@@ -11188,7 +11188,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         const bool pale = (fidx == paleIdx);
         // A 6×6 grid (~2.8% of the columns, like the former ~2.5%): in every cell one hash-shifted place, inside
         // the forest — a tree. The work is of the order of the number of bbox cells, not the number of forest columns (tens of millions).
-        const int G = site.dense ? 4 : 6;                // yards (OSM): a 4×4 grid — 2.25 times more trees than in ordinary vegetation
+        const int G = site.dense ? 8 : 6;                // yards (OSM): an 8×8 grid (it was 4×4: the crowns of neighboring trees merged into a solid canopy over the whole yard)
         const int gx0 = int(std::floor(double(site.minX) / G)), gx1 = int(std::floor(double(site.maxX) / G));
         const int gz0 = int(std::floor(double(site.minZ) / G)), gz1 = int(std::floor(double(site.maxZ) / G));
         for (int gx = gx0; gx <= gx1; ++gx)
@@ -11203,6 +11203,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (progress && (vegCols & 0xFFFF) == 0)
                 progress(std::min(vegCols, vegCells), vegCells, 4);                  // the "trees in forests" stage
             const quint32 hc = colHash(pairKey(gx, gz) ^ 0x7EEDull);
+            if (site.dense && (hc >> 20) % 10u == 0u) continue;                          // yards: every tenth place stays empty (so the trees stand in groups with clearings)
             const int tx = gx * G + int(hc % G), tz = gz * G + int((hc >> 8) % G);
             if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
             if (!spansContain(site.spans, tx, tz)) continue;
@@ -11917,7 +11918,19 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             }
         }
         else if (store.get(bx, y, bz) == IdAir)
+        {
+            if (pid == quint16(IdWheat))
+            {   // wheat grows on plowed soil, not on turf; on special tiles (the island lamps) we do not plant
+                const auto gp2 = ground.find(pairKey(bx >> 4, bz >> 4));
+                if (gp2 != ground.end())
+                {
+                    quint16& sf = gp2->surf[(bz & 15) * 16 + (bx & 15)];
+                    if (sf != g_zoneSurface) continue;
+                    sf = IdFarmland;
+                }
+            }
             store.set(bx, y, bz, pid);
+        }
     }
 
     lap("before 3.55");
@@ -15446,6 +15459,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (tplInst.size() >= 120) break;
         }
     }
+    if (!world.attribution.isEmpty())
+        zip.add(QStringLiteral("ATTRIBUTION.txt"), world.attribution.toUtf8());       // Minecraft ignores unknown files in the save folder
     if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()))
     {
         for (int ti = 0; ti < tplInst.size(); ++ti)

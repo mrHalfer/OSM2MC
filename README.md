@@ -110,4 +110,4 @@ The project CRS is the `Wkt` line of the `.tqt`, otherwise the `.prj` of the fir
 
 ## Notes
 
-Minecraft is a trademark of Mojang AB; tMC is not affiliated with Mojang or Microsoft. tMC is under the MIT license (`LICENSE`); the third-party components are listed in `THIRD_PARTY_NOTICES.md`. Map data © OpenStreetMap contributors (ODbL). The Minecraft server files used by the tests are not included (the Mojang EULA).
+Minecraft is a trademark of Mojang AB; tMC is not affiliated with Mojang or Microsoft. tMC is under the MIT license (`LICENSE`); the third-party components are listed in `THIRD_PARTY_NOTICES.md`. Map data © OpenStreetMap contributors, under the Open Database License (ODbL). **A world made from OSM data is a derived database: when you publish it (a server, a download), keep the attribution "Map data © OpenStreetMap contributors (ODbL)" and follow the ODbL** (https://www.openstreetmap.org/copyright). The exported zip contains the file `ATTRIBUTION.txt` with this line. The Minecraft server files used by the tests are not included (the Mojang EULA).

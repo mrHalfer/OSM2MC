@@ -110,4 +110,4 @@ CRS проекта: строка `Wkt` из `.tqt`, иначе `.prj` перво
 
 ## Примечания
 
-Minecraft — товарный знак Mojang AB; tMC не связан с Mojang и Microsoft. tMC распространяется по лицензии MIT (`LICENSE`); сторонние компоненты перечислены в `THIRD_PARTY_NOTICES.md`. Картографические данные © участники OpenStreetMap (ODbL). Файлы серверов Minecraft, нужные тестам, в репозиторий не входят (EULA Mojang).
+Minecraft — товарный знак Mojang AB; tMC не связан с Mojang и Microsoft. tMC распространяется по лицензии MIT (`LICENSE`); сторонние компоненты перечислены в `THIRD_PARTY_NOTICES.md`. Картографические данные © участники OpenStreetMap по лицензии Open Database License (ODbL). **Мир, сделанный из данных OSM, — производная база данных: если вы его публикуете (сервер, скачивание), сохраняйте подпись «Map data © OpenStreetMap contributors (ODbL)» и соблюдайте ODbL** (https://www.openstreetmap.org/copyright). В экспортированном zip лежит файл `ATTRIBUTION.txt` с этой строкой. Файлы серверов Minecraft, нужные тестам, в репозиторий не входят (EULA Mojang).

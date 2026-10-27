@@ -179,6 +179,9 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     w.apronChunks = 0;
     w.caves = opt.caves;
     w.locateDatapack = opt.locateDatapack;
+    if (TmcProject::isOsmFile(opt.source))
+        w.attribution = QStringLiteral("Map data (c) OpenStreetMap contributors, Open Database License (ODbL) 1.0: https://www.openstreetmap.org/copyright\n"
+                                       "This world was made from OpenStreetMap data with tMC. If you publish it, keep this attribution and follow the ODbL.\n");
     w.strongholdChunk = opt.strongholdChunk;
     w.cityChunk = opt.cityChunk;
     w.paleForestChunk = opt.paleForestChunk;

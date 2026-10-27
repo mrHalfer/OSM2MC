@@ -152,6 +152,8 @@ public:
         QVector<QPointF> clipPolygon;
         //! The climate zone of the export area (export/climate.h, Climate::Zone): tree species, surface and chunk biome. 0 — temperate (as before).
         int climateZone = 0;
+        //! The attribution of the source data (for OpenStreetMap — the ODbL line): if not empty, it is written into the root of the zip as ATTRIBUTION.txt
+        QString attribution;
     };
 
     struct Result
