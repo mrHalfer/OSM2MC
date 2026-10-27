@@ -1,0 +1,1910 @@
+{
+ "_help": [
+  "Rules that turn OpenStreetMap tags into tqt layers (the working file of tMC). Edited by hand; the program does not read the \"examples\" array.",
+  "The rules are checked from top to bottom; an object goes into the layer of the FIRST matching rule (unless \"continue\": true is set).",
+  "from  : the OSM driver layer — multipolygons (buildings, plots, sites), lines (roads, rails), points (points).",
+  "layer : the tqt layer suffix: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin; \"-\" — drop the object (no further rules are checked).",
+  "as    : polygon (a closed line -> a polygon), line (a polygon boundary -> a line), square:N (a point -> a square with a side of N meters), crosswalk:N (a crossing node -> a line of N meters across the nearest motor road).",
+  "pass  : 1 (default) — by tags; 2 — a \"guess\" for buildings not recognized on the 1st pass: they see the nb:* tags about the neighbors.",
+  "when  : conditions on tags (all at once). \"v\" — equals; \"*\" — the tag exists; \"-\" or null — no tag; \"!v\" — the tag exists and is not equal to v;",
+  "        [\"a\",\"b\"] — one of; [\"!a\",\"!b\"] — the tag exists and is not from the list; \"~regex\"; numbers \">=4\", \"<250\" (the first number from the tag value).",
+  "        Service tags: poi:<tag> — tags of the points inside the building outline; area:<tag> — tags of the enclosing plots (without building);",
+  "        _area — the outline area, m2; _perim — the perimeter, m; nb:code / nb:share / nb:n / nb:rel / nb:dist — neighbors (pass 2 only).",
+  "fields: the tqt layer fields (CODE, REL, MAT ...). The value: text with substitutions {tag}, {tag1,tag2} (the first non-empty),",
+  "        {tag|num}, {tag|int}, {tag|num*3}, {osm_id}; alternatives through || (the first non-empty). REL=\"auto\": height -> building:levels by the",
+  "        floor recalculation formulas (by CODE and the outline shape) -> heights.csv by CODE -> 6 m.",
+  "Address: the fields TYSTR (street type), STREET (name) and NUMBR (house number) for bldpol and the street name for rdslin are filled IN BY THEMSELVES from addr:street/addr:place/addr:full/addr:housenumber and name",
+  "        (osm/tmcaddress.cpp): \"улица Ленина\" -> TYSTR=улица, STREET=Ленина; \"12к1\" -> 12К.1. If a rule sets these fields explicitly, its value is taken.",
+  "The tags from the conditions and templates automatically become columns of the temporary osmconf.ini, the others are read from other_tags.",
+  "db:code / db:rel / db:floor — the enhancer data (tmc_buildings.dat): the type, height and floor count of the nearest point; a fallback if OSM did not determine it.",
+  "greenery: completing the vegetation for OSM (yards between houses, forced taiga in the private sector, forests up to the forest_share of the area, parks no fewer than parks_per_km2 per km²; the grid step cell_m, m). enabled=false turns it off.",
+  "greenery.wild_forests: on very big empty plots (from wild_min_area_m2 m² after the margins) forests for bandit camps and bases are added (no more than wild_max_count); the margin from buildings wild_building_m, from block development wild_block_m, m — there are none between high-rises."
+ ],
+ "neighbors": {
+  "radius_m": 60,
+  "ignore_codes": [
+   "44000000"
+  ]
+ },
+ "rules": [
+  {
+   "note": "Not buildings in the sense of the model: canopies, roofs, bridges, ruins, tents",
+   "from": "multipolygons",
+   "layer": "-",
+   "when": {
+    "building": [
+     "roof",
+     "ruins",
+     "bridge",
+     "tent",
+     "carport",
+     "no"
+    ]
+   }
+  },
+  {
+   "note": "WATER: area rivers (natural=water + water=river/oxbow/stream, waterway=riverbank) — hdrpol 31410000",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "natural": "water",
+    "water": ["river", "oxbow", "stream", "stream_pool"]
+   },
+   "fields": { "CODE": "31410000" }
+  },
+  {
+   "note": "WATER: an area river (waterway=riverbank, old tagging)",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "waterway": "riverbank"
+   },
+   "fields": { "CODE": "31410000" }
+  },
+  {
+   "note": "WATER: an area canal (water=canal, waterway=canal/dock)",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "natural": "water",
+    "water": ["canal", "lock", "moat"]
+   },
+   "fields": { "CODE": "31430000" }
+  },
+  {
+   "note": "WATER: a reservoir (water=reservoir, landuse=reservoir) — hdrpol 31131000",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "water": "reservoir"
+   },
+   "fields": { "CODE": "31131000" }
+  },
+  {
+   "note": "WATER: a reservoir (landuse=reservoir)",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "landuse": "reservoir"
+   },
+   "fields": { "CODE": "31131000" }
+  },
+  {
+   "note": "WATER: a pond (water=pond/basin/lagoon, landuse=basin) — hdrpol 31132000",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "water": ["pond", "basin", "lagoon", "fish_pass", "wastewater"]
+   },
+   "fields": { "CODE": "31132000" }
+  },
+  {
+   "note": "WATER: a pond (landuse=basin)",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "landuse": "basin"
+   },
+   "fields": { "CODE": "31132000" }
+  },
+  {
+   "note": "WATER: a lake and other water bodies (natural=water without a refinement), small ones too — hdrpol 31120000",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "natural": "water"
+   },
+   "fields": { "CODE": "31120000" }
+  },
+  {
+   "note": "WATER: a swimming pool (leisure=swimming_pool, from 30 m²) — hdrpol 31133000",
+   "from": "multipolygons",
+   "layer": "hdrpol",
+   "when": {
+    "building": "-",
+    "leisure": "swimming_pool",
+    "_area": ">=30"
+   },
+   "fields": { "CODE": "31133000" }
+  },
+  {
+   "note": "WATER: watercourses in tunnels and pipes — not drawn",
+   "from": "lines",
+   "layer": "-",
+   "when": {
+    "waterway": "*",
+    "tunnel": ["yes", "culvert", "building", "flooded"]
+   }
+  },
+  {
+   "note": "WATER: a river (a waterway=river line) — hdrlin",
+   "from": "lines",
+   "layer": "hdrlin",
+   "when": {
+    "waterway": "river"
+   },
+   "fields": { "CODE": "31420000" }
+  },
+  {
+   "note": "WATER: a canal (a waterway=canal line) — hdrlin",
+   "from": "lines",
+   "layer": "hdrlin",
+   "when": {
+    "waterway": "canal"
+   },
+   "fields": { "CODE": "31440000" }
+  },
+  {
+   "note": "WATER: a stream (a waterway=stream line), without drainage ditches and seasonal ones — hdrlin",
+   "from": "lines",
+   "layer": "hdrlin",
+   "when": {
+    "waterway": "stream",
+    "intermittent": "-"
+   },
+   "fields": { "CODE": "31421000" }
+  },
+  {
+   "note": "School/college/university: building=*",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "school",
+     "college",
+     "university"
+    ]
+   },
+   "fields": {
+    "CODE": "44312000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "School: amenity on the building itself",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "amenity": [
+     "school",
+     "college",
+     "university"
+    ]
+   },
+   "fields": {
+    "CODE": "44312000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "School: a POI point inside the outline",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail",
+     "office"
+    ],
+    "poi:amenity": [
+     "school",
+     "college",
+     "university"
+    ]
+   },
+   "fields": {
+    "CODE": "44312000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "School: a building inside an amenity=school plot (a campus), big",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service"
+    ],
+    "area:amenity": [
+     "school",
+     "college",
+     "university"
+    ],
+    "_area": ">=300"
+   },
+   "fields": {
+    "CODE": "44312000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Kindergarten: building=kindergarten",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "kindergarten"
+   },
+   "fields": {
+    "CODE": "44313000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Kindergarten: amenity on the building",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "amenity": [
+     "kindergarten",
+     "childcare"
+    ]
+   },
+   "fields": {
+    "CODE": "44313000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Kindergarten: a POI inside the outline",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail",
+     "office"
+    ],
+    "poi:amenity": [
+     "kindergarten",
+     "childcare"
+    ]
+   },
+   "fields": {
+    "CODE": "44313000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Kindergarten: a building inside the kindergarten plot",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service"
+    ],
+    "area:amenity": [
+     "kindergarten",
+     "childcare"
+    ],
+    "_area": ">=150"
+   },
+   "fields": {
+    "CODE": "44313000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Hospital: building=hospital",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "hospital"
+   },
+   "fields": {
+    "CODE": "44314000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Hospital/clinic: amenity on the building",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "amenity": [
+     "hospital",
+     "clinic",
+     "doctors"
+    ]
+   },
+   "fields": {
+    "CODE": "44314000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Hospital/clinic: a POI inside the outline",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail",
+     "office"
+    ],
+    "poi:amenity": [
+     "hospital",
+     "clinic"
+    ]
+   },
+   "fields": {
+    "CODE": "44314000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Hospital: a building inside the hospital plot, big",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service"
+    ],
+    "area:amenity": "hospital",
+    "_area": ">=300"
+   },
+   "fields": {
+    "CODE": "44314000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Mall: shop=mall on the building",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "shop": "mall"
+   },
+   "fields": {
+    "CODE": "44318000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Mall: a shop=mall POI inside the outline",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail",
+     "office"
+    ],
+    "poi:shop": "mall"
+   },
+   "fields": {
+    "CODE": "44318000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Mall: building=supermarket",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "supermarket"
+   },
+   "fields": {
+    "CODE": "44318000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Mall: big retail/commercial (the area threshold is tuned)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "retail",
+     "commercial"
+    ],
+    "_area": ">=3000"
+   },
+   "fields": {
+    "CODE": "44318000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Religious: building=*",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "church",
+     "cathedral",
+     "chapel",
+     "mosque",
+     "synagogue",
+     "temple",
+     "religious",
+     "shrine",
+     "monastery",
+     "kingdom_hall"
+    ]
+   },
+   "fields": {
+    "CODE": "44319000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Religious: amenity on the building / a POI inside",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "amenity": "place_of_worship"
+   },
+   "fields": {
+    "CODE": "44319000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Religious: a POI inside the outline",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail",
+     "office"
+    ],
+    "poi:amenity": "place_of_worship"
+   },
+   "fields": {
+    "CODE": "44319000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Religious: any neutral building on the temple grounds (the exporter makes a dungeon only under the biggest one)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service"
+    ],
+    "area:amenity": "place_of_worship"
+   },
+   "fields": {
+    "CODE": "44319000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Museum: building=museum",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "museum"
+   },
+   "fields": {
+    "CODE": "44317000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Museum: tourism=museum on the building",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "tourism": "museum"
+   },
+   "fields": {
+    "CODE": "44317000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Museum: a POI inside the outline",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail",
+     "office"
+    ],
+    "poi:tourism": "museum"
+   },
+   "fields": {
+    "CODE": "44317000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Cultural: theater, cinema, library, house of culture (on the building)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "amenity": [
+     "theatre",
+     "cinema",
+     "library",
+     "arts_centre",
+     "community_centre",
+     "social_centre"
+    ]
+   },
+   "fields": {
+    "CODE": "44316000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Cultural: a POI inside the outline",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail",
+     "office"
+    ],
+    "poi:amenity": [
+     "theatre",
+     "cinema",
+     "library",
+     "arts_centre",
+     "community_centre",
+     "social_centre"
+    ]
+   },
+   "fields": {
+    "CODE": "44316000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Administrative: building=government",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "government"
+   },
+   "fields": {
+    "CODE": "44311000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Administrative: administration, police, emergency service, court, post office (on the building)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "amenity": [
+     "townhall",
+     "police",
+     "fire_station",
+     "courthouse",
+     "post_office",
+     "prison"
+    ]
+   },
+   "fields": {
+    "CODE": "44311000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Administrative: a POI inside the outline",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail",
+     "office"
+    ],
+    "poi:amenity": [
+     "townhall",
+     "police",
+     "fire_station",
+     "courthouse",
+     "post_office"
+    ]
+   },
+   "fields": {
+    "CODE": "44311000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Scientific: a research institute",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "amenity": "research_institute"
+   },
+   "fields": {
+    "CODE": "44315000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Scientific: office=research",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "*",
+    "office": "research"
+   },
+   "fields": {
+    "CODE": "44315000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Industrial: building=*",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "industrial",
+     "warehouse",
+     "hangar",
+     "factory",
+     "manufacture"
+    ]
+   },
+   "fields": {
+    "CODE": "44340000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Industrial: a building on an industrial zone",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "yes",
+     "public",
+     "civic",
+     "education",
+     "commercial",
+     "service",
+     "retail"
+    ],
+    "area:landuse": "industrial",
+    "_area": ">=100"
+   },
+   "fields": {
+    "CODE": "44340000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Sheds: garages, outbuildings, greenhouses, kiosks, utility structures",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "shed",
+     "garage",
+     "garages",
+     "barn",
+     "farm_auxiliary",
+     "cowshed",
+     "stable",
+     "sty",
+     "livestock",
+     "greenhouse",
+     "hut",
+     "service",
+     "outbuilding",
+     "allotment_house",
+     "kiosk",
+     "storage_tank",
+     "silo",
+     "boathouse",
+     "transformer_tower",
+     "tech_cab",
+     "container",
+     "digester",
+     "slurry_tank",
+     "parking",
+     "toilets",
+     "bakehouse",
+     "conservatory",
+     "static_caravan"
+    ]
+   },
+   "fields": {
+    "CODE": "44000000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Apartment block: apartments/dormitory",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "apartments",
+     "dormitory"
+    ]
+   },
+   "fields": {
+    "CODE": "44400000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Apartment block: residential 4+ floors",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "residential",
+    "building:levels": ">=4"
+   },
+   "fields": {
+    "CODE": "44400000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Private: house/detached/…",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": [
+     "house",
+     "detached",
+     "semidetached_house",
+     "terrace",
+     "bungalow",
+     "cabin",
+     "farm",
+     "villa",
+     "ger",
+     "residential"
+    ]
+   },
+   "fields": {
+    "CODE": "44400002",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Apartment block: building=yes, 4+ floors",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "yes",
+    "building:levels": ">=4"
+   },
+   "fields": {
+    "CODE": "44400000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Enhancer: the building type from the database (the nearest point of tmc_buildings.dat) when the type could not be determined from OSM; it has no priority over OSM (the 1st pass rules worked earlier)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "db:code": "*"
+   },
+   "fields": {
+    "CODE": "{db:code}",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Very small (<40 m²) -> a shed/utility building",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "_area": "<40"
+   },
+   "fields": {
+    "CODE": "44000000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Mostly apartment blocks nearby, big -> an apartment block",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "nb:code": "44400000",
+    "nb:share": ">=50",
+    "_area": ">=350"
+   },
+   "fields": {
+    "CODE": "44400000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Apartment blocks nearby, small (a yard: garages, substations) -> a shed",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "nb:code": "44400000",
+    "_area": "<150"
+   },
+   "fields": {
+    "CODE": "44000000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Apartment blocks nearby, medium -> general purpose",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "nb:code": "44400000",
+    "_area": "<350"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Private sector nearby, up to 400 m² -> a private house",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "nb:code": "44400002",
+    "_area": "<=400"
+   },
+   "fields": {
+    "CODE": "44400002",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Private sector nearby, more than 400 m² -> general purpose",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "nb:code": "44400002",
+    "_area": ">400"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "An industrial zone/warehouses nearby -> industrial",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "nb:code": "44340000",
+    "nb:share": ">=50",
+    "_area": ">=100"
+   },
+   "fields": {
+    "CODE": "44340000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "No neighbors, on a residential zone, up to 400 m² -> a private house",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "area:landuse": [
+     "residential",
+     "farmyard"
+    ],
+    "_area": "<=400"
+   },
+   "fields": {
+    "CODE": "44400002",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "No neighbors, up to 250 m² -> a private house",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes",
+    "nb:code": "-",
+    "_area": "<=250"
+   },
+   "fields": {
+    "CODE": "44400002",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Everything else -> general purpose",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "pass": 2,
+   "when": {
+    "building": "yes"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Other non-residential types (hotels, offices, public, civic …) -> general purpose",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "!yes"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Not roads: tunnels and passages under buildings",
+   "from": "lines",
+   "layer": "-",
+   "when": {
+    "highway": "*",
+    "tunnel": [
+     "yes",
+     "culvert",
+     "building_passage"
+    ]
+   }
+  },
+  {
+   "note": "A pedestrian crossing (a footway=crossing line) — a zebra on the roadway, code 45262000 (an internal tMC code)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": [
+     "footway",
+     "path"
+    ],
+    "footway": "crossing"
+   },
+   "fields": {
+    "CODE": "45262000"
+   }
+  },
+  {
+   "note": "A pedestrian crossing over a bike path/a bike crossing (cycleway=crossing) — also a zebra",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "cycleway",
+    "cycleway": "crossing"
+   },
+   "fields": {
+    "CODE": "45262000"
+   }
+  },
+  {
+   "note": "Not roads: under construction, proposed, platforms, race tracks, etc.",
+   "from": "lines",
+   "layer": "-",
+   "when": {
+    "highway": [
+     "construction",
+     "proposed",
+     "platform",
+     "bus_stop",
+     "raceway",
+     "corridor",
+     "elevator",
+     "services",
+     "rest_area",
+     "escape",
+     "bus_guideway"
+    ]
+   }
+  },
+  {
+   "note": "A motorway",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "motorway"
+   },
+   "fields": {
+    "CODE": "61210000"
+   }
+  },
+  {
+   "note": "A road with an improved surface (trunk)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "trunk"
+   },
+   "fields": {
+    "CODE": "61220000"
+   }
+  },
+  {
+   "note": "Ramps and interchanges",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": [
+     "motorway_link",
+     "trunk_link",
+     "primary_link",
+     "secondary_link",
+     "tertiary_link"
+    ]
+   },
+   "fields": {
+    "CODE": "61231000"
+   }
+  },
+  {
+   "note": "Main streets (primary)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "primary"
+   },
+   "fields": {
+    "CODE": "45210000"
+   }
+  },
+  {
+   "note": "Major streets (secondary)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "secondary"
+   },
+   "fields": {
+    "CODE": "45220000"
+   }
+  },
+  {
+   "note": "Other named streets (tertiary)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "tertiary"
+   },
+   "fields": {
+    "CODE": "45230000"
+   }
+  },
+  {
+   "note": "Residential streets and passages with a name",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": [
+     "residential",
+     "unclassified",
+     "living_street"
+    ],
+    "name": "*"
+   },
+   "fields": {
+    "CODE": "45230000"
+   }
+  },
+  {
+   "note": "Intra-block passages (residential/other streets without a name)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": [
+     "residential",
+     "unclassified",
+     "living_street"
+    ]
+   },
+   "fields": {
+    "CODE": "45270000"
+   }
+  },
+  {
+   "note": "service (passages, driveways, parking aisles) — for now as alleys",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "service"
+   },
+   "fields": {
+    "CODE": "45260000"
+   }
+  },
+  {
+   "note": "footway, path, steps, pedestrian — alleys/footpaths",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": [
+     "footway",
+     "path",
+     "steps",
+     "pedestrian"
+    ]
+   },
+   "fields": {
+    "CODE": "45260000"
+   }
+  },
+  {
+   "note": "A bike path",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "cycleway"
+   },
+   "fields": {
+    "CODE": "45261000"
+   }
+  },
+  {
+   "note": "Field and forest roads (track)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "track"
+   },
+   "fields": {
+    "CODE": "61330000"
+   }
+  },
+  {
+   "note": "Pedestrian trails (bridleway)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "bridleway"
+   },
+   "fields": {
+    "CODE": "61420000"
+   }
+  },
+  {
+   "note": "Not railways: abandoned and dismantled",
+   "from": "lines",
+   "layer": "-",
+   "when": {
+    "railway": [
+     "abandoned",
+     "disused",
+     "razed",
+     "construction",
+     "proposed",
+     "platform",
+     "subway"
+    ]
+   }
+  },
+  {
+   "note": "A railway",
+   "from": "lines",
+   "layer": "rrslin",
+   "when": {
+    "railway": "rail"
+   },
+   "fields": {
+    "CODE": "61111000"
+   }
+  },
+  {
+   "note": "A narrow-gauge railway, light metro",
+   "from": "lines",
+   "layer": "rrslin",
+   "when": {
+    "railway": [
+     "narrow_gauge",
+     "light_rail",
+     "funicular"
+    ]
+   },
+   "fields": {
+    "CODE": "61112000"
+   }
+  },
+  {
+   "note": "A monorail",
+   "from": "lines",
+   "layer": "rrslin",
+   "when": {
+    "railway": "monorail"
+   },
+   "fields": {
+    "CODE": "61113000"
+   }
+  },
+  {
+   "note": "A tram",
+   "from": "lines",
+   "layer": "rrslin",
+   "when": {
+    "railway": "tram"
+   },
+   "fields": {
+    "CODE": "61124000"
+   }
+  },
+  {
+   "note": "A pedestrian crossing marked by a node (highway=crossing): a 12 m line across the nearest motor road (within 4 m); if there is already a crossing line (8 m) nearby — it is skipped",
+   "from": "points",
+   "layer": "rdslin",
+   "as": "crosswalk:12",
+   "when": {
+    "highway": "crossing"
+   },
+   "fields": {
+    "CODE": "45262000"
+   }
+  },
+  {
+   "note": "PRELIMINARY: forest (natural=wood, landuse=forest): dense tall forests, the height from heights.csv",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "natural": "wood"
+   },
+   "fields": {
+    "CODE": "71111110",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: forest (landuse=forest)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "landuse": "forest"
+   },
+   "fields": {
+    "CODE": "71111110",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: shrubs",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "natural": "scrub"
+   },
+   "fields": {
+    "CODE": "71211200",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: meadow (natural=grassland, landuse=meadow)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "natural": "grassland"
+   },
+   "fields": {
+    "CODE": "71314000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: meadow (landuse=meadow)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "landuse": "meadow"
+   },
+   "fields": {
+    "CODE": "71314000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: swamp — moisture-loving grass",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "natural": "wetland"
+   },
+   "fields": {
+    "CODE": "71313000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: park (parks get trees, lawn, islands)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "leisure": "park"
+   },
+   "fields": {
+    "CODE": "71126000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: garden (leisure=garden)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "leisure": "garden"
+   },
+   "fields": {
+    "CODE": "71126000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: a park marked by a point (leisure=park) — a 90 m square",
+   "from": "points",
+   "layer": "vegpol",
+   "as": "square:90",
+   "when": {
+    "leisure": "park"
+   },
+   "fields": {
+    "CODE": "71126000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: a recreation zone — lawn",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "leisure": "recreation_ground"
+   },
+   "fields": {
+    "CODE": "71329000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: lawn (landuse=grass)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "landuse": "grass"
+   },
+   "fields": {
+    "CODE": "71329000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: an orchard (landuse=orchard)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "landuse": "orchard"
+   },
+   "fields": {
+    "CODE": "71123000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: a vineyard",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "landuse": "vineyard"
+   },
+   "fields": {
+    "CODE": "71222000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: vegetable gardens / allotments (landuse=allotments)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "landuse": "allotments"
+   },
+   "fields": {
+    "CODE": "71328000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "PRELIMINARY: arable land (landuse=farmland)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "landuse": "farmland"
+   },
+   "fields": {
+    "CODE": "71324000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Not surface parking lots: underground, multi-storey, along the street",
+   "from": "multipolygons",
+   "layer": "-",
+   "when": {
+    "amenity": "parking",
+    "parking": [
+     "underground",
+     "multi-storey",
+     "street_side",
+     "lane"
+    ]
+   }
+  },
+  {
+   "note": "A parking lot — the marking is drawn by the exporter",
+   "from": "multipolygons",
+   "layer": "rdcpol",
+   "when": {
+    "amenity": "parking"
+   },
+   "fields": {
+    "CODE": "62230000"
+   }
+  },
+  {
+   "note": "A playground (outline)",
+   "from": "multipolygons",
+   "layer": "csrpol",
+   "when": {
+    "leisure": "playground"
+   },
+   "fields": {
+    "CODE": "53710000",
+    "REL": "0"
+   }
+  },
+  {
+   "note": "A playground marked by a point — a 20 m square",
+   "from": "points",
+   "layer": "csrpol",
+   "when": {
+    "leisure": "playground"
+   },
+   "fields": {
+    "CODE": "53710000",
+    "REL": "0"
+   },
+   "as": "square:20"
+  },
+  {
+   "note": "A sports ground, stadium, sports complex, running track (outline)",
+   "from": "multipolygons",
+   "layer": "csrpol",
+   "when": {
+    "leisure": [
+     "pitch",
+     "sports_centre",
+     "stadium",
+     "track",
+     "fitness_station"
+    ]
+   },
+   "fields": {
+    "CODE": "53700000",
+    "REL": "0"
+   }
+  },
+  {
+   "note": "A square / a pedestrian zone (outline)",
+   "from": "multipolygons",
+   "layer": "blkpol",
+   "when": {
+    "highway": "pedestrian"
+   },
+   "fields": {
+    "CODE": "45300000"
+   }
+  },
+  {
+   "note": "A square (place=square)",
+   "from": "multipolygons",
+   "layer": "blkpol",
+   "when": {
+    "place": "square"
+   },
+   "fields": {
+    "CODE": "45300000"
+   }
+  },
+  {
+   "note": "A market (amenity=marketplace) — a paved site",
+   "from": "multipolygons",
+   "layer": "blkpol",
+   "when": {
+    "building": "-",
+    "amenity": "marketplace"
+   },
+   "fields": {
+    "CODE": "45300000"
+   }
+  },
+  {
+   "note": "Asphalt sites: passages and sites drawn as an area (highway=service/residential/unclassified/footway… + area=yes) — asphalt without marking",
+   "from": "multipolygons",
+   "layer": "blkpol",
+   "when": {
+    "building": "-",
+    "area": "yes",
+    "highway": ["service", "residential", "unclassified", "living_street", "tertiary", "secondary", "primary", "footway", "path", "track", "cycleway"]
+   },
+   "fields": {
+    "CODE": "62231000"
+   }
+  },
+  {
+   "note": "Asphalt sites: airfield surfaces (apron, taxiways, runways)",
+   "from": "multipolygons",
+   "layer": "blkpol",
+   "when": {
+    "building": "-",
+    "aeroway": ["apron", "taxiway", "runway", "helipad"]
+   },
+   "fields": {
+    "CODE": "62231000"
+   }
+  },
+  {
+   "note": "Asphalt sites: man_made=apron, gas station sites etc. with an asphalt/concrete/paved surface on plots (amenity=fuel, amenity=bus_station, amenity=car_wash)",
+   "from": "multipolygons",
+   "layer": "blkpol",
+   "when": {
+    "building": "-",
+    "amenity": ["fuel", "bus_station", "car_wash", "charging_station"],
+    "surface": ["asphalt", "paved", "concrete"]
+   },
+   "fields": {
+    "CODE": "62231000"
+   }
+  },
+  {
+   "note": "Sports grounds: an ice rink, mini golf, a dog park with equipment (outline)",
+   "from": "multipolygons",
+   "layer": "csrpol",
+   "when": {
+    "building": "-",
+    "leisure": ["ice_rink", "miniature_golf", "dog_park"]
+   },
+   "fields": {
+    "CODE": "53700000",
+    "REL": "0"
+   }
+  },
+  {
+   "note": "Sports equipment and workout grounds marked by a point (leisure=fitness_station / sport=*) — a 12 m square",
+   "from": "points",
+   "layer": "csrpol",
+   "when": {
+    "leisure": "fitness_station"
+   },
+   "fields": {
+    "CODE": "53700000",
+    "REL": "0"
+   },
+   "as": "square:12"
+  },
+  {
+   "note": "A sports ground marked only by the tag sport=* on a plot (without leisure=pitch), from 100 m²",
+   "from": "multipolygons",
+   "layer": "csrpol",
+   "when": {
+    "building": "-",
+    "leisure": "-",
+    "landuse": "-",
+    "natural": "-",
+    "sport": "*",
+    "_area": ">=100"
+   },
+   "fields": {
+    "CODE": "53700000",
+    "REL": "0"
+   }
+  },
+  {
+   "note": "Building parts (building:part): overhanging the ground (min_height / min_level) — not taken: there is no volume under them",
+   "from": "multipolygons",
+   "layer": "-",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "building:min_level": ">=1"
+   }
+  },
+  {
+   "note": "Building parts (building:part): overhanging the ground (building:min_height / min_height >= 1 m)",
+   "from": "multipolygons",
+   "layer": "-",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "min_height": ">=1"
+   }
+  },
+  {
+   "note": "Building parts (building:part): separate buildings with their own height; the type, material and address are inherited from the outline (see tmcproject.cpp, the \"BUILDING PARTS\" block). PART is a service mark, PH — whether the part has its own height or floor count",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}"
+   }
+  },
+  {
+   "note": "Structures without the building tag: tanks, silos, water towers, towers, chimneys — as industrial",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "man_made": ["storage_tank", "silo", "water_tower", "tower", "chimney", "bunker_silo", "water_works", "wastewater_plant"]
+   },
+   "fields": {
+    "CODE": "44340000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "A road without a refinement (highway=road)",
+   "from": "lines",
+   "layer": "rdslin",
+   "when": {
+    "highway": "road"
+   },
+   "fields": {
+    "CODE": "45270000"
+   }
+  },
+  {
+   "note": "Vegetation: lawn — a square, a village meadow, a cemetery, a golf course, a flower bed, a green zone without buildings",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "building": "-",
+    "landuse": ["village_green", "cemetery", "flowerbed", "greenfield"]
+   },
+   "fields": {
+    "CODE": "71329000"
+   }
+  },
+  {
+   "note": "Vegetation: a golf course, the lawn of sports facilities and park zones",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "building": "-",
+    "leisure": "golf_course"
+   },
+   "fields": {
+    "CODE": "71329000"
+   }
+  },
+  {
+   "note": "Vegetation: heath, shrub thickets (natural=heath)",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "building": "-",
+    "natural": "heath"
+   },
+   "fields": {
+    "CODE": "71211200",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
+   "note": "Vegetation: a plant nursery (landuse=plant_nursery) and an orchard analog",
+   "from": "multipolygons",
+   "layer": "vegpol",
+   "when": {
+    "building": "-",
+    "landuse": "plant_nursery"
+   },
+   "fields": {
+    "CODE": "71123000"
+   }
+  }
+ ],
+ "greenery": {
+  "enabled": true,
+  "yards": true,
+  "private_taiga": true,
+  "forest_share": 0.08,
+  "parks_per_km2": 1.5,
+  "wild_forests": true,
+  "wild_min_area_m2": 30000,
+  "wild_building_m": 40,
+  "wild_block_m": 150,
+  "wild_patch_m2": 80000,
+  "wild_apart_m": 600,
+  "wild_max_count": 6,
+  "cell_m": 2.0
+ }
+}

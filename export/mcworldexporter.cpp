@@ -1,0 +1,15578 @@
+#include "export/mcworldexporter.h"
+#include "core/steplog.h"
+#include <QPainterPath>
+#include <QPolygonF>
+#include "export/climate.h"
+#include <cstring>
+
+#include <QByteArray>
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QElapsedTimer>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QObject>
+#include <QPoint>
+#include <QRect>
+#include <QRegularExpression>
+#include <QPointF>
+#include <QSet>
+#include <QThread>
+#include <QThreadPool>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QtConcurrent/QtConcurrentMap>
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstring>
+#include <iterator>
+#include <limits>
+#include <map>
+
+/*!\file mcworldexporter.cpp
+ * \brief Implementation of the export to a Minecraft Java 26.x save (DataVersion 5023, native format).
+ *
+ * The 26.x world format (checked with a live vanilla 26.3 server — a round trip without a single error):
+ * - level.dat: Data.version = INT 19133 ("storage version", strictly validated on opening!),
+ *   DataVersion 5023, a Version compound, a spawn compound instead of SpawnX/Y/Z, difficulty_settings;
+ * - data/minecraft/world_gen_settings.dat — the generator (we write our own superflat, the top of the flat plane
+ *   is adjusted to the median height of our ground crust); the game creates the other state files itself;
+ * - layout: chunks in dimensions/minecraft/overworld/region/*.mca (there is no root region/ any more);
+ * - chunk NBT: sections Y=-4..19, block_states/biomes with palettes as STRING LISTS ("minecraft:stone"),
+ *   a unary palette has no data, light and Heightmaps are not written — the reader recomputes them itself.
+ *
+ * The formats written by hand here (minimally, but per the wiki spec and the behavior of Amulet Core):
+ *  - NBT (big-endian) — tags 0..12, a root compound with a name;
+ *  - region .mca — an 8192-byte header: a table of 1024 BE words (3 bytes of offset in 4KiB sectors |
+ *    1 byte sectorCount) + a table of 1024 BE mtimes; then chunks in sectors of 4096, payload =
+ *    [4 bytes of length][1 byte of compression type][data]; the compression is zlib (type 2), i.e. exactly what
+ *    qCompress() returns (it is a standard zlib stream: a 2-byte header, deflate, adler32);
+ *  - level.dat — GZIP NBT. Qt can only do zlib, so gzip is assembled by hand: a "raw" deflate is cut out of
+ *    the qCompress() stream (the 2-byte zlib header and the 4-byte adler32 are removed),
+ *    and a 10-byte gzip header and the CRC32+ISIZE trailer are appended to it;
+ *  - zip — local headers + central directory + EOCD, the deflate method (the same "raw" deflate from
+ *    qCompress(), the size is known in advance — everything is assembled in memory) with a fallback to store.
+ *
+ * IMPORTANT about the packing of BlockStates/Heightmaps: starting with DataVersion 2529 (1.16.2, see the interface
+ * anvil_2529 in Amulet Core — "less dense": entries NO LONGER spill over a long boundary) long
+ * arrays are packed "sparsely": entriesPerLong = floor(64/bits), the high bits of each long
+ * are padding. For 4 bits both formats give an identical result, but at 5+ bits they differ, so
+ * the sparse variant is used everywhere here. The minimum width of the block palette is 4 bits (MIN_BITS_PER_BLOCK,
+ * vanilla 1.13+ cannot read a palette narrower than 4 bits).
+ *
+ * Voxelization: a triangle is cut by horizontal "slabs" Y∈[n,n+1] (Sutherland–Hodgman over a 3D
+ * polygon), the (convex) section is projected onto XZ and rasterized over integer X columns
+ * (clipping the strip [X,X+1] is again a convex clip, its Z range is taken). This is how the
+ * "surface" voxels are obtained; if the mesh is closed — a 3D flood fill from the extent boundary marks the outer
+ * air, the unreached cells = the body of the object.
+ */
+
+// The byte utilities, NBT and zip have been moved to export/format/
+#include "export/format/bytes.h"
+#include "export/format/nbtwriter.h"
+#include "export/format/minizip.h"
+
+// ---------------------------------------------------------------------------
+// The block palette
+// ---------------------------------------------------------------------------
+
+static const char* kAir = "minecraft:air";
+static const char* kGrassBlock = "minecraft:grass_block";
+static const char* kDirt = "minecraft:dirt";
+static const char* kStone = "minecraft:stone";
+
+struct NamedColor { const char* name; int r, g, b; };
+static const NamedColor kBlockPalette[] = {
+    { "minecraft:white_concrete",       240, 240, 242 },
+    { "minecraft:light_gray_concrete",  180, 180, 180 },
+    { "minecraft:gray_concrete",        110, 110, 110 },
+    { "minecraft:black_concrete",        25,  25,  27 },
+    { "minecraft:brown_concrete",       120,  80,  55 },
+    { "minecraft:red_concrete",         180,  55,  50 },
+    { "minecraft:orange_concrete",      235, 130,  30 },
+    { "minecraft:yellow_concrete",      240, 205,  65 },
+    { "minecraft:lime_concrete",        120, 190,  65 },
+    { "minecraft:green_concrete",        70, 130,  50 },
+    { "minecraft:cyan_concrete",         35, 155, 150 },
+    { "minecraft:light_blue_concrete",   80, 160, 215 },
+    { "minecraft:blue_concrete",         60,  70, 165 },
+    { "minecraft:purple_concrete",      140,  80, 190 },
+    { "minecraft:magenta_concrete",     195,  85, 195 },
+    { "minecraft:pink_concrete",        240, 150, 185 },
+    { "minecraft:bricks",               150,  97,  84 },
+    { "minecraft:stone",                125, 125, 125 },
+    // Cave rocks/ores (cave_templates.bin from extract_caves.py) — only for the underground
+    // palettes; nearestBlockId does not see them (the "_concrete" filter), so buildings do not turn into "stone".
+    { "minecraft:cobblestone",           85,  85,  85 },
+    { "minecraft:deepslate",             80,  80,  82 },
+    { "minecraft:cobbled_deepslate",     70,  70,  72 },
+    { "minecraft:polished_deepslate",    80,  80,  84 },
+    { "minecraft:tuff",                 108, 104,  97 },
+    { "minecraft:granite",              156,  99,  74 },
+    { "minecraft:diorite",              188, 188, 188 },
+    { "minecraft:andesite",             135, 135, 135 },
+    { "minecraft:smooth_stone",         155, 155, 155 },
+    { "minecraft:calcite",              223, 224, 220 },
+    { "minecraft:smooth_basalt",         61,  64,  71 },
+    { "minecraft:blackstone",            39,  34,  44 },
+    { "minecraft:gravel",               131, 127, 126 },
+    { "minecraft:sand",                 219, 207, 163 },
+    { "minecraft:clay",                 165, 168, 178 },
+    { "minecraft:coarse_dirt",          119,  85,  59 },
+    { "minecraft:rootdirt",             104,  72,  51 },
+    { "minecraft:mud",                  110,  98,  86 },
+    { "minecraft:packed_mud",           142, 106,  79 },
+    { "minecraft:ice",                  145, 183, 253 },
+    { "minecraft:packed_ice",           140, 180, 250 },
+    { "minecraft:blue_ice",             115, 118, 229 },
+    { "minecraft:obsidian",              20,  17,  31 },
+    { "minecraft:bedrock",               85,  85,  85 },
+    { "minecraft:glowstone",            190, 160,  90 },
+    { "minecraft:magma_block",          140,  80,  40 },
+    { "minecraft:netherrack",           110,  54,  53 },
+    { "minecraft:gold_block",           246, 208,  61 },
+    { "minecraft:dripstone_block",      113,  95,  87 },
+    { "minecraft:moss_block",           117, 143,  45 },
+    { "minecraft:coal_ore",             116, 114, 110 },
+    { "minecraft:iron_ore",             145, 127, 116 },
+    { "minecraft:copper_ore",           120, 120, 105 },
+    { "minecraft:gold_ore",             155, 145,  85 },
+    { "minecraft:redstone_ore",         146,  70,  65 },
+    { "minecraft:lapis_ore",            100, 110, 160 },
+    { "minecraft:emerald_ore",           95, 150, 120 },
+    { "minecraft:diamond_ore",          100, 160, 165 },
+    { "minecraft:deepslate_coal_ore",    70,  70,  72 },
+    { "minecraft:deepslate_iron_ore",    85,  80,  78 },
+    { "minecraft:deepslate_copper_ore",  78,  76,  74 },
+    { "minecraft:deepslate_gold_ore",    92,  86,  66 },
+    { "minecraft:deepslate_redstone_ore",90,  60,  58 },
+    { "minecraft:deepslate_lapis_ore",   66,  72, 100 },
+    { "minecraft:deepslate_emerald_ore", 64,  88,  78 },
+    { "minecraft:deepslate_diamond_ore", 62,  86,  90 },
+    { "minecraft:raw_iron_block",       120, 100,  90 },
+    { "minecraft:raw_copper_block",     105,  95,  88 },
+    { "minecraft:raw_gold_block",       130, 110,  70 },
+    { "minecraft:coal_block",            30,  30,  30 },
+    { "minecraft:cobweb",               230, 230, 230 },
+    // Floating islands over kindergartens (the tropics): slime, bamboo, a jungle tree, sugar cane, fern, lily pads
+    { "minecraft:slime_block",          110, 190,  90 },
+    { "minecraft:jungle_log",            85,  67,  25 },
+    { "minecraft:bamboo",               100, 160,  50 },
+    { "minecraft:sugar_cane",           150, 190, 100 },
+    { "minecraft:fern",                  80, 130,  60 },
+    { "minecraft:lily_pad",              40, 120,  40 },
+    { "minecraft:spruce_log",            58,  37,  16 },
+    { "minecraft:birch_log",            216, 215, 210 },
+    { "minecraft:poplar_log",           110,  85,  60 },
+    { "minecraft:sweet_berry_bush",      70, 110,  50 },
+    { "minecraft:brown_mushroom",       145, 110,  80 },
+    { "minecraft:red_mushroom",         200,  50,  45 },
+    { "minecraft:stone_bricks",         122, 122, 122 },
+    { "minecraft:beehive",              190, 150,  80 },
+    { "minecraft:kelp",                  60, 130,  50 },
+    { "minecraft:kelp_plant",            50, 120,  45 },
+    { "minecraft:seagrass",              70, 140,  60 },
+    // Climate zones (export/climate.h): acacia of savannas and deserts, the snow cover of tundra, dry bush
+    { "minecraft:acacia_log",           103,  96,  86 },
+    { "minecraft:snow_block",           249, 254, 254 },
+    { "minecraft:dead_bush",            107,  78,  40 },
+};
+
+//! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
+enum : quint16 { IdAir = 0, IdGrass = 1, IdDirt = 2, IdStone = 3, IdPaletteStart = 4 };
+
+static constexpr int kPaletteCount = int(sizeof(kBlockPalette) / sizeof(kBlockPalette[0]));
+
+//! The carpet palette for roads — colors repeating the 16 wool colors (roads in the 3D window are gray/brown,
+//! the choice is by the same nearest RGB distance as for concrete).
+static const NamedColor kCarpets[] = {
+    { "minecraft:white_carpet",       235, 235, 235 },
+    { "minecraft:orange_carpet",      216, 175,  92 },
+    { "minecraft:magenta_carpet",     144, 100, 194 },
+    { "minecraft:light_blue_carpet",  144, 159, 194 },
+    { "minecraft:yellow_carpet",      211, 190,   9 },
+    { "minecraft:lime_carpet",        112, 185,  25 },
+    { "minecraft:pink_carpet",        237, 141, 172 },
+    { "minecraft:gray_carpet",         69,  69,  69 },
+    { "minecraft:light_gray_carpet", 155, 161, 161 },
+    { "minecraft:cyan_carpet",         69, 124, 161 },
+    { "minecraft:purple_carpet",      122,  48,  86 },
+    { "minecraft:blue_carpet",         54,  61, 121 },
+    { "minecraft:brown_carpet",       110,  71,  39 },
+    { "minecraft:green_carpet",        76, 127,  37 },
+    { "minecraft:red_carpet",         142,  60,  46 },
+    { "minecraft:black_carpet",        20,  20,  20 },
+};
+static constexpr int kCarpetsCount = int(sizeof(kCarpets) / sizeof(kCarpets[0]));
+
+//! The wool palette (csrpol plates without height — "instead of turf"). Exactly the carpet one (wool and
+//! carpet in Minecraft have the same color), but a separate block: wool is a full block, laid over the ground surface
+//! instead of grass turf.
+static const NamedColor kWools[] = {
+    { "minecraft:white_wool",       235, 235, 235 },
+    { "minecraft:orange_wool",      216, 175,  92 },
+    { "minecraft:magenta_wool",     144, 100, 194 },
+    { "minecraft:light_blue_wool",  144, 159, 194 },
+    { "minecraft:yellow_wool",      211, 190,   9 },
+    { "minecraft:lime_wool",        112, 185,  25 },
+    { "minecraft:pink_wool",        237, 141, 172 },
+    { "minecraft:gray_wool",         69,  69,  69 },
+    { "minecraft:light_gray_wool", 155, 161, 161 },
+    { "minecraft:cyan_wool",         69, 124, 161 },
+    { "minecraft:purple_wool",      122,  48,  86 },
+    { "minecraft:blue_wool",         54,  61, 121 },
+    { "minecraft:brown_wool",       110,  71,  39 },
+    { "minecraft:green_wool",        76, 127,  37 },
+    { "minecraft:red_wool",         142,  60,  46 },
+    { "minecraft:black_wool",        20,  20,  20 },
+};
+static constexpr int kWoolsCount = int(sizeof(kWools) / sizeof(kWools[0]));
+
+//! Meadow flowers (a user request): scattered over grass polygons "without height" instead of
+//! part of the short grass; the values of the pot's flower property (a windowsill) are the same names.
+//! 1.21+ (flattening 24w21a) and 26.x carry them as separate ids; the names were verified by probing the servers.
+static const struct { const char* name; const char* flower; } kFlowers[] = {
+    { "minecraft:dandelion",    "dandelion"    },
+    { "minecraft:poppy",        "poppy"        },
+    { "minecraft:cornflower",   "cornflower"   },
+    { "minecraft:allium",       "allium"       },
+    { "minecraft:azure_bluet",  "azure_bluet"  },
+    { "minecraft:oxeye_daisy",  "oxeye_daisy"  },
+    { "minecraft:red_tulip",    "red_tulip"    },
+    { "minecraft:white_tulip",  "white_tulip"  },
+    { "minecraft:orange_tulip", "orange_tulip" },
+    { "minecraft:pink_tulip",   "pink_tulip"   },
+};
+static constexpr int kFlowersCount = int(sizeof(kFlowers) / sizeof(kFlowers[0]));
+
+//! The bed colors for interiors (IdBedBase + col*8 + dir*2 + part, see the enum).
+static const char* const kBeds[] = { "minecraft:red_bed", "minecraft:white_bed",
+                                     "minecraft:blue_bed" };
+static constexpr int kBedsCount = int(sizeof(kBeds) / sizeof(kBeds[0]));
+
+//! The painting motifs — only of SIZE 1×1 (kebab/match/pumpkin), so that a painting definitely
+//! does not overlap a window/door opening (the user's remark: "they have a size").
+//! The 1×1 paintings (the sizes were checked against the server's painting_variant/*.json): other motifs are bigger than a cell and
+//! would overlap neighboring blocks.
+static const char* const kPaintMotifs[] = { "minecraft:kebab", "minecraft:aztec", "minecraft:alban",
+                                            "minecraft:aztec2", "minecraft:bomb", "minecraft:plant",
+                                            "minecraft:wasteland", "minecraft:meditative" };
+static constexpr int kPaintMotifsCount = int(sizeof(kPaintMotifs) / sizeof(kPaintMotifs[0]));
+
+//! The armor materials of the mall mannequins (item ids <material>_<part>; "gold" is golden_).
+static const char* const kArmorMats[] = { "leather", "chainmail", "iron", "golden", "diamond" };
+static constexpr int kArmorMatsCount = int(sizeof(kArmorMats) / sizeof(kArmorMats[0]));
+
+//! Special idents after the object palette: 16 carpets, then single vegetation/road blocks.
+//! All are >= IdPaletteStart, i.e. they count as "object" blocks (they do not turn into ground, and they do get into
+//! the spawn center of mass, though — roads/forests, which is correct on the whole).
+enum : quint16
+{
+    IdCarpetBase = IdPaletteStart + kPaletteCount,   // IdCarpetBase + i = kCarpets[i]
+    IdOakLog     = IdCarpetBase + kCarpetsCount,
+    IdOakLeaves,
+    IdGrassPlant,       //!< 'minecraft:short_grass' — a tuft of grass (in 1.21.2+ and 26.x 'grass' was renamed)
+    IdRail,             //!< a rail without neighbors (the default shape none)
+    IdRailEW,           //!< a rail along X (shape=east_west)
+    IdRailNS,           //!< a rail along Z (shape=north_south)
+    IdOakPlanks,
+    IdGlass,
+    IdIronBlock,          //!< minecraft:iron_block — metal/steel by the MAT column
+    IdWoolBase,           // IdWoolBase + i = kWools[i]
+    IdWater = int(IdWoolBase) + kWoolsCount,   // water (hydrography pits) — without properties: level=0 by default
+    IdTallGrass,          // 'minecraft:tall_grass' the LOWER half (half=lower — the default, without Properties)
+    IdTallGrassUpper,     // 'minecraft:tall_grass' the upper half (Properties half=upper)
+    IdWheat,              // 'minecraft:wheat' ripe (Properties age=7) — giant fields (>100000 m²)
+    IdChest,              // 'minecraft:chest' — a chest with loot inside buildings (default Properties)
+    IdChestL,             // the same chest, type=left — the left half of a double chest (joined by vanilla)
+    IdChestR,             // type=right — the right half (the vanilla connection: the right neighbor = east for facing=north)
+    IdWallTorchN,         // 'minecraft:wall_torch' facing=north/east/south/west — a torch FROM a wall
+    IdWallTorchE,         // (facing looks away from the holder wall, the holder is the neighbor on the opposite side)
+    IdWallTorchS,
+    IdWallTorchW,
+    IdLanternHung,        // 'minecraft:lantern' hanging=true — a lamp under a ceiling and a lantern under the arm of a pole
+    IdGateN,              // 'minecraft:oak_fence_gate' facing=north/east/south/west — a gate (closed — the default)
+    IdGateE,
+    IdGateS,
+    IdGateW,
+    IdCobbleWall,         // 'minecraft:cobblestone_wall' — the base of a lamp post (as in villages); up=true by default
+    IdStairsN,            // 'minecraft:oak_stairs' facing — the steps of a pitched roof; THE PROPERTY IS MANDATORY:
+    IdStairsE,            // the default is facing=east, slopes along the Z axis without the property would lie "the wrong way"
+    IdStairsS,
+    IdStairsW,            // (half=bottom/shape=straight/waterlogged — defaults, omitted)
+    IdFence,              // 'minecraft:oak_fence' — the BASE: id = IdFence + conn, conn is a bitmask of neighbors
+    IdFenceMax = int(IdFence) + 16,
+                          // connections: north=1 (-Z), east=2 (+X), south=4 (+Z), west=8 (-X). The fence
+                          // connections are a PERSISTENT block state property: without it the fence loads as "sticks"
+                          // and only break+place recomputes them. The mask bit is set by the final pass
+                          // (3.58) by the neighbors of the already written store.
+    IdLadderN = int(IdFenceMax),  // 'minecraft:ladder' facing — a VERTICAL ladder on floors
+    IdLadderE,                    // where a stepped flight did not fit; facing looks AWAY from the wall,
+    IdLadderS,                    // the holder is a solid neighbor on the opposite side
+    IdLadderW,
+    IdStoneStairsN = int(IdLadderW) + 1,  // 'minecraft:stone_stairs' — inter-floor steps
+    IdStoneStairsE,                       // (a user request) in all buildings EXCEPT
+    IdStoneStairsS,                       // the private sector (the pitched roof codes — oak there)
+    IdStoneStairsW,
+    IdFlowerPotBase,                      // 'minecraft:flower_pot' flower=kFlowers[i] — a pot
+    IdFlowerPotMax = int(IdFlowerPotBase) + kFlowersCount,   // on a windowsill behind glass (30%)
+    IdFlowerBase = int(IdFlowerPotMax),   // 'minecraft:<color>' meadow flowers: +i = kFlowers[i]
+    IdFlowerMax = int(IdFlowerBase) + kFlowersCount,
+    IdLava = int(IdFlowerMax),            // 'minecraft:lava' — donor lava lakes in caves
+                                          // (cave_templates.bin); without properties: level=0 (a source)
+    IdSpawner,                            // 'minecraft:spawner' — monster spawners in buildings
+                                          //  (a user request: every 15th "city" floor,
+                                          //  50/50; the zombie/skeleton/spider type — in the block_entity, see
+                                          //  SpawnerSite. ONE BLOCK: there are no zombie/skeleton_spawner names
+                                          //  in the game — the server turned them into air)
+    IdSlabBottom,                         // 'minecraft:oak_slab' type=bottom/top — the slopes of a gable
+    IdSlabTop,                            // roof of the private sector (a request: "half blocks instead of stairs
+                                          //  — a roof half as tall"; oak_stairs remained
+                                          //  only on the inter-floor oak flights; the table top
+                                          //  since v2 is an oak_pressure_plate, not a slab)
+    IdBookshelf,                          // 'minecraft:bookshelf' — bookshelves (interiors)
+    IdCraftingTable,                      // 'minecraft:crafting_table' — a crafting table
+    IdCartographyTable,                   // 'minecraft:cartography_table' — a cartography table
+    IdBarrel,                             // 'minecraft:barrel' — a barrel cabinet (facing=up — the default)
+    IdFurnace,                            // 'minecraft:furnace' — a stove (facing/lit — defaults)
+    IdLanternStanding,                    // 'minecraft:lantern' ON THE FLOOR/on a post (without properties)
+    IdBedBase,                            // 'minecraft:<color>_bed': id = base + col*8 + dir*2 +
+    IdBedMax = int(IdBedBase) + kBedsCount * 8,   //  part (col — the kBeds table, dir 0..3 = north/east/
+                                          //  south/west, part 0=foot/1=head; occupied=false — the default)
+    IdCauldron,                           // 'minecraft:cauldron' — water/dishes (layer/water — defaults)
+    IdComposter,                          // 'minecraft:composter' (level=0 — the default)
+    IdLoom,                               // 'minecraft:loom' (facing=north — the default)
+    IdGrindstone,                         // 'minecraft:grindstone' (face=floor/attached — defaults)
+    IdSmithingTable,                      // 'minecraft:smithing_table' (without properties)
+    IdPressurePlateStone,                 // 'minecraft:stone_pressure_plate' — at the entrances of large malls
+    IdPressurePlateOak,                   // 'minecraft:oak_pressure_plate' — the table top ON
+                                          //  a fence post (a request: "instead of an oak slab — an oak
+                                          //  pressure plate"; powered=false — the default)
+    IdPainting,                           // 'minecraft:painting' +0..3 facing — a 1×1 painting on a wall
+    IdPaintingMax = int(IdPainting) + 4,  //  (the motif is in block_entities, see PaintingSite)
+    IdObsidian = int(IdPaintingMax),      // 'minecraft:obsidian' — a Nether portal frame (csrpol,
+                                          //  a request: 10% of csrpol objects get a portal)
+    IdCryingObsidian,                     // 'minecraft:crying_obsidian' — "ruined" portals
+                                          //  (vanilla ruins mix in crying obsidian)
+    IdPortalX,                            // 'minecraft:portal' axis=x — an active portal: axis
+    IdPortalZ,                            //  = the direction of the frame's EXTENT (wiki): along X →
+                                          //  axis=x, along Z → axis=z
+    IdOakTrapdoor,                        // 'minecraft:oak_trapdoor' facing=north half=bottom open=false — a wooden basement hatch (under a carpet)
+    IdIronTrapdoor,                       // 'minecraft:iron_trapdoor' facing=north half=bottom open=false — a basement hatch
+    IdLeverCeil,                          // 'minecraft:lever' face=ceiling facing=north powered=false — opens the hatch from inside
+    IdStoneBrickWall,                     // 'minecraft:stone_brick_wall' (default properties) — a street sign post
+    IdAnvilBase,                          // 'minecraft:anvil' facing = N/E/S/W (+0..3) — anvils of industrial zones
+    IdAnvilMax = int(IdAnvilBase) + 4,
+    IdBlastFurnaceBase,                   // 'minecraft:blast_furnace' facing (+0..3), lit=false
+    IdBlastFurnaceMax = int(IdBlastFurnaceBase) + 4,
+    IdGrindstoneBase,                     // 'minecraft:grindstone' face=floor, facing (+0..3)
+    IdGrindstoneMax = int(IdGrindstoneBase) + 4,
+    IdStonecutterBase,                    // 'minecraft:stonecutter' facing (+0..3)
+    IdStonecutterMax = int(IdStonecutterBase) + 4,
+    IdLavaCauldron,                       // 'minecraft:lava_cauldron' — a cauldron with lava (without properties)
+    IdBlackGlass,                         // 'minecraft:black_stained_glass' — dark windows of bandit lairs
+    IdWallBannerBase,                     // 'minecraft:white_wall_banner' facing = N/E/S/W (+0..3); the ominous banner pattern is in the block entity
+    IdWallBannerMax = int(IdWallBannerBase) + 4,
+    IdHayBale,                            // 'minecraft:hay_block' axis=y — bandit lairs
+    IdBlackstone,                         // 'minecraft:blackstone' (black) — a school blackboard
+    IdCandleBase,                         // 'minecraft:candle' candles=1..4 lit=true: id = base + (candles-1) — candles on altars
+    IdCandleMax = int(IdCandleBase) + 4,
+    IdLecternBase,                        // 'minecraft:lectern' facing = N/E/S/W (+0..3), has_book=true — a lectern in a church with a book (the BE Book is in ChestSite::lectern)
+    IdLecternMax = int(IdLecternBase) + 4,
+    IdPodzol,                             // 'minecraft:podzol' — dirt/field/forest roads (instead of wool)
+    IdDirtPath,                           // 'minecraft:dirt_path' — trampled ground under village squares
+    IdCoarseDirt,                         // 'minecraft:coarse_dirt'
+    IdWallSignBase,                       // 'minecraft:oak_wall_sign' facing = N/E/S/W (+0..3) — a house address plate
+    IdWallSignMax = int(IdWallSignBase) + 4,
+    IdStoneButtonBase,                    // 'minecraft:stone_button' face=wall powered=false, facing = N/E/S/W (+0..3) — a button by an iron door
+    IdStoneButtonMax = int(IdStoneButtonBase) + 4,
+    IdBell,                               // 'minecraft:bell' attachment=floor facing=north — the center of a "village" (a raid point)
+    IdDoorBase,                           // doors: IdDoorBase + (type*4 + facing)*2 + half; type 0..11 (kDoorTypes), facing N/E/S/W
+    IdDoorMax = int(IdDoorBase) + 12 * 4 * 2 * 2,         // id = Base + ((type*4 + facing)*2 + hinge)*2 + half
+    IdRailShapeBase,                      // IdRailShapeBase + k, k=0..9: 'minecraft:rail' with the shape kRailShapes[k]
+    IdRailShapeMax = int(IdRailShapeBase) + 10,
+    IdPaleLog,                            // 'minecraft:pale_oak_log' (axis=y by default) — the Pale Garden forest
+    IdPaleLeaves,                         // 'minecraft:pale_oak_leaves' distance=2 persistent=true
+    IdPaleMossBlock,                      // 'minecraft:pale_moss_block'
+    IdPaleMossCarpet,                     // 'minecraft:pale_moss_carpet' bottom=true, sides none
+    IdPaleHangingMoss,                    // 'minecraft:pale_hanging_moss' tip=true — hangs from the crowns
+    IdCreakingHeart,                      // 'minecraft:creaking_heart' axis=y, state=dormant, natural=true — in the trunks
+    IdEyeOpen,                            // 'minecraft:open_eyeblossom'
+    IdEyeClosed,                          // 'minecraft:closed_eyeblossom'
+    IdJungleLeaves,                       // 'minecraft:jungle_leaves' distance=2 persistent=true — the tropics of the floating islands
+    IdAcaciaLeaves,                       // 'minecraft:acacia_leaves' distance=2 persistent=true — trees of savannas and deserts (climate zones)
+    IdSpruceLeaves,                       // 'minecraft:spruce_leaves' distance=2 persistent=true — spruces of the 71111110 forests
+    IdBirchLeaves,                        // 'minecraft:birch_leaves' — birches around schools
+    IdRedPoplarLeaves,                    // 'minecraft:red_poplar_leaves' (26.x) — the "motley forest" around kindergartens
+    IdOrangePoplarLeaves,
+    IdYellowPoplarLeaves,
+    IdLeafLitter,                         // 'minecraft:leaf_litter' facing=north segment_amount=2 — the litter of the motley forest
+    IdFarmland,                           // 'minecraft:farmland' moisture=7 — greenhouse beds
+    IdCarrots,                            // 'minecraft:carrots' age=7
+    IdPotatoes,                           // 'minecraft:potatoes' age=7
+    IdBeetroots,                          // 'minecraft:beetroots' age=3
+    IdStoneFence,                         // 'minecraft:stone_brick_wall' — the BASE of a stone fence: id = IdStoneFence + conn (north=1, east=2, south=4, west=8), pass 3.58
+    IdStoneFenceMax = int(IdStoneFence) + 16,
+    IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
+                                          //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
+};
+
+//! A block state from the cave world palette (donor structures: rails, fences, stairs... with properties).
+struct CaveState
+{
+    QString name;
+    QVector<QPair<QString, QString>> props;
+};
+//! The state table of the active CaveSet (set in CaveSet::load, read from the chunk assembly threads).
+static const QVector<CaveState>* g_caveStates = nullptr;
+
+//! The entrance doors: the type (wood — by the building color, 11 — an iron "locked" one), the compass sides as in dvec: 0=N,1=E,2=S,3=W.
+static const char* const kDoorNames[12] = {
+    "minecraft:oak_door", "minecraft:spruce_door", "minecraft:birch_door", "minecraft:jungle_door",
+    "minecraft:acacia_door", "minecraft:dark_oak_door", "minecraft:mangrove_door", "minecraft:cherry_door",
+    "minecraft:crimson_door", "minecraft:warped_door", "minecraft:bamboo_door", "minecraft:iron_door" };
+static const char* const kDirNames[4] = { "north", "east", "south", "west" };
+//! The approximate plank color (for matching a door to the building material), the order as in kDoorNames[0..10].
+static const int kDoorRgb[11][3] = { { 162, 130, 78 }, { 114, 84, 48 }, { 192, 175, 121 }, { 160, 115, 81 },
+                                     { 168, 90, 50 }, { 66, 43, 20 }, { 117, 54, 48 }, { 226, 178, 172 },
+                                     { 101, 48, 70 }, { 43, 104, 99 }, { 193, 173, 80 } };
+static QString blockName(quint16 id)
+{
+    switch (id)
+    {
+    case IdAir:       return QLatin1String(kAir);
+    case IdGrass:     return QLatin1String(kGrassBlock);
+    case IdDirt:      return QLatin1String(kDirt);
+    case IdStone:     return QLatin1String(kStone);
+    case IdOakLog:    return QLatin1String("minecraft:oak_log");
+    case IdOakLeaves: return QLatin1String("minecraft:oak_leaves");
+    case IdGrassPlant:return QLatin1String("minecraft:short_grass");
+    case IdRail:
+    case IdRailEW:
+    case IdRailNS:    return QLatin1String("minecraft:rail");
+    case IdOakPlanks: return QLatin1String("minecraft:oak_planks");
+    case IdIronBlock: return QLatin1String("minecraft:iron_block");
+    case IdGlass:     return QLatin1String("minecraft:glass");
+    case IdWater:     return QLatin1String("minecraft:water");
+    case IdLava:      return QLatin1String("minecraft:lava");
+    case IdSpawner:        return QLatin1String("minecraft:spawner");
+    case IdTallGrass:
+    case IdTallGrassUpper: return QLatin1String("minecraft:tall_grass");
+    case IdWheat:     return QLatin1String("minecraft:wheat");
+    case IdFarmland:  return QLatin1String("minecraft:farmland");
+    case IdCarrots:   return QLatin1String("minecraft:carrots");
+    case IdPotatoes:  return QLatin1String("minecraft:potatoes");
+    case IdBeetroots: return QLatin1String("minecraft:beetroots");
+    case IdChest:
+    case IdChestL:
+    case IdChestR:    return QLatin1String("minecraft:chest");
+    case IdWallTorchN:
+    case IdWallTorchE:
+    case IdWallTorchS:
+    case IdWallTorchW: return QLatin1String("minecraft:wall_torch");
+    case IdLanternHung: return QLatin1String("minecraft:lantern");
+    case IdGateN:
+    case IdGateE:
+    case IdGateS:
+    case IdGateW:       return QLatin1String("minecraft:oak_fence_gate");
+    case IdCobbleWall:  return QLatin1String("minecraft:cobblestone_wall");
+    case IdStairsN:
+    case IdStairsE:
+    case IdStairsS:
+    case IdStairsW:       return QLatin1String("minecraft:oak_stairs");
+    case IdSlabBottom:
+    case IdSlabTop:       return QLatin1String("minecraft:oak_slab");
+    case IdBookshelf:     return QLatin1String("minecraft:bookshelf");
+    case IdCraftingTable: return QLatin1String("minecraft:crafting_table");
+    case IdCartographyTable: return QLatin1String("minecraft:cartography_table");
+    case IdBarrel:        return QLatin1String("minecraft:barrel");
+    case IdFurnace:       return QLatin1String("minecraft:furnace");
+    case IdLanternStanding: return QLatin1String("minecraft:lantern");
+    case IdCauldron:      return QLatin1String("minecraft:cauldron");
+    case IdComposter:     return QLatin1String("minecraft:composter");
+    case IdLoom:          return QLatin1String("minecraft:loom");
+    case IdGrindstone:    return QLatin1String("minecraft:grindstone");
+    case IdSmithingTable: return QLatin1String("minecraft:smithing_table");
+    case IdPressurePlateOak: return QLatin1String("minecraft:oak_pressure_plate");
+    case IdBell: return QLatin1String("minecraft:bell");
+    case IdIronTrapdoor: return QLatin1String("minecraft:iron_trapdoor");
+    case IdOakTrapdoor: return QLatin1String("minecraft:oak_trapdoor");
+    case IdLeverCeil: return QLatin1String("minecraft:lever");
+    case IdPressurePlateStone: return QLatin1String("minecraft:stone_pressure_plate");
+    case IdObsidian:         return QLatin1String("minecraft:obsidian");
+    case IdCryingObsidian:   return QLatin1String("minecraft:crying_obsidian");
+    case IdPortalX:
+    case IdPortalZ:          return QLatin1String("minecraft:portal");
+    case IdStoneStairsN:
+    case IdStoneStairsE:
+    case IdStoneStairsS:
+    case IdStoneStairsW:  return QLatin1String("minecraft:stone_stairs");
+    case IdLadderN:
+    case IdLadderE:
+    case IdLadderS:
+    case IdLadderW:       return QLatin1String("minecraft:ladder");
+    default:          break;
+    }
+    if (id >= IdFence && id < IdFenceMax)          // a fence: IdFence + connection bits (see the enum)
+        return QLatin1String("minecraft:oak_fence");
+    if (id >= IdStoneFence && id < IdStoneFenceMax)
+        return QLatin1String("minecraft:stone_brick_wall");
+    if (id == IdStoneBrickWall) return QLatin1String("minecraft:stone_brick_wall");
+    if (id >= IdWallBannerBase && id < IdWallBannerMax) return QLatin1String("minecraft:white_wall_banner");
+    if (id == IdHayBale) return QLatin1String("minecraft:hay_block");
+    if (id == IdBlackGlass) return QLatin1String("minecraft:black_stained_glass");
+    if (id >= IdAnvilBase && id < IdAnvilMax) return QLatin1String("minecraft:anvil");
+    if (id >= IdBlastFurnaceBase && id < IdBlastFurnaceMax) return QLatin1String("minecraft:blast_furnace");
+    if (id >= IdGrindstoneBase && id < IdGrindstoneMax) return QLatin1String("minecraft:grindstone");
+    if (id >= IdStonecutterBase && id < IdStonecutterMax) return QLatin1String("minecraft:stonecutter");
+    if (id == IdLavaCauldron) return QLatin1String("minecraft:lava_cauldron");
+    if (id == IdBlackstone) return QLatin1String("minecraft:blackstone");
+    if (id == IdPaleLog) return QLatin1String("minecraft:pale_oak_log");
+    if (id == IdPaleLeaves) return QLatin1String("minecraft:pale_oak_leaves");
+    if (id == IdPaleMossBlock) return QLatin1String("minecraft:pale_moss_block");
+    if (id == IdPaleMossCarpet) return QLatin1String("minecraft:pale_moss_carpet");
+    if (id == IdPaleHangingMoss) return QLatin1String("minecraft:pale_hanging_moss");
+    if (id == IdCreakingHeart) return QLatin1String("minecraft:creaking_heart");
+    if (id == IdEyeOpen) return QLatin1String("minecraft:open_eyeblossom");
+    if (id == IdEyeClosed) return QLatin1String("minecraft:closed_eyeblossom");
+    if (id == IdJungleLeaves) return QLatin1String("minecraft:jungle_leaves");
+    if (id == IdAcaciaLeaves) return QLatin1String("minecraft:acacia_leaves");
+    if (id == IdSpruceLeaves) return QLatin1String("minecraft:spruce_leaves");
+    if (id == IdBirchLeaves) return QLatin1String("minecraft:birch_leaves");
+    if (id == IdRedPoplarLeaves) return QLatin1String("minecraft:red_poplar_leaves");
+    if (id == IdOrangePoplarLeaves) return QLatin1String("minecraft:orange_poplar_leaves");
+    if (id == IdYellowPoplarLeaves) return QLatin1String("minecraft:yellow_poplar_leaves");
+    if (id == IdLeafLitter) return QLatin1String("minecraft:leaf_litter");
+    if (id >= IdCandleBase && id < IdCandleMax) return QLatin1String("minecraft:candle");
+    if (id >= IdLecternBase && id < IdLecternMax) return QLatin1String("minecraft:lectern");
+    if (id == IdPodzol) return QLatin1String("minecraft:podzol");
+    if (id == IdDirtPath) return QLatin1String("minecraft:dirt_path");
+    if (id == IdCoarseDirt) return QLatin1String("minecraft:coarse_dirt");
+    if (id >= IdWallSignBase && id < IdWallSignMax)
+        return QLatin1String("minecraft:oak_wall_sign");
+    if (id >= IdStoneButtonBase && id < IdStoneButtonMax)
+        return QLatin1String("minecraft:stone_button");
+    if (id >= IdDoorBase && id < IdDoorMax)
+        return QLatin1String(kDoorNames[(int(id) - int(IdDoorBase)) / 16]);
+    if (id >= IdRailShapeBase && id < IdRailShapeMax)
+        return QLatin1String("minecraft:rail");
+    if (id >= IdBedBase && id < IdBedMax)          // a bed: the color from the kBeds table
+        return QLatin1String(kBeds[(int(id) - int(IdBedBase)) / 8]);
+    if (id >= IdPainting && id < IdPaintingMax)    // a painting: the motif is in the BE, only facing here
+        return QLatin1String("minecraft:painting");
+    if (id >= IdFlowerPotBase && id < IdFlowerPotMax)   // a pot: the flower in the pot is a separate block potted_<flower>
+    {
+        static const char* const kPotted[10] = {
+            "minecraft:potted_dandelion", "minecraft:potted_poppy", "minecraft:potted_cornflower",
+            "minecraft:potted_allium", "minecraft:potted_azure_bluet", "minecraft:potted_oxeye_daisy",
+            "minecraft:potted_red_tulip", "minecraft:potted_white_tulip", "minecraft:potted_orange_tulip",
+            "minecraft:potted_pink_tulip" };
+        return QLatin1String(kPotted[(int(id) - int(IdFlowerPotBase)) % 10]);
+    }
+    if (id >= IdFlowerBase && id < IdFlowerMax)
+        return QLatin1String(kFlowers[int(id) - int(IdFlowerBase)].name);
+    if (id >= IdCarpetBase && id < IdCarpetBase + kCarpetsCount)
+        return QLatin1String(kCarpets[int(id) - int(IdCarpetBase)].name);
+    if (id >= IdWoolBase && id < IdWoolBase + kWoolsCount)
+        return QLatin1String(kWools[int(id) - int(IdWoolBase)].name);
+    const int i = int(id) - int(IdPaletteStart);
+    if (i >= 0 && i < kPaletteCount)
+        return QLatin1String(kBlockPalette[i].name);
+    if (id >= IdCaveBase && g_caveStates && int(id) - int(IdCaveBase) < g_caveStates->size())
+        return (*g_caveStates)[int(id) - int(IdCaveBase)].name;
+    return QLatin1String(kAir);
+}
+
+//! The block state properties for the palette. Checked against chunks re-saved by the 26.3 and
+//! 1.21.11 servers (setblock probes rail/oak_leaves): the values are strings, default blocks are written without
+//! Properties. The leaves are persistent=true so that a tree does not fall apart without a "proper" distance;
+//! the rails — oriented by the neighboring columns of the track (otherwise all rails lie "idle").
+//! The rail shapes: indices 0..9 (N=north -Z, E=east +X, S=south +Z, W=west -X).
+static const char* const kRailShapes[10] = { "north_south", "east_west", "ascending_east", "ascending_west",
+                                             "ascending_north", "ascending_south", "south_east", "south_west",
+                                             "north_west", "north_east" };
+static void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
+{
+    out.clear();
+    if (id >= IdWallSignBase && id < IdWallSignMax)
+    {
+        out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdWallSignBase)) & 3]))
+            << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdStoneButtonBase && id < IdStoneButtonMax)
+    {
+        out << qMakePair(QStringLiteral("face"), QStringLiteral("wall"))
+            << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdStoneButtonBase)) & 3]))
+            << qMakePair(QStringLiteral("powered"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdWallBannerBase && id < IdWallBannerMax)
+    {
+        out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdWallBannerBase)) & 3]));
+        return;
+    }
+    if (id >= IdAnvilBase && id < IdAnvilMax)
+    {
+        out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdAnvilBase)) & 3]));
+        return;
+    }
+    if (id >= IdBlastFurnaceBase && id < IdBlastFurnaceMax)
+    {
+        out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdBlastFurnaceBase)) & 3]))
+            << qMakePair(QStringLiteral("lit"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdGrindstoneBase && id < IdGrindstoneMax)
+    {
+        out << qMakePair(QStringLiteral("face"), QStringLiteral("floor"))
+            << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdGrindstoneBase)) & 3]));
+        return;
+    }
+    if (id >= IdStonecutterBase && id < IdStonecutterMax)
+    {
+        out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdStonecutterBase)) & 3]));
+        return;
+    }
+    if (id == IdHayBale)
+    {
+        out << qMakePair(QStringLiteral("axis"), QStringLiteral("y"));
+        return;
+    }
+    if (id >= IdLecternBase && id < IdLecternMax)
+    {
+        out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdLecternBase)) & 3]))
+            << qMakePair(QStringLiteral("has_book"), QStringLiteral("true"))
+            << qMakePair(QStringLiteral("powered"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdCandleBase && id < IdCandleMax)
+    {
+        out << qMakePair(QStringLiteral("candles"), QString::number(int(id) - int(IdCandleBase) + 1))
+            << qMakePair(QStringLiteral("lit"), QStringLiteral("true"))
+            << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
+        return;
+    }
+    if (id == IdIronTrapdoor || id == IdOakTrapdoor)
+    {
+        out << qMakePair(QStringLiteral("facing"), QStringLiteral("north"))
+            << qMakePair(QStringLiteral("half"), QStringLiteral("bottom"))
+            << qMakePair(QStringLiteral("open"), QStringLiteral("false"))
+            << qMakePair(QStringLiteral("powered"), QStringLiteral("false"))
+            << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
+        return;
+    }
+    if (id == IdLeverCeil)
+    {
+        out << qMakePair(QStringLiteral("face"), QStringLiteral("ceiling"))
+            << qMakePair(QStringLiteral("facing"), QStringLiteral("north"))
+            << qMakePair(QStringLiteral("powered"), QStringLiteral("false"));
+        return;
+    }
+    if (id == IdBell)
+    {   // a bell on the floor, not ringing
+        out << qMakePair(QStringLiteral("attachment"), QStringLiteral("floor"))
+            << qMakePair(QStringLiteral("facing"), QStringLiteral("north"))
+            << qMakePair(QStringLiteral("powered"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdDoorBase && id < IdDoorMax)
+    {   // a door: facing, half, hinge on the left, closed
+        const int k = int(id) - int(IdDoorBase);
+        out << qMakePair(QStringLiteral("facing"), QLatin1String(kDirNames[(k / 4) % 4]))
+            << qMakePair(QStringLiteral("half"), (k & 1) ? QStringLiteral("upper") : QStringLiteral("lower"))
+            << qMakePair(QStringLiteral("hinge"), (k & 2) ? QStringLiteral("right") : QStringLiteral("left"))
+            << qMakePair(QStringLiteral("open"), QStringLiteral("false"))
+            << qMakePair(QStringLiteral("powered"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdRailShapeBase && id < IdRailShapeMax)
+    {   // a rail: the shape by index (straight / turns / slopes)
+        out << qMakePair(QStringLiteral("shape"), QLatin1String(kRailShapes[int(id) - int(IdRailShapeBase)]))
+            << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdCaveBase)
+    {   // a state from the cave world: the properties are written in the file itself
+        if (g_caveStates && int(id) - int(IdCaveBase) < g_caveStates->size())
+            out = (*g_caveStates)[int(id) - int(IdCaveBase)].props;
+        return;
+    }
+    if (id >= IdFence && id < IdFenceMax)
+    {   // The fence connections are PERSISTENT properties: north(-Z)/east(+X)/south(+Z)/west(-X) from
+        // the bitmask written into the id by pass 3.58. Without them the game loads bare sticks.
+        const int conn = int(id) - int(IdFence);
+        out << qMakePair(QStringLiteral("north"), (conn & 1) ? QStringLiteral("true") : QStringLiteral("false"))
+            << qMakePair(QStringLiteral("east"),  (conn & 2) ? QStringLiteral("true") : QStringLiteral("false"))
+            << qMakePair(QStringLiteral("south"), (conn & 4) ? QStringLiteral("true") : QStringLiteral("false"))
+            << qMakePair(QStringLiteral("west"),  (conn & 8) ? QStringLiteral("true") : QStringLiteral("false"))
+            << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdStoneFence && id < IdStoneFenceMax)
+    {   // a stone fence: the sides low/none by the connection bitmask; the post (up) — everywhere except straight segments
+        const int conn = int(id) - int(IdStoneFence);
+        out << qMakePair(QStringLiteral("north"), (conn & 1) ? QStringLiteral("low") : QStringLiteral("none"))
+            << qMakePair(QStringLiteral("east"),  (conn & 2) ? QStringLiteral("low") : QStringLiteral("none"))
+            << qMakePair(QStringLiteral("south"), (conn & 4) ? QStringLiteral("low") : QStringLiteral("none"))
+            << qMakePair(QStringLiteral("west"),  (conn & 8) ? QStringLiteral("low") : QStringLiteral("none"))
+            << qMakePair(QStringLiteral("up"), (conn == 5 || conn == 10) ? QStringLiteral("false") : QStringLiteral("true"))
+            << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdPainting && id < IdPaintingMax)
+    {   // the painting facing is AWAY from the wall (as for wall_torch: which side the viewer is on).
+        // the motif (a 1×1 subject) is in block_entities, without it the server takes kebab — also 1×1.
+        static const char* const kPaintDir[] = { "north", "east", "south", "west" };
+        out << qMakePair(QStringLiteral("facing"),
+                        QLatin1String(kPaintDir[int(id) - int(IdPainting)]));
+        return;
+    }
+    if (id >= IdBedBase && id < IdBedBase + kBedsCount * 8)
+    {   // A bed is two blocks: BOTH cells with the same facing (from foot to head), part tells the
+        // halves apart. occupied=false is the default, not written. Without part the server would turn the pair into two
+        // "feet"/"heads" and the head would ride on foot.
+        static const char* const kBedDir[] = { "north", "east", "south", "west" };
+        const int v = int(id) - int(IdBedBase);
+        out << qMakePair(QStringLiteral("facing"), QLatin1String(kBedDir[(v >> 1) & 3]))
+            << qMakePair(QStringLiteral("part"), (v & 1) ? QStringLiteral("head")
+                                                         : QStringLiteral("foot"));
+        return;
+    }
+    if (id >= IdFlowerPotBase && id < IdFlowerPotMax)
+    {   // flower_pot has NO flower property (a probe on the servers: the server
+        // loses the "flower" property, the pot loads empty). The id variants = the kind of flower, the flower itself is in the
+        // pot's block_entity (display/DisplayBlock, see buildChunkNbt). Without Properties.
+        return;
+    }
+    switch (id)
+    {
+    case IdRailEW: out << qMakePair(QStringLiteral("shape"), QStringLiteral("east_west"))
+                       << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false")); break;
+    case IdRailNS: out << qMakePair(QStringLiteral("shape"), QStringLiteral("north_south"))
+                       << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false")); break;
+    case IdOakLeaves: out << qMakePair(QStringLiteral("distance"), QStringLiteral("2"))
+                          << qMakePair(QStringLiteral("persistent"), QStringLiteral("true"))
+                          << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false")); break;
+    case IdJungleLeaves:
+    case IdAcaciaLeaves:
+    case IdSpruceLeaves:
+    case IdBirchLeaves:
+    case IdRedPoplarLeaves:
+    case IdOrangePoplarLeaves:
+    case IdYellowPoplarLeaves:
+    case IdPaleLeaves: out << qMakePair(QStringLiteral("distance"), QStringLiteral("2"))
+                           << qMakePair(QStringLiteral("persistent"), QStringLiteral("true"))
+                           << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false")); break;
+    case IdPaleMossCarpet: out << qMakePair(QStringLiteral("bottom"), QStringLiteral("true"))
+                               << qMakePair(QStringLiteral("east"), QStringLiteral("none"))
+                               << qMakePair(QStringLiteral("north"), QStringLiteral("none"))
+                               << qMakePair(QStringLiteral("south"), QStringLiteral("none"))
+                               << qMakePair(QStringLiteral("west"), QStringLiteral("none")); break;
+    case IdPaleHangingMoss: out << qMakePair(QStringLiteral("tip"), QStringLiteral("true")); break;
+    case IdLeafLitter: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north"))
+                           << qMakePair(QStringLiteral("segment_amount"), QStringLiteral("2")); break;
+    case IdCreakingHeart: out << qMakePair(QStringLiteral("axis"), QStringLiteral("y"))
+                              << qMakePair(QStringLiteral("creaking_heart_state"), QStringLiteral("dormant"))
+                              << qMakePair(QStringLiteral("natural"), QStringLiteral("true")); break;
+    case IdTallGrassUpper: out << qMakePair(QStringLiteral("half"), QStringLiteral("upper")); break;
+    case IdWheat: out << qMakePair(QStringLiteral("age"), QStringLiteral("7")); break;
+    case IdCarrots: out << qMakePair(QStringLiteral("age"), QStringLiteral("7")); break;
+    case IdPotatoes: out << qMakePair(QStringLiteral("age"), QStringLiteral("7")); break;
+    case IdBeetroots: out << qMakePair(QStringLiteral("age"), QStringLiteral("3")); break;
+    case IdFarmland: out << qMakePair(QStringLiteral("moisture"), QStringLiteral("7")); break;
+    case IdPortalX: out << qMakePair(QStringLiteral("axis"), QStringLiteral("x")); break;
+    case IdPortalZ: out << qMakePair(QStringLiteral("axis"), QStringLiteral("z")); break;
+    case IdChestL: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north"))
+                       << qMakePair(QStringLiteral("type"), QStringLiteral("left"))
+                       << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false")); break;
+    case IdChestR: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north"))
+                       << qMakePair(QStringLiteral("type"), QStringLiteral("right"))
+                       << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false")); break;
+    case IdWallTorchN: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north")); break;
+    case IdWallTorchE: out << qMakePair(QStringLiteral("facing"), QStringLiteral("east")); break;
+    case IdWallTorchS: out << qMakePair(QStringLiteral("facing"), QStringLiteral("south")); break;
+    case IdWallTorchW: out << qMakePair(QStringLiteral("facing"), QStringLiteral("west")); break;
+    case IdLanternHung: out << qMakePair(QStringLiteral("hanging"), QStringLiteral("true"))
+                            << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false")); break;
+    case IdGateN: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north")); break;
+    case IdGateE: out << qMakePair(QStringLiteral("facing"), QStringLiteral("east")); break;
+    case IdGateS: out << qMakePair(QStringLiteral("facing"), QStringLiteral("south")); break;
+    case IdGateW: out << qMakePair(QStringLiteral("facing"), QStringLiteral("west")); break;
+    case IdStairsN: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north")); break;
+    case IdStairsE: out << qMakePair(QStringLiteral("facing"), QStringLiteral("east")); break;
+    case IdStairsS: out << qMakePair(QStringLiteral("facing"), QStringLiteral("south")); break;
+    case IdStairsW: out << qMakePair(QStringLiteral("facing"), QStringLiteral("west")); break;
+    case IdSlabBottom: out << qMakePair(QStringLiteral("type"), QStringLiteral("bottom")); break;
+    case IdSlabTop: out << qMakePair(QStringLiteral("type"), QStringLiteral("top")); break;
+    case IdLadderN: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north")); break;
+    case IdLadderE: out << qMakePair(QStringLiteral("facing"), QStringLiteral("east")); break;
+    case IdLadderS: out << qMakePair(QStringLiteral("facing"), QStringLiteral("south")); break;
+    case IdLadderW: out << qMakePair(QStringLiteral("facing"), QStringLiteral("west")); break;
+    case IdStoneStairsN: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north")); break;
+    case IdStoneStairsE: out << qMakePair(QStringLiteral("facing"), QStringLiteral("east")); break;
+    case IdStoneStairsS: out << qMakePair(QStringLiteral("facing"), QStringLiteral("south")); break;
+    case IdStoneStairsW: out << qMakePair(QStringLiteral("facing"), QStringLiteral("west")); break;
+    default: break;
+    }
+}
+
+//! The nearest-by-RGB concrete color from the palette (the Euclidean distance over 8-bit components).
+static quint16 nearestBlockId(const QColor& c)
+{
+    const int r = c.red(), g = c.green(), b = c.blue();
+    int best = 0;
+    long bestD = std::numeric_limits<long>::max();
+    for (int i = 0; i < kPaletteCount; ++i)
+    {
+        // Walls (bldpol/csrpol) — ONLY concrete by color: stone/bricks live in the palette for
+        // palette indices (brick by a keyword), and in the color matching the stone one
+        // (125,125,125) outvoted beige-gray shades ("a stone shed" instead of concrete).
+        if (!strstr(kBlockPalette[i].name, "_concrete")) continue;
+        const long dr = r - kBlockPalette[i].r;
+        const long dg = g - kBlockPalette[i].g;
+        const long db = b - kBlockPalette[i].b;
+        const long d = dr * dr + dg * dg + db * db;
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return quint16(IdPaletteStart + best);
+}
+
+//! The nearest-by-RGB carpet color (roads) — a separate matching, we do not touch concrete for buildings.
+static quint16 nearestCarpetId(const QColor& c)
+{
+    const int r = c.red(), g = c.green(), b = c.blue();
+    int best = 0;
+    long bestD = std::numeric_limits<long>::max();
+    for (int i = 0; i < kCarpetsCount; ++i)
+    {
+        const long dr = r - kCarpets[i].r;
+        const long dg = g - kCarpets[i].g;
+        const long db = b - kCarpets[i].b;
+        const long d = dr * dr + dg * dg + db * db;
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return quint16(IdCarpetBase + best);
+}
+
+//! The index of a block in kBlockPalette by the full name (-1 if none).
+static int paletteIndexOf(const char* name)
+{
+    for (int i = 0; i < kPaletteCount; ++i)
+        if (qstrcmp(kBlockPalette[i].name, name) == 0)
+            return i;
+    return -1;
+}
+
+//! The vegpol codes on which a Pale Garden may grow (a user request): tall/stunted forest, forest undergrowth, bushes, industrial crops and meadow vegetation.
+//! Parks (71126000), lawns and flowerbeds (71329000), gardens and everything courtyard (vgbpol) — not allowed.
+static bool isPaleForestCode(int code)
+{
+    switch (code)
+    {
+    case 71111110: case 71111120: case 71113000: case 71211100: case 71211200:
+    case 71122000: case 71221000: case 71321000: case 71314000:
+        return true;
+    default:
+        return false;
+    }
+}
+
+//! Forest blocks that are not among the special idents (birch/spruce trunks of single trees, fern, berries, mushrooms, lilies, bamboo, sugar cane, moss):
+//! village plots and sign posts count them as "vegetation", not an obstacle.
+static bool isForestExtraVeg(quint16 bid)
+{
+    if (bid < IdPaletteStart || bid >= IdPaletteStart + kPaletteCount) return false;
+    static const char* const kNames[] = { "minecraft:birch_log", "minecraft:spruce_log", "minecraft:jungle_log", "minecraft:jungle_leaves", "minecraft:acacia_log", "minecraft:dead_bush", "minecraft:fern", "minecraft:sweet_berry_bush",
+                                           "minecraft:brown_mushroom", "minecraft:red_mushroom", "minecraft:lily_pad", "minecraft:bamboo", "minecraft:sugar_cane", "minecraft:pale_moss_block" };
+    static QSet<quint16> ids;
+    if (ids.isEmpty())
+        for (const char* n : kNames) { const int pi = paletteIndexOf(n); if (pi >= 0) ids.insert(quint16(IdPaletteStart + pi)); }
+    return ids.contains(bid);
+}
+
+//! A block is vegetation (a tree, leaves, grass, flowers, crops, forest flora): the chamfer of the world edge does not count such columns as "occupied" and lowers them together with them.
+static bool isVegBlockId(quint16 bid)
+{
+    if (bid == IdAir) return false;
+    return bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdAcaciaLeaves || bid == IdJungleLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves
+        || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter || bid == IdPaleHangingMoss
+        || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass || bid == IdTallGrassUpper || bid == IdWheat
+        || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
+}
+
+//! The building material from the "Material" column (the bldpol layer in the "Material from a column" mode — the same
+//! layer settings and object columns that the radio model reads, see MainWindow::ExtractRadioBuildings).
+//! The column values are free text, so matching is by keywords; 0 — not recognized,
+//! the caller picks a block by the object color.
+static quint16 materialBlockId(const QString& material, const QColor& color)
+{
+    const QString s = material.toLower();
+    // The "Material" column (MAT) is either a digit of the reference or a word; empty/0/not recognized — the
+    // object color from the 3D window. The reference: 1 concrete, 2 reinforced concrete -> light gray concrete; 3 metal,
+    // 9 steel -> an iron block; 4 stone -> the same light gray concrete; 7 brick -> brick; 5 wooden -> planks;
+    // 6 earth -> dirt; 8 mixed -> calcite.
+    {
+        bool isNum = false;
+        const int code = qRound(material.trimmed().replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&isNum));
+        if (isNum)
+        {
+            switch (code)
+            {
+            case 1: case 2: case 4: return quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+            case 3: case 9: return IdIronBlock;
+            case 7:         return quint16(IdPaletteStart + paletteIndexOf("minecraft:bricks"));
+            case 5:         return IdOakPlanks;
+            case 6:         return IdDirt;
+            case 8:         return quint16(IdPaletteStart + paletteIndexOf("minecraft:calcite"));
+            default:        return 0;                       // 0 [EMPTY] and unknown codes — by color
+            }
+        }
+    }
+    if (s.contains(QStringLiteral("кирпич")) || s.contains(QLatin1String("brick")))
+        return quint16(IdPaletteStart + paletteIndexOf("minecraft:bricks"));
+    if (s.contains(QStringLiteral("камен")) || s.contains(QLatin1String("stone"))
+        || s.contains(QLatin1String("masonry")))
+        return quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+    if (s.contains(QStringLiteral("дерев")) || s.contains(QStringLiteral("брус"))
+        || s.contains(QStringLiteral("бревен")) || s.contains(QLatin1String("wood")) || s.contains(QLatin1String("timber"))
+        || s.contains(QLatin1String("log")))
+        return IdOakPlanks;
+    if (s.contains(QStringLiteral("земл")) || s.contains(QLatin1String("earth")) || s.contains(QLatin1String("adobe"))
+        || s.contains(QLatin1String("mud")) || s.contains(QLatin1String("clay")))
+        return IdDirt;
+    if (s.contains(QStringLiteral("смешан")) || s.contains(QLatin1String("mixed")))
+        return quint16(IdPaletteStart + paletteIndexOf("minecraft:calcite"));
+    if (s.contains(QStringLiteral("стекл")) || s.contains(QLatin1String("glass")))
+        return IdGlass;
+    if (s.contains(QStringLiteral("метал")) || s.contains(QStringLiteral("сталь"))
+        || s.contains(QStringLiteral("стальн")) || s.contains(QLatin1String("metal")) || s.contains(QLatin1String("steel"))
+        || s.contains(QLatin1String("iron")) || s.contains(QLatin1String("aluminium")) || s.contains(QLatin1String("aluminum")))
+        return IdIronBlock;
+    if (s.contains(QStringLiteral("железобетон")) || s.contains(QStringLiteral("бетон"))
+        || s.contains(QStringLiteral("монолит")) || s.contains(QLatin1String("concrete"))
+        || s.contains(QLatin1String("cement")))
+        return quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+    if (s.contains(QStringLiteral("каркас"))
+        || s.contains(QStringLiteral("профнастил")) || s.contains(QStringLiteral("сендвич"))
+        || s.contains(QStringLiteral("сэндвич")) || s.contains(QStringLiteral("панел")) || s.contains(QLatin1String("panel"))
+        || s.contains(QLatin1String("sandwich")) || s.contains(QLatin1String("plaster")) || s.contains(QLatin1String("frame")))
+        return nearestBlockId(color);   // frame/panels/sandwich — concrete of the object color
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// The voxel storage: chunk -> section (16³) -> block id
+// ---------------------------------------------------------------------------
+
+static inline qint64 pairKey(int a, int b)
+{
+    return (qint64(quint32(a)) << 32) | quint32(b);
+}
+static inline int keyFirst(qint64 k)  { return qint32(quint32(quint32(quint64(k) >> 32))); }
+static inline int keySecond(qint64 k) { return qint32(quint32(quint32(quint64(k) & 0xFFFFFFFFull))); }
+
+//! The hash key for the "column/chunk -> data" maps. pairKey(x, z) has the standard qHash(qint64) = low32(k ^ (k >> 31)) = z ^ (x << 1): for coordinates
+//! within a few thousand that is only a few thousand distinct values for millions of keys — chains of hundreds of elements, every insertion
+//! and lookup took tens of microseconds (a large reservoir — 125 s for 4 million columns). ColKey behaves like a qint64 (implicit conversions),
+//! but hashes the value by mixing (the MurmurHash3 finalizer), so all column and chunk maps work in O(1).
+struct ColKey
+{
+    qint64 v = 0;
+    Q_DECL_CONSTEXPR ColKey() = default;
+    Q_DECL_CONSTEXPR ColKey(qint64 k) : v(k) {}
+    Q_DECL_CONSTEXPR operator qint64() const { return v; }
+};
+static inline uint qHash(const ColKey& k, uint seed = 0) noexcept
+{
+    quint64 h = quint64(k.v) ^ quint64(seed);
+    h ^= h >> 33; h *= 0xff51afd7ed558ccdull;
+    h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53ull;
+    h ^= h >> 33;
+    return uint(h);
+}
+
+//! The key (x&15, z&15, y&15) inside a section — the same indexing order that Minecraft expects:
+//! index = (y<<8) | (z<<4) | x. A bitwise & with negatives gives a correct modulo 16.
+static inline int sectionIndex(int x, int y, int z)
+{
+    return ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
+}
+
+class VoxelStore
+{
+public:
+    //! chunk key = pairKey(chunkX, chunkZ); value: section index (y>>4, -4..19 — a 26.x world: -64..319) -> 4096 ids.
+    QHash<ColKey, QHash<int, QVector<quint16>>> chunks;
+
+    quint16 get(int x, int y, int z) const
+    {
+        if (y < -64 || y > 319) return 0;
+        auto it = chunks.constFind(pairKey(x >> 4, z >> 4));
+        if (it == chunks.constEnd()) return 0;
+        auto sit = it->constFind(y >> 4);
+        if (sit == it->constEnd()) return 0;
+        return (*sit)[sectionIndex(x, y, z)];
+    }
+
+    void set(int x, int y, int z, quint16 id)
+    {
+        if (y < -64 || y > 319 || id == IdAir) return;
+        QVector<quint16>& sec = chunks[pairKey(x >> 4, z >> 4)][y >> 4];
+        if (sec.isEmpty())
+            sec.fill(0, 4096);
+        sec[sectionIndex(x, y, z)] = id;
+    }
+
+    //! Erase a block (set() ignores air): needed for cutting down trees under a village plot.
+    void erase(int x, int y, int z)
+    {
+        if (y < -64 || y > 319) return;
+        auto it = chunks.find(pairKey(x >> 4, z >> 4));
+        if (it == chunks.end()) return;
+        auto sit = it->find(y >> 4);
+        if (sit == it->end() || sit->isEmpty()) return;
+        (*sit)[sectionIndex(x, y, z)] = 0;
+    }
+
+    //! Raise/lower everything written by dy blocks (for the "normal world": the city is placed above the
+    //! average Minecraft height). The sections (16-block slices) move at an arbitrary dy —
+    //! so we simply move every non-empty block through set(), which sorts it out itself.
+    void translateY(int dy)
+    {
+        if (dy == 0) return;
+        QHash<ColKey, QHash<int, QVector<quint16>>> old;
+        old.swap(chunks);
+        for (auto cit = old.constBegin(); cit != old.constEnd(); ++cit)
+        {
+            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+            for (auto sit = cit->constBegin(); sit != cit->constEnd(); ++sit)
+            {
+                const int y0 = sit.key() << 4;
+                const QVector<quint16>& sec = sit.value();
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    if (!sec[i]) continue;
+                    set(bx0 + (i & 15), y0 + ((i >> 8) & 15) + dy, bz0 + ((i >> 4) & 15), sec[i]);
+                }
+            }
+        }
+    }
+};
+
+//! The chunk ground is COLUMN METADATA, not blocks (an optimization of the "expensive" ground): previously the fill
+//! wrote every block from y=-64 to the surface into VoxelStore (~130 store.set per column, ~170 million
+//! calls per noise export). Now the depth (stone) in NBT is a unary section without data anyway, and
+//! only the 3 top blocks of a column and the water column are significant — buildChunkNbt completes them analytically.
+//! The column index is lz*16+lx (as in the arrays below), the values are as of after the yShift lift.
+struct GroundChunk
+{
+    QVector<qint16> top;    //!< the column top (-1..255; signed — the junction chamfer lowers the edge below 0, see 3.59b)
+    QVector<quint16> surf;  //!< the top block: turf or the wool of a csrpol plate
+    QVector<quint16> wd;    //!< the depth of the water pit (0 — land); the water occupies (top-wd, top]
+    QVector<quint8> art;    //!< 1 — the column of an artificial reservoir (without a sandy bottom); empty — all are natural
+    int stoneFloor = std::numeric_limits<int>::min();  //!< below (inclusive) the whole section is solid stone
+    int caveTpl = -1;       //!< the index of the cave template (CaveSet) for the underground, -1 — solid rock
+    bool isEmpty() const { return top.isEmpty(); }
+};
+
+//! The ground block in a column (top/surf/wd — metadata) at height y; IdAir above the surface.
+//! It repeats the former rules of the fill loop: water up to top, surface exactly at top, 2 ground blocks under it,
+//! deeper — stone (with wd>3 the water also reaches below top-3 — hence the stone threshold max(3, wd)).
+//! The climate zone of the current export (Climate::Zone) and the chunk biome names for the cell values 0..7 (see biomeCells); set in Export before the chunk assembly.
+static int g_zone = 0;
+static const char* g_biomeName[8] = { "minecraft:plains", "minecraft:pale_garden", "minecraft:taiga", "minecraft:forest",
+                                      "minecraft:birch_forest", "minecraft:dappled_forest", "minecraft:flower_forest", "minecraft:meadow" };
+static quint16 g_zoneSurface = 1;                                   // the top block of natural ground (1 = IdGrass; desert — sand, tundra — a snow block)
+static quint16 g_sandId = 0, g_clayId = 0;                      // the sand and clay ids (palette ones; set in Export before the chunk assembly)
+static inline quint16 groundBlockAt(int top, quint16 surf, int wd, int y, int wx = 0, int wz = 0, bool artificial = false)
+{
+    if (y > top) return IdAir;
+    if (wd > 0 && y > top - wd) return IdWater;
+    if (wd > 0 && g_sandId && !artificial && y >= top - wd - 2)
+    {   // the bottom of a reservoir: a 3-block layer of sand, in places (in patches) clay instead of the top block
+        if (y == top - wd)
+        {
+            quint32 h = quint32(wx >> 1) * 374761393u ^ quint32(wz >> 1) * 668265263u ^ 0xC1A7u;
+            h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+            return (g_clayId && h % 100u < 24u) ? g_clayId : g_sandId;
+        }
+        return g_sandId;
+    }
+    if (y == top) return surf;
+    if (y >= top - 2) return IdDirt;
+    return IdStone;
+}
+
+//! A block entity of a donor-world structure (a chest/barrel with loot, a spawner with a mob) in chunk coordinates.
+struct CaveBe
+{
+    int lx = 0, lz = 0, y = 0;
+    int kind = 0;          //!< 1 chest, 2 trapped_chest, 3 barrel, 4 mob_spawner, 5 — any other BE (trial_spawner, vault, dispenser, a pot…) as raw NBT
+    QString str;           //!< LootTable or the mob id
+    QByteArray raw;        //!< kind 5: the block entity fields (id and data) without x/y/z — written into the chunk as is
+};
+
+//! The underground of ONE chunk (16×16×128, y=-64..63), assembled from a continuous block of the donor world.
+struct CaveTemplate
+{
+    QVector<quint16> blocks;   //!< the index (y+64)*256 + lz*16 + lx, y ∈ [-64..63] — internal block ids
+    quint16 uniId[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };  //!< section k (y=-64+16k..-49+16k) entirely
+         //!< of ONE solid block — written as a unary palette without data (like the stone
+         //!< "apron" depth); 0 — the section is motley (caves/different rock), a merge is needed
+    QVector<CaveBe> bes;
+};
+
+//! The cave world (cave_templates.bin, the MCW2 format from extract_cave_world.py): a W×H RECTANGLE of neighboring
+//! chunks of the donor world with their mutual positions preserved — caves, mines, dungeons and ancient cities
+//! stay whole. The export world is covered with it by MIRROR repetition (a reflection across the boundary:
+//! at the tile joint the content matches, caves do not break off); the tile offset depends on the seed.
+//! The blocks are stored together with properties; on reflection the properties are mirrored (facing, east/west/north/south,
+//! the shape of rails/stairs, hinge, the chest type, rotation).
+struct CaveSet
+{
+    int W = 0, H = 0, offX = 0, offZ = 0;
+    QVector<CaveState> states;           //!< the file palette + mirrored variants (g_caveStates looks here)
+    QVector<quint16> idOf;               //!< the palette index -> the internal block id
+    QVector<quint32> flipOf[3];          //!< the mirror by X / by Z / by XZ: the palette index -> the palette index
+    int baseN = 0;                       //!< the size of the file palette (before the mirrored variants)
+    QSet<quint16> oceanIds;              //!< the ids of water and underwater plants: the top solid body of them (the donor ocean) is filled with stone
+    QByteArray file;
+    QVector<quint32> off, len;           //!< the chunk blobs in the file (index j*W + i)
+
+    CaveSet() = default;
+    CaveSet(const CaveSet&) = delete;
+    CaveSet& operator=(const CaveSet&) = delete;
+    ~CaveSet() { if (g_caveStates == &states) g_caveStates = nullptr; }
+
+    bool empty() const { return W == 0; }
+    struct TplPiece { QString id, loc; int bb[6] = { 0, 0, 0, 0, 0, 0 }; };         //!< a structure piece: a box in the block coordinates of the template window
+    struct TplStart { QString id; int sx = 0, sz = 0; QVector<TplPiece> pieces; };   //!< a start of a template structure: the start chunk (indices in the window)
+    struct WorldStart { QString id; int startCx = 0, startCz = 0; bool here = false; QVector<TplPiece> pieces; };   //!< a start for ONE world chunk
+    QVector<TplStart> tplStarts;                                   //!< mines, trial chambers, donor cities — get starts in the world
+    QHash<ColKey, QVector<int>> tplStartsByChunk;                  //!< the template chunk (u,v) -> the numbers of starts whose pieces touch it
+    //! The starts touching a world chunk (taking the mirrored tiling into account): a reference to a start — in every touched chunk, the start itself (here) — in the start chunk.
+    void startsAt(int cx, int cz, QVector<WorldStart>& out) const;
+    bool load(const QString& path, quint64 seed, QString* err);   //!< false — the file is corrupt/does not fit
+    CaveTemplate get(int cx, int cz) const;                       //!< the underground of the chunk (cx,cz) of the export world
+};
+
+static QString caveStateKey(const CaveState& s)
+{
+    QVector<QPair<QString, QString>> p = s.props;
+    std::sort(p.begin(), p.end());
+    QString k = s.name;
+    for (const auto& kv : p) k += QLatin1Char('|') + kv.first + QLatin1Char('=') + kv.second;
+    return k;
+}
+
+//! The mirror of a block state: fx — reflection along the X axis (east<->west), fz — along Z (north<->south).
+static CaveState mirrorCaveState(const CaveState& s, bool fx, bool fz)
+{
+    auto swapDir = [&](QString v) -> QString
+    {
+        if (fx) { if (v == QLatin1String("east")) v = QStringLiteral("west"); else if (v == QLatin1String("west")) v = QStringLiteral("east"); }
+        if (fz) { if (v == QLatin1String("north")) v = QStringLiteral("south"); else if (v == QLatin1String("south")) v = QStringLiteral("north"); }
+        return v;
+    };
+    const bool single = (fx != fz);       // one reflection changes the "handedness" (left<->right)
+    auto swapLR = [](QString v) -> QString
+    {
+        if (v.contains(QLatin1String("left"))) return v.replace(QLatin1String("left"), QLatin1String("right"));
+        if (v.contains(QLatin1String("right"))) return v.replace(QLatin1String("right"), QLatin1String("left"));
+        return v;
+    };
+    QHash<QString, QString> m;
+    for (const auto& kv : s.props) m.insert(kv.first, kv.second);
+    QHash<QString, QString> o = m;
+    for (const auto& kv : s.props)
+    {
+        const QString& k = kv.first; const QString& v = kv.second;
+        if (k == QLatin1String("east") || k == QLatin1String("west") || k == QLatin1String("north") || k == QLatin1String("south"))
+        {   // connections (fence, glass, wall, vine...): the value goes to the mirrored side
+            const QString nk = swapDir(k);
+            o[nk] = m.value(k);
+        }
+        else if (k == QLatin1String("facing"))
+            o[k] = swapDir(v);
+        else if (k == QLatin1String("shape"))
+        {
+            if (v.contains(QLatin1String("inner")) || v.contains(QLatin1String("outer")))
+                o[k] = single ? swapLR(v) : v;                       // stairs: corners
+            else
+            {   // rails: north_south, east_west, ascending_*, north_east...
+                QStringList parts = v.split(QLatin1Char('_'));
+                for (QString& pt : parts) pt = swapDir(pt);
+                o[k] = parts.join(QLatin1Char('_'));
+            }
+        }
+        else if (k == QLatin1String("hinge") || k == QLatin1String("type"))
+            o[k] = (single && (v == QLatin1String("left") || v == QLatin1String("right"))) ? swapLR(v) : v;
+        else if (k == QLatin1String("rotation"))
+        {
+            int r = v.toInt();
+            if (fx) r = (16 - r) % 16;
+            if (fz) r = ((8 - r) % 16 + 16) % 16;
+            o[k] = QString::number(r);
+        }
+    }
+    CaveState out;
+    out.name = s.name;
+    for (const auto& kv : s.props) out.props.append(qMakePair(kv.first, o.value(kv.first)));
+    return out;
+}
+
+static quint16 caveStateToId(const CaveState& st, int paletteIdx)
+{
+    if (st.props.isEmpty())
+    {
+        if (st.name == QLatin1String("minecraft:air"))   return IdAir;
+        if (st.name == QLatin1String("minecraft:stone")) return IdStone;
+        const int idx = paletteIndexOf(st.name.toLatin1().constData());
+        if (idx >= 0) return quint16(IdPaletteStart + idx);
+    }
+    else if (st.props.size() == 1 && st.props[0].first == QLatin1String("level") && st.props[0].second == QLatin1String("0"))
+    {
+        if (st.name == QLatin1String("minecraft:water")) return IdWater;
+        if (st.name == QLatin1String("minecraft:lava"))  return IdLava;
+    }
+    const int dyn = int(IdCaveBase) + paletteIdx;
+    return dyn < 65535 ? quint16(dyn) : quint16(IdStone);
+}
+
+bool CaveSet::load(const QString& path, quint64 seed, QString* err)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+    {
+        if (err) *err = QObject::tr("Could not open the cave template file: %1").arg(path);
+        return false;
+    }
+    file = f.readAll();
+    auto bad = [err](const char* why) -> bool
+    { if (err) *err = QObject::tr("Cave templates: %1").arg(QLatin1String(why)); return false; };
+    const uchar* d = reinterpret_cast<const uchar*>(file.constData());
+    const qint64 n = file.size();
+    if (n < 24 || qstrncmp(file.constData(), "MCW2", 4) != 0)
+        return bad("a file of the MCW2 format is needed (rebuild with extract_cave_world.py)");
+    auto rd32 = [&](qint64 pos) -> quint32
+    { return (quint32(d[pos]) << 24) | (quint32(d[pos + 1]) << 16) | (quint32(d[pos + 2]) << 8) | d[pos + 3]; };
+    const quint32 ver = rd32(4), w = rd32(8), h = rd32(12), palN = rd32(16);
+    if (ver != 2 || w == 0 || h == 0 || w > 1024 || h > 1024 || palN == 0 || palN > 20000)
+        return bad("unsupported version/header sizes");
+    qint64 pos = 20;
+    states.clear();
+    QHash<QString, int> byKey;
+    for (quint32 i = 0; i < palN; ++i)
+    {
+        if (pos + 2 > n) return bad("the palette is truncated");
+        const int l = (d[pos] << 8) | d[pos + 1];
+        pos += 2;
+        if (pos + l > n) return bad("the palette is truncated");
+        const QStringList parts = QString::fromUtf8(file.constData() + pos, l).split(QLatin1Char('|'));
+        pos += l;
+        CaveState st;
+        st.name = parts.value(0);
+        for (int k = 1; k < parts.size(); ++k)
+        {
+            const int eq = parts[k].indexOf(QLatin1Char('='));
+            if (eq > 0) st.props.append(qMakePair(parts[k].left(eq), parts[k].mid(eq + 1)));
+        }
+        byKey.insert(caveStateKey(st), states.size());
+        states.append(st);
+    }
+    baseN = states.size();
+    const qint64 nChunks = qint64(w) * h;
+    if (pos + nChunks * 8 > n) return bad("the chunk index is truncated");
+    off.resize(int(nChunks)); len.resize(int(nChunks));
+    for (qint64 i = 0; i < nChunks; ++i)
+    {
+        off[int(i)] = rd32(pos + i * 8);
+        len[int(i)] = rd32(pos + i * 8 + 4);
+        if (qint64(off[int(i)]) + len[int(i)] > n) return bad("a chunk blob goes beyond the file");
+    }
+    // mirrored palette variants (by X, by Z, by both axes)
+    for (int fi = 0; fi < 3; ++fi)
+    {
+        const bool fx = (fi == 0 || fi == 2), fz = (fi == 1 || fi == 2);
+        flipOf[fi].resize(baseN);
+        for (int i = 0; i < baseN; ++i)
+        {
+            const CaveState m = mirrorCaveState(states[i], fx, fz);
+            const QString k = caveStateKey(m);
+            auto it = byKey.constFind(k);
+            if (it == byKey.constEnd())
+            {
+                it = byKey.insert(k, states.size());
+                states.append(m);
+            }
+            flipOf[fi][i] = quint32(it.value());
+        }
+    }
+    idOf.resize(states.size());
+    for (int i = 0; i < states.size(); ++i)
+    {
+        idOf[i] = caveStateToId(states[i], i);
+        const QString& nm = states[i].name;
+        if (nm == QLatin1String("minecraft:water") || nm == QLatin1String("minecraft:kelp") || nm == QLatin1String("minecraft:kelp_plant")
+            || nm == QLatin1String("minecraft:seagrass") || nm == QLatin1String("minecraft:tall_seagrass") || nm == QLatin1String("minecraft:bubble_column"))
+            oceanIds.insert(idOf[i]);
+    }
+    W = int(w); H = int(h);
+    // the 'STRT' trailer: the structure starts of the window (after the chunk blobs); absent — structures without starts
+    tplStarts.clear(); tplStartsByChunk.clear();
+    {
+        qint64 endBlobs = 0;
+        for (int i = 0; i < off.size(); ++i) endBlobs = std::max<qint64>(endBlobs, qint64(off[i]) + len[i]);
+        if (n >= endBlobs + 8 && qstrncmp(file.constData() + endBlobs, "STRT", 4) == 0)
+        {
+            qint64 tp = endBlobs + 4;
+            const quint32 ns = rd32(tp); tp += 4;
+            auto ri32 = [&](qint64 q) -> int { return int(rd32(q)); };
+            for (quint32 si = 0; si < ns && tp + 2 <= n; ++si)
+            {
+                TplStart st;
+                int l = (d[tp] << 8) | d[tp + 1]; tp += 2;
+                if (tp + l + 10 > n) break;
+                st.id = QString::fromUtf8(file.constData() + tp, l); tp += l;
+                st.sx = ri32(tp); st.sz = ri32(tp + 4);
+                const int np = (d[tp + 8] << 8) | d[tp + 9]; tp += 10;
+                bool ok = true;
+                for (int pi = 0; pi < np && ok; ++pi)
+                {
+                    TplPiece pc;
+                    if (tp + 2 > n) { ok = false; break; }
+                    l = (d[tp] << 8) | d[tp + 1]; tp += 2;
+                    if (tp + l + 24 + 2 > n) { ok = false; break; }
+                    pc.id = QString::fromUtf8(file.constData() + tp, l); tp += l;
+                    for (int k = 0; k < 6; ++k) pc.bb[k] = ri32(tp + 4 * k);
+                    tp += 24;
+                    l = (d[tp] << 8) | d[tp + 1]; tp += 2;
+                    if (tp + l > n) { ok = false; break; }
+                    pc.loc = QString::fromUtf8(file.constData() + tp, l); tp += l;
+                    st.pieces.append(pc);
+                }
+                if (!ok) break;
+                if (st.sx < 0 || st.sx >= int(w) || st.sz < 0 || st.sz >= int(h)) continue;
+                const int idx = tplStarts.size();
+                tplStarts.append(st);
+                QSet<ColKey> cells;
+                cells.insert(pairKey(st.sx, st.sz));
+                for (const TplPiece& pc : st.pieces)
+                    for (int cz2 = pc.bb[2] >> 4; cz2 <= (pc.bb[5] >> 4); ++cz2)
+                        for (int cx2 = pc.bb[0] >> 4; cx2 <= (pc.bb[3] >> 4); ++cx2)
+                            if (cx2 >= 0 && cx2 < int(w) && cz2 >= 0 && cz2 < int(h)) cells.insert(pairKey(cx2, cz2));
+                for (const qint64 ck : cells) tplStartsByChunk[ck].append(idx);
+            }
+        }
+    }
+    // the tile offset: a different seed — a different donor area under the city
+    quint64 hsh = seed * 0x9E3779B97F4A7C15ull;
+    hsh ^= hsh >> 29;
+    offX = int(hsh % quint64(2 * W));
+    hsh *= 0xBF58476D1CE4E5B9ull; hsh ^= hsh >> 31;
+    offZ = int(hsh % quint64(2 * H));
+    g_caveStates = &states;
+    return true;
+}
+
+void CaveSet::startsAt(int cx, int cz, QVector<WorldStart>& out) const
+{
+    out.clear();
+    if (empty() || tplStarts.isEmpty()) return;
+    const int px = ((cx + offX) % (2 * W) + 2 * W) % (2 * W), pz = ((cz + offZ) % (2 * H) + 2 * H) % (2 * H);
+    const bool fx = px >= W, fz = pz >= H;
+    const int u = fx ? 2 * W - 1 - px : px, v = fz ? 2 * H - 1 - pz : pz;
+    const auto it = tplStartsByChunk.constFind(pairKey(u, v));
+    if (it == tplStartsByChunk.constEnd()) return;
+    const int baseCx = cx - px, baseCz = cz - pz;                      // the world chunk of the tile origin (for both halves)
+    const int baseX = baseCx * 16, baseZ = baseCz * 16;
+    for (const int si : it.value())
+    {
+        const TplStart& st = tplStarts[si];
+        WorldStart ws;
+        ws.id = st.id;
+        ws.startCx = fx ? baseCx + 2 * W - 1 - st.sx : baseCx + st.sx;
+        ws.startCz = fz ? baseCz + 2 * H - 1 - st.sz : baseCz + st.sz;
+        ws.here = (u == st.sx && v == st.sz);
+        if (ws.here)
+            for (const TplPiece& pc : st.pieces)
+            {
+                TplPiece wp = pc;
+                wp.bb[0] = fx ? baseX + 2 * W * 16 - 1 - pc.bb[3] : baseX + pc.bb[0];
+                wp.bb[3] = fx ? baseX + 2 * W * 16 - 1 - pc.bb[0] : baseX + pc.bb[3];
+                wp.bb[2] = fz ? baseZ + 2 * H * 16 - 1 - pc.bb[5] : baseZ + pc.bb[2];
+                wp.bb[5] = fz ? baseZ + 2 * H * 16 - 1 - pc.bb[2] : baseZ + pc.bb[5];
+                ws.pieces.append(wp);
+            }
+        out.append(ws);
+    }
+}
+
+CaveTemplate CaveSet::get(int cx, int cz) const
+{
+    CaveTemplate ct;
+    if (empty()) return ct;
+    const int px = ((cx + offX) % (2 * W) + 2 * W) % (2 * W), pz = ((cz + offZ) % (2 * H) + 2 * H) % (2 * H);
+    const bool fx = px >= W, fz = pz >= H;
+    const int u = fx ? 2 * W - 1 - px : px, v = fz ? 2 * H - 1 - pz : pz;
+    const int idx = v * W + u;
+    const QByteArray raw = qUncompress(reinterpret_cast<const uchar*>(file.constData()) + off[idx], int(len[idx]));
+    static constexpr int CELLS = 128 * 256;
+    if (raw.size() < 4 + CELLS * 2) return ct;
+    const uchar* r = reinterpret_cast<const uchar*>(raw.constData());
+    const int beN = (r[0] << 24) | (r[1] << 16) | (r[2] << 8) | r[3];
+    int pos = 4;
+    for (int i = 0; i < beN && pos + 7 <= raw.size(); ++i)
+    {
+        CaveBe b;
+        const int lx = qint8(r[pos]), lz = qint8(r[pos + 1]);
+        b.y = qint16((r[pos + 2] << 8) | r[pos + 3]);
+        b.kind = r[pos + 4];
+        const int l = (r[pos + 5] << 8) | r[pos + 6];
+        pos += 7;
+        if (pos + l > raw.size()) break;
+        if (b.kind == 5) b.raw = QByteArray(raw.constData() + pos, l);
+        else b.str = QString::fromUtf8(raw.constData() + pos, l);
+        pos += l;
+        b.lx = fx ? 15 - lx : lx;
+        b.lz = fz ? 15 - lz : lz;
+        ct.bes.append(b);
+    }
+    if (raw.size() < pos + CELLS * 2) return ct;
+    const uchar* c = r + pos;
+    const int f = (fx && fz) ? 3 : (fz ? 2 : (fx ? 1 : 0));   // 0 none, 1 by X, 2 by Z, 3 by XZ
+    const quint32* fm = f ? flipOf[f - 1].constData() : nullptr;
+    ct.blocks.resize(CELLS);
+    for (int ty = 0; ty < 128; ++ty)
+        for (int lz = 0; lz < 16; ++lz)
+        {
+            const int sz = fz ? 15 - lz : lz;
+            for (int lx = 0; lx < 16; ++lx)
+            {
+                const int sx = fx ? 15 - lx : lx;
+                const int src = ty * 256 + sz * 16 + sx;
+                quint32 p = (quint32(c[2 * src]) << 8) | c[2 * src + 1];
+                if (p >= quint32(baseN)) p = 0;
+                if (fm) p = fm[p];
+                ct.blocks[ty * 256 + lz * 16 + lx] = idOf[int(p)];
+            }
+        }
+    // The "donor ocean": a continuous body of water/seaweed from the very top of the template (y=63) downward is the seabed of the donor, while here it is land.
+    // We fill it with stone: the ground is leveled to the top of the template, caves start under a real bottom, not under an ocean.
+    // Other large bodies of water (underground lakes/an "ocean" under the bottom that did not reach the top of the template): connected water of 150 cells or more
+    // inside a chunk is filled with stone; small puddles and cave streams remain.
+    if (!oceanIds.isEmpty())
+    {
+        QVector<char> seen(128 * 256, 0);
+        QVector<int> stack, comp;
+        for (int start = 0; start < 128 * 256; ++start)
+        {
+            if (seen[start] || !oceanIds.contains(ct.blocks[start])) continue;
+            comp.clear(); stack.clear();
+            stack.append(start); seen[start] = 1;
+            while (!stack.isEmpty())
+            {
+                const int c = stack.takeLast();
+                comp.append(c);
+                const int ty = c >> 8, lz = (c >> 4) & 15, lx = c & 15;
+                const int nb[6] = { lx > 0 ? c - 1 : -1, lx < 15 ? c + 1 : -1, lz > 0 ? c - 16 : -1, lz < 15 ? c + 16 : -1,
+                                    ty > 0 ? c - 256 : -1, ty < 127 ? c + 256 : -1 };
+                for (int n : nb)
+                    if (n >= 0 && !seen[n] && oceanIds.contains(ct.blocks[n])) { seen[n] = 1; stack.append(n); }
+            }
+            if (comp.size() >= 150)
+                for (int c : comp) ct.blocks[c] = IdStone;
+        }
+    }
+    // The same with the air "above the donor ground": where the donor terrain is below y=63 (valleys, slopes), open air stretched from the top of the template downward —
+    // here there is ground there, and such a cavity turned into a huge void underground (especially at the joints of template tiles).
+    for (int col = 0; col < 256; ++col)
+        for (int ty = 127; ty >= 0; --ty)
+        {
+            const quint16 b = ct.blocks[ty * 256 + col];
+            if (b != IdAir && !oceanIds.contains(b)) break;
+            ct.blocks[ty * 256 + col] = IdStone;
+        }
+    for (int sec = 0; sec < 8; ++sec)
+    {
+        const quint16 first = ct.blocks[sec * 4096];
+        bool uni = true;
+        for (int j = 1; j < 4096 && uni; ++j)
+            if (ct.blocks[sec * 4096 + j] != first) uni = false;
+        ct.uniId[sec] = (uni && first != IdAir) ? first : quint16(0);
+    }
+    return ct;
+}
+
+//! Donor-world "lair" structures (lair_structures.bin, the LST1 format from extract_lair_structs.py): the stronghold portal
+//! room and the Ancient City (Deep Dark). Each is a rectangle of chunks with blocks y=-64..63 (like MCW2), placed on the world
+//! at an ARBITRARY X/Z shift (so that the entrance column falls under a church shaft), without rotations or mirroring. The Y shift is zero:
+//! the stronghold lies at y≈22..36, the city at y≈-52..-22, so they do not overlap in height. The block states are added
+//! to the CaveSet palette (g_caveStates is one per export).
+struct LairBe
+{
+    int x = 0, y = 0, z = 0, kind = 0;      //!< x,z — coordinates in the template system (before the shift)
+    QString str;
+};
+
+struct LairStruct
+{
+    QString id, biome;
+    int cx0 = 0, cz0 = 0, W = 0, H = 0;     //!< the chunk rectangle of the template
+    int ex = 0, ez = 0, floorY = 0, topY = 0;   //!< the entrance column: the floor floorY, air up to topY
+    int yLo = -64, yHi = 63;                    //!< the heights that the structure overlaps in the underground (for the stronghold and the city they do not overlap)
+    int room[6] = { 0, 0, 0, 0, 0, 0 };         //!< the main hall (x0,y0,z0,x1,y1,z1 in the template system): the "structure start" box for /locate
+    QVector<quint16> cells;                 //!< internal ids, index ((y+64)*(H*16) + z)*(W*16) + x (x,z — from the rectangle corner)
+    QVector<LairBe> bes;
+};
+
+struct LairPlace
+{
+    int s = 0;                              //!< the index in LairSet::st
+    int tx = 0, tz = 0;                     //!< the template -> world shift
+    int sx = 0, sz = 0;                     //!< the shaft column (world x,z)
+};
+
+struct LairSet
+{
+    QVector<LairStruct> st;
+    QVector<LairPlace> placed;
+
+    bool empty() const { return st.isEmpty(); }
+    int find(const QString& id) const { for (int i = 0; i < st.size(); ++i) if (st[i].id == id) return i; return -1; }
+    bool load(const QString& path, CaveSet& cs);
+    //! The world placement rectangle (blocks, inclusive).
+    QRect rectOf(const LairPlace& p) const
+    {
+        const LairStruct& s = st[p.s];
+        return QRect(s.cx0 * 16 + p.tx, s.cz0 * 16 + p.tz, s.W * 16, s.H * 16);
+    }
+    //! The "structure start" (minecraft:stronghold / ancient_city) for /locate, eye of ender search and advancements: the box is the main hall.
+    struct Start { QString sid; int scx = 0, scz = 0; int bb[6] = { 0, 0, 0, 0, 0, 0 }; };
+    QVector<Start> startsTouching(int cx, int cz) const;   //!< structures whose hall touches the chunk (a reference), the start lies in the hall center chunk
+    //! Overlays the placed structures onto the chunk underground; true — the template changed. deepDark — the chunk touches a structure with the Deep Dark biome.
+    bool apply(int cx, int cz, CaveTemplate& ct, bool* deepDark) const;
+};
+
+bool LairSet::load(const QString& path, CaveSet& cs)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QByteArray file = f.readAll();
+    const uchar* d = reinterpret_cast<const uchar*>(file.constData());
+    const qint64 n = file.size();
+    auto rd32 = [&](qint64 pos) -> quint32
+    { return (quint32(d[pos]) << 24) | (quint32(d[pos + 1]) << 16) | (quint32(d[pos + 2]) << 8) | d[pos + 3]; };
+    if (n < 12 || qstrncmp(file.constData(), "LST1", 4) != 0) return false;
+    const quint32 jl = rd32(4);
+    if (8 + qint64(jl) > n) return false;
+    const QJsonArray arr = QJsonDocument::fromJson(QByteArray(file.constData() + 8, int(jl))).object().value(QStringLiteral("structures")).toArray();
+    QHash<QString, int> byKey;
+    for (int i = 0; i < cs.states.size(); ++i) byKey.insert(caveStateKey(cs.states[i]), i);
+    qint64 pos = 8 + qint64(jl);
+    QVector<LairStruct> out;
+    for (int si = 0; si < arr.size(); ++si)
+    {
+        if (pos + 4 > n) return false;
+        const quint32 plen = rd32(pos);
+        pos += 4;
+        if (pos + plen > n || plen < 20 || qstrncmp(file.constData() + pos, "MCW2", 4) != 0) return false;
+        const uchar* p = d + pos;
+        auto r32 = [&](qint64 o) -> quint32 { return (quint32(p[o]) << 24) | (quint32(p[o + 1]) << 16) | (quint32(p[o + 2]) << 8) | p[o + 3]; };
+        const int W = int(r32(8)), H = int(r32(12)), palN = int(r32(16));
+        if (W <= 0 || H <= 0 || W > 64 || H > 64 || palN <= 0 || palN > 20000) return false;
+        qint64 o = 20;
+        QVector<quint16> idMap(palN);
+        for (int i = 0; i < palN; ++i)
+        {
+            const int l = (p[o] << 8) | p[o + 1];
+            o += 2;
+            if (o + l > qint64(plen)) return false;
+            const QStringList parts = QString::fromUtf8(reinterpret_cast<const char*>(p) + o, l).split(QLatin1Char('|'));
+            o += l;
+            CaveState stt;
+            stt.name = parts.value(0);
+            for (int k = 1; k < parts.size(); ++k)
+            {
+                const int eq = parts[k].indexOf(QLatin1Char('='));
+                if (eq > 0) stt.props.append(qMakePair(parts[k].left(eq), parts[k].mid(eq + 1)));
+            }
+            const QString key = caveStateKey(stt);
+            auto it = byKey.constFind(key);
+            int idx;
+            if (it == byKey.constEnd())
+            {
+                idx = cs.states.size();
+                cs.states.append(stt);
+                cs.idOf.append(caveStateToId(stt, idx));
+                byKey.insert(key, idx);
+            }
+            else idx = it.value();
+            idMap[i] = cs.idOf[idx];
+        }
+        const qint64 idxPos = o;
+        o += qint64(W) * H * 8;
+        if (o > qint64(plen)) return false;
+        const QJsonObject jo = arr[si].toObject();
+        LairStruct ls;
+        ls.id = jo.value(QStringLiteral("id")).toString();
+        ls.biome = jo.value(QStringLiteral("biome")).toString();
+        ls.cx0 = jo.value(QStringLiteral("cx0")).toInt(); ls.cz0 = jo.value(QStringLiteral("cz0")).toInt();
+        ls.W = W; ls.H = H;
+        const QJsonArray en = jo.value(QStringLiteral("entry")).toArray();
+        ls.ex = en.at(0).toInt(); ls.ez = en.at(1).toInt();
+        ls.floorY = jo.value(QStringLiteral("floorY")).toInt(); ls.topY = jo.value(QStringLiteral("topY")).toInt();
+        const QJsonArray rm = jo.value(QStringLiteral("room")).toArray();
+        for (int k = 0; k < 6; ++k) ls.room[k] = rm.at(k).toInt();
+        const QJsonArray yr = jo.value(QStringLiteral("yRange")).toArray();
+        if (yr.size() == 2) { ls.yLo = std::max(-64, yr.at(0).toInt()); ls.yHi = std::min(63, yr.at(1).toInt()); }
+        const int RW = W * 16, RH = H * 16;
+        ls.cells.fill(quint16(IdAir), qint64(RW) * RH * 128);
+        for (int j = 0; j < H; ++j)
+            for (int i = 0; i < W; ++i)
+            {
+                const qint64 e = idxPos + qint64(j * W + i) * 8;
+                const quint32 bo = r32(e), bl = r32(e + 4);
+                if (qint64(bo) + bl > qint64(plen)) return false;
+                const QByteArray raw = qUncompress(p + bo, int(bl));
+                if (raw.size() < 4 + 32768 * 2) return false;
+                const uchar* r = reinterpret_cast<const uchar*>(raw.constData());
+                const int beN = (r[0] << 24) | (r[1] << 16) | (r[2] << 8) | r[3];
+                int q = 4;
+                for (int b = 0; b < beN && q + 7 <= raw.size(); ++b)
+                {
+                    LairBe be;
+                    const int lx = qint8(r[q]), lz = qint8(r[q + 1]);
+                    be.y = qint16((r[q + 2] << 8) | r[q + 3]);
+                    be.kind = r[q + 4];
+                    const int l = (r[q + 5] << 8) | r[q + 6];
+                    q += 7;
+                    if (q + l > raw.size()) break;
+                    be.str = QString::fromUtf8(raw.constData() + q, l);
+                    q += l;
+                    be.x = (ls.cx0 + i) * 16 + lx; be.z = (ls.cz0 + j) * 16 + lz;
+                    ls.bes.append(be);
+                }
+                if (raw.size() < q + 32768 * 2) return false;
+                const uchar* c = r + q;
+                for (int ty = 0; ty < 128; ++ty)
+                    for (int lz = 0; lz < 16; ++lz)
+                        for (int lx = 0; lx < 16; ++lx)
+                        {
+                            const int src = ty * 256 + lz * 16 + lx;
+                            const int pi = (c[2 * src] << 8) | c[2 * src + 1];
+                            ls.cells[(qint64(ty) * RH + (j * 16 + lz)) * RW + (i * 16 + lx)] = pi < palN ? idMap[pi] : quint16(IdAir);
+                        }
+            }
+        if (ls.id.isEmpty()) return false;
+        out.append(ls);
+        pos += plen;
+    }
+    st = out;
+    return !st.isEmpty();
+}
+
+QVector<LairSet::Start> LairSet::startsTouching(int cx, int cz) const
+{
+    QVector<Start> out;
+    for (const LairPlace& pl : placed)
+    {
+        const LairStruct& s = st[pl.s];
+        Start r;
+        r.sid = QStringLiteral("minecraft:") + s.id;
+        r.bb[0] = s.room[0] + pl.tx; r.bb[1] = s.room[1]; r.bb[2] = s.room[2] + pl.tz;
+        r.bb[3] = s.room[3] + pl.tx; r.bb[4] = s.room[4]; r.bb[5] = s.room[5] + pl.tz;
+        r.scx = ((r.bb[0] + r.bb[3]) / 2) >> 4; r.scz = ((r.bb[2] + r.bb[5]) / 2) >> 4;
+        if (cx >= (r.bb[0] >> 4) && cx <= (r.bb[3] >> 4) && cz >= (r.bb[2] >> 4) && cz <= (r.bb[5] >> 4))
+            out.append(r);
+    }
+    return out;
+}
+
+bool LairSet::apply(int cx, int cz, CaveTemplate& ct, bool* deepDark) const
+{
+    bool changed = false;
+    const QRect chunk(cx * 16, cz * 16, 16, 16);
+    for (const LairPlace& pl : placed)
+    {
+        const LairStruct& s = st[pl.s];
+        const QRect r = rectOf(pl).intersected(chunk);
+        if (r.isEmpty()) continue;
+        if (deepDark && !s.biome.isEmpty()) *deepDark = true;
+        const int RW = s.W * 16, RH = s.H * 16;
+        const int ox = s.cx0 * 16 + pl.tx, oz = s.cz0 * 16 + pl.tz;          // the world corner of the rectangle
+        for (int z = r.top(); z <= r.bottom(); ++z)
+            for (int x = r.left(); x <= r.right(); ++x)
+            {
+                const int lx = x - cx * 16, lz = z - cz * 16;
+                const int edgeXZ = std::min(std::min(x - ox, ox + RW - 1 - x), std::min(z - oz, oz + RH - 1 - z));
+                for (int ty = s.yLo + 64; ty <= s.yHi + 64; ++ty)
+                {
+                    quint16 b = s.cells[(qint64(ty) * RH + (z - oz)) * RW + (x - ox)];
+                    // the cut seam: at the boundary of the rectangle (and of the top/bottom of the range) a void of the donor, behind which in the world template there is rock,
+                    // is replaced with stone — otherwise the cut cavity gives a huge "chasm". Where the cave continues in the same cell
+                    // (air in the world template too) — the cut smoothly leads into the cave, we touch nothing.
+                    if ((b == IdAir || b == IdWater) && (edgeXZ < 6 || ty - (s.yLo + 64) < 3 || (s.yHi + 64) - ty < 3))
+                    {
+                        const quint16 base = ct.blocks[ty * 256 + lz * 16 + lx];
+                        if (base != IdAir && base != IdWater) b = IdStone;
+                    }
+                    ct.blocks[ty * 256 + lz * 16 + lx] = b;
+                }
+            }
+        for (int i = ct.bes.size() - 1; i >= 0; --i)                          // the donor chests inside the overlapped area are replaced
+            if (ct.bes[i].y >= s.yLo && ct.bes[i].y <= s.yHi && r.contains(cx * 16 + ct.bes[i].lx, cz * 16 + ct.bes[i].lz)) ct.bes.removeAt(i);
+        for (const LairBe& b : s.bes)
+        {
+            const int wx = b.x + pl.tx, wz = b.z + pl.tz;
+            if (!r.contains(wx, wz) || b.y < s.yLo || b.y > s.yHi) continue;
+            CaveBe cb;
+            cb.lx = wx - cx * 16; cb.lz = wz - cz * 16; cb.y = b.y; cb.kind = b.kind; cb.str = b.str;
+            ct.bes.append(cb);
+        }
+        changed = true;
+    }
+    if (changed)
+        for (int sec = 0; sec < 8; ++sec)
+        {
+            const quint16 first = ct.blocks[sec * 4096];
+            bool uni = true;
+            for (int j = 1; j < 4096 && uni; ++j)
+                if (ct.blocks[sec * 4096 + j] != first) uni = false;
+            ct.uniId[sec] = (uni && first != IdAir) ? first : quint16(0);
+        }
+    return changed;
+}
+
+//! The random_spread salt (spacing is a power of two, separation=0) at which the potential start chunk of cell (cx,cz) is exactly (cx,cz).
+//! It repeats java.util.Random / WorldgenRandom.setLargeFeatureWithSalt / RandomSpreadStructurePlacement (checked against the vanilla city of seed 777).
+static int findPlacementSalt(qint64 seed, int cx, int cz, int spacing)
+{
+    if (spacing < 2 || (spacing & (spacing - 1)) != 0) return 0;      // the implementation is correct only for spacing = 2^n (nextInt by a power of two) and separation = 0
+    auto floorDiv = [](int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); };
+    const qint64 i = floorDiv(cx, spacing), j = floorDiv(cz, spacing);
+    const quint64 wantX = quint64(cx - i * spacing), wantZ = quint64(cz - j * spacing);
+    const quint64 MASK = (1ull << 48) - 1;
+    const int shift = 31 - [&] { int b = 0; while ((1 << b) < spacing) ++b; return b; }();
+    const quint64 base = quint64(i * 341873128712ll + j * 132897987541ll + seed);
+    for (qint64 salt = 1; salt < 2147483647ll; ++salt)
+    {
+        quint64 s = ((base + quint64(salt)) ^ 0x5DEECE66Dull) & MASK;
+        s = (s * 0x5DEECE66Dull + 0xBull) & MASK;
+        if (((s >> 17) >> shift) != wantX) continue;
+        s = (s * 0x5DEECE66Dull + 0xBull) & MASK;
+        if (((s >> 17) >> shift) == wantZ) return int(salt);
+    }
+    return 0;
+}
+
+//! The real "Pale Garden" (pale_garden.bin, PGD1 from extract_pale_garden.py): a rectangle from a game-generated world — the terrain height
+//! hd of each column, the top block of the terrain and everything standing above the terrain (trees, moss, grass, creaking hearts), with heights counted from hd.
+//! It is laid onto the largest forest as a mirrored tile: the donor terrain (relative to its mean) is added to the level of our ground,
+//! and fades out smoothly at the forest boundary (blending), trees are transferred whole together with the terrain.
+struct PaleDonor
+{
+    int W = 0, H = 0;
+    QVector<qint16> hd;
+    QVector<quint16> surf;                 //!< the internal id of the top terrain block
+    QVector<quint32> off;                  //!< the column offset into ady/aid (W*H+1)
+    QVector<quint32> uoff;                 //!< PGD3: the offset of the column underground cells into udy/uid (W*H+1)
+    QVector<quint8> udy;                   //!< PGD3: the depth of a cell UNDER the terrain (1..28)
+    QVector<quint16> uid;                  //!< PGD3: the internal id (air / water) — pits, sinkholes and voids right at the surface
+    QVector<qint16> ady;                   //!< the block offset from the terrain (PGD2 — signed: building blocks buried in the ground)
+    QVector<quint16> aid;                  //!< the internal id of a block above the terrain
+    QVector<quint16> aidDry;               //!< the same blocks without waterlogged (for ships standing NOT in water, otherwise water spreads over the deck)
+    struct PatchBe { int x = 0, z = 0, dy = 0, kind = 0; QString str; };
+    QVector<PatchBe> bes;                  //!< the chests/barrels/spawners of the patch (PGD2)
+    int bbx0 = 0, bbz0 = 0, bbx1 = -1, bbz1 = -1;   //!< the box of the building inside the patch (PGD2)
+    QString name;
+    QSet<quint16> heartIds;                //!< the ids of creaking_heart states
+    QSet<quint16> mansionIds;              //!< the ids of mansion blocks (dark oak, cobblestone, glass panes...)
+    quint16 logId = 0, heartId = 0;        //!< the ids of pale_oak_log (axis=y) and creaking_heart — hearts are "re-seeded" into trunks from them
+    QVector<quint8> mansion;               //!< the columns of the woodland mansion in the template, extended by 4 blocks
+    int mx0 = 0, mx1 = -1, mz0 = 0, mz1 = -1;   //!< the mansion box in the template (mx1 < mx0 — no mansion)
+    //! The column that replaces a mansion column: a reflection across the box boundary onto the neighboring free part of the template; -1 — there is none.
+    int reflectFree(int ux, int uz) const
+    {
+        auto free = [&](int x, int z) { return x >= 0 && x < W && z >= 0 && z < H && !mansion[z * W + x]; };
+        int c[4][2] = { { 2 * mx0 - 1 - ux, uz }, { 2 * (mx1 + 1) - 1 - ux, uz }, { ux, 2 * mz0 - 1 - uz }, { ux, 2 * (mz1 + 1) - 1 - uz } };
+        for (int k = 0; k < 4; ++k) if (free(c[k][0], c[k][1])) return c[k][1] * W + c[k][0];
+        return -1;
+    }
+    bool empty() const { return W == 0; }
+    bool load(const QString& path, CaveSet& cs);
+};
+
+bool PaleDonor::load(const QString& path, CaveSet& cs)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QByteArray file = f.readAll();
+    const bool v2 = file.size() >= 16 && qstrncmp(file.constData(), "PGD2", 4) == 0;
+    const bool v3 = file.size() >= 16 && qstrncmp(file.constData(), "PGD3", 4) == 0;
+    if (file.size() < 16 || (!v2 && !v3 && qstrncmp(file.constData(), "PGD1", 4) != 0)) return false;
+    const QByteArray raw = qUncompress(reinterpret_cast<const uchar*>(file.constData()) + 4, int(file.size() - 4));
+    if (raw.size() < 12) return false;
+    const uchar* d = reinterpret_cast<const uchar*>(raw.constData());
+    auto r32 = [&](int o) -> quint32 { return (quint32(d[o]) << 24) | (quint32(d[o + 1]) << 16) | (quint32(d[o + 2]) << 8) | d[o + 3]; };
+    const int w = int(r32(0)), h = int(r32(4)), palN = int(r32(8));
+    if (w <= 0 || h <= 0 || w > 2048 || h > 2048 || palN <= 0 || palN > 20000) return false;
+    int o = 12;
+    QHash<QString, int> byKey;
+    for (int i = 0; i < cs.states.size(); ++i) byKey.insert(caveStateKey(cs.states[i]), i);
+    QVector<quint16> idMap(palN), idMapDry(palN);
+    for (int i = 0; i < palN; ++i)
+    {
+        if (o + 2 > raw.size()) return false;
+        const int l = (d[o] << 8) | d[o + 1];
+        o += 2;
+        if (o + l > raw.size()) return false;
+        const QStringList parts = QString::fromUtf8(raw.constData() + o, l).split(QLatin1Char('|'));
+        o += l;
+        CaveState st;
+        st.name = parts.value(0);
+        for (int k = 1; k < parts.size(); ++k)
+        {
+            const int eq = parts[k].indexOf(QLatin1Char('='));
+            if (eq > 0) st.props.append(qMakePair(parts[k].left(eq), parts[k].mid(eq + 1)));
+        }
+        const QString key = caveStateKey(st);
+        auto it = byKey.constFind(key);
+        int idx;
+        if (it == byKey.constEnd())
+        {
+            idx = cs.states.size();
+            cs.states.append(st);
+            cs.idOf.append(caveStateToId(st, idx));
+            byKey.insert(key, idx);
+        }
+        else idx = it.value();
+        idMap[i] = cs.idOf[idx];
+        idMapDry[i] = idMap[i];
+        {   // the variant without waterlogged
+            bool wl = false;
+            CaveState sd = st;
+            for (auto& pr : sd.props) if (pr.first == QLatin1String("waterlogged") && pr.second == QLatin1String("true")) { pr.second = QStringLiteral("false"); wl = true; }
+            if (wl)
+            {
+                const QString kd = caveStateKey(sd);
+                auto itd = byKey.constFind(kd);
+                int idd;
+                if (itd == byKey.constEnd())
+                {
+                    idd = cs.states.size();
+                    cs.states.append(sd);
+                    cs.idOf.append(caveStateToId(sd, idd));
+                    byKey.insert(kd, idd);
+                }
+                else idd = itd.value();
+                idMapDry[i] = cs.idOf[idd];
+            }
+        }
+        if (st.name == QLatin1String("minecraft:creaking_heart")) { heartIds.insert(idMap[i]); heartId = idMap[i]; }
+        static const char* const kMansionNames[] = { "minecraft:dark_oak_planks", "minecraft:cobblestone", "minecraft:glass_pane", "minecraft:dark_oak_stairs",
+                                                     "minecraft:cobblestone_stairs", "minecraft:cobblestone_wall", "minecraft:polished_andesite",
+                                                     "minecraft:smooth_stone_slab", "minecraft:dark_oak_fence" };
+        for (const char* mn : kMansionNames) if (st.name == QLatin1String(mn)) mansionIds.insert(idMap[i]);
+        if (st.name == QLatin1String("minecraft:pale_oak_log") && (st.props.isEmpty() || (st.props.size() == 1 && st.props[0].second == QLatin1String("y"))))
+            logId = idMap[i];
+    }
+    hd.resize(w * h); surf.resize(w * h); off.resize(w * h + 1);
+    ady.clear(); aid.clear(); aidDry.clear();
+    uoff.clear(); udy.clear(); uid.clear();
+    if (v3) uoff.resize(w * h + 1);
+    double sum = 0.0;
+    for (int i = 0; i < w * h; ++i)
+    {
+        if (o + 6 > raw.size()) return false;
+        hd[i] = qint16((d[o] << 8) | d[o + 1]);
+        const int si = (d[o + 2] << 8) | d[o + 3];
+        const int n = (d[o + 4] << 8) | d[o + 5];
+        o += 6;
+        surf[i] = si < palN ? idMap[si] : quint16(IdGrass);
+        off[i] = quint32(ady.size());
+        const int esz = v2 ? 4 : 3;
+        if (o + esz * n > raw.size()) return false;
+        for (int k = 0; k < n; ++k)
+        {
+            const int ii = v2 ? ((d[o + 2] << 8) | d[o + 3]) : ((d[o + 1] << 8) | d[o + 2]);
+            ady.append(v2 ? qint16((d[o] << 8) | d[o + 1]) : qint16(d[o]));
+            aid.append(ii < palN ? idMap[ii] : quint16(IdAir));
+            aidDry.append(ii < palN ? idMapDry[ii] : quint16(IdAir));
+            o += esz;
+        }
+        if (v3)
+        {   // the underground cells of a column: a count + (depth u8, palette index u16)
+            if (o + 1 > raw.size()) return false;
+            const int nu = d[o++];
+            if (o + 3 * nu > raw.size()) return false;
+            uoff[i] = quint32(udy.size());
+            for (int k = 0; k < nu; ++k)
+            {
+                const int ii = (d[o + 1] << 8) | d[o + 2];
+                udy.append(d[o]);
+                uid.append(ii < palN ? idMap[ii] : quint16(IdAir));
+                o += 3;
+            }
+        }
+        sum += hd[i];
+    }
+    off[w * h] = quint32(ady.size());
+    if (v3) uoff[w * h] = quint32(udy.size());
+    W = w; H = h;
+    if (v2)
+    {   // block entities and the building box
+        if (o + 4 > raw.size()) return false;
+        const int nbe = int(r32(o));
+        o += 4;
+        for (int k = 0; k < nbe; ++k)
+        {
+            if (o + 11 > raw.size()) return false;
+            PatchBe b;
+            b.x = (d[o] << 8) | d[o + 1]; b.z = (d[o + 2] << 8) | d[o + 3]; b.dy = qint16((d[o + 4] << 8) | d[o + 5]); b.kind = d[o + 6];
+            const int l = (d[o + 7] << 8) | d[o + 8];
+            o += 9;
+            if (o + l > raw.size()) return false;
+            b.str = QString::fromUtf8(raw.constData() + o, l);
+            o += l;
+            bes.append(b);
+        }
+        if (o + 8 <= raw.size())
+        {
+            bbx0 = (d[o] << 8) | d[o + 1]; bbz0 = (d[o + 2] << 8) | d[o + 3]; bbx1 = (d[o + 4] << 8) | d[o + 5]; bbz1 = (d[o + 6] << 8) | d[o + 7];
+        }
+    }
+    // the mansion columns: there is a block from mansionIds above the terrain; the box and an extension by 4 blocks (the yard and porch of the mansion are part of it too)
+    mansion.fill(0, w * h);
+    mx0 = w; mx1 = -1; mz0 = h; mz1 = -1;
+    for (int z = 0; z < h; ++z)
+        for (int x = 0; x < w; ++x)
+        {
+            bool hit = false;
+            for (quint32 k = off[z * w + x]; k < off[z * w + x + 1] && !hit; ++k) hit = mansionIds.contains(aid[int(k)]);
+            if (!hit) continue;
+            mx0 = std::min(mx0, x); mx1 = std::max(mx1, x); mz0 = std::min(mz0, z); mz1 = std::max(mz1, z);
+        }
+    if (mx1 >= mx0)
+    {
+        mx0 = std::max(0, mx0 - 4); mz0 = std::max(0, mz0 - 4); mx1 = std::min(w - 1, mx1 + 4); mz1 = std::min(h - 1, mz1 + 4);
+        for (int z = mz0; z <= mz1; ++z)
+            for (int x = mx0; x <= mx1; ++x) mansion[z * w + x] = 1;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Convex clipping of polygons (Sutherland–Hodgman)
+// ---------------------------------------------------------------------------
+
+using Poly3 = QVector<QVector3D>;
+using Poly2 = QVector<QPointF>;
+
+//! Clip a 3D polygon by a half-plane (y >= plane for minY, otherwise y <= plane) — the polygon is convex,
+//! the result is convex too. The intersection point is a lerp between the "outer" and the "inner" one.
+static void clipHalf3(const Poly3& in, Poly3& out, bool minY, double plane)
+{
+    out.clear();
+    const int n = in.size();
+    for (int i = 0; i < n; ++i)
+    {
+        const QVector3D& a = in[i];
+        const QVector3D& b = in[(i + 1) % n];
+        const double da = a.y() - plane;
+        const double db = b.y() - plane;
+        const bool ain = minY ? da >= 0 : da <= 0;
+        const bool bin = minY ? db >= 0 : db <= 0;
+        if (ain) out.append(a);
+        if (ain != bin)
+        {
+            const double t = da / (da - db);
+            out.append(a + (b - a) * float(t));
+        }
+    }
+}
+
+//! Clip a 2D polygon by the strip X∈[x0,x1] (successively x>=x0 and x<=x1).
+static void clipStripX(const Poly2& in, Poly2& out, double x0, double x1)
+{
+    Poly2 tmp;
+    out = in;
+    // x >= x0
+    tmp.clear();
+    for (int i = 0; i < out.size(); ++i)
+    {
+        const QPointF& a = out[i];
+        const QPointF& b = out[(i + 1) % out.size()];
+        const double da = a.x() - x0, db = b.x() - x0;
+        const bool ain = da >= 0, bin = db >= 0;
+        if (ain) tmp.append(a);
+        if (ain != bin)
+        {
+            const double t = da / (da - db);
+            tmp.append(QPointF(a.x() + (b.x() - a.x()) * t, a.y() + (b.y() - a.y()) * t));
+        }
+    }
+    // x <= x1
+    out.clear();
+    for (int i = 0; i < tmp.size(); ++i)
+    {
+        const QPointF& a = tmp[i];
+        const QPointF& b = tmp[(i + 1) % tmp.size()];
+        const double da = a.x() - x1, db = b.x() - x1;
+        const bool ain = da <= 0, bin = db <= 0;
+        if (ain) out.append(a);
+        if (ain != bin)
+        {
+            const double t = da / (da - db);
+            out.append(QPointF(a.x() + (b.x() - a.x()) * t, a.y() + (b.y() - a.y()) * t));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Voxelization of one object
+// ---------------------------------------------------------------------------
+
+//! An artificial reservoir (a pond with a fountain, an embankment): ALL outline corners are right angles (with a tolerance of tolDeg degrees: 87.5° counts as "right" too). The outline is the boundary edges of the top horizontal
+//! lid of the mesh (edges belonging to exactly one triangle); nearly straight vertices (a turn < 3°) are ignored; >= 4 corners are needed. The axis scales sx/sy — map units -> meters.
+static bool isRectilinearOutline(const McWorldExporter::McObject& o, double sx, double sy, double tolDeg)
+{
+    const auto& V = o.vertices;
+    const auto& I = o.indices;
+    if (I.size() < 3) return false;
+    double zmax = -1e300;
+    for (int t = 0; t + 2 < I.size(); t += 3)
+    {
+        const double z0 = V[int(I[t])].z(), z1 = V[int(I[t + 1])].z(), z2 = V[int(I[t + 2])].z();
+        if (std::fabs(z0 - z1) < 1e-4 && std::fabs(z1 - z2) < 1e-4) zmax = std::max(zmax, z0);
+    }
+    if (zmax < -1e299) return false;
+    QHash<QPair<qint64, qint64>, int> vid;                       // the quantized (x,y) -> the vertex number
+    QVector<QPointF> pts;
+    auto vertexId = [&](const QVector3D& v) -> int
+    {
+        const QPair<qint64, qint64> k(qint64(std::llround(double(v.x()) * 1000.0)), qint64(std::llround(double(v.y()) * 1000.0)));
+        auto it = vid.find(k);
+        if (it == vid.end()) { it = vid.insert(k, pts.size()); pts.append(QPointF(double(v.x()) * sx, double(v.y()) * sy)); }
+        return it.value();
+    };
+    QHash<QPair<int, int>, int> edgeCnt;
+    for (int t = 0; t + 2 < I.size(); t += 3)
+    {
+        const QVector3D& a = V[int(I[t])]; const QVector3D& b = V[int(I[t + 1])]; const QVector3D& c = V[int(I[t + 2])];
+        if (std::fabs(double(a.z()) - zmax) > 1e-4 || std::fabs(double(b.z()) - zmax) > 1e-4 || std::fabs(double(c.z()) - zmax) > 1e-4) continue;
+        const int ia = vertexId(a), ib = vertexId(b), ic = vertexId(c);
+        const int e[3][2] = { { ia, ib }, { ib, ic }, { ic, ia } };
+        for (auto& ed : e)
+        {
+            if (ed[0] == ed[1]) continue;
+            ++edgeCnt[qMakePair(std::min(ed[0], ed[1]), std::max(ed[0], ed[1]))];
+        }
+    }
+    QHash<int, QVector<int>> adj;
+    for (auto it = edgeCnt.constBegin(); it != edgeCnt.constEnd(); ++it)
+        if (it.value() == 1) { adj[it.key().first].append(it.key().second); adj[it.key().second].append(it.key().first); }
+    if (adj.isEmpty()) return false;
+    for (auto it = adj.constBegin(); it != adj.constEnd(); ++it)
+        if (it.value().size() != 2) return false;               // a complex/broken outline — we consider it natural
+    QSet<int> seen;
+    int corners = 0;
+    for (auto it = adj.constBegin(); it != adj.constEnd(); ++it)
+    {
+        if (seen.contains(it.key())) continue;
+        QVector<int> loop;
+        int prev = -1, cur = it.key();
+        while (!seen.contains(cur))
+        {
+            seen.insert(cur); loop.append(cur);
+            const QVector<int>& nb = adj[cur];
+            const int nxt = (nb[0] != prev) ? nb[0] : nb[1];
+            prev = cur; cur = nxt;
+        }
+        const int n = loop.size();
+        if (n < 3) return false;
+        for (int i = 0; i < n; ++i)
+        {
+            const QPointF p0 = pts[loop[(i + n - 1) % n]], p1 = pts[loop[i]], p2 = pts[loop[(i + 1) % n]];
+            const double ax = p1.x() - p0.x(), ay = p1.y() - p0.y(), bx = p2.x() - p1.x(), by = p2.y() - p1.y();
+            if ((ax * ax + ay * ay) < 1e-12 || (bx * bx + by * by) < 1e-12) continue;
+            const double turn = std::fabs(std::atan2(ax * by - ay * bx, ax * bx + ay * by)) * 180.0 / 3.14159265358979;
+            if (turn < 3.0) continue;                           // an almost straight section
+            if (std::fabs(turn - 90.0) > tolDeg) return false;  // the angle is not right — a natural reservoir
+            ++corners;
+        }
+    }
+    return corners >= 4;
+}
+
+struct VxTransform
+{
+    double cx0 = 0;      // the world X of the scene center -> block X 0
+    double cy0 = 0;      // the world Y of the scene center -> block Z 0 (the north of the map = -Z in MC)
+    double yBase = 0;    // the world height corresponding to block Y 1
+    double zScale = 1;   // the height compression if the range is larger than 240
+    double sx = 1;       // blocks per map unit along X (= meters per unit: 1 block = 1 m)
+    double sz = 1;       // the same along the map Y (block Z)
+};
+
+static inline double toBlockX(const VxTransform& tf, double wx) { return (wx - tf.cx0) * tf.sx; }
+static inline double toBlockY(const VxTransform& tf, double wz) { return (wz - tf.yBase) * tf.zScale + 1.0; }
+static inline double toBlockZ(const VxTransform& tf, double wy) { return (tf.cy0 - wy) * tf.sz; }
+
+//! The cells "touched" by a triangle, in the local grid of the object extent:
+//! the cell (lx,ly,lz) <=> the block (minx+lx, miny+ly, minz+lz); grid[cell]=1 — a surface voxel.
+static void rasterizeTriangle(const QVector3D& t0, const QVector3D& t1, const QVector3D& t2,
+                              int minx, int miny, int minz, int sx, int sy, int sz,
+                              QByteArray& grid, QVector<int>& surfaceCells)
+{
+    const double fminy = std::min({ t0.y(), t1.y(), t2.y() });
+    const double fmaxy = std::max({ t0.y(), t1.y(), t2.y() });
+    const double fminx = std::min({ t0.x(), t1.x(), t2.x() });
+    const double fmaxx = std::max({ t0.x(), t1.x(), t2.x() });
+    const double fminz = std::min({ t0.z(), t1.z(), t2.z() });
+    const double fmaxz = std::max({ t0.z(), t1.z(), t2.z() });
+
+    // A quick rejection by the XZ extent of the grid
+    if (int(std::floor(fmaxx)) < minx || int(std::floor(fminx)) >= minx + sx ||
+        int(std::floor(fmaxz)) < minz || int(std::floor(fminz)) >= minz + sz)
+        return;
+
+    const int yLo = int(std::floor(fminy));
+    const int yHi = int(std::ceil(fmaxy));   // the slabs [Y,Y+1] at Y=yHi give an empty section — we skip it below
+
+    Poly3 tri;
+    tri << t0 << t1 << t2;
+
+    Poly3 slab, upper;
+    Poly2 flat, strip;
+    for (int Y = yLo; Y <= yHi; ++Y)
+    {
+        const double slabY0 = double(Y);
+        const double slabY1 = slabY0 + 1.0;
+        // the section of the triangle by the slab [Y, Y+1] — a convex 3D polygon (up to 6 vertices)
+        clipHalf3(tri, slab, true, slabY0);
+        if (slab.size() < 3) continue;
+        clipHalf3(slab, upper, false, slabY1);
+        if (upper.size() < 3) continue;
+
+        flat.clear();
+        double pminx = std::numeric_limits<double>::max(), pmaxx = -pminx;
+        for (const QVector3D& p : upper)
+        {
+            flat << QPointF(p.x(), p.z());
+            pminx = std::min(pminx, double(p.x()));
+            pmaxx = std::max(pmaxx, double(p.x()));
+        }
+
+        int xLo = int(std::floor(pminx));
+        // INCLUSIVE up to floor(max): there used to be an epsilon offset (max - 1e-9), which lost
+        // the corner columns of walls when a mesh face stands exactly on an integer boundary (a wall
+        // of a mall shell at x/z = an integer): the corner was written by neither the east nor the south quarks, while the roof
+        // capital covered the corner — above the empty corner column colMin from the roof raised
+        // the ground fill up to the eaves, and the cave template bit a hole through it (a bad column in verify).
+        int xHi = int(std::floor(pmaxx));
+        if (xHi < xLo) xHi = xLo;
+        for (int X = xLo; X <= xHi; ++X)
+        {
+            clipStripX(flat, strip, double(X), double(X + 1));
+            if (strip.size() < 3) continue;
+            double zmin = std::numeric_limits<double>::max(), zmax = -zmin;
+            for (const QPointF& p : strip)
+            {
+                zmin = std::min(zmin, double(p.y()));
+                zmax = std::max(zmax, double(p.y()));
+            }
+            int zLo = int(std::floor(zmin));
+            int zHi = int(std::floor(zmax));         // clearly: see xHi — an exactly integer face must
+            if (zHi < zLo) zHi = zLo;                // cover its outermost column
+
+            const int lx = X - minx;
+            const int ly = Y - miny;
+            if (lx < 0 || lx >= sx || ly < 0 || ly >= sy) continue;
+            for (int Z = zLo; Z <= zHi; ++Z)
+            {
+                const int lz = Z - minz;
+                if (lz < 0 || lz >= sz) continue;
+                const int cell = (lz * sy + ly) * sx + lx;
+                if (!grid[cell])
+                {
+                    grid[cell] = 1;
+                    surfaceCells.append(cell);
+                }
+            }
+        }
+    }
+}
+
+//! A spawner wall: the position of a spawner block + an index into kSpawnerTypes. The monster itself is NOT a property
+//! of the block (there are no separate zombie/skeleton_spawner blocks in the game — the server silently turned them into
+//! air, the user's remark "I did not meet a single one"): the type lives in the block_entity
+//! ("SpawnData"{id} — 1.20.5/1.21.x + a reserve for <=1.20.4 in "EntityId").
+struct SpawnerSite
+{
+    int x = 0, y = 0, z = 0;              // y — as in block_entities (the record coordinate)
+    int type = 0;                         // the index of kSpawnerTypes
+};
+
+//! A water/lava source at the junction with the game world: the block is written into the store, and in the chunk there is also a scheduled
+//! fluid tick (fluid_ticks): without it the game, having lifted the source from disk, does not update it and the water/lava
+//! "stands as a column" instead of spreading.
+struct FluidSite
+{
+    int x = 0, y = 0, z = 0;
+    bool lava = false;
+};
+
+static const char* const kSpawnerTypes[] = { "minecraft:zombie", "minecraft:skeleton",
+                                             "minecraft:spider" };
+static constexpr int kSpawnerTypesCount = int(sizeof(kSpawnerTypes) / sizeof(kSpawnerTypes[0]));
+
+//! A chest with loot: the block position + a loot table index. It is written both as a block (IdChest) and into the
+//! chunk block_entities list with LootTable — the trick is that the contents are generated by the game
+//! itself on first opening (it survives a non-existent table too — the chest is simply empty).
+struct ChestSite
+{
+    int x = 0, y = 0, z = 0;
+    int tbl = 0;
+    bool barrel = false;                  //!< true — this is a barrel (minecraft:barrel), the table is from kBarrelLoot
+    int lectern = -1;                     //!< >= 0 — this is a lectern (minecraft:lectern) with the book kBooks[lectern]
+};
+
+//! The books on the lecterns of churches: short passages of the Gospel and Revelation (the Synodal translation, in Russian), chosen by a hash.
+struct BookText { const char* title; const char* page1; const char* page2; };
+static const BookText kBooks[] = {
+    { "От Иоанна, 1", "В начале было Слово, и Слово было у Бога, и Слово было Бог. Оно было в начале у Бога. Всё чрез Него начало быть, и без Него ничто не начало быть, что начало быть.",
+                      "В Нём была жизнь, и жизнь была свет человеков. И свет во тьме светит, и тьма не объяла его." },
+    { "Заповеди блаженства", "Блаженны нищие духом, ибо их есть Царство Небесное. Блаженны плачущие, ибо они утешатся. Блаженны кроткие, ибо они наследуют землю.",
+                      "Блаженны алчущие и жаждущие правды, ибо они насытятся. Блаженны милостивые, ибо они помилованы будут. Блаженны чистые сердцем, ибо они Бога узрят." },
+    { "Откровение, 21", "И увидел я новое небо и новую землю, ибо прежнее небо и прежняя земля миновали, и моря уже нет. И я, Иоанн, увидел святой город Иерусалим, новый, сходящий от Бога с неба.",
+                      "И отрет Бог всякую слезу с очей их, и смерти не будет уже; ни плача, ни вопля, ни болезни уже не будет, ибо прежнее прошло." },
+    { "Молитва", "Отче наш, сущий на небесах! Да святится имя Твоё; да приидет Царствие Твоё; да будет воля Твоя и на земле, как на небе.",
+                      "Хлеб наш насущный дай нам на сей день; и прости нам долги наши, как и мы прощаем должникам нашим; и не введи нас в искушение, но избавь нас от лукавого." },
+    { "Альфа и Омега", "Я есмь Альфа и Омега, начало и конец, говорит Господь, Который есть и был и грядёт, Вседержитель.",
+                      "Се, стою у двери и стучу: если кто услышит голос Мой и отворит дверь, войду к нему, и буду вечерять с ним, и он со Мною." },
+    { "О любви", "Любовь долготерпит, милосердствует, любовь не завидует, любовь не превозносится, не гордится, не бесчинствует, не ищет своего, не раздражается, не мыслит зла.",
+                      "Любовь никогда не перестаёт. А теперь пребывают сии три: вера, надежда, любовь; но любовь из них больше." },
+    { "От Иоанна, 3", "Ибо так возлюбил Бог мир, что отдал Сына Своего Единородного, дабы всякий верующий в Него, не погиб, но имел жизнь вечную.",
+                      "Ибо не послал Бог Сына Своего в мир, чтобы судить мир, но чтобы мир спасён был чрез Него." },
+    { "Откровение, 22", "И показал мне чистую реку воды жизни, светлую, как кристалл, исходящую от престола Бога и Агнца. И ночи не будет там, и не будут нуждаться ни в светильнике, ни в свете солнечном.",
+                      "Я есмь Альфа и Омега, первый и последний, начало и конец. Блаженны соблюдающие заповеди Его." },
+};
+static constexpr int kBooksCount = int(sizeof(kBooks) / sizeof(kBooks[0]));
+//! The books on the lecterns of research institutes (instead of the teacher's desk): the most famous physics formulas. The index in ChestSite::lectern = 1000 + the number.
+static const BookText kSciBooks[] = {
+    { "Эквивалентность", "E = mc²\n\nЭнергия покоя равна массе, умноженной на квадрат скорости света.\n\nc ≈ 299 792 458 м/с",
+                      "E = hν\n\nЭнергия кванта равна постоянной Планка, умноженной на частоту.\n\nλ = h / p" },
+    { "Законы Ньютона", "F = ma\n\nСила равна массе, умноженной на ускорение.\n\np = mv\n\nF = dp / dt",
+                      "F = G·m₁m₂ / r²\n\nЗакон всемирного тяготения.\n\ng ≈ 9,81 м/с²" },
+    { "Электричество", "U = I·R\n\nЗакон Ома.\n\nP = U·I\n\nQ = I²·R·t (закон Джоуля — Ленца)",
+                      "F = k·q₁q₂ / r²\n\nЗакон Кулона.\n\nC = q / U" },
+    { "Механика", "v = v₀ + at\n\ns = v₀t + at² / 2\n\nEк = mv² / 2\n\nEп = mgh",
+                      "A = F·s·cos α\n\nN = A / t\n\nT = 2π√(l / g)" },
+    { "Термодинамика", "pV = nRT\n\nУравнение состояния идеального газа.\n\nΔU = Q − A",
+                      "Q = cmΔT\n\nS = k·ln W\n\nη = 1 − T₂ / T₁" },
+    { "Волны и свет", "c = λ·ν\n\nn = c / v\n\nsin α / sin β = n₂ / n₁",
+                      "∇·E = ρ / ε₀\n\n∇×E = −∂B / ∂t\n\n(уравнения Максвелла)" },
+};
+static constexpr int kSciBooksCount = int(sizeof(kSciBooks) / sizeof(kSciBooks[0]));
+
+//! The loot of barrels (a request: "what usually lies in barrels in Minecraft"): vanilla village barrels —
+//! the fisherman, butcher, a meat/fruit "house", shepherd, tanner, mason, weaponsmith/toolsmith,
+//! plus the bilge barrel of a shipwreck. The game survives tables that are absent in a version (an empty barrel).
+static const char* const kBarrelLoot[] = {
+    "minecraft:chests/village/village_fisher",
+    "minecraft:chests/village/village_butcher",
+    "minecraft:chests/village/village_plains_house",
+    "minecraft:chests/village/village_shepherd",
+    "minecraft:chests/village/village_tannery",
+    "minecraft:chests/village/village_mason",
+    "minecraft:chests/village/village_taiga_house",
+    "minecraft:chests/shipwreck_supply",
+};
+static constexpr int kBarrelLootCount = int(sizeof(kBarrelLoot) / sizeof(kBarrelLoot[0]));
+
+//! The chest loot tables by "expensiveness" (a request: the really valuable only in basements and in house treasures, and not always):
+//!  tier 0 (cheap, household) — [0, kLootT0), tier 1 (medium) — [kLootT0, kLootT1), tier 2 (expensive) — the rest.
+static const char* const kChestLoot[] = {
+    "minecraft:chests/village/village_plains_house",
+    "minecraft:chests/village/village_taiga_house",
+    "minecraft:chests/village/village_savanna_house",
+    "minecraft:chests/village/village_desert_house",
+    "minecraft:chests/village/village_snowy_house",
+    "minecraft:chests/village/village_butcher",
+    "minecraft:chests/village/village_fisher",
+    "minecraft:chests/village/village_shepherd",
+    "minecraft:chests/igloo_chest",
+    // medium
+    "minecraft:chests/abandoned_mineshaft",
+    "minecraft:chests/simple_dungeon",
+    "minecraft:chests/village/village_toolsmith",
+    "minecraft:chests/village/village_weaponsmith",
+    "minecraft:chests/village/village_armorer",
+    "minecraft:chests/village/village_temple",
+    // expensive
+    "minecraft:chests/shipwreck_treasure",
+    "minecraft:chests/desert_pyramid",
+    "minecraft:chests/woodland_mansion",              // the mansion: diamonds, enchanted books, a totem — the "expensive" loot of the Pale Garden (index kChestLootCount-3)
+    "minecraft:chests/ruined_portal",                 // gold and enchanted gear — the chest of a ruined portal (index kChestLootCount-2)
+    "minecraft:chests/pillager_outpost",
+};
+static constexpr int kChestLootCount = int(sizeof(kChestLoot) / sizeof(kChestLoot[0]));
+static constexpr int kLootT0 = 9, kLootT1 = 15;
+//! The table choice by a random r: pCheap % — the cheap tier, the next pMid % — the medium one, the rest — the expensive one.
+static int pickChestLoot(quint32 r, int pCheap, int pMid)
+{
+    const int roll = int(r % 100u);
+    const quint32 q = r / 100u;
+    if (roll < pCheap) return int(q % quint32(kLootT0));
+    if (roll < pCheap + pMid) return kLootT0 + int(q % quint32(kLootT1 - kLootT0));
+    return kLootT1 + int(q % quint32(kChestLootCount - kLootT1));
+}
+
+//! A painting on a wall: the position of the painting block + the facing side + the motif index (kPaintMotifs).
+//! The motifs are chosen 1×1 — a painting does not overlap windows/openings (the user's remark).
+struct PaintingSite
+{
+    int x = 0, y = 0, z = 0;              // y — as in block_entities (the record coordinate)
+    int face = 0;                         // 0..3 = north/east/south/west
+    int motif = 0;
+};
+
+//! A mall mannequin = an armor_stand entity (a block is NOT written): Pos at the cell center, sometimes with
+//! armor (a mask: bit0 boots, bit1 leggings, bit2 chestplate, bit3 helmet; the material is mat).
+struct MannequinSite
+{
+    int x = 0, y = 0, z = 0;              // the lower standing cell (Pos y = y)
+    int yaw = 0;                          // rotation, degrees
+    int armor = 0;                        // the slot mask
+    int mat = 0;                          // the index of kArmorMats
+};
+
+//! An item frame on a mall stand (an item_frame entity in entities/r.*.mca): the frame cell, the side it "looks" at
+//! (from the support into the hall: 0=N,1=E,2=S,3=W) and the item itself. kind: 0 sword, 1 pickaxe, 2 axe, 3 shovel, 4 hoe, 5 golden
+//! apple, 6 golden carrot; mat (for tools): 0 wood, 1 stone, 2 gold, 3 iron, 4 diamond; dmg — wear
+//! (the durability left is 2..36%, like the armor of the mannequins).
+struct FrameSite
+{
+    int x = 0, y = 0, z = 0;
+    int face = 0;
+    int kind = 0, mat = 0, dmg = 0;
+};
+//! The bandit banner (an ominous banner) on a lair wall: the banner cell and the side (where it looks, 0=N,1=E,2=S,3=W).
+struct BannerSite
+{
+    int x = 0, y = 0, z = 0, d = 0;
+};
+//! The raider spawn zone (a lair in a large industrial building): a rectangular parallelepiped INSIDE the building (inset from the walls and the roof).
+//! It is written as a false "pillager outpost" (a structure start pillager_outpost) — the game itself spawns pillagers inside its box.
+struct LairZone
+{
+    int x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0;
+    QVector<int> floorsY;                 //!< the store-Y of the floors inside the zone: at each level the zone = a tile of feature_logs templates (6×3×7)
+};
+//! An integer point (x,y,z) in world blocks.
+struct QPoint3
+{
+    int x = 0, y = 0, z = 0;
+};
+//! A floating island over a kindergarten: the center (cx,cz), the semi-axes rx,rz, the y of the building roof (store coordinates), a hash for the terrain.
+struct IslandSite
+{
+    int kind = 0;                         //!< 0 — a kindergarten (a "motley forest" around), 1 — a school (a birch grove around), 2 — a floating island over a park (71126000)
+    int cx = 0, cz = 0, rx = 0, rz = 0, yTop = 0;
+    quint32 hash = 0;
+};
+//! Whether the point (px,pz) is in the "ragged" zone of the colored forest around a school / research institute / kindergarten: the distance from the building walls is no more than R·(0.55..1.45),
+//! the multiplier is a smooth value noise by coordinates (a 5-block cell) with its own salt for each building: the edges of the zone are tongues and bays, not a circle.
+static bool zoneInside(const IslandSite& is, int px, int pz, int R)
+{
+    const int dxo = std::max(0, std::abs(px - is.cx) - is.rx), dzo = std::max(0, std::abs(pz - is.cz) - is.rz);
+    const double d = std::hypot(double(dxo), double(dzo));
+    if (d > R * 1.45) return false;
+    if (d <= 0.0) return true;
+    auto hv = [&](int gx, int gz) -> double
+    {
+        quint32 h = quint32(gx) * 374761393u ^ quint32(gz) * 668265263u ^ is.hash;
+        h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+        return double(h % 1000u) / 999.0;
+    };
+    const double fx = px / 5.0, fz = pz / 5.0;
+    const int gx = int(std::floor(fx)), gz = int(std::floor(fz));
+    double tx = fx - gx, tz = fz - gz;
+    tx = tx * tx * (3.0 - 2.0 * tx); tz = tz * tz * (3.0 - 2.0 * tz);
+    const double n = (hv(gx, gz) * (1 - tx) + hv(gx + 1, gz) * tx) * (1 - tz) + (hv(gx, gz + 1) * (1 - tx) + hv(gx + 1, gz + 1) * tx) * tz;
+    return d <= R * (0.55 + 0.9 * n);
+}
+//! An address plate of a house: the candidates (one per compass side, the cell OUTSIDE the wall, the sign faces outward) and two lines
+//! of text. The final side is chosen after the roads — the nearest to a road; SignSite is a ready plate (a block entity).
+struct SignCand
+{
+    int x[4] = { 0, 0, 0, 0 }, z[4] = { 0, 0, 0, 0 };
+    bool ok[4] = { false, false, false, false };
+    int y = 0;
+    QString l1, l2, l3;
+};
+//! The ruins of a portal in a forest: the start of the structure minecraft:ruined_portal (for /locate): the box BB and the center chunk (the start lies there, references are in all chunks of the box).
+struct PortalStartSite
+{
+    int cx = 0, cz = 0;                   //!< the start chunk
+    int bb[6] = { 0, 0, 0, 0, 0, 0 };     //!< x0,y0,z0,x1,y1,z1
+};
+struct SignSite
+{
+    int x = 0, y = 0, z = 0;
+    QString l1, l2, l3;
+};
+//! A village bell: the bell itself is drawn only by the block entity (the block has just the frame), so we write the BE explicitly, otherwise the client
+//! (until the server touches the block) does not see the bell.
+struct BellSite
+{
+    int x = 0, y = 0, z = 0;
+};
+//! The basement of a private house: the center of a 3×3 room (cx,cz), the store-Y of the house walking level wy (the room wy-3..wy-2, the floor wy-4),
+//! the descent column (hx,hz) at the north edge of the room; content: 0 — a chest with valuable loot, 1 — a heap of mobs.
+struct BasementSite
+{
+    int cx = 0, cz = 0, wy = 0, hx = 0, hz = 0, content = 0, mobType = 0;
+    bool church = false;                  //!< a church basement: roomier, the ceiling is a double slab, expensive chests more often
+    bool lab = false;                     //!< a research building (44315000): under it an underground laboratory with redstone mechanisms
+    int x0 = 0, x1 = 0, z0 = 0, z1 = 0;   //!< the room rectangle (blocks, inclusive); the descent hx,hz is at the north edge z0
+    int area = 0;                         //!< church: the cells of the 1st floor interior
+    qint64 size = 0;                      //!< church: "size" = area × height (to choose the largest ones for secret passages)
+    bool school = false;                  //!< a school: the same laboratory as under a research building, but the LAST in the order of candidates for the Ancient City (church, research building, school)
+    int forced = 0;                       //!< >0: the building was chosen by a point on the map (1 — the stronghold, 2 — the Ancient City), whatever its code
+};
+//! The maximum durability of tools and swords by material (wood, stone, gold, iron, diamond).
+static const int kToolMaxDur[5] = { 59, 131, 32, 250, 1561 };
+static const char* const kToolMatNames[5] = { "wooden", "stone", "golden", "iron", "diamond" };
+static const char* const kToolKindNames[5] = { "sword", "pickaxe", "axe", "shovel", "hoe" };
+
+//! The professions of villagers (an id without the minecraft: prefix) and the "clothing" by biome.
+static const char* const kProfs[] = { "armorer", "butcher", "cartographer", "cleric", "farmer", "fisherman",
+                                      "fletcher", "leatherworker", "librarian", "mason", "nitwit", "none",
+                                      "shepherd", "toolsmith", "weaponsmith" };
+enum { PfButcher = 1, PfCartographer = 2, PfCleric = 3, PfFarmer = 4, PfFisherman = 5, PfFletcher = 6,
+       PfLeather = 7, PfLibrarian = 8, PfMason = 9, PfNitwit = 10, PfNone = 11, PfShepherd = 12,
+       PfToolsmith = 13, PfWeaponsmith = 14 };
+static const char* const kVTypes[] = { "plains", "desert", "jungle", "savanna", "snow", "swamp", "taiga" };
+
+//! A live NPC (an entity in entities/r.*.mca): a villager / a wandering trader / a trader llama.
+struct NpcSite
+{
+    int x = 0, y = 0, z = 0;              // the standing cell (Pos is the cell center, y is the bottom)
+    int yaw = 0;                          // rotation, degrees
+    int kind = 0;                         // 0 villager, 1 wandering_trader, 2 trader_llama
+    int prof = PfNone;                    // the index of kProfs (villager)
+    int vtype = 0;                        // the index of kVTypes (villager)
+    int level = 1;                        // the trade level 1..5 (villager)
+    bool baby = false;                    // a child (Age=-24000), children have no profession
+    int variant = 0;                      // the llama coat 0..3; for kind=4 — the mob kind (0 zombie,1 skeleton,2 spider,3 witch,4 pillager,5 vindicator,6 evoker,7 enderman)
+    QString animal;                       // kind=5 — an animal (the entity id: minecraft:sheep, wolf, fox...)
+    double yoff = 0.0;                    // an addition to y in blocks (a patient lies/stands on a bed: 0.5625)
+    bool captain = false;                 // the lair standard-bearer: a pillager captain with an ominous banner on the head
+    QString petVariant;                   // kind=5: the cat coat (minecraft:tabby, black...) — written into the variant field
+};
+
+//! The facade marking of kindergartens (44313000), schools (44312000) and research institutes (44315000): the blocks of the wall material of ONE building are repainted by position,
+//! only the WALLS (not the roof and not the inner slabs). A kindergarten — colored bands every 4 rows and dotted columns, the colors change along the wall (red, blue, green, pink, purple);
+//! a school — calm: only white vertical lines at the corners of the building; a research institute — the same white corner lines and red bands every 6 rows. No yellow and no orange.
+static void decorateWalls(VoxelStore& st, int code, quint16 wallId)
+{
+    int minY = std::numeric_limits<int>::max();
+    for (auto cit = st.chunks.constBegin(); cit != st.chunks.constEnd(); ++cit)
+        for (auto sit = cit->constBegin(); sit != cit->constEnd(); ++sit)
+        {
+            const QVector<quint16>& sec = sit.value();
+            for (int i = 0; i < sec.size(); ++i)
+                if (sec[i] == wallId) minY = std::min(minY, (sit.key() << 4) + ((i >> 8) & 15));
+        }
+    if (minY == std::numeric_limits<int>::max()) return;
+    static const char* const kKid[] = { "minecraft:red_concrete", "minecraft:blue_concrete", "minecraft:lime_concrete",
+                                        "minecraft:pink_concrete", "minecraft:purple_concrete", "minecraft:green_concrete" };
+    quint16 kid[6];
+    for (int k = 0; k < 6; ++k) kid[k] = quint16(IdPaletteStart + paletteIndexOf(kKid[k]));
+    const quint16 white = quint16(IdPaletteStart + paletteIndexOf("minecraft:white_concrete")), red = kid[0];
+    const bool kinder = (code == 44313000), school = (code == 44312000);
+
+    // The corner columns of the outline: the columns that have a block in the wall rows (2..7 above the foundation) form the footprint; the air that is connected to the outside
+    // (a flood fill from beyond the bounding box) is "outside"; a footprint column with outside neighbors on two perpendicular sides is a corner.
+    QSet<qint64> corners;
+    if (!kinder)
+    {
+        QSet<qint64> foot;
+        int x0 = std::numeric_limits<int>::max(), x1 = std::numeric_limits<int>::min(), z0 = x0, z1 = x1;
+        for (auto cit = st.chunks.constBegin(); cit != st.chunks.constEnd(); ++cit)
+        {
+            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+            for (auto sit = cit->constBegin(); sit != cit->constEnd(); ++sit)
+            {
+                const QVector<quint16>& sec = sit.value();
+                const int baseY = sit.key() << 4;
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    if (!sec[i]) continue;
+                    const int rel = baseY + ((i >> 8) & 15) - minY;
+                    if (rel < 2 || rel > 7) continue;
+                    const int x = bx0 + (i & 15), z = bz0 + ((i >> 4) & 15);
+                    foot.insert(pairKey(x, z));
+                    x0 = std::min(x0, x); x1 = std::max(x1, x); z0 = std::min(z0, z); z1 = std::max(z1, z);
+                }
+            }
+        }
+        if (!foot.isEmpty() && qint64(x1 - x0 + 3) * (z1 - z0 + 3) <= 4000000)
+        {
+            const int W = x1 - x0 + 3, H = z1 - z0 + 3;               // the box with a margin of 1 cell
+            QVector<char> outside(W * H, 0);
+            QVector<int> stack;
+            outside[0] = 1; stack.append(0);
+            while (!stack.isEmpty())
+            {
+                const int cur = stack.takeLast();
+                const int cx = cur % W, cz = cur / W;
+                const int nb[4][2] = { { cx + 1, cz }, { cx - 1, cz }, { cx, cz + 1 }, { cx, cz - 1 } };
+                for (const auto& n : nb)
+                {
+                    if (n[0] < 0 || n[0] >= W || n[1] < 0 || n[1] >= H) continue;
+                    const int idx = n[1] * W + n[0];
+                    if (outside[idx] || foot.contains(pairKey(n[0] - 1 + x0, n[1] - 1 + z0))) continue;
+                    outside[idx] = 1; stack.append(idx);
+                }
+            }
+            auto isOut = [&](int x, int z) { const int gx = x - x0 + 1, gz = z - z0 + 1; return gx >= 0 && gx < W && gz >= 0 && gz < H && outside[gz * W + gx]; };
+            for (const qint64 ck : foot)
+            {
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const bool ox = isOut(x - 1, z) || isOut(x + 1, z), oz = isOut(x, z - 1) || isOut(x, z + 1);
+                if (ox && oz) corners.insert(ck);
+            }
+        }
+    }
+
+    for (auto cit = st.chunks.begin(); cit != st.chunks.end(); ++cit)
+    {
+        const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+        for (auto sit = cit->begin(); sit != cit->end(); ++sit)
+        {
+            QVector<quint16>& sec = sit.value();
+            const int baseY = sit.key() << 4;
+            for (int i = 0; i < sec.size(); ++i)
+            {
+                if (sec[i] != wallId) continue;
+                const int x = bx0 + (i & 15), z = bz0 + ((i >> 4) & 15), y = baseY + ((i >> 8) & 15), rel = y - minY;
+                if (rel < 2) continue;                                              // the foundation stays as it is
+                if (st.get(x, y, z) == 0 || st.get(x, y + 1, z) == 0 || st.get(x, y - 1, z) == 0) continue;     // only the WALL: not the roof (air above it) and not an inner slab (air below)
+                if (kinder)
+                {
+                    if (rel % 4 == 2 || (x + z + (rel / 4) * 2) % 6 == 0)
+                        sec[i] = kid[((x + z + 4096) / 3 + rel / 4) % 6];
+                }
+                else if (corners.contains(pairKey(x, z))) sec[i] = white;
+                else if (!school && rel % 6 == 3) sec[i] = red;                     // a research institute: red bands
+            }
+        }
+    }
+}
+
+//! Voxelizes an object and writes the result into the store; returns the number of written blocks (0 — the object
+//! was skipped: an empty mesh or an extent beyond reason). colMin — the minimum voxel Y of the object per
+//! XZ column (for the subsequent ground fill), it is updated.
+static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransform& tf, quint16 id,
+                          VoxelStore& store, QHash<ColKey, int>& colMin, const std::atomic_bool* cancel,
+                          int sink = 0, QHash<ColKey, int>* colAnchor = nullptr, int extraBlocks = 0,
+                          bool floors = false, int* storyCounter = nullptr, QVector<ChestSite>* chests = nullptr,
+                          QVector<PaintingSite>* paints = nullptr,
+                          QVector<MannequinSite>* mannequins = nullptr,
+                          QVector<SpawnerSite>* spawners = nullptr,
+                          quint16 structId = 0, bool woodSingle = false, int privMode = 0,
+                          QVector<NpcSite>* npcs = nullptr, QVector<FrameSite>* frames = nullptr,
+                          QVector<BasementSite>* basements = nullptr, QVector<SignCand>* signs = nullptr,
+                          QVector<BannerSite>* banners = nullptr, QVector<LairZone>* zones = nullptr,
+                          QVector<IslandSite>* islands = nullptr, int deepRole = 0)
+{
+    const int nv = obj.vertices.size();
+    if (nv < 3 || obj.indices.size() < 3)
+        return 0;
+
+    // Into block coordinates + the extent
+    QVector<QVector3D> bc;
+    bc.reserve(nv);
+    long long mnx = std::numeric_limits<long long>::max(), mxx = std::numeric_limits<long long>::min();
+    long long mnz = mnx, mxz = mxx;
+    long long mny = std::numeric_limits<long long>::max(), mxy = -mny;
+    double yMinF = std::numeric_limits<double>::max(), yMaxF = -yMinF;
+    for (int i = 0; i < nv; ++i)
+    {
+        const QVector3D& v = obj.vertices[i];
+        const double bx = toBlockX(tf, v.x());
+        const double by = toBlockY(tf, v.z());
+        const double bz = toBlockZ(tf, v.y());
+        bc << QVector3D(float(bx), float(by), float(bz));
+        yMinF = std::min(yMinF, by);
+        yMaxF = std::max(yMaxF, by);
+        const long long ibx = (long long)std::floor(bx), ibz = (long long)std::floor(bz),
+                        iby = (long long)std::floor(by);
+        mnx = std::min(mnx, ibx); mxx = std::max(mxx, ibx + 1);
+        mnz = std::min(mnz, ibz); mxz = std::max(mxz, ibz + 1);
+        mny = std::min(mny, iby); mxy = std::max(mxy, iby + 1);
+    }
+    // "Growing" of structures: we pull the top upward by extraBlocks blocks (the bottom stays in place) — otherwise
+    // 4.5 m houses with a 2-block foundation stay pitiful kitchen gardens (a user request:
+    // all structures +2 blocks, below 6 m — another +2).
+    if (extraBlocks > 0 && yMaxF - yMinF > 1e-3)
+    {
+        const double h = yMaxF - yMinF;
+        const double k = (h + extraBlocks) / h;
+        for (QVector3D& p : bc)
+            p.setY(float(yMinF + (double(p.y()) - yMinF) * k));
+        mxy = std::max(mxy, (long long)std::floor(yMinF + h * k) + 1);
+    }
+    if (mxx <= mnx || mxy <= mny || mxz <= mnz)
+        return 0;
+
+    // The extent in integer cells + a gap of 1 on all sides (the shell of the flood fill must have an "air
+    // corridor" around the object)
+    const long long gx0 = mnx - 1, gx1 = mxx + 1;
+    const long long gy0 = mny - 1, gy1 = mxy + 1;
+    const long long gz0 = mnz - 1, gz1 = mxz + 1;
+    const long long sxl = gx1 - gx0, syl = gy1 - gy0, szl = gz1 - gz0;
+    // Reasonable limits: giant objects (flat forest polygons tens of km across) are skipped explicitly —
+    // their rasterization would eat memory/time out of proportion to the result.
+    if (sxl > 100000 || syl > 4096 || szl > 100000)
+        return 0;
+    const long long vol = sxl * syl * szl;
+    if (vol > 64ll * 1024 * 1024)
+        return 0;
+    const int volI = int(vol);   // the volume is certainly < INT_MAX (the check above) — it is convenient to index a QByteArray with an int
+
+    const int sx = int(sxl), sy = int(syl), sz = int(szl);
+    const int minx = int(gx0), miny = int(gy0), minz = int(gz0);
+
+    QByteArray grid;
+    grid.fill(0, volI);
+    QVector<int> surfaceCells;
+
+    for (int i = 0; i + 2 < obj.indices.size(); i += 3)
+    {
+        if ((i & 0xFFFF) == 0 && cancel && cancel->load()) break;
+        const quint32 i0 = obj.indices[i], i1 = obj.indices[i + 1], i2 = obj.indices[i + 2];
+        if (i0 >= quint32(nv) || i1 >= quint32(nv) || i2 >= quint32(nv)) continue;
+        rasterizeTriangle(bc[i0], bc[i1], bc[i2], minx, miny, minz, sx, sy, sz, grid, surfaceCells);
+    }
+    if (surfaceCells.isEmpty())
+        return 0;
+    // The structural part with a given wall material (structId != 0): the foundation (the two bottom rows),
+    // the floors between stories and the roof (the two top rows) — gray concrete whatever is in the walls.
+    int rowLo = std::numeric_limits<int>::max(), rowHi = -1;
+    if (structId || privMode)
+        for (int cell : surfaceCells)
+        {
+            const int ry = (cell / sx) % sy;
+            rowLo = std::min(rowLo, ry); rowHi = std::max(rowHi, ry);
+        }
+    // A private house 44400002/44400100 (privMode): the material is decided by the PRESENCE of a floor slab — exactly the condition by
+    // which the slab is built below (it lies at lyLow+5 and must be no higher than lyHigh-1, i.e. rowHi-rowLo >= 6
+    // is needed). If there is a slab — the walls are BRICK, the foundation/slab gray concrete; if there is no slab —
+    // the walls are LOGS, the ceiling is planks (the gables and the roof are planks in both cases).
+    if (privMode)
+    {
+        const bool slabNeeded = (rowHi - rowLo) >= 6;
+        id = slabNeeded ? quint16(IdPaletteStart + paletteIndexOf("minecraft:bricks")) : quint16(IdOakLog);
+        structId = slabNeeded ? quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete")) : quint16(0);
+        woodSingle = !slabNeeded;
+    }
+    const auto structFor = [&](int ry) -> quint16
+    { return (structId && (ry <= rowLo + 1 || ry >= rowHi - 1)) ? structId : quint16(0); };
+
+    // The interior of a closed mesh: a 3D flood fill of the outer air from the extent boundary; the cells
+    // it did not reach are the body of the object.
+    if (obj.closed && vol <= 8ll * 1024 * 1024)
+    {
+        QVector<int> queue;
+        queue.reserve(int(vol) / 8 + 16);
+        auto tryPush = [&](int x, int y, int z)
+        {
+            const int cell = (z * sy + y) * sx + x;
+            if (!grid[cell]) { grid[cell] = 2; queue.append(cell); }   // 2 = outer air
+        };
+        for (int z = 0; z < sz; ++z)
+            for (int x = 0; x < sx; ++x)
+            {
+                tryPush(x, 0, z);
+                tryPush(x, sy - 1, z);
+            }
+        for (int z = 0; z < sz; ++z)
+            for (int y = 0; y < sy; ++y)
+            {
+                tryPush(0, y, z);
+                tryPush(sx - 1, y, z);
+            }
+        for (int y = 0; y < sy; ++y)
+            for (int x = 0; x < sx; ++x)
+            {
+                tryPush(x, y, 0);
+                tryPush(x, y, sz - 1);
+            }
+        for (int qi = 0; qi < queue.size(); ++qi)
+        {
+            const int cell = queue[qi];
+            const int x = cell % sx;
+            const int y = (cell / sx) % sy;
+            const int z = cell / (sx * sy);
+            if (x > 0)        tryPush(x - 1, y, z);
+            if (x + 1 < sx)   tryPush(x + 1, y, z);
+            if (y > 0)        tryPush(x, y - 1, z);
+            if (y + 1 < sy)   tryPush(x, y + 1, z);
+            if (z > 0)        tryPush(x, y, z - 1);
+            if (z + 1 < sz)   tryPush(x, y, z + 1);
+        }
+        for (int c = 0; c < volI; ++c)
+            if (!grid[c])
+                grid[c] = 3;                                  // 3 = the body (air unreachable from outside)
+        if (obj.merged)
+        {   // A complex of touching parts (an industrial zone): the wall between two parts — surface cells (1) with the body (3) on both
+            // sides at the same height (along X or Z; up to 2 cells thick if the part walls did not coincide) — is removed, the parts
+            // become one volume. Roofs/floors and outer walls (with outer air on at least one side) remain.
+            const int sxyL = sx * sy;
+            QVector<int> kill;
+            for (int c = 0; c < volI; ++c)
+            {
+                if (grid[c] != char(1)) continue;
+                const int lx = c % sx, lz = c / sxyL;
+                for (int axis = 0; axis < 2; ++axis)
+                {
+                    const int step = axis == 0 ? 1 : sxyL;
+                    const bool inb1 = axis == 0 ? (lx > 0 && lx + 1 < sx) : (lz > 0 && lz + 1 < sz);
+                    if (!inb1) continue;
+                    if (grid[c - step] == char(3) && grid[c + step] == char(3)) { kill.append(c); break; }
+                    // a double wall: 3,1,1,3
+                    const bool inb2 = axis == 0 ? (lx > 0 && lx + 2 < sx) : (lz > 0 && lz + 2 < sz);
+                    if (inb2 && grid[c - step] == char(3) && grid[c + step] == char(1) && grid[c + 2 * step] == char(3))
+                    { kill.append(c); kill.append(c + step); break; }
+                }
+            }
+            for (int c : kill) grid[c] = char(3);
+            surfaceCells.erase(std::remove_if(surfaceCells.begin(), surfaceCells.end(), [&](int c) { return grid[c] != char(1); }),
+                               surfaceCells.end());                                   // the removed cells are not a surface
+        }
+        // The cavity: we do not fill a building with blocks entirely — it is empty inside. We keep a "2-block" shell: the voxels
+        // of the rasterized surface (1) plus one layer of the body adjacent to the surface/air (4).
+        // The deeper body cells (all 6 neighbors are body too) stay air.
+        QVector<int> skin;
+        const int sxy = sx * sy;
+        for (int c = 0; c < volI; ++c)
+        {
+            if (grid[c] != char(3)) continue;
+            const int lx = c % sx, ly = (c / sx) % sy, lz = c / sxy;
+            bool nearAir = false;                             // the cell borders 0/1/2 (or the edge) — a wall
+            if (ly == 0 || grid[c - sx] != char(3)) nearAir = true;
+            if (ly == sy - 1 || grid[c + sx] != char(3)) nearAir = true;
+            if (!nearAir && (lx == 0 || grid[c - 1] != char(3))) nearAir = true;
+            if (!nearAir && (lx == sx - 1 || grid[c + 1] != char(3))) nearAir = true;
+            if (!nearAir && (lz == 0 || grid[c - sxy] != char(3))) nearAir = true;
+            if (!nearAir && (lz == sz - 1 || grid[c + sxy] != char(3))) nearAir = true;
+            if (nearAir) skin << c;
+        }
+        for (int c : skin)
+            grid[c] = char(4);                                // 4 = the inner lining (written)
+    }
+
+    auto addVoxel = [&](int bx, int by, int bz, quint16 vid = 0)
+    {
+        store.set(bx, by - sink, bz, vid ? vid : id);         // sink — the foundation: the lower courses go into the ground
+        const qint64 ck = pairKey(bx, bz);
+        const int sy2 = by - sink;
+        auto it = colMin.find(ck);
+        if (it == colMin.end() || sy2 < it.value())
+            colMin[ck] = sy2;
+        if (colAnchor)                                        // the ORIGINAL (not sunk) bottom boundary —
+        {                                                     // we use it to check the ground level around the object
+            auto a = colAnchor->find(ck);
+            if (a == colAnchor->end() || by < a.value())
+                (*colAnchor)[ck] = by;
+        }
+    };
+    auto addDecor = [&](int bx, int by, int bz, quint16 vid)
+    {   // Decor hanging AT HEIGHT on someone else's wall (aviation beacons): it must NOT touch the ground column —
+        // colMin would have been raised to the torch tier, and a dirt/stone
+        // column would have grown under an empty point (the same mechanism as the "armor" of L-shaped private-sector houses).
+        store.set(bx, by - sink, bz, vid);
+    };
+
+    // "Floors" and windows (bldpol only, a closed mesh — see floors): the floor height is preferably
+    // 4 blocks of air + 1 block of slab; if with 5-6-block floors the same number fits as
+    // with 4, we stretch them (fill the volume, do not lose floors). The floor slabs — over the whole patch
+    // inside the shell; the windows — 2-block strips with a 1-block inset from the floor/slab, every 4th
+    // column of the facade, through the whole thickness of the wall (glass + a hole behind it).
+    int storyP = 0, nStories = 0, winDyMax = -1;                // the floor step (air + slab), the number of floors,
+                                                                // the top row of windows (the bottom of the roof lining)
+    int lyLow = sy, lyHigh = -1;
+    // The flags of the window profile (needed both by the floor computation and by windowDir — declared before both).
+    // The exception is shopping malls (CODE 44318000, a user request): they get "panoramic windows" —
+    // a continuous strip of glass in bands of NOT LESS THAN 5 blocks in a row: a period of 6..9 columns, one column
+    // of the period is a blind "mullion"; the mullion phase depends only on the facade line, so the mullions
+    // stand vertically on all floors. We do not blind the corners — the strip wraps around the corner ("curved" windows
+    // with an x/z offset of 1 block were allowed by the user).
+    const bool panor = (obj.code == 44318000);
+    // "Non-residential" buildings (a user request): WINDOWS 2×3 — a panel of 2 panes (4 blocks of width with
+    // mullions), the strip height is 3 rows (an inset of 1 from the floor, the top flush with the slab). The codes: 44310000,
+    // 44340000 and the series 44311000..44317000. SHOPPING MALLS (44318000) are NOT among them: the user
+    // clarified that malls keep the FORMER panorama (strips of 5..8 with glazing around the corners).
+    // For the 2×3 strip we fix the floor at 3+1 (shaft >= 4).
+    const bool bigWin = (obj.code == 44310000 || obj.code == 44340000
+                         || (obj.code >= 44311000 && obj.code <= 44317000 && obj.code % 1000 == 0));
+    // Sheds and utility structures (CODE 44000000, a user request) — no windows at all.
+    const bool noWin = (obj.code == 44000000);
+    // Non-residential "office" buildings (a request): general-purpose, administrative, educational, children's,
+    // hospitals, scientific, cultural, museums (44310000..44317000, without malls 44318000 — they have their own line) and the church
+    // 44319000. They are furnished like residential ones, but WITHOUT beds and WITHOUT mannequins, with desks/shelves/fittings.
+    const bool office = (obj.code >= 44310000 && obj.code <= 44317000 && obj.code % 1000 == 0)
+                        || obj.code == 44319000;
+    const bool resid = (obj.code == 44400000);    // multi-storey residential: carpets in compositions (runners, checkerboard, edging)
+    const bool hospital = (obj.code == 44314000);         // a "healthcare institution": beds, a doctor, patients
+    // The private sector (the pitched-roof codes) — a common flag of ALL passes (a user request):
+    // there is no flat roof at all (a foundation + walls), the 1-block floor slab is sunk by 1 block,
+    // the 1st-floor room is 4 blocks, the 2nd floor = the whole remainder up to the slopes (with an attic), the inter-floor
+    // flight is ordinary (oak). Declared before the floor computation — it is needed already there (and before wide2 —
+    // the window profile looks at it too).
+    const bool priv = obj.kind == McWorldExporter::McObject::Building && obj.closed
+                      && (obj.code == 44400002 || obj.code == 44400100 || obj.code == 44400110);
+    // Sheds/utility structures (44000000, a request): the walls, floor and roof are ONE block (no lining), the foundation is 1 block (sink=1). The floor level,
+    // as for the private sector, is one row lower (lowF): the walking row is lyLow+1.
+    const bool shedThin = obj.kind == McWorldExporter::McObject::Building && obj.closed && obj.code == 44000000;
+    const bool lowF = priv || shedThin;
+    // "Residential" (CODE 44400000, a user request): SQUARE 2×2 windows — two neighboring columns
+    // of glass for the same 2 rows of height (rows 1..2 above the slab). The PRIVATE SECTOR is also 2×2
+    // (a request: "windows 1×2 on the first floor and 1×1 in the attic — that is just ugly"): under a slope
+    // the strip is cut by a row or two higher, 2×1 remains — the user allowed it. Other codes
+    // (in no list) — ordinary narrow vertical 1×2. Sheds (noWin) — without windows.
+    const bool wide2 = (obj.code == 44400000) || priv;
+    if (floors && obj.closed)
+    {
+        for (int cell : surfaceCells)
+        {
+            const int ly = (cell / sx) % sy;
+            lyLow = std::min(lyLow, ly);
+            lyHigh = std::max(lyHigh, ly);
+        }
+        // In the private sector the walking level of the 1st floor is one block lower (the floor slab is 1 block) — we measure the shaft from it.
+        const int shaftH = std::max(0, (lyHigh - 2) - (lowF ? lyLow + 1 : lyLow + 2) + 1);
+        winDyMax = shaftH - 1;                                  // above — the roof lining, not a facade
+        const int n4 = (shaftH + 1) / 5;                        // how many "floors of 4" fit
+        nStories = std::max(1, n4);                             // even a short little house has a "first" floor (windows)
+        int storyH = 4;
+        if (n4 > 0)                                             // the remaining air is divided equally among the floors, but not above 6
+            storyH = std::min(6, std::max(4, (shaftH - (nStories - 1)) / nStories));
+        if (bigWin && shaftH >= 4)                              // a 2×3 window: a floor of 3 air + a slab
+        {
+            storyH = 3;
+            nStories = std::max(1, (shaftH + 1) / 4);           // the top strip flush with the slab — fits
+        }
+        if (priv)                                               // the private sector (a request): the 1st-floor room is exactly
+        {                                                       // 4 blocks, the step is 4 (the slab stands INSTEAD of the ceiling),
+            storyH = 4;                                         // exactly two floors — the 2nd = the whole remainder up to the slopes
+            nStories = woodSingle ? 1 : 2;                      // (an attic or a small loft — whatever fits);
+                                                                // a wooden house (MAT=5) — exactly one floor, no ceiling for the attic
+            storyP = storyH;                                    // windows do not get above the 2nd tier of the strip
+        }
+        else storyP = storyH + 1;
+    }
+    const int sxy = sx * sy;
+    // The window definition: 0 — not a window; otherwise — the offset of the "inner" wall block behind the glass
+    // (±1 in X, ±sxy in Z). The window strips are on the 1st and 2nd blocks ABOVE the floor/slab (raised by a block from
+    // the floor level, as the user asked — not flush with it), along the facade — every 4th column.
+    // The 3×5 windows of "non-residential" (bigWin), the mall panorama (panor) and the square 2×2 of "residential" (wide2) have their own profiles below.
+    const auto lineHash = [](qint64 k) -> quint32
+    {   // the same mix as colHash in Export (there the lambda is local — here is our own)
+        const qint32 x = keyFirst(k), z = keySecond(k);
+        quint32 h = quint32(x) * 374761393u + quint32(z) * 668265263u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        return h ^ (h >> 16);
+    };
+    // BANDIT LAIR (a request): industrial zone buildings (44340000) — 30%, multi-storey residential (44400000, floors >= 2) — 5%. In a lair on the outside
+    // hang ominous banners, the interiors are camp-style (barrels, hay bales, chests with outpost loot, banners), raiders live inside.
+    // A test hook: MCX_FORCE_LAIR=1 makes any such building a lair.
+    bool lair = false;
+    if (floors && obj.closed && storyP > 0 && !obj.lift && obj.kind == McWorldExporter::McObject::Building)
+    {
+        const quint32 hl = lineHash(pairKey(minx, minz) ^ 0x1A1E5ull) % 100u;
+        const bool force = qEnvironmentVariableIsSet("MCX_FORCE_LAIR");
+        const bool never = qEnvironmentVariableIsSet("MCX_NO_LAIR");                 // a test hook: no lairs at all
+        if (never) lair = false;
+        else if (obj.code == 44340000) lair = force || hl < 30u;
+        else if (obj.code == 44400000 && nStories >= 2) lair = force || hl < 5u;
+    }
+    auto windowDir = [&](int lx, int ly, int lz) -> int
+    {
+        if (noWin) return 0;                                    // a shed — no windows (a user request)
+        if (storyP == 0 || ly >= lyHigh) return 0;              // the roof — not a facade
+        const int dy = ly - lyLow - (lowF ? 1 : 2);             // from the walking floor of the 1st floor (private — a block lower)
+        if (dy < 0 || dy > winDyMax) return 0;                  // above the shaft (the roof lining row) — not a window
+        const int inStory = dy % storyP;
+        if (bigWin)                                             // a 2×3 window: 3 rows of glass (a request)
+        {
+            if (inStory < 1 || inStory > 3) return 0;           // an inset of 1 from the floor, the top flush with the slab
+        }
+        else if (panor)                                         // the mall panorama: the strip height depends on the floor height
+        {   // an inset of 1 from the floor; the strip height is at least 2 rows, and if the floor allows more than 2, exactly 2 blocks of wall
+            // remain between the top of the strip and the ceiling (a floor has storyP-1 rows of air: the window occupies rows 1 .. storyP-4)
+            if (inStory < 1 || inStory > std::max(2, storyP - 4)) return 0;
+        }
+        else if (inStory != 1 && inStory != 2) return 0;        // a residential strip — two rows from the floor
+        if (dy / storyP >= nStories) return 0;                  // above the last strip — it is already an attic
+        const int c = lz * sxy + ly * sx + lx;
+        const bool xn = (lx == 0 || grid[c - 1] == char(0) || grid[c - 1] == char(2));
+        const bool xp = (lx == sx - 1 || grid[c + 1] == char(0) || grid[c + 1] == char(2));
+        const bool zn = (lz == 0 || grid[c - sxy] == char(0) || grid[c - sxy] == char(2));
+        const bool zp = (lz == sz - 1 || grid[c + sxy] == char(0) || grid[c + sxy] == char(2));
+        const bool xw = xn || xp, zw = zn || zp;                // where the wall face looks
+        if (!xw && !zw) return 0;                               // a pocket in the thickness — not a facade
+        if (bigWin)
+        {
+            // A 2×3 panel (a request): 2 panes + 2 blind mullions per period, the phase from the start of
+            // the facade; the corner is blind (unlike the mall panorama, the strip does not wrap around the corner).
+            if (xw == zw) return 0;
+            const int along = xw ? lz : lx;
+            const int m = (((along - 1) % 4) + 4) % 4;          // 0..1 — glass, 2..3 — a mullion
+            if (m >= 2) return 0;
+            return xw ? (xn ? 1 : -1) : (zn ? sxy : -sxy);
+        }
+        if (panor)
+        {
+            const bool useX = xw || !zw;                        // a mall corner is glass too, X has priority
+            const int along = useX ? lz : lx;
+            // The key of the facade LINE (not of the column!): X-facing — the side + lz; Z-facing — the side +
+            // the side offset by minx (a constant per facade ⇒ "along" only sets the phase).
+            const qint64 lk = useX ? pairKey(qint64(minx) + (xn ? 0 : 1), qint64(minz) + lz)
+                                   : pairKey(qint64(minx) + (zn ? 2 : 3), qint64(minz) + (zn ? 0 : 1));
+            const quint32 lh = lineHash(lk ^ 0xC0DE5ull);
+            const int P = 6 + int(lh % 4u);                     // the period 6..9 ⇒ glass bands 5..8
+            const int ph = int((lh >> 8) % quint32(P));
+            if ((((along + ph) % P) + P) % P == 0) return 0;    // one column of the period is a mullion
+            return useX ? (xn ? 1 : -1) : (zn ? sxy : -sxy);
+        }
+        if (xw == zw) return 0;                                 // a corner (both) or a lining (neither) — blind
+        const int along = xw ? lz : lx;                         // the facade column runs along the second axis
+        const int m = (((along % 4) + 4) % 4);                  // columns of period 4
+        if (wide2 ? (m != 1 && m != 2) : m != 1) return 0;      // 44400000 — a square 2×2 (a pair of glass
+                                                                  // columns), the others — a narrow 1×2 (one)
+        return xw ? (xn ? 1 : -1) : (zn ? sxy : -sxy);           // the "inner" block behind the glass — FROM
+                                                                  // the street into the wall thickness
+    };
+
+    // The wall patch by surface cells — needed by the pitched roof (the roof used to compute it itself).
+    int fx0 = sx, fx1 = -1, fz0 = sz, fz1 = -1;
+    for (int cell : surfaceCells)
+    {
+        const int lx = cell % sx, lz = cell / sxy;
+        fx0 = std::min(fx0, lx); fx1 = std::max(fx1, lx);
+        fz0 = std::min(fz0, lz); fz1 = std::max(fz1, lz);
+    }
+    const bool ridgeZ = (fz1 - fz0) >= (fx1 - fx0);             // the ridge along Z ⇒ slopes along X
+    const int a0 = ridgeZ ? fx0 : fz0, a1 = ridgeZ ? fx1 : fz1; // across the slopes
+    const int b0 = ridgeZ ? fz0 : fx0, b1 = ridgeZ ? fz1 : fx1; // along the ridge
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+    const auto interiorCol = [&](int lx, int ly, int lz)      // the cell (lx,ly,lz) — is it above a cavity?
+    {
+        const int c = lz * sxy + ly * sx + lx;
+        return grid[c - sx] == char(3) || grid[c - 2 * sx] == char(3);
+    };
+
+    int added = 0;
+    // ——— BUILDING ENTRANCES ———
+    // Buildings (except elevator shafts LIFT=1 and sheds 44000000) get an entrance in the 1st-floor wall: a 1×2 opening through both
+    // walls (the outer layer — a door, the inner one — emptiness). The entrance is MANDATORY: first we look for an ideal place (a flat
+    // wall without windows), then — any with both wall layers, windows nearby are replaced by a wall (forcedWall). Ordinary houses —
+    // one entrance, apartment buildings (44400000) — from 1 to 5 entrances along the facade length. Doors: 90% iron ("locked"),
+    // 10% wooden of the wall color; malls and churches — double wooden ones; for large malls (a plan from 1200 m²) in front of the
+    // doors there are stone pressure plates. The entrance cells go into doorCells: furniture does not grow in the passage.
+    QVector<qint64> entranceKeys;
+    QSet<int> forcedWall;                                     // the cells of the outer layer where a window is forbidden
+    if (floors && obj.closed && storyP > 0 && !obj.lift && !noWin
+        && obj.kind == McWorldExporter::McObject::Building && lyHigh >= lyLow + 4)
+    {
+        const int lyF0 = lowF ? lyLow + 1 : lyLow + 2;               // the walking row of the 1st floor
+        static const int ddx[4] = { 0, 1, 0, -1 }, ddz[4] = { -1, 0, 1, 0 };   // N, E, S, W
+        // the lateral axis of the leaves: for N/S walls — along X, for E/W — along Z (the second leaf with an offset of +1)
+        auto latX = [&](int d) { return ddz[d] != 0 ? 1 : 0; };
+        auto latZ = [&](int d) { return ddx[d] != 0 ? 1 : 0; };
+        const bool church = (obj.code == 44319000);
+        const bool dbl = panor || church;                            // a double door
+        struct EntCand { int lx, lz, d; };
+        auto gAt = [&](int x, int y, int z) -> char
+        { return (x < 0 || x >= sx || z < 0 || z >= sz || y < 0 || y >= sy) ? char(0) : grid[z * sxy + y * sx + x]; };
+        auto isOut = [&](int x, int y, int z) { const char g = gAt(x, y, z); return g == char(0) || g == char(2); };
+        // the strictness level: 0 — ideal (without windows, the side cells are wall); 1 — any wall with two layers; 2 — only
+        // the outer cell with a neighbor open to the outside
+        auto okLeaf = [&](int lx, int lz, int d, int level) -> bool
+        {
+            for (int r = 0; r < 2; ++r)
+            {
+                const int y = lyF0 + r;
+                if (gAt(lx, y, lz) != char(1) || !isOut(lx + ddx[d], y, lz + ddz[d])) return false;
+                if (level >= 2) continue;
+                if (gAt(lx - ddx[d], y, lz - ddz[d]) != char(4)) return false;
+                const char g2 = gAt(lx - 2 * ddx[d], y, lz - 2 * ddz[d]);
+                if (g2 != char(3) && g2 != char(4)) return false;
+                if (level == 0)
+                {
+                    if (windowDir(lx, y, lz)) return false;
+                    for (int t = -1; t <= 1; t += 2)               // on the sides — a wall too (not a corner and not the edge of the opening)
+                    {
+                        const int tx = lx + t * latX(d), tz = lz + t * latZ(d);
+                        if (gAt(tx, y, tz) != char(1) || !isOut(tx + ddx[d], y, tz + ddz[d])) return false;
+                    }
+                }
+            }
+            return true;
+        };
+        QVector<EntCand> chosen;
+        const bool apt = (obj.code == 44400000);
+        const int Lmax = std::max(fx1 - fx0 + 1, fz1 - fz0 + 1);
+        const int nEnt = apt ? std::max(1, std::min(5, int(Lmax / 22.0 + 0.5))) : 1;
+        const int minSep = apt ? std::max(8, Lmax / (nEnt + 1)) : 0;
+        const quint32 hE = lineHash(pairKey(minx, minz) ^ 0xD00DEull);
+        for (int level = 0; level <= 2 && chosen.size() < nEnt; ++level)
+        {
+            QVector<EntCand> cands;
+            for (int cell : surfaceCells)
+            {
+                if ((cell / sx) % sy != lyF0) continue;
+                const int lx = cell % sx, lz = cell / sxy;
+                for (int d = 0; d < 4; ++d)
+                    if (okLeaf(lx, lz, d, level)
+                        && (!dbl || okLeaf(lx + latX(d), lz + latZ(d), d, level)))
+                        cands.append(EntCand{ lx, lz, d });
+            }
+            if (cands.isEmpty()) continue;
+            std::sort(cands.begin(), cands.end(), [](const EntCand& a, const EntCand& b)
+            { return a.lz != b.lz ? a.lz < b.lz : (a.lx != b.lx ? a.lx < b.lx : a.d < b.d); });
+            const int n0 = cands.size(), start = int(hE % quint32(n0));
+            for (int t = 0; t < n0 && chosen.size() < nEnt; ++t)
+            {
+                const EntCand& c = cands[(start + t) % n0];
+                bool far = true;
+                for (const EntCand& q : chosen)
+                    if (std::max(std::abs(q.lx - c.lx), std::abs(q.lz - c.lz)) < std::max(minSep, dbl ? 3 : 1)) { far = false; break; }
+                if (far) chosen.append(c);
+            }
+        }
+        if (!chosen.isEmpty())
+        {
+            // the door wood color — by the color of the building wall block (not needed for an iron one)
+            int wr = 162, wg = 130, wb = 78;
+            {
+                const int pi = int(id) - int(IdPaletteStart);
+                if (pi >= 0 && pi < kPaletteCount) { wr = kBlockPalette[pi].r; wg = kBlockPalette[pi].g; wb = kBlockPalette[pi].b; }
+                else if (id == IdIronBlock) { wr = wg = wb = 200; }
+                else if (id == IdDirt) { wr = 134; wg = 96; wb = 67; }
+                else if (id == IdOakLog) { wr = 102; wg = 81; wb = 49; }
+            }
+            int woodType = 0, bestD = std::numeric_limits<int>::max();
+            const int sat = std::max({ wr, wg, wb }) - std::min({ wr, wg, wb });
+            if (sat < 40)
+            {   // gray/white walls: the nearest "wooden" by color would come out pink (cherry) — we take by brightness
+                const int lum = (wr + wg + wb) / 3;
+                woodType = lum < 80 ? 5 /*dark oak*/ : lum < 140 ? 1 /*spruce*/ : 2 /*birch*/;
+            }
+            else
+                for (int w = 0; w < 11; ++w)
+                {
+                    const int dr = kDoorRgb[w][0] - wr, dg = kDoorRgb[w][1] - wg, db = kDoorRgb[w][2] - wb;
+                    const int dd = dr * dr + dg * dg + db * db;
+                    if (dd < bestD) { bestD = dd; woodType = w; }
+                }
+            const int planArea = (fx1 - fx0 + 1) * (fz1 - fz0 + 1);
+            const bool bigShop = panor && planArea >= 1200;
+            // the "left" side of the view (the view along facing): N->west, E->north, S->east, W->south; the second leaf stands
+            // in the +lateral direction (east for N/S walls, south for E/W), the hinges are on the outer sides of the pair
+            static const int leftIsNeg[4] = { 1, 1, 0, 0 };           // is the left side of the view in the negative lateral axis?
+            for (int ci = 0; ci < chosen.size(); ++ci)
+            {
+                const EntCand& c = chosen[ci];
+                const quint32 hd = lineHash(pairKey(minx + c.lx, minz + c.lz) ^ 0xD00F5ull);
+                const bool iron = !panor && !church && (hd % 100u) < 90u;   // malls and churches — wooden
+                const int type = iron ? 11 : woodType;
+                const int leaves = dbl ? 2 : 1;
+                for (int li = 0; li < leaves; ++li)
+                {
+                    const int lx = c.lx + li * latX(c.d), lz = c.lz + li * latZ(c.d);
+                    int hinge = 0;                                      // 0 — left, 1 — right
+                    if (dbl) hinge = (li == 0) ? (leftIsNeg[c.d] ? 0 : 1) : (leftIsNeg[c.d] ? 1 : 0);
+                    for (int r = 0; r < 3; ++r)
+                    {
+                        const int y = lyF0 + r;
+                        if (r < 2)
+                        {
+                            const int outerCell = lz * sxy + y * sx + lx;
+                            grid[outerCell] = char(5);                  // the outer layer — a door (an ordinary wall is not written)
+                            const int ix = lx - ddx[c.d], iz = lz - ddz[c.d];
+                            if (gAt(ix, y, iz) == char(4)) grid[iz * sxy + y * sx + ix] = char(5);   // the inner layer — an opening
+                            addVoxel(minx + lx, miny + y, minz + lz,
+                                     quint16(int(IdDoorBase) + (((type * 4 + c.d) * 2 + hinge) * 2 + r)));
+                            ++added;
+                            if (r == 0 && iron)
+                    {   // a stone button FROM INSIDE at an iron door: we put it into the inner-layer cell beside the opening, it is
+                        // "glued" to the neighboring block of the outer layer (it touches the door) and powers it — the door opens
+                        const int tx = c.lx + (ddx[c.d] == 0 ? 1 : 0), tz = c.lz + (ddx[c.d] == 0 ? 0 : 1);
+                        const int ix = tx - ddx[c.d], iz = tz - ddz[c.d];
+                        if (gAt(tx, y, tz) == char(1) && gAt(ix, y, iz) == char(4))
+                        {
+                            grid[iz * sxy + y * sx + ix] = char(5);          // the inner lining is not written here
+                            addVoxel(minx + ix, miny + y, minz + iz,
+                                     quint16(int(IdStoneButtonBase) + ((c.d + 2) & 3)));   // looks inward
+                            ++added;
+                        }
+                        // ~20% of locked iron doors: a button OUTSIDE too (on the outer face of the same wall block) — the door can be opened from the street
+                        if (gAt(tx, y, tz) == char(1) && ((hd >> 12) % 100u) < 20u)
+                        {
+                            const int ox = tx + ddx[c.d], oz = tz + ddz[c.d];
+                            const char go = gAt(ox, y, oz);
+                            if ((go == char(0) || go == char(2)) && store.get(minx + ox, miny + y - sink, minz + oz) == IdAir)
+                            {
+                                addDecor(minx + ox, miny + y, minz + oz, quint16(int(IdStoneButtonBase) + (c.d & 3)));   // looks outward
+                                ++added;
+                            }
+                        }
+                    }
+                    for (int k = 0; k <= 2; ++k)                 // the entrance cells: the wall, the opening, the room behind it
+                            {
+                                const int bx = minx + lx - k * ddx[c.d], bz = minz + lz - k * ddz[c.d], by = miny + y;
+                                entranceKeys.append((qint64(bx + 32768) << 29) | (qint64(bz + 32768) << 12) | qint64(by));
+                            }
+                        }
+                        // windows above the door and at the jambs are forbidden: a wall (at the edges of the pair — 1 cell wider)
+                        for (int t = -1; t <= 1; ++t)
+                            if (!dbl || (li == 0 ? t <= 0 : t >= 0))
+                                forcedWall.insert((lz + t * latZ(c.d)) * sxy + y * sx + (lx + t * latX(c.d)));
+                        if (r == 0 && bigShop)
+                            addVoxel(minx + lx + ddx[c.d], miny + y, minz + lz + ddz[c.d], IdPressurePlateStone);
+                    }
+                }
+            }
+        }
+    }
+    int nWindows = 0;                                     // windows in the building (without a single window — cobwebs inside)
+    for (int cell : surfaceCells)
+    {
+        if (grid[cell] == char(5)) continue;              // a pre-marked hole — we do not write it
+        const int lx = cell % sx;
+        const int ly = (cell / sx) % sy;
+        const int lz = cell / (sx * sy);
+        if (priv && lyHigh >= 0 && ly == lyHigh && interiorCol(lx, ly, lz))
+            continue;                                     // the private sector: we write the flat cap
+                                                          // only on the wall ring (the slopes hold onto it)
+        const int dir = forcedWall.contains(cell) ? 0 : windowDir(lx, ly, lz);   // there are no windows at an entrance
+        addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : IdGlass) : structFor(ly));
+        if (dir) ++nWindows;
+        if (dir)                                                // a window all the way through (a user request):
+        {                                                       // the second block of the two-layer wall behind the glass
+            const bool ok = (dir == 1 && lx + 1 < sx) || (dir == -1 && lx > 0)
+                         || (dir == sxy && lz + 1 < sz) || (dir == -sxy && lz > 0);
+            if (ok)
+            {
+                const int inner = cell + dir;
+                if (grid[inner] == char(4))
+                {
+                    grid[inner] = char(5);                      // 5 — a hole behind the glass (a skip in the lining)
+                    // A flower pot on the windowsill (a user request): with a 30% chance behind the
+                    // LOWER glass of the strip a flower_pot with a random flower appears — it is visible from
+                    // the street through the glass, it stands on the wall block of the row under the window. The exception is malls.
+                    // A holder is mandatory: the row under the hole must be written (4) or be blind (1).
+                    const quint32 hp = lineHash(pairKey(minx + lx, minz + lz) ^ (qint64(ly) << 32)
+                                                 ^ 0xF10E5ull);
+                    const int below = grid[inner - sx];         // ly>=1: the window is not in the bottom row
+                    // In a 2×2 window the windowsill is under the LEFT glass of the pair (a window = one planter, not
+                    // two; this also keeps the pot density from eating the "see-through" of the windows in the big-check).
+                    const int alongP = (dir == 1 || dir == -1) ? lz : lx;
+                    const bool potCol = !wide2 || ((((alongP % 4) + 4) % 4) == 1);
+                    if (!panor && !obj.lift && potCol && (hp % 100u) < 30u
+                        && (ly - lyLow - (lowF ? 1 : 2)) % storyP == 1  // the pot — under the LOWER glass of the strip
+                        && (below == char(4) || below == char(1)))
+                    {
+                        const int px = minx + lx + (dir == 1 ? 1 : dir == -1 ? -1 : 0);
+                        const int pz = minz + lz + (dir == sxy ? 1 : dir == -sxy ? -1 : 0);
+                        const int fl = int((hp >> 8) % quint32(kFlowersCount));
+                        addVoxel(px, miny + ly, pz, quint16(IdFlowerPotBase + fl));
+                    }
+                }
+            }
+        }
+        ++added;
+    }
+    // Dark buildings without a single window: cobwebs in the upper corners of rooms (at the ceiling, where at least two walls meet).
+    if (nWindows == 0 && obj.closed && sx >= 5 && sz >= 5 && sy >= 4)
+    {
+        const quint16 web = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobweb"));
+        for (int lz = 1; lz < sz - 1; ++lz)
+            for (int ly = 1; ly < sy - 1; ++ly)
+                for (int lx = 1; lx < sx - 1; ++lx)
+                {
+                    const int c = lz * sxy + ly * sx + lx;
+                    if (grid[c] != char(3) || (grid[c + sx] != char(1) && grid[c + sx] != char(4))) continue;
+                    int walls = 0;
+                    const int nb[4] = { c - 1, c + 1, c - sxy, c + sxy };
+                    for (int n : nb) if (grid[n] == char(1) || grid[n] == char(4)) ++walls;
+                    if (walls < 2) continue;
+                    if (lineHash(pairKey(minx + lx, minz + lz) ^ (qint64(ly) << 32) ^ 0xC0B3EBull) % 100u < 35u)
+                        addVoxel(minx + lx, miny + ly, minz + lz, web);
+                }
+    }
+    if (obj.closed)
+    {
+        for (int c = 0; c < volI; ++c)
+        {
+            if (grid[c] != char(4)) continue;                 // only the lining (the deep body is emptiness)
+            const int lx = c % sx;
+            const int ly = (c / sx) % sy;
+            const int lz = c / (sx * sy);
+            if (priv && lyHigh >= 0 && ly == lyHigh - 1 && interiorCol(lx, ly, lz)) continue;
+                                                                    // private sector: the roof lining
+                                                                    // is not written in the interior — above the 2nd floor
+                                                                    // there is no ceiling, only slopes
+            if (lowF && ly == lyLow + 1 && grid[c + sx] == char(3)) continue;
+                                                                    // a 1-block foundation (a request): the floor slab
+                                                                    // lining row is not written in the interior —
+                                                                    // the walking cell of the 1st floor is a block lower
+            // LIFT==1 (a user request): WALLS 1 block thick — the wall lining
+            // (a horizontal neighbor — the surface "1") is NOT written into the store; the grid is NOT touched,
+            // everything that consumes the grid (slopes/cavity/stairs/partitions) lives as before.
+            // Cells with "1" above/below — the FLOOR/ROOF lining, requested "do not touch" —
+            // stay: the walls are thin, while the floor/ceiling are closed over the whole patch (without gaps at the walls).
+            if (obj.lift || shedThin)
+            {
+                const bool side1 = (lx > 0 && grid[c - 1] == char(1))
+                    || (lx + 1 < sx && grid[c + 1] == char(1))
+                    || (lz > 0 && grid[c - sxy] == char(1))
+                    || (lz + 1 < sz && grid[c + sxy] == char(1));
+                const bool vert1 = (ly > 0 && grid[c - sx] == char(1))
+                    || (ly + 1 < sy && grid[c + sx] == char(1));
+                if (side1 && (!vert1 || shedThin)) continue;                // a shed: the side lining is not written at the floor/roof either
+                if (ly + 1 < sy && grid[c + sx] == char(1)) continue;      // the lining UNDER the roof: the shaft ceiling is 1 block, not 2
+            }
+            const int bx = minx + lx, by = miny + ly, bz = minz + lz;
+            if (store.get(bx, by - sink, bz) != IdAir) continue;   // the surface takes priority
+            // "- sink" is mandatory: the store is written at the sunk level (addVoxel), and without the shift
+            // the check of the two rows missed — the row under the cap landed on the cap and the lining
+            // vanished as a strip around the whole perimeter (a "holey belt" in rooms).
+            addVoxel(bx, by, bz, structFor(ly));
+            ++added;
+        }
+    }
+    // Inter-floor stairs (a user request, globally for multi-storey buildings). The "head-on" criterion:
+    // we scan the cavity of the 1st floor row by row — where a flight window fits
+    // (storyP+1) x 2..3 blocks (the very "patch of ~6x10") — we put a staircase there; in LARGE
+    // houses (a cavity >= 200 cells) — a SECOND one, in the suitable window farthest from the first. The floor
+    // flights stand one above another in the same shafts. If a flight did not fit or on
+    // some floor there is a hole/obstacle in the window — that floor is served by a VERTICAL ladder
+    // along a blind wall. Steps and ladders are marked "5": the slab pass skips
+    // such cells (set(IdAir) is a no-op: a slab can only be NOT written), above the head of
+    // the top steps air remains, a torch/lamp/chest will not climb into the shaft. The heights
+    // are honest: the slab of floor k — lyLow+1+k*storyP (the same formula as in the slab pass),
+    // step j occupies the cell lyS-R+j (R = storyP, +1 in the private sector), the top one stands INSTEAD of
+    // the slab. "+sink" is
+    // not needed here: the foundation is already in the grid, an external shift dropped the flight under the floor.
+    QSet<ColKey> stairXZ;                                       // the cells (lx,lz) of flights and ladders: furniture is not placed in front of or under them
+    if (floors && obj.closed && storyP > 0 && nStories >= 2 && lyLow + 2 <= lyHigh - 2)
+    {
+        // The private sector: the walking level of the 1st floor is lyLow+1 (a 1-block foundation), one step more
+        // per flight (the lowest one stands IN the walking cell); the cavity mask — by the row lyLow+2,
+        // where the interior is still "3" (on the floor row of a thick mesh slab there would be a lining).
+        const int R = priv ? storyP + 1 : storyP;               // steps per flight (1 step = 1 block)
+        const int lyC0 = lyLow + 2;                             // the row of the cavity mask (the air "3")
+        QVector<char> cav(sx * sz, 0);
+        for (int lz = 0; lz < sz; ++lz)
+            for (int lx = 0; lx < sx; ++lx)
+                cav[lz * sx + lx] = (grid[lz * sxy + lyC0 * sx + lx] == char(3));
+        auto rectCav = [&cav, sx](int x0, int z0, int w, int h)
+        {   // the whole rectangle x0..x0+w-1, z0..z0+h-1 — a cavity?
+            for (int z = z0; z < z0 + h; ++z)
+                for (int x = x0; x < x0 + w; ++x)
+                    if (!cav[z * sx + x]) return false;
+            return true;
+        };
+        // The flight slot — the FIRST window that fits (R+1) x width: width 3 (a user request —
+        // "make 3 instead of 2 blocks of width"), did not fit — 2, then 1;
+        // a run along X, then along Z. THE FLIGHT IS TURNED (a user request: "the entrance to stairs
+        // is always right against a wall — turn the direction, it is easier to enter"): the cell at
+        // the start wall is the UPPER LANDING (the slab cell of the k-th floor at the "5" of the top step),
+        // the steps go FROM it into the depth of the room; the bottom step — behind it there is always an entrance
+        // cell (in a room R+2 fits — there it is free, otherwise the bottom step is at the far
+        // wall, but a block away from it). "Uphill" — AGAINST the scan direction (-X / -Z).
+        struct Slot { int s0, t0, w; bool runX; };
+        const int need = R + 1;                                 // the upper landing + the steps
+        auto slotRect = [need](const Slot& s)                   // the slot rectangle [xa0,xa1,za0,za1]
+        {
+            return s.runX ? QVector<int>{ s.s0, s.s0 + need - 1, s.t0, s.t0 + s.w - 1 }
+                          : QVector<int>{ s.t0, s.t0 + s.w - 1, s.s0, s.s0 + need - 1 };
+        };
+        // avoid==nullptr — the first one that fits (slot 0, the old behavior). Otherwise — we look for a WIDE
+        // (first 3, then 2, then 1) rectangle that fits, does not intersect avoid even
+        // diagonally (a gap >= 1) and is no closer than minD from its center (sqrt: minD is the square of the
+        // distance): width is more important than a couple of extra blocks of distance (a request: "the staircase — 3 blocks").
+        auto findSlot = [&](const Slot* avoid, double minD = 0.0, bool entry = false) -> Slot
+        {
+            Slot best{ -1, 0, 0, true };
+            const QVector<int> av = avoid ? slotRect(*avoid) : QVector<int>();
+            for (int w = 3; w >= 1; --w)
+            {
+                Slot wBest{ -1, 0, 0, true };
+                double wBestD = -1.0;
+                for (int rz = 0; rz < 2; ++rz)                  // the window along X (0) or along Z (1)
+                {
+                    const bool rX = (rz == 0);
+                    const int aMax = rX ? sx : sz, bMax = rX ? sz : sx;
+                    if (aMax < need || bMax < w) continue;
+                    for (int t = 0; t + w <= bMax; ++t)
+                        for (int a = 0; a + need <= aMax; ++a)
+                        {
+                            if (!rectCav(rX ? a : t, rX ? t : a, rX ? need : w, rX ? w : need))
+                                continue;
+                            if (entry)
+                            {   // a request: "a base right against a wall/partition — move it away
+                                // by 1 block so that the cell IN FRONT of the bottom step is free".
+                                // The entrance cell = a step beyond the window on the side of the bottom step
+                                // (the bottom one is at the max end, the cavity is where the window is).
+                                if (a + need >= aMax) continue;   // beyond the window the grid edge = a wall
+                                if (!(rX ? rectCav(a + need, t, 1, w) : rectCav(t, a + need, w, 1)))
+                                    continue;
+                            }
+                            Slot cand{ a, t, w, rX };
+                            if (!avoid) return cand;            // first-fit: the first one is it
+                            const QVector<int> r = slotRect(cand);
+                            if (r[0] <= av[1] + 1 && av[0] - 1 <= r[1]
+                                && r[2] <= av[3] + 1 && av[2] - 1 <= r[3])
+                                continue;                       // it touches slot 0 — not suitable
+                            const double dx = (r[0] + r[1] - av[0] - av[1]) * 0.5;
+                            const double dz = (r[2] + r[3] - av[2] - av[3]) * 0.5;
+                            const double d = dx * dx + dz * dz;
+                            if (d <= wBestD) continue;
+                            wBestD = d;
+                            wBest = cand;
+                        }
+                }
+                if (wBest.s0 >= 0 && wBestD >= minD) { best = wBest; break; }
+            }
+            return best;
+        };
+        QVector<Slot> slotList;                                 // the name "slots" is taken by a Qt macro
+        // First — windows WITH A FREE ENTRANCE CELL in front of the bottom step (a request
+        // "pull away from the wall by 1 block IF POSSIBLE"); in a cramped house there may be no such window
+        // at all — then we place it as we can ("if there are no more places — fine").
+        Slot first = findSlot(nullptr, 0.0, true);
+        if (first.s0 < 0) first = findSlot(nullptr);
+        if (first.s0 >= 0) slotList << first;
+        // The second staircase (a user request: "in large-area buildings one staircase is
+        // not enough — put the second in the farthest suitable place"). "Large" —
+        // a cavity >= 200 cells; the second shaft must fit separately from the first and no closer than
+        // 6 blocks between centers, otherwise we settle for one.
+        {
+            int cavCount = 0;
+            for (char c : cav) cavCount += (c != 0);
+            if (first.s0 >= 0 && cavCount >= 200)
+            {
+                Slot far = findSlot(&first, 36.0, true);        // the same entrance priority
+                if (far.s0 < 0) far = findSlot(&first, 36.0);
+                if (far.s0 >= 0) slotList << far;
+            }
+        }
+        // A vertical ladder (plan B for a floor): a column in the cavity right against a REAL
+        // wall — we check the holder in the store over the WHOLE climb height (the grid "remembers"
+        // the lining, but windows/doors have already been cut out — the server would drop a ladder in a hole
+        // when loading the chunk). The ladder cells are marked "5": both a hole in the slab and "do not go here" for a light/chest.
+        const quint16 ladId[4] = { IdLadderN, IdLadderE, IdLadderS, IdLadderW };
+        const int ladDx[4] = { 0, -1, 0, 1 }, ladDz[4] = { 1, 0, -1, 0 };   // where the holder is
+        int prevLadLx = -1, prevLadLz = -1;                      // the ladder cell of the previous flight: the next one is searched as close as possible (if possible — strictly above it, a common shaft)
+        auto ladderFlight = [&](int lyBot, int lyTop)           // lyTop — the slab cell (it becomes a hole)
+        {
+            // Pass 0 — an "inner" ladder: the cell remains a cavity on ALL tiers of the flight and on the row of exit to the floor above (it does not go into the narrowing of a composite building / does not
+            // hit the roof of the lower part); the holder is a wall — a ready one, and where there is none in the cavity, it is built up by a post of the building material. Pass 1 — the former one
+            // (as it turns out: "if it is really bad — the ladder will be strange"). Among the suitable cells the one nearest to the ladder of the previous flight is taken (above it — if possible).
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                int bestLx = -1, bestLz = -1, bestD = 0, bestScore = std::numeric_limits<int>::max();
+                QVector<int> bestBuild;
+                for (int lz = 1; lz < sz - 1; ++lz)
+                    for (int lx = 1; lx < sx - 1; ++lx)
+                    {
+                        if (!cav[lz * sx + lx]) continue;
+                        if (pass == 0)
+                        {
+                            bool inside = lyTop + 1 < sy;
+                            for (int ly = lyBot; ly <= lyTop + 1 && inside; ++ly)
+                                if (grid[lz * sxy + ly * sx + lx] != char(3)) inside = false;
+                            if (!inside) continue;
+                        }
+                        for (int d = 0; d < 4; ++d)
+                        {
+                            const int hlx = lx + ladDx[d], hlz = lz + ladDz[d];
+                            const int hx = minx + hlx, hz = minz + hlz;
+                            bool holds = true;
+                            QVector<int> toBuild;                        // the tiers where the holder must be built up
+                            for (int ly = lyBot; ly <= lyTop && holds; ++ly)
+                            {
+                                if (store.get(hx, miny + ly - sink, hz) != IdAir) continue;
+                                if (pass == 0 && hlx >= 0 && hlx < sx && hlz >= 0 && hlz < sz && grid[hlz * sxy + ly * sx + hlx] == char(3)) toBuild.append(ly);
+                                else holds = false;
+                            }
+                            if (!holds) continue;
+                            bool free = true;
+                            for (int ly = lyBot; ly <= lyTop && free; ++ly)
+                                if (store.get(minx + lx, miny + ly - sink, minz + lz) != IdAir) free = false;
+                            if (!free) continue;
+                            const int score = prevLadLx < 0 ? (lz * sx + lx)
+                                                            : ((lx - prevLadLx) * (lx - prevLadLx) + (lz - prevLadLz) * (lz - prevLadLz)) * 8 + int(toBuild.size());
+                            if (score < bestScore) { bestScore = score; bestLx = lx; bestLz = lz; bestD = d; bestBuild = toBuild; }
+                        }
+                    }
+                if (bestLx < 0) continue;
+                const int lx = bestLx, lz = bestLz, d = bestD;
+                const int hlx = lx + ladDx[d], hlz = lz + ladDz[d];
+                for (int ly : bestBuild) { addVoxel(minx + hlx, miny + ly, minz + hlz, id); grid[hlz * sxy + ly * sx + hlx] = char(4); ++added; }   // a holder post
+                for (int ly = lyBot; ly <= lyTop; ++ly)
+                {
+                    addVoxel(minx + lx, miny + ly, minz + lz, ladId[d]);
+                    stairXZ.insert(pairKey(lx, lz));
+                    grid[lz * sxy + ly * sx + lx] = char(5);
+                    ++added;
+                }
+                prevLadLx = lx; prevLadLz = lz;
+                return;
+            }
+        };
+        // (priv is the common flag of the private sector, declared before the surface pass)
+        // The flight of slot sl to the floor with the slab plane lyS: commit=false — only a check "did it fit", commit=true — it also places the steps/the head.
+        auto tryFlight = [&](const Slot& sl, int lyS, bool commit) -> bool
+        {
+            const int s0 = sl.s0, t0 = sl.t0, width = sl.w;
+            const bool runX = sl.runX;
+            bool fits = s0 >= 0;                            // "holes": is the whole flight a cavity (3)?
+            for (int wI = 0; wI < width && fits; ++wI)
+                for (int j = 1; j <= R && fits; ++j)
+                {
+                    const int lx = runX ? (s0 + R - j + 1) : (t0 + wI), lz = runX ? (t0 + wI) : (s0 + R - j + 1);
+                    const int lyJ = lyS - R + j;
+                    const char gS = grid[lz * sxy + lyJ * sx + lx];
+                    // the private sector: the bottom step stands in the row of the unwritten floor lining (4),
+                    // the top one — in the row of the roof lining under the roof (4), if the slab = lyHigh-1
+                    if (gS != char(3) && !priv) fits = false;
+                    else if (priv && gS != char(3) && gS != char(4)) fits = false;
+                }
+            // "No ceiling above the staircase" (a user request): the SLAB cells above the last three steps
+            // — where the feet and the head of the person climbing stand — must be a cavity (in fact
+            // the player hit their head even at R-3: when stepping up the head flies into the cell further,
+            // so the freedom window is extended by one more block). If there is a wall there (a facade/partition is already
+            // in the store) — the flight is unsuitable, the floor is given to a vertical ladder.
+            const int jHead0 = std::max(1, R - 3);          // the bottom step of the "freedom window"
+            for (int wI = 0; wI < width && fits; ++wI)
+                for (int j = jHead0; j <= R - 1 && fits; ++j)
+                {
+                    const int lx = runX ? (s0 + R - j + 1) : (t0 + wI), lz = runX ? (t0 + wI) : (s0 + R - j + 1);
+                    const char gH = grid[lz * sxy + lyS * sx + lx];
+                    if (gH != char(3) && !priv) fits = false;   // private: the slab = lyHigh-1 — a lining (4)
+                    else if (priv && gH != char(3) && gH != char(4)) fits = false;
+                }
+            // The head above the TOP steps: two rows above the plane (the feet and the head on the landing of the next floor) must be a
+            // cavity. Important for composite buildings of different heights: the number of floors is counted by the highest part, and a flight could
+            // hit the roof of the low one (the roof/lining above the landing).
+            if (!priv)
+                for (int wI = 0; wI < width && fits; ++wI)
+                    for (int j = jHead0; j <= R && fits; ++j)
+                    {
+                        const int lx = runX ? (s0 + R - j + 1) : (t0 + wI), lz = runX ? (t0 + wI) : (s0 + R - j + 1);
+                        if (lyS + 2 >= sy || grid[lz * sxy + (lyS + 1) * sx + lx] != char(3) || grid[lz * sxy + (lyS + 2) * sx + lx] != char(3))
+                            fits = false;
+                    }
+            // A step must not lie on something already standing (someone else's flight/ladder/furniture in the store)
+            if (fits && !commit)
+                for (int wI = 0; wI < width && fits; ++wI)
+                    for (int j = 1; j <= R && fits; ++j)
+                    {
+                        const int lx = runX ? (s0 + R - j + 1) : (t0 + wI), lz = runX ? (t0 + wI) : (s0 + R - j + 1);
+                        const int lyJ = lyS - R + j;
+                        if (store.get(minx + lx, miny + lyJ - sink, minz + lz) != IdAir) fits = false;
+                    }
+            if (!fits) return false;                        // this slot did not fit for the floor
+            if (!commit) return true;
+            // The steps are STONE in all buildings except the private sector (the pitched roof codes —
+            // there the flight is oak, to match the pitched roof). A user request.
+            const quint16 fid = runX ? (priv ? IdStairsW : IdStoneStairsW)  // "uphill" AGAINST
+                                     : (priv ? IdStairsN : IdStoneStairsN); // the scan: along -X / -Z
+            for (int wI = 0; wI < width; ++wI)
+                for (int j = 1; j <= R; ++j)
+                {
+                    const int lx = runX ? (s0 + R - j + 1) : (t0 + wI), lz = runX ? (t0 + wI) : (s0 + R - j + 1);
+                    const int ly = lyS - R + j;
+                    stairXZ.insert(pairKey(lx, lz));
+                    addVoxel(minx + lx, miny + ly, minz + lz, fid);   // j=R stands INSTEAD of the slab:
+                    grid[lz * sxy + ly * sx + lx] = char(5);          // the slab pass sees "5" — skips
+                    ++added;
+                }
+            // The head: columns jHead0..R-1 at the slab level — the slab does not lie there (the mark "5"),
+            // otherwise the person climbing hits their head on the floor (a request "there must be no ceiling
+            // above the staircase" + a follow-up request: 2×2 windows are not enough, remove one more block of slab).
+            for (int wI = 0; wI < width; ++wI)
+                for (int j = jHead0; j <= R - 1; ++j)
+                {
+                    const int lx = runX ? (s0 + R - j + 1) : (t0 + wI), lz = runX ? (t0 + wI) : (s0 + R - j + 1);
+                    grid[lz * sxy + lyS * sx + lx] = char(5);
+                }
+            return true;
+        };
+        for (int k = 1; k < nStories; ++k)                      // the flight floor(k-1) -> floor k
+        {
+            const int lyS = lyLow + 1 + k * storyP;             // the slab plane — the same formula
+            if (lyS > lyHigh - (lowF ? 1 : 2)) break;           // as in the slab pass below; the private sector:
+                                                                // the slab INSTEAD of the ceiling — the row lyHigh-1 is allowed
+            bool anyFit = false;
+            for (const Slot& sl : slotList)
+                if (tryFlight(sl, lyS, true)) anyFit = true;
+            if (!anyFit)
+            {   // A building of different heights (for example low wings at the edges and a higher middle): for the upper floors that exist only over part of the building there are no stairs
+                // of the first floor — we look for a NEW slot right at this level (the widest window, as far as possible from those already standing); the next floors use the same one.
+                Slot nb{ -1, 0, 0, true };
+                for (int w = 3; w >= 1 && nb.s0 < 0; --w)
+                {
+                    double nbD = -1.0;
+                    for (int rz = 0; rz < 2; ++rz)
+                    {
+                        const bool rX = (rz == 0);
+                        const int aMax = rX ? sx : sz, bMax = rX ? sz : sx;
+                        if (aMax < need || bMax < w) continue;
+                        for (int t = 0; t + w <= bMax; ++t)
+                            for (int a = 0; a + need <= aMax; ++a)
+                            {
+                                const Slot cand{ a, t, w, rX };
+                                if (!tryFlight(cand, lyS, false)) continue;
+                                const QVector<int> r = slotRect(cand);
+                                double dmin = 1e18;
+                                for (const Slot& o : slotList)
+                                {
+                                    const QVector<int> ro = slotRect(o);
+                                    const double dx = (r[0] + r[1] - ro[0] - ro[1]) * 0.5, dz = (r[2] + r[3] - ro[2] - ro[3]) * 0.5;
+                                    dmin = std::min(dmin, dx * dx + dz * dz);
+                                }
+                                if (slotList.isEmpty()) dmin = 0.0;
+                                if (dmin > nbD) { nbD = dmin; nb = cand; }
+                            }
+                    }
+                }
+                if (nb.s0 >= 0)
+                {
+                    slotList << nb;
+                    anyFit = tryFlight(nb, lyS, true);
+                }
+            }
+            if (!anyFit)                                        // not a single flight fit — a vertical one
+                ladderFlight(lyS - R + 1, lyS);                 // the bottom ladder — in the walking cell of the floor
+        }
+    }
+    // Inter-floor slabs (1 block) — deep body cells at the floor level of each next floor;
+    // the roof serves as the top slab itself, the floor of the first floor is already two-layered (surface+lining).
+    // The formula lyLow+1+k*storyP = the walking level of the previous floor + storyP. "+sink" must not
+    // be woven in: the foundation is already inside the grid — a shift diverged from the stairs (slabs above a flight).
+    if (floors && obj.closed && storyP > 0)
+    {
+        for (int k = 1; k < nStories; ++k)
+        {
+            const int lyS = lyLow + 1 + k * storyP;
+            if (lyS > lyHigh - (lowF ? 1 : 2)) break;           // above — it is already the roof lining; the private sector:
+                                                                // the slab in the row lyHigh-1 = the ceiling of the 1st floor
+            for (int lz = 0; lz < sz; ++lz)
+                for (int lx = 0; lx < sx; ++lx)
+                {
+                    const int c = lz * sxy + lyS * sx + lx;
+                    if (grid[c] != char(3) && !((lowF || obj.lift) && grid[c] == char(4))) continue;
+                                                                // the deep body = the slab itself; in the private
+                                                                // sector the slab may lie in the row of the removed
+                                                                // lining (the store is empty there — a skip above);
+                                                                // LIFT (thin walls): the wall lining row
+                                                                // is empty in the store — the slab reaches the wall
+                    const int bx = minx + lx, by = miny + lyS, bz = minz + lz;
+                    if (store.get(bx, by - sink, bz) != IdAir) continue;
+                    addVoxel(bx, by, bz, structId);              // the floor slab — gray concrete (structId==0 -> the wall material)
+                    ++added;
+                }
+        }
+    }
+    // A one-storey private house (log walls): there is no floor between stories (fewer than 6 rows, the slab
+    // lyLow+5 does not lie), but a ceiling over the room is needed — planks on the top row of walls (lyHigh), under
+    // the roof slopes. We never write the flat interior cap of a private house, so here the cell
+    // is still a "surface" (1) or an empty lining — we write it with planks over the whole patch.
+    if (woodSingle && priv && floors && obj.closed && storyP > 0 && lyHigh >= 0)
+    {
+        const int lyS = lyHigh;
+        for (int lz = 0; lz < sz; ++lz)
+            for (int lx = 0; lx < sx; ++lx)
+            {
+                const int c = lz * sxy + lyS * sx + lx;
+                if (grid[c] != char(1) && grid[c] != char(3) && grid[c] != char(4)) continue;
+                const int bx = minx + lx, by = miny + lyS, bz = minz + lz;
+                if (store.get(bx, by - sink, bz) != IdAir) continue;
+                addVoxel(bx, by, bz, IdOakPlanks);
+                ++added;
+            }
+    }
+    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
+    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
+    auto dkey = [](int bx, int by, int bz)
+    { return (qint64(bx + 32768) << 29) | (qint64(bz + 32768) << 12) | qint64(by); };
+    QSet<ColKey> doorCells;
+    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
+    // THE ADDRESS PLATE (a request): one candidate per compass side — a wall of the 1st floor at eye height, free outside,
+    // not a window and not next to an entrance; closer to the middle of the facade. The needed side (the nearest to a road) is chosen in Export().
+    if (signs && floors && obj.closed && storyP > 0 && !obj.lift && obj.kind == McWorldExporter::McObject::Building
+        && (!obj.streetType.isEmpty() || !obj.street.isEmpty() || !obj.number.isEmpty()))
+    {
+        const int lySg = (lowF ? lyLow + 1 : lyLow + 2) + 1;
+        if (lySg < lyHigh - 1)
+        {
+            static const int sdx[4] = { 0, 1, 0, -1 }, sdz[4] = { -1, 0, 1, 0 };
+            SignCand sc;
+            sc.y = miny + lySg - sink;
+            sc.l1 = obj.streetType; sc.l2 = obj.street; sc.l3 = obj.number;
+            int bestScore[4] = { 1 << 20, 1 << 20, 1 << 20, 1 << 20 };
+            const int ccx = (fx0 + fx1) / 2, ccz = (fz0 + fz1) / 2;
+            for (int cell : surfaceCells)
+            {
+                if ((cell / sx) % sy != lySg || grid[cell] != char(1)) continue;
+                const int lx = cell % sx, lz = cell / sxy;
+                if (windowDir(lx, lySg, lz)) continue;
+                for (int d = 0; d < 4; ++d)
+                {
+                    const int ox = lx + sdx[d], oz = lz + sdz[d];
+                    const char go = (ox < 0 || ox >= sx || oz < 0 || oz >= sz) ? char(0) : grid[oz * sxy + lySg * sx + ox];
+                    if (go != char(0) && go != char(2)) continue;
+                    if (store.get(minx + ox, sc.y, minz + oz) != IdAir) continue;
+                    bool nearDoor = false;
+                    for (int t = -1; t <= 1 && !nearDoor; ++t)
+                        for (int rr = -1; rr <= 0; ++rr)
+                        {
+                            const int tx = lx + (sdx[d] == 0 ? t : 0), tz = lz + (sdx[d] == 0 ? 0 : t);
+                            if (doorCells.contains(dkey(minx + tx, miny + lySg + rr, minz + tz))) { nearDoor = true; break; }
+                        }
+                    if (nearDoor) continue;
+                    const int sc2 = std::abs(sdx[d] == 0 ? lx - ccx : lz - ccz);
+                    if (sc2 < bestScore[d])
+                    {
+                        bestScore[d] = sc2;
+                        sc.x[d] = minx + ox; sc.z[d] = minz + oz; sc.ok[d] = true;
+                    }
+                }
+            }
+            if (sc.ok[0] || sc.ok[1] || sc.ok[2] || sc.ok[3]) signs->append(sc);
+        }
+    }
+    QSet<ColKey> partSet;                 // the blocks of inter-room partitions — we hang paintings on them
+    // Room partitions (a user request: "large buildings without walls inside — divide them
+    // into spacious rooms with passages"). A guillotine cut of the set of cavity cells: the building is
+    // a prism, the mask of the 1st floor suits all floors. Rooms of 100..300 cells; shopping malls
+    // (44318000) — 300..900. If the area > max, but any division gives a half < min — we do not divide
+    // (the very "rare exception"). The columns of stair shafts/ladders (with the mark "5") are excluded
+    // from the mask — a partition never enters a shaft. In each wall exactly one passage
+    // of width 1 (malls — 2) and height 2: the room graph is a tree, so everything is connected. The partitions
+    // are laid with the building wall block and marked "4" in the grid — chests/spawners/light do not
+    // climb onto them, and torches can hang on them as on ordinary walls.
+    if (floors && obj.closed && storyP > 0 && lyLow + 2 <= lyHigh - 4)
+    {
+        const int minA = obj.code == 44318000 ? 300 : 100;
+        const int maxA = obj.code == 44318000 ? 900 : 300;
+        const int doorW = obj.code == 44318000 ? 2 : 1;
+        const int lyF0 = lyLow + 2;                             // the walking level of the 1st floor
+        QVector<QPair<int, int>> cells0;
+        for (int lz = 0; lz < sz; ++lz)
+            for (int lx = 0; lx < sx; ++lx)
+            {
+                if (grid[lz * sxy + lyF0 * sx + lx] != char(3)) continue;
+                bool shaft = false;                             // is the column a shaft? (steps/ladders)
+                for (int ly = lyF0; ly <= lyHigh && !shaft; ++ly)
+                    if (grid[lz * sxy + ly * sx + lx] == char(5)) shaft = true;
+                if (!shaft) cells0.append(qMakePair(lx, lz));
+            }
+        if (cells0.size() > maxA)                               // there is something to cut
+        {
+            quint32 ph = 2166136261u;                           // the same FNV+xorshift as for treasures
+            auto pmix = [&ph](long long v)
+            { for (int b = 0; b < 8; ++b) { ph ^= quint32((v >> (b * 8)) & 0xFF) + quint32(b * 31 + 7); ph *= 16777619u; } };
+            pmix(minx); pmix(miny); pmix(minz); pmix(sx); pmix(sz); pmix(cells0.size());
+            auto prnd = [&ph](int mod) -> int
+            { ph ^= ph << 13; ph ^= ph >> 17; ph ^= ph << 5; return mod > 0 ? int(ph % quint32(mod)) : 0; };
+            struct Wall { int posZ; bool alongX; QVector<QPair<int, int>> cells; int d0, d1; };
+            //   alongX=true — we cut along Z (the wall cells have z==posZ, the wall runs along X)
+            QVector<Wall> walls;
+            auto split = [&](auto&& self, const QVector<QPair<int, int>>& cs, int depth) -> void
+            {
+                if (cs.size() <= maxA || depth > 8) return;
+                int xa0 = sx, xa1 = -1, za0 = sz, za1 = -1;
+                QSet<ColKey> set;
+                for (const auto& p : cs)
+                {
+                    xa0 = qMin(xa0, p.first); xa1 = qMax(xa1, p.first);
+                    za0 = qMin(za0, p.second); za1 = qMax(za1, p.second);
+                    set.insert((qint64(p.first) << 20) | p.second);
+                }
+                const int total = cs.size();
+                int axes[2] = { 1, 0 };                         // the long side of the bbox first
+                if ((xa1 - xa0) > (za1 - za0)) { axes[0] = 0; axes[1] = 1; }
+                for (int ai = 0; ai < 2; ++ai)
+                {
+                    const bool byZ = axes[ai] == 1;             // do we cut along Z?
+                    const int c0 = byZ ? za0 : xa0, c1 = byZ ? za1 : xa1;
+                    QVector<int> cnt(c1 - c0 + 1, 0);
+                    for (const auto& p : cs) ++cnt[(byZ ? p.second : p.first) - c0];
+                    int bestPos = -1, bestDiff = 1 << 30, pref = 0;
+                    for (int c = c0; c <= c1; ++c)
+                    {
+                        const int left = pref, right = total - pref - cnt[c - c0];
+                        pref += cnt[c - c0];
+                        if (!cnt[c - c0] || left < minA || right < minA) continue;
+                        const int diff = qAbs(left - right);
+                        if (diff < bestDiff) { bestDiff = diff; bestPos = c; }
+                    }
+                    if (bestPos < 0) continue;                  // this axis cannot be split into minima
+                    QVector<QPair<int, int>> wc, ls, rs;
+                    QVector<int> doorCand;                      // the orthogonal coordinates of cells with cells on both sides
+                    for (const auto& p : cs)
+                    {
+                        const int c = byZ ? p.second : p.first;
+                        const int orth = byZ ? p.first : p.second;
+                        if (c == bestPos)
+                        {
+                            wc.append(p);
+                            const bool hasA = byZ ? set.contains((qint64(p.first) << 20) | (p.second - 1))
+                                                  : set.contains((qint64(p.first - 1) << 20) | p.second);
+                            const bool hasB = byZ ? set.contains((qint64(p.first) << 20) | (p.second + 1))
+                                                  : set.contains((qint64(p.first + 1) << 20) | p.second);
+                            if (hasA && hasB) doorCand.append(orth);
+                        }
+                        else if (c < bestPos) ls.append(p);
+                        else rs.append(p);
+                    }
+                    if (wc.isEmpty() || ls.isEmpty() || rs.isEmpty()) continue;
+                    std::sort(doorCand.begin(), doorCand.end());
+                    Wall w;
+                    w.alongX = byZ;                             // we cut along Z => the wall runs along X
+                    w.posZ = bestPos;
+                    w.cells = wc;
+                    w.d0 = w.d1 = 0;
+                    if (!doorCand.isEmpty())
+                    {
+                        int di = prnd(doorCand.size());
+                        w.d0 = doorCand[di];
+                        w.d1 = w.d0;
+                        if (doorW > 1 && di + 1 < doorCand.size() && doorCand[di + 1] == w.d0 + 1)
+                            w.d1 = w.d0 + 1;
+                    }
+                    walls << w;
+                    self(self, ls, depth + 1);
+                    self(self, rs, depth + 1);
+                    return;
+                }
+            };
+            split(split, cells0, 0);
+            // Thin walls (lift): the wall lining is empty in the store, and the end of a partition
+            // "does not reach" the facade by a block (a see-through gap, the same disease as with
+            // slabs). We complete the char4 rows at the ends into the line — the writing loop below
+            // will accept them itself (the store check protects against a double write).
+            if (obj.lift || shedThin)
+                for (Wall& w : walls)
+                {
+                    QSet<ColKey> have;
+                    for (const auto& p : w.cells) have.insert((qint64(p.first) << 20) | p.second);
+                    const int dx = w.alongX ? 1 : 0, dz = w.alongX ? 0 : 1;
+                    const int n = w.cells.size();
+                    for (int i = 0; i < n; ++i)             // the inner neighbors are "3", they will not pass the gate
+                        for (int s = -1; s <= 1; s += 2)
+                        {
+                            const int nx = w.cells[i].first + dx * s, nz = w.cells[i].second + dz * s;
+                            if (nx < 1 || nx >= sx - 1 || nz < 1 || nz >= sz - 1) continue;
+                            if (grid[nz * sxy + lyF0 * sx + nx] != char(4)) continue;
+                            if (have.contains((qint64(nx) << 20) | nz)) continue;
+                            have.insert((qint64(nx) << 20) | nz);
+                            w.cells.append(qMakePair(nx, nz));
+                        }
+                }
+            // The walls of the floors: from the walking level to the bottom cell of the slab of the next floor
+            // (the top floor — up to the ceiling: the column goes up to the first non-air cell, the roof
+            // will stop it itself). The passage is 2 blocks high. The private sector — ONLY the 1st floor
+            // (a user request: "a partition goes above the first floor by 1 block,
+            // partitions are not needed on the second floor"): the 2nd floor = a mezzanine under the slopes.
+            for (int k = 0; k < (priv ? 1 : qMax(1, nStories)); ++k)
+            {
+                const int lyBot = (lowF && k == 0 ? lyLow + 1 : lyF0) + k * storyP;  // the floor of a private house — a block lower
+                const int lyTop = (k + 1 < nStories) ? qMin(lyLow + (k + 1) * storyP, lyHigh - 3)
+                                                     : (priv ? lyHigh - 2 : lyHigh - 1);  // a private house has no ceiling —
+                                                                 // we leave the lining row to the roof skips
+                if (lyBot > lyTop) continue;
+                for (const Wall& w : walls)
+                    for (const auto& pc : w.cells)
+                    {
+                        const int lx = pc.first, lz = pc.second;
+                        const int orth = w.alongX ? lx : lz;   // along what the opening is counted
+                        for (int ly = lyBot; ly <= lyTop; ++ly)
+                        {
+                            if (orth >= w.d0 && orth <= w.d1 && ly <= lyBot + 1)
+                            {   // the opening — we remember both cells (for the "Interiors")
+                                const int byd = miny + ly;
+                                if (byd >= 0) doorCells.insert(dkey(minx + lx, byd, minz + lz));
+                                continue;
+                            }
+                            const int c = lz * sxy + ly * sx + lx;
+                            if (grid[c] != char(3)
+                                && !(((lowF && ly == lyLow + 1) || obj.lift || shedThin) && grid[c] == char(4))) continue;
+                                                                // private: the bottom row of the partition stands
+                                                                // on the row of the removed floor lining (the store is empty);
+                                                                // lift: the ends of the line — an empty wall lining
+                            const int bx = minx + lx, by = miny + ly, bz = minz + lz;
+                            if (store.get(bx, by - sink, bz) != IdAir) continue;
+                            addVoxel(bx, by, bz);
+                            partSet.insert(dkey(bx, by, bz));
+                            grid[c] = char(4);
+                            ++added;
+                        }
+                    }
+            }
+        }
+    }
+    // "Treasures" (bldpol with floors only, a user request): a chest on EVERY 5th FLOOR of the city —
+    // the floor counter runs through all buildings (5 one-storey in a row — a treasure in the fifth house;
+    // 5 two-storey — in the third on the 1st floor and in the fifth on the 2nd). In 50% of cases we try a DOUBLE
+    // chest: two chest blocks type=left/right, facing=north, neighbors along X — vanilla joins them
+    // into one inventory for two loots; if there is no free pair — a single one. The stack/place/tables — from
+    // an xorshift seeded with the house geometry: the same input — the same layout.
+    if (floors && obj.closed && storyP > 0 && storyCounter && chests && sx >= 8 && sz >= 8)
+    {
+        quint32 rh = 2166136261u;
+        auto mix = [&rh](long long v)
+        { for (int b = 0; b < 8; ++b) { rh ^= quint32((v >> (b * 8)) & 0xFF) + quint32(b * 31 + 7); rh *= 16777619u; } };
+        mix(minx); mix(miny); mix(minz); mix(sx); mix(sz); mix(nStories);
+        auto rnd = [&rh](int mod) -> int
+        { rh ^= rh << 13; rh ^= rh >> 17; rh ^= rh << 5; return mod > 0 ? int(rh % quint32(mod)) : 0; };
+        for (int k = 0; k < nStories; ++k)
+        {
+            ++*storyCounter;
+            // Monster spawners (a user request): the same "city" floor counter as for
+            // chests; on every 15th floor — 50/50 to put a spawner into the cavity of this floor,
+            // the type: 70% zombie / 15% skeleton / 15% spider. The randomness is a SEPARATE xorshift stream
+            // (seeded by the geometry + the floor number) so that the chest layout does not shift.
+            // Sheds/utility structures (CODE 44000000, a request): spawners twice as often — the second slot of the cycle
+            // (every 15th floor of the city + shifted by 7), the rest of the choice (50/50, the type) is the same.
+            if (*storyCounter % 15 == 0 || (obj.code == 44000000 && *storyCounter % 15 == 7))
+            {
+                quint32 sh = 2166136261u;
+                auto smix = [&sh](long long v)
+                { for (int b = 0; b < 8; ++b) { sh ^= quint32((v >> (b * 8)) & 0xFF) + quint32(b * 31 + 7); sh *= 16777619u; } };
+                smix(minx); smix(miny); smix(minz); smix(sx); smix(sz); smix(nStories); smix(*storyCounter);
+                auto srnd = [&sh](int mod) -> int
+                { sh ^= sh << 13; sh ^= sh >> 17; sh ^= sh << 5; return mod > 0 ? int(sh % quint32(mod)) : 0; };
+                if (srnd(2) == 0)                               // 50/50 — we place it
+                {
+                    const int lyP = (lowF && k == 0 ? lyLow + 1 : lyLow + 2) + k * storyP;  // the cell on the floor
+                    if (lyP <= lyHigh - 3)
+                    {
+                        const int tp = srnd(100);               // the type: 70/15/15
+                        const int type = tp < 70 ? 0 : (tp < 85 ? 1 : 2);  // kSpawnerTypes
+                        for (int tryN = 0; tryN < 60; ++tryN)
+                        {
+                            const int lx = 3 + srnd(sx - 6), lz = 3 + srnd(sz - 6);
+                            const int c = lz * sxy + lyP * sx + lx;
+                            if (grid[c] != char(3)
+                                && !(lowF && lyP == lyLow + 1 && grid[c] == char(4))) continue;  // the cavity (the floor of a private house — 4)
+                            {   // the room is no smaller than 7×7: around the spawner (the center) — a 7×7 square of free floor cells
+                                bool roomOk = (lx >= 3 && lx + 3 < sx && lz >= 3 && lz + 3 < sz);
+                                for (int dz = -3; dz <= 3 && roomOk; ++dz)
+                                    for (int dx = -3; dx <= 3; ++dx)
+                                    {
+                                        const char g2 = grid[(lz + dz) * sxy + lyP * sx + lx + dx];
+                                        if (g2 != char(3) && !(lowF && lyP == lyLow + 1 && g2 == char(4))) { roomOk = false; break; }
+                                    }
+                                if (!roomOk) continue;
+                            }
+                            const char below = grid[c - sx];
+                            if (below != char(1) && below != char(3) && below != char(4)) continue;
+                            const int bx = minx + lx, by = miny + lyP, bz = minz + lz;
+                            if (store.get(bx, by - sink, bz) != IdAir) continue;
+                            addVoxel(bx, by, bz, IdSpawner);     // one block for all types —
+                            if (spawners)                        //  the monster is in the block_entity
+                                spawners->append(SpawnerSite{ bx, by - sink, bz, type });
+                            ++added;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (*storyCounter % 5 != 0) continue;                   // every 5th floor of the city
+            const int lyC = (lowF && k == 0 ? lyLow + 1 : lyLow + 2) + k * storyP;  // the cell on the floor of this floor
+            if (lyC > lyHigh - 3) continue;                         // there is no full air above — the floor is simply counted
+            const bool wantDouble = rnd(2) == 0;                    // 50% — a double one (a user request)
+            for (int tryN = 0; tryN < 24; ++tryN)
+            {
+                const int lx = 3 + rnd(sx - 6);                     // not by the wall: 2 wall layers + a passage
+                const int lz = 3 + rnd(sz - 6);
+                const int c = lz * sxy + lyC * sx + lx;
+                if (grid[c] != char(3)
+                    && !(lowF && lyC == lyLow + 1 && grid[c] == char(4))) continue;  // the cavity of the house
+                                                                      // (in the private sector the floor is the removed lining "4")
+                const char below = grid[c - sx];                    // the chest stands on the floor/slab
+                if (below != char(1) && below != char(3) && below != char(4)) continue;
+                const int bx = minx + lx, by = miny + lyC, bz = minz + lz;
+                if (store.get(bx, by - sink, bz) != IdAir) continue;
+                const bool shedChest = (obj.code == 44000000);       // sheds: 35% of chests are expensive (and then mobs are nearby), for houses 15%
+                bool dbl = false;
+                if (wantDouble && lx + 1 <= sx - 4)                 // the right half — a block to the east
+                {
+                    const char below2 = grid[c + 1 - sx];
+                    if ((grid[c + 1] == char(3)
+                         || (lowF && lyC == lyLow + 1 && grid[c + 1] == char(4)))
+                        && (below2 == char(1) || below2 == char(3) || below2 == char(4))
+                        && store.get(bx + 1, by - sink, bz) == IdAir)
+                    {
+                        addVoxel(bx, by, bz, IdChestL);
+                        addVoxel(bx + 1, by, bz, IdChestR);         // each block with its own table — in a double one 2 locs
+                        chests->append(ChestSite{ bx, by - sink, bz, pickChestLoot(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
+                        chests->append(ChestSite{ bx + 1, by - sink, bz, pickChestLoot(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
+                        added += 2;
+                        dbl = true;
+                    }
+                }
+                if (!dbl)
+                {
+                    addVoxel(bx, by, bz, IdChest);
+                    chests->append(ChestSite{ bx, by - sink, bz, pickChestLoot(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
+                    ++added;
+                }
+                if (shedChest && npcs && chests->last().tbl >= kLootT1)
+                {   // an expensive chest in a shed is guarded by 2–3 mobs of one kind in neighboring cells
+                    quint32 gh = quint32(bx) * 374761393u ^ quint32(bz) * 668265263u ^ quint32(by) * 2246822519u ^ 0x6A4Du;
+                    gh ^= gh >> 15; gh *= 2246822519u; gh ^= gh >> 13;
+                    const int want = 2 + int(gh % 2u), mobKind = int((gh >> 8) % 4u);   // 4 kinds equally
+                    int got = 0;
+                    for (int rr = 1; rr <= 2 && got < want; ++rr)
+                        for (int q = 0; q < 16 && got < want; ++q)
+                        {
+                            const int ang = (q + int(gh >> 12)) % 16;
+                            static const int gx[16] = { 1, 1, 0, -1, -1, -1, 0, 1, 2, 2, 0, -2, -2, -2, 0, 2 };
+                            static const int gz[16] = { 0, 1, 1, 1, 0, -1, -1, -1, 0, 1, 2, 1, 0, -1, -2, -1 };
+                            const int mx = bx + (rr == 1 ? gx[ang % 8] : gx[8 + ang % 8]);
+                            const int mz = bz + (rr == 1 ? gz[ang % 8] : gz[8 + ang % 8]);
+                            const int lx2 = mx - minx, lz2 = mz - minz;
+                            if (lx2 < 1 || lx2 >= sx - 1 || lz2 < 1 || lz2 >= sz - 1) continue;
+                            if (grid[lz2 * sxy + lyC * sx + lx2] != char(3)) continue;
+                            if (store.get(mx, by - sink, mz) != IdAir || store.get(mx, by - sink + 1, mz) != IdAir) continue;
+                            if (store.get(mx, by - sink - 1, mz) == IdAir) continue;
+                            NpcSite m;
+                            m.kind = 4; m.variant = mobKind; m.x = mx; m.z = mz; m.y = by - sink;
+                            m.yaw = int((gh >> (3 + got)) % 4u) * 90;
+                            npcs->append(m);
+                            ++got;
+                        }
+                }
+                break;
+            }
+        }
+    }
+    // The gable roof of the private sector (a user request) for bldpol with the codes
+    // 44400002 / 44400100 / 44400110: two slopes of oak half blocks (oak_slab, alternating
+    // type=bottom/top: a rise of 0.5 block per column — "first a half block in the lower position,
+    // then in the upper", the roof is half as tall as a stair one), the ridge along the long side;
+    // the gable triangles are filled with the building wall block. The cap cells stay in the GRID
+    // (supAt reads them), but the store of the cap/roof lining in the interior of a private house
+    // is not written — there is no flat roof.
+    // The extent is the REAL walls (the surface cells restriction), not the grid: the grid is wider by a 1-cell
+    // frame, the cornice with stairs wrote blocks into that frame outside the facade, their colMin raised the ground
+    // fill to the cornice height — a "stone armor" grew around the house (the user's remark).
+    if (obj.kind == McWorldExporter::McObject::Building && obj.closed
+        && (obj.code == 44400002 || obj.code == 44400100 || obj.code == 44400110)
+        && lyHigh >= 0)
+    {
+        if (fx1 - fx0 >= 4 && fz1 - fz0 >= 4)                   // the wall patch and the a/b axes are computed above,
+        {                                                       // before the surface pass (the roof needs them)
+        const int W = a1 - a0 + 1;                              // the width across the slopes
+        const int half = qMin(W / 2, 7);                        // slope columns per side (the ceiling — against y>319)
+        // A half-block slope (a user request: "stair roofs are TOO tall — build
+        // from half blocks: first the lower, then the upper"): the column jj from the cornice carries
+        // an oak_slab at the level lyHigh+1+jj/2 (the type alternates bottom/top by parity) — the surface
+        // rises by 0.5 block per column instead of a whole one, the ridge is about half as tall.
+        // jj is clamped to half-1: for wide houses a flat run goes with the same slab as
+        // the last step (a joint without a ledge), a separate "ridge of stairs" is not needed.
+        auto skatCell = [&](int d)                              // d — the column across the slope
+        {
+            const int jj = qMin(qMin(d - a0, a1 - d), half - 1);
+            return qMakePair(lyHigh + 1 + (jj >> 1), quint16(jj & 1) ? IdSlabTop : IdSlabBottom);
+        };
+        // The "armor" — L-shaped houses cover the polygon notch with the bbox roof: the slabs/gables
+        // written OVER EMPTINESS raised the ground fill to the cornice with their colMin (pillars
+        // of stone and earth at the walls — the user's remark). The roof attaches only to those columns
+        // where under it there is really a roof/wall of the grid (the capital draws char 1 over the whole
+        // polygon patch — the polygon notch stays zero).
+        auto supAt = [&](int lx, int lz)
+        {
+            for (int ly = lyHigh; ly >= lyHigh - 1 && ly >= 0; --ly)
+            {
+                const char g = grid[(lz * sy + ly) * sx + lx];
+                if (g == char(1) || g == char(4)) return true;
+            }
+            return false;
+        };
+        for (int d = a0; d <= a1; ++d)                          // the slabs from the cornices to the ridge
+        {
+            const auto sc = skatCell(d);
+            for (int t = b0; t <= b1; ++t)
+            {
+                if (ridgeZ) { if (supAt(d, t)) addVoxel(minx + d, miny + sc.first, minz + t, sc.second); }
+                else        { if (supAt(t, d)) addVoxel(minx + t, miny + sc.first, minz + d, sc.second); }
+            }
+        }
+        // The gables: triangles at both ends — the same block as the walls.
+        for (int end = 0; end < 2; ++end)
+        {
+            const int tEnd = end ? b1 : b0;
+            for (int d = a0; d <= a1; ++d)
+            {
+                if (!(ridgeZ ? supAt(d, tEnd) : supAt(tEnd, d))) continue;  // above the L notch — do not pour
+                const int top = skatCell(d).first;          // the bottom face of the slope — the slab above d
+                for (int ly = lyHigh + 1; ly < top; ++ly)
+                {
+                    const quint16 gId = privMode ? quint16(IdOakPlanks) : id;   // the gables of private houses — planks
+                    if (ridgeZ) addVoxel(minx + d,  miny + ly, minz + tEnd, gId);
+                    else        addVoxel(minx + tEnd, miny + ly, minz + d, gId);
+                }
+            }
+        }
+        // The cornice "soffit": in each column of the wall ring the air gap from the top of the
+        // ceiling (the capital) to the first roof plank above it
+        // is sewn up with oak planks. Where the slope slab lies on the capital — the soffit is zero (the first
+        // block above the ceiling is already dense). Columns without a roof above them (the notch of an L polygon) — we
+        // do not touch. We do not write the lattice above lyHigh: it is not there, the light below the cornice will not climb there anyway.
+        for (int lz = fz0; lz <= fz1; ++lz)
+            for (int lx = fx0; lx <= fx1; ++lx)
+            {
+                if (!(lx == fx0 || lx == fx1 || lz == fz0 || lz == fz1)) continue;  // only the perimeter
+                int top = -1;                                       // the first roof plank above the column
+                for (int ly = lyHigh + 1; ly <= lyHigh + half + 1; ++ly)
+                    if (store.get(minx + lx, miny + ly - sink, minz + lz) != IdAir) { top = ly; break; }
+                if (top < 0) continue;
+                int ceilTop = -1;                                   // the ceiling of the column (the capital/wall)
+                for (int ly = lyHigh; ly >= lyHigh - 2 && ceilTop < 0; --ly)
+                    if (store.get(minx + lx, miny + ly - sink, minz + lz) != IdAir) ceilTop = ly;
+                if (ceilTop < 0) continue;
+                for (int ly = ceilTop + 1; ly < top; ++ly)
+                    addVoxel(minx + lx, miny + ly, minz + lz, IdOakPlanks);
+            }
+        // "Sewing up the real perimeter" (a user request: "the second floor of the private sector
+        // without gables and a soffit — after building the roof walk along the perimeter of the building
+        // and finish with planks from the top block of the real wall to the roof of stairs"):
+        // the soffit above knows only the bbox frame, while the real walls may end INSIDE
+        // the frame (the notch of an L polygon — the end of a wing stands in the middle of the span and does not reach
+        // the slope: a through gap of a couple of floors). A wall column is one where at lyHigh
+        // the store has a block (we remove the interior cap of a private house — the cavity above
+        // the slab would not be filled that way). Above a wall column we look for the first roof plank
+        // (a slope slab/a gable) and sew up the air gap under it with oak planks.
+        // Where the slab lies right on the wall — a no-op; above a roof notch — we do not touch.
+        for (int lz = fz0; lz <= fz1; ++lz)
+            for (int lx = fx0; lx <= fx1; ++lx)
+            {
+                if (store.get(minx + lx, miny + lyHigh - sink, minz + lz) == IdAir) continue;
+                int top = -1;
+                for (int ly = lyHigh + 1; ly <= lyHigh + half + 2; ++ly)
+                    if (store.get(minx + lx, miny + ly - sink, minz + lz) != IdAir) { top = ly; break; }
+                if (top < 0) continue;                                  // above the notch — do not pour
+                for (int ly = lyHigh + 1; ly < top; ++ly)
+                    addVoxel(minx + lx, miny + ly, minz + lz, IdOakPlanks);
+            }
+        }
+    }
+    // The light inside (a user request): torches on the inner walls of floors — not often (a block
+    // ~1/10 by the cell hash, no closer than 6 blocks to already hanging lights) and carrying lamps under
+    // the floor (lantern hanging=true) with the same distance, so that the light comes in "spots", not a garland.
+    // A torch occupies a cavity cell next to the holder wall; facing is AWAY from the wall (the vanilla
+    // semantics). A hole behind glass (5) does not count as a holder — a torch does not fit in a window.
+    if (floors && obj.closed && storyP > 0)
+    {
+        auto cellHash = [](int x, int y, int z) -> quint32      // a deterministic "noise" of a cell
+        {
+            quint32 h = quint32(x) * 374761393u + quint32(y) * 668265263u + quint32(z) * 2246822519u;
+            h = (h ^ (h >> 15)) * 2246822519u;
+            return h ^ (h >> 13);
+        };
+        struct LightPt { int x, y, z; };
+        // where a light already hangs — for the distance; an 8×8 grid by (x,z): going over ALL lights for
+        // every candidate cell was quadratic (large buildings — hundreds of millions of checks)
+        QHash<ColKey, QVector<LightPt>> lights;
+        auto lightKey = [](int x, int z) { return pairKey(x >> 3, z >> 3); };
+        auto hasSlabAt = [&](int ly)                          // at the level ly a floor slab really lies
+        {
+            if (ly > (priv ? lyHigh - 1 : lyHigh - 2)) return false;  // private: the last slab = lyHigh-1
+            for (int k = 1; k < nStories; ++k)
+                if (ly == lyLow + 1 + k * storyP) return true;
+            return false;
+        };
+        auto tooClose = [&lights, hasSlabAt](int bx, int by, int bz, int minD)
+        {   // The lights of floors stand evenly in "spots" within their tier, but the distance is computed
+            // in THREE-DIMENSIONAL distance and taking the floors into account: if between the heights of two points
+            // a slab lies somewhere — these are different floors, and they do not "eat" each other (otherwise
+            // the light of the first floor would burn out all the light of the second, and vice versa — which made
+            // the stair openings the only sources in multi-storey buildings).
+            for (int gx = (bx - minD + 1) >> 3; gx <= (bx + minD - 1) >> 3; ++gx)
+            for (int gz = (bz - minD + 1) >> 3; gz <= (bz + minD - 1) >> 3; ++gz)
+            {
+                const auto bit = lights.constFind(pairKey(gx, gz));
+                if (bit == lights.constEnd()) continue;
+                for (const LightPt& p : bit.value())
+                {
+                if (p.x == bx && p.z == bz && p.y == by) continue;
+                const int dy = std::abs(p.y - by);
+                const int d2 = std::max(std::abs(p.x - bx), std::abs(p.z - bz));
+                if (d2 >= minD) continue;
+                bool split = false;                           // a slab strictly BETWEEN them?
+                for (int ly = std::min(p.y, by) + 1; !split && ly < std::max(p.y, by); ++ly)
+                    if (hasSlabAt(ly)) split = true;
+                if (!split && dy < minD) return true;         // one tier — we keep the distance volumetrically
+                }
+            }
+            return false;
+        };
+        for (int k = 0; k < nStories; ++k)
+        {
+            const int lyF = (lowF && k == 0 ? lyLow + 1 : lyLow + 2) + k * storyP;  // the floor level of the story
+            // — torches: two rows per floor (a user request — "evenly over all floors"):
+            // 2 blocks above the floor and 2 blocks above the slab of the next tier (the top row of an ordinary
+            // floor = the bottom row of the next one, so there are no duplicates). The cells of the cavity with a wall neighbor.
+            const int lyRows[2] = { lyF + 2, lyF + storyP + 2 };
+            for (int row = 0; row < 2; ++row)
+            {
+                const int lyT = lyRows[row];
+                if (lyT <= lyHigh - 2)
+                {
+                for (int lz = 1; lz < sz - 1; ++lz)
+                    for (int lx = 1; lx < sx - 1; ++lx)
+                    {
+                        const int c = lz * sxy + lyT * sx + lx;
+                        if (grid[c] != char(3)) continue;
+                        quint16 tid = 0;                      // we look for the holder in a fixed order
+                        // The holder is a cell where a block REALLY stands (the store): the grid knows the lining,
+                        // but windows/doors/furniture have already cut holes in it — a torch must not be hung in such a hole,
+                        // the server will smear an unsupported wall_torch when loading the chunk.
+                        // The grid axes coincide with the world axes (addVoxel: minx+lx, miny+ly, minz+lz).
+                        auto holder = [&](int off)
+                        { return grid[c + off] == char(1) || grid[c + off] == char(4); };
+                        const int bxc = minx + lx, by = miny + lyT, bzc = minz + lz;
+                        if (lx + 1 < sx && holder(1) && store.get(bxc + 1, by - sink, bzc) != IdAir) tid = IdWallTorchW;
+                        else if (lx > 0 && holder(-1) && store.get(bxc - 1, by - sink, bzc) != IdAir) tid = IdWallTorchE;
+                        else if (lz + 1 < sz && holder(sxy) && store.get(bxc, by - sink, bzc + 1) != IdAir) tid = IdWallTorchN;
+                        else if (lz > 0 && holder(-sxy) && store.get(bxc, by - sink, bzc - 1) != IdAir) tid = IdWallTorchS;
+                        if (!tid) continue;
+                        // We do not hang a torch above a step: "there must be no ceiling above a staircase" —
+                        // a torch in the cell above the head of a flight is the same violator (and the
+                        // player knocks it down by touching it with their head). The steps are already in the store by this moment.
+                        {
+                            const quint16 underId = store.get(bxc, by - sink - 1, bzc);
+                            if (underId >= IdStoneStairsN && underId <= IdStoneStairsW) continue;
+                        }
+                        const int bx = bxc, bz = bzc;
+                        if (cellHash(bx, by, bz) % 10u != 0u) continue;   // "not too often"
+                        if (tooClose(bx, by, bz, 6)) continue;
+                        if (store.get(bx, by - sink, bz) != IdAir) continue;
+                        addVoxel(bx, by, bz, tid);
+                        lights[lightKey(bx, bz)].append(LightPt{ bx, by, bz });
+                        ++added;
+                    }
+                }
+            }
+            // — lamps: the cell right under the floor. For ordinary floors this is the level above the slab, for
+            // the LAST floor — the cell under the roof lining (otherwise in one-storey buildings the lamps have nothing to hang
+            // from). The holder is a written slab (grid 3 at the slab level) or the lining (1/4).
+            const int lyL = (k + 1 < nStories) ? lyLow + (k + 1) * storyP : lyHigh - 2;
+                                                                // the row under the slab k+1 (for the former scheme
+                                                                // = lyF + storyP - 2, the same formula)
+            if (lyL > lyF + 2 && lyL <= lyHigh - 2)
+            {
+                for (int lz = 2; lz < sz - 2; ++lz)
+                    for (int lx = 2; lx < sx - 2; ++lx)
+                    {
+                        const int c = lz * sxy + lyL * sx + lx;
+                        if (grid[c] != char(3)) continue;
+                        const char up = grid[c + sx];
+                        if (up != char(1) && up != char(4) && up != char(3)) continue;
+                        if (up == char(3) && !hasSlabAt(lyL + 1)) continue;
+                        // The holder must be a REAL block in the store: the grid "remembers" the lining/slab,
+                        // but the slab pass skips cells with the mark "5" (a stair opening!), and windows
+                        // cut the lining — a hanging lantern without a block above would be dropped by the server onto the floor
+                        // when loading the chunk.
+                        {
+                            const int hx = minx + lx, hz = minz + lz;
+                            if (store.get(hx, miny + lyL + 1 - sink, hz) == IdAir) continue;
+                        }
+                        const int bx = minx + lx, by = miny + lyL, bz = minz + lz;
+                        if (cellHash(bx ^ 0x5EED, by, bz ^ 0x2B1D) % 10u != 0u) continue;   // lamps are slightly rarer than torches
+                        if (tooClose(bx, by, bz, 4)) continue;   // "not close to torches", but in moderation: in
+                                                                  // small houses a distance of 6 would eat the whole ceiling
+                        if (store.get(bx, by - sink, bz) != IdAir) continue;
+                        addVoxel(bx, by, bz, IdLanternHung);
+                        lights[lightKey(bx, bz)].append(LightPt{ bx, by, bz });
+                        ++added;
+                    }
+            }
+        }
+    }
+    // "Interiors" v2 (a request: "houses stopped being boxes"; edits after the first test:
+    // the table top is a slab ON TOP of the fence (type=top: the bottom slab sank into the post —
+    // a "half block in the center"); the chairs are turned: facing = AWAY from the table, the bottom to the table; no more
+    // than TWO tables per room; the spreading is OVER ALL rooms (a room = a 4-connected component
+    // of free cells, openings are the boundaries): in each residential room 1..4 items, and not
+    // a "heap" by the seniority of the floor traversal; paintings on the walls (motif 1×1 — they do not overlap
+    // windows/openings); malls (panor, a request: "in shops — shelves, racks, several little tables,
+    // mannequins, sometimes with armor") — their own line: shelf rows along the walls and as "islands",
+    // a counter, tables and mannequins = armor_stand entities (armor — only on the armor stand).
+    // Furniture goes ONLY into the air above the walking row; chests/stairs/light are already in
+    // the store — not touched; under a candidate there must be no flight head/ladder (the gate
+    // "stone steps").
+    if (floors && obj.closed && storyP > 0
+        && (priv || panor || office || obj.code == 44340000 || (!obj.lift && !bigWin && !noWin)))
+    {
+        const int nFin = priv ? 1 : qMax(1, nStories);          // the private sector — only the 1st floor
+        struct FinPt { int x, y, z; };
+        QVector<FinPt> finPts;                                  // what is already furnished (distances)
+        QSet<ColKey> occ;                                       // the furniture cells (repeats)
+        int npcTotal = 0;                                       // how many residents have already been settled in the building
+        int petTotal = 0;                                       // pets in the building: cats in apartment blocks, dogs (wolves) in private houses
+        bool lecternDone = false;                               // a church: a lectern with a book — one per building
+        int lairCapsLeft = -1;                                  // how many standard-bearers are still to be assigned (computed from the building area on first use)
+        auto doorNear = [&](int bx, int by, int bz)
+        {   // at least one cell of a door opening nearby — we do not place
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        if (doorCells.contains(dkey(bx + dx, by + dy, bz + dz))) return true;
+            return false;
+        };
+        const int dvec[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };  // 0=N,1=E,2=S,3=W
+        const quint16 stairId[4] = { IdStairsN, IdStairsE, IdStairsS, IdStairsW };
+        auto finHash = [](int bx, int bz, int by, quint32 salt) -> quint32
+        {
+            quint32 h = quint32(bx) * 374761393u ^ quint32(bz) * 668265263u
+                      ^ quint32(by) * 2246822519u ^ salt;
+            h ^= h >> 15; h *= 2246822519u; return h ^ (h >> 13);
+        };
+        auto farOtherFin = [&](int bx, int by, int bz, int minD)
+        {   // is it free to stand aside from all the furniture already placed on the tier
+            for (const FinPt& p : finPts)
+                if (std::abs(p.y - by) < 2 &&
+                    qMax(std::abs(p.x - bx), std::abs(p.z - bz)) < minD) return false;
+            return true;
+        };
+        for (int k = 0; k < nFin; ++k)
+        {
+            const int lyF = (lowF && k == 0 ? lyLow + 1 : lyLow + 2) + k * storyP;
+            if (lyF > lyHigh - 2) continue;
+            // IN FRONT OF THE STAIRS AND UNDER THEM — ALWAYS FREE (a requirement): furniture/decor is not placed within a radius of 1 cell of any step or ladder
+            // (in height — from the slab of this floor to the top of the flight), i.e. neither approaches, nor landings, nor the space under the flight are cluttered.
+            static const bool noStairFree = qEnvironmentVariableIsSet("MCX_NO_STAIRFREE");   // debugging: switch the rule off (to check the gate)
+            QVector<char> stNear(sx * sz, -1);
+            auto nearStairs = [&](int lx, int lz) -> bool
+            {
+                char& cv = stNear[lz * sx + lx];
+                if (cv >= 0) return cv != 0;
+                bool hit = false;
+                for (int dz = -1; dz <= 1 && !hit; ++dz)
+                    for (int dx = -1; dx <= 1 && !hit; ++dx)
+                        if (stairXZ.contains(pairKey(lx + dx, lz + dz))) hit = true;
+                cv = hit ? 1 : 0;
+                return hit;
+            };
+            auto cellFree = [&](int lx, int lz, int row)
+            {   // the cell (lx, lyF+row, lz) — a cavity, air, outside openings and furniture.
+                // The walking row of the private sector is marked "4" in the grid (the floor lining row is removed —
+                // the same nuance as in the partition/stair masks above), but it is empty in the store.
+                const int ly = lyF + row;
+                if (lx < 1 || lx >= sx - 1 || lz < 1 || lz >= sz - 1 || ly > lyHigh) return false;
+                const char gc = grid[lz * sxy + ly * sx + lx];
+                if (gc != char(3) && !(lowF && row == 0 && gc == char(4))) return false;
+                const int bx = minx + lx, bz = minz + lz, byc = miny + ly;
+                if (store.get(bx, byc - sink, bz) != IdAir) return false;
+                if (row == 0)
+                {   // under a candidate a FLOOR is MANDATORY (a complaint "interior elements hang
+                    // in the air in the stair flights": a hole of the shaft in the slab = there is no air under
+                    // the feet, and furniture/a machine on NoGravity hung in the opening). Plus
+                    // not the flight head/the ladder hatch: a step of the upper floor would stand
+                    // as a "ceiling" above a step of the lower one (the "stone steps" gate).
+                    const quint16 und = store.get(bx, byc - 1 - sink, bz);
+                    if (und == IdAir) return false;
+                    if ((und >= IdStairsN && und <= IdStairsW)
+                        || (und >= IdLadderN && und <= IdLadderW)
+                        || (und >= IdStoneStairsN && und <= IdStoneStairsW)) return false;
+                }
+                if (occ.contains(dkey(bx, byc, bz))) return false;
+                if (!noStairFree && nearStairs(lx, lz)) return false;
+                return !doorNear(bx, byc, bz);
+            };
+            auto put = [&](int lx, int lz, int row, quint16 vid, int* placed)
+            {
+                const int bx = minx + lx, bz = minz + lz, byc = miny + lyF + row;
+                addVoxel(bx, byc, bz, vid);
+                if (vid == IdBarrel && chests)                     // a barrel is a container with loot (the BE barrel)
+                    chests->append(ChestSite{ bx, byc - sink,
+                                              bz, int(lineHash(pairKey(bx, bz) ^ (qint64(byc) << 32) ^ 0xBA77E1ull) % quint32(kBarrelLootCount)), true });
+                occ.insert(dkey(bx, byc, bz));
+                finPts.append(FinPt{ bx, byc, bz });
+                ++*placed; ++added;
+            };
+            auto wallAt = [&](int ax, int az, int d)
+            { return store.get(minx + ax + dvec[d][0], miny + lyF - sink,
+                               minz + az + dvec[d][1]) != IdAir; };
+            auto putMannequin = [&](int bx, int bz, int byc) -> bool
+            {   // A MANNEQUIN: an armor_stand entity (no block), sometimes in armor. Pos is the cell
+                // center; yaw is a multiple of 90; the armor material is cheap (leather/chainmail/iron...).
+                if (!mannequins) return false;
+                const quint32 ah = finHash(bx, bz, byc, 0xAACC0u);
+                MannequinSite ms;
+                ms.x = bx; ms.y = byc - sink; ms.z = bz;
+                ms.yaw = int((ah >> 12) % 4u) * 90;
+                ms.armor = ah % 100u < 75u ? int((ah >> 6) & 0xFu) : 0;   // 75% "a showcase in armor"
+                if (ms.armor == 0 && ah % 100u < 75u) ms.armor = 0xC;     // chestplate+helmet (bits 2,3)
+                const quint32 am = finHash(bx, bz, byc, 0x93u);
+                // The rarity of mannequin armor (a request): leather most often (56%), chainmail a bit rarer (22%), gold even
+                // rarer (16%), iron — 4%, diamond — the minimum (2%). The kArmorMats indices: 0 leather, 1 chainmail, 2 iron,
+                // 3 gold, 4 diamond.
+                const quint32 ar = am % 100u;
+                ms.mat = ar < 56u ? 0 : ar < 78u ? 1 : ar < 94u ? 3 : ar < 98u ? 2 : 4;
+                mannequins->append(ms);
+                occ.insert(dkey(bx, byc, bz));                      // the cell is "occupied"
+                finPts.append(FinPt{ bx, byc, bz });
+                return true;
+            };
+            // The free cells of the walking row are the basis of rooms; a room = a 4-connected
+            // component (openings, shafts and the door buffer are the natural boundaries).
+            QVector<char> open(sx * sz, 0);
+            int openN = 0;
+            for (int lz = 2; lz < sz - 2; ++lz)
+                for (int lx = 2; lx < sx - 2; ++lx)
+                    if (cellFree(lx, lz, 0)) { open[lz * sx + lx] = 1; ++openN; }
+            QVector<int> roomOf(sx * sz, -1);
+            QVector<QVector<int>> rooms;
+            {   // DFS labeling (the stack is a QVector; the room order = the order of the first cells)
+                QVector<int> stk;
+                for (int i0 = 0; i0 < sx * sz; ++i0)
+                {
+                    if (!open[i0] || roomOf[i0] >= 0) continue;
+                    const int rid = rooms.size();
+                    rooms.append(QVector<int>());
+                    stk.append(i0); roomOf[i0] = rid;
+                    while (!stk.isEmpty())
+                    {
+                        const int v = stk.takeLast();
+                        rooms[rid].append(v);
+                        const int vx = v % sx, vz = v / sx;
+                        for (int q = 0; q < 4; ++q)
+                        {
+                            const int nx = vx + (q == 0 ? 1 : q == 1 ? -1 : 0);
+                            const int nz = vz + (q == 2 ? 1 : q == 3 ? -1 : 0);
+                            if (nx < 0 || nx >= sx || nz < 0 || nz >= sz) continue;
+                            const int w = nz * sx + nx;
+                            if (!open[w] || roomOf[w] >= 0) continue;
+                            roomOf[w] = rid; stk.append(w);
+                        }
+                    }
+                }
+            }
+            int floorBlocks = 0;
+            const int capFloor = panor ? qMax(30, openN / 3)       // a mall — we are not afraid of being "flooded":
+                                       : qMax(10, openN / 6);      // a hall must look like a hall
+            // A SCHOOL (44312000): the rooms are classrooms (80%: a blackboard at the north wall, a teacher's desk, desks in rows with chairs, a passage after
+            // every 3 desks) or libraries (20%: rows of shelves in 2 tiers with passages and reading tables). A CHURCH (44319000): in
+            // spacious rooms by the wall an obsidian altar 3×1 with candles.
+            const bool schoolF = (obj.code == 44312000 || obj.code == 44315000), churchF = (obj.code == 44319000);   // a scientific building is furnished like a school (laboratory classrooms, libraries)
+            // A SCHOOL: the plan of all rooms is computed in advance (a blackboard on a shared wall makes the neighboring room a classroom, facing the same blackboard).
+            struct SBox { int minX = 0, maxX = -1, minZ = 0, maxZ = -1; };
+            struct SchoolPlan { int kind = -1; int f = 0; bool owner = false; QVector<QPoint> board; };   // kind: 0 ordinary, 1 classroom, 2 library
+            QVector<SBox> sbox(rooms.size());
+            QVector<SchoolPlan> splan(rooms.size());
+            auto inRoomId = [&](int x, int z, int rid) { return x >= 0 && x < sx && z >= 0 && z < sz && roomOf[z * sx + x] == rid; };
+            auto depthOf = [&](const SBox& b, int f, int lx, int lz) { return f == 0 ? lz - b.minZ : f == 2 ? b.maxZ - lz : f == 1 ? b.maxX - lx : lx - b.minX; };
+            auto latOf   = [&](const SBox& b, int f, int lx, int lz) { return f == 0 ? lx - b.minX : f == 2 ? b.maxX - lx : f == 1 ? lz - b.minZ : b.maxZ - lz; };
+            auto cellAt  = [&](const SBox& b, int f, int lt, int dp) -> QPoint
+            {
+                switch (f)
+                {
+                case 0: return QPoint(b.minX + lt, b.minZ + dp);
+                case 2: return QPoint(b.maxX - lt, b.maxZ - dp);
+                case 1: return QPoint(b.maxX - dp, b.minZ + lt);
+                default: return QPoint(b.minX + dp, b.maxZ - lt);
+                }
+            };
+            // a wall cell is suitable for a blackboard: a solid block at height 0..2 (not glass, not an opening, not a door)
+            auto wallBlank = [&](int wx, int wz) -> bool
+            {
+                for (int row = 0; row <= 2; ++row)
+                {
+                    const quint16 b = store.get(minx + wx, miny + lyF + row - sink, minz + wz);
+                    if (b == IdAir || b == IdGlass || (b >= IdDoorBase && b < IdDoorMax)) return false;
+                }
+                return true;
+            };
+            // The best blackboard segment on side f of room rid: a continuous solid section of length >= 4; among the suitable ones we take the nearest to
+            // the middle of the wall, the blackboard (up to 6 blocks) is centered on the segment closer to the middle of the wall. Returns the WALL cells.
+            auto boardOnSide = [&](int rid, int f, QVector<QPoint>& out) -> bool
+            {
+                const SBox& b = sbox[rid];
+                const int Lmax = (f % 2 == 0) ? (b.maxX - b.minX) : (b.maxZ - b.minZ);
+                QVector<char> blank(Lmax + 1, 0);
+                for (int lt = 0; lt <= Lmax; ++lt)
+                {
+                    const QPoint c = cellAt(b, f, lt, 0);
+                    if (!inRoomId(c.x(), c.y(), rid)) continue;
+                    if (depthOf(b, f, c.x(), c.y()) != 0) continue;
+                    if (wallBlank(c.x() + dvec[f][0], c.y() + dvec[f][1])) blank[lt] = 1;
+                }
+                const double mid = Lmax * 0.5;
+                int bestLt0 = -1, bestW = 0;
+                double bestD = 1e9;
+                for (int lt = 0; lt <= Lmax;)
+                {
+                    if (!blank[lt]) { ++lt; continue; }
+                    int e = lt;
+                    while (e + 1 <= Lmax && blank[e + 1]) ++e;
+                    const int run = e - lt + 1;
+                    if (run >= 4)
+                    {
+                        const int W = std::min(6, run);
+                        // the blackboard position inside the segment, the nearest to the middle of the wall
+                        int st = int(std::lround(mid - W * 0.5));
+                        st = std::max(lt, std::min(st, e - W + 1));
+                        const double d = std::abs(st + W * 0.5 - mid);
+                        if (d < bestD) { bestD = d; bestLt0 = st; bestW = W; }
+                    }
+                    lt = e + 1;
+                }
+                if (bestLt0 < 0) return false;
+                out.clear();
+                for (int k = 0; k < bestW; ++k)
+                {
+                    const QPoint c = cellAt(b, f, bestLt0 + k, 0);
+                    out.append(QPoint(c.x() + dvec[f][0], c.y() + dvec[f][1]));
+                }
+                return true;
+            };
+            if (schoolF)
+            {
+                for (int r2 = 0; r2 < rooms.size(); ++r2)
+                {
+                    SBox& b = sbox[r2];
+                    b.minX = sx; b.minZ = sz;
+                    for (int idx : rooms[r2])
+                    {
+                        b.minX = std::min(b.minX, idx % sx); b.maxX = std::max(b.maxX, idx % sx);
+                        b.minZ = std::min(b.minZ, idx / sx); b.maxZ = std::max(b.maxZ, idx / sx);
+                    }
+                }
+                for (int r2 = 0; r2 < rooms.size(); ++r2)
+                {
+                    if (rooms[r2].size() < 24 || splan[r2].kind != -1) continue;       // small rooms are standard; already decided ones are not touched
+                    const SBox& b = sbox[r2];
+                    const quint32 hs = finHash(minx + b.minX, minz + b.minZ, miny + lyF, 0x5C001u);
+                    bool classWanted = (hs % 100u) < 80u;
+                    bool placed = false;
+                    if (classWanted)
+                        for (int k = 0; k < 4 && !placed; ++k)
+                        {
+                            const int f = (int(hs % 4u) + k) % 4;
+                            QVector<QPoint> wall;
+                            if (!boardOnSide(r2, f, wall)) continue;
+                            // the neighboring room behind the wall: if it is already decided as a non-classroom or as a classroom with ANOTHER blackboard — we skip this side
+                            const QPoint wc = wall[wall.size() / 2];
+                            const int nbx = wc.x() + dvec[f][0], nbz = wc.y() + dvec[f][1];
+                            const int nb = (nbx >= 0 && nbx < sx && nbz >= 0 && nbz < sz) ? roomOf[nbz * sx + nbx] : -1;
+                            if (nb >= 0 && nb != r2 && rooms[nb].size() >= 24 && splan[nb].kind != -1) continue;
+                            splan[r2].kind = 1; splan[r2].f = f; splan[r2].owner = true; splan[r2].board = wall;
+                            if (nb >= 0 && nb != r2 && rooms[nb].size() >= 24)
+                            {   // the neighboring room sees the same blackboard -> also a classroom, facing it
+                                splan[nb].kind = 1; splan[nb].f = (f + 2) % 4; splan[nb].owner = false; splan[nb].board = wall;
+                            }
+                            placed = true;
+                        }
+                    if (!placed)
+                    {
+                        // no suitable blind wall (or a library came up): a library (20% / 50% when there is no wall) or an ordinary one
+                        const bool lib = classWanted ? ((hs >> 8) % 2u == 0u) : true;
+                        splan[r2].kind = lib ? 2 : 0;
+                    }
+                }
+            }
+            // access to stairs: desks and chairs are not placed closer than 2 cells to a stair shaft/hatch (the "5" cells of the grid), so as not to block the entrance
+            auto nearShaft = [&](int x, int z) -> bool
+            {
+                for (int dz = -2; dz <= 2; ++dz)
+                    for (int dx = -2; dx <= 2; ++dx)
+                    {
+                        const int nx = x + dx, nz = z + dz;
+                        if (nx < 0 || nx >= sx || nz < 0 || nz >= sz) continue;
+                        for (int row = 0; row <= 3; ++row)
+                            if (lyF + row < sy && grid[nz * sxy + (lyF + row) * sx + nx] == char(5)) return true;
+                    }
+                return false;
+            };
+            auto schoolRoom = [&](int rid) -> bool
+            {   // true — the room is furnished here (a classroom/library); false — leave it standard
+                const SchoolPlan& pl = splan[rid];
+                if (pl.kind != 1 && pl.kind != 2) return false;
+                const SBox& b = sbox[rid];
+                auto inRoom = [&](int x, int z) { return inRoomId(x, z, rid); };
+                auto ok2 = [&](int x, int z) { return inRoom(x, z) && cellFree(x, z, 0) && cellFree(x, z, 1) && !nearShaft(x, z); };
+                int dm = 0;
+                if (pl.kind == 1)
+                {   // a classroom
+                    const quint16 boardId = quint16(IdPaletteStart + paletteIndexOf("minecraft:black_concrete"));
+                    const int f = pl.f;
+                    const int Lmax = (f % 2 == 0) ? (b.maxX - b.minX) : (b.maxZ - b.minZ);
+                    const int Dmax = (f % 2 == 0) ? (b.maxZ - b.minZ) : (b.maxX - b.minX);
+                    const int back = (f + 2) % 4;
+                    if (pl.owner)
+                        for (const QPoint& wc : pl.board)                                           // the blackboard REPLACES the wall blocks (3 high)
+                            for (int row = 0; row <= 2; ++row)
+                                put(wc.x(), wc.y(), row, boardId, &dm);
+                    // the center of the blackboard along the lateral axis of this room
+                    int latSum = 0;
+                    for (const QPoint& wc : pl.board)
+                        latSum += latOf(b, f, wc.x() - dvec[f][0], wc.y() - dvec[f][1]);
+                    const int bc = pl.board.isEmpty() ? Lmax / 2 : latSum / pl.board.size();
+                    {
+                        const QPoint c = cellAt(b, f, bc, 2);
+                        if (ok2(c.x(), c.y()))
+                        {
+                            if (obj.code == 44315000 && chests)
+                            {   // a research institute: instead of a teacher's desk — a lectern with an open book (physics formulas), facing the class
+                                put(c.x(), c.y(), 0, quint16(int(IdLecternBase) + back), &dm);
+                                ChestSite ls; ls.x = minx + c.x(); ls.y = miny + lyF - sink; ls.z = minz + c.y();
+                                ls.lectern = 1000 + int(finHash(minx + c.x(), minz + c.y(), miny + lyF, 0xF0121u) % quint32(kSciBooksCount));
+                                chests->append(ls);
+                            }
+                            else { put(c.x(), c.y(), 0, IdFence, &dm); put(c.x(), c.y(), 1, IdPressurePlateOak, &dm); }   // the teacher's desk
+                        }
+                    }
+                    for (int dp = 4; dp <= Dmax - 1; dp += 4)                                       // rows every 4: a passage 2 wide
+                        for (int lt = 1; lt <= Lmax - 1; ++lt)
+                        {
+                            if ((lt - 1) % 5 >= 3) continue;                                        // three desks in a row, then a passage 2 wide
+                            const QPoint c = cellAt(b, f, lt, dp), ch = cellAt(b, f, lt, dp + 1);
+                            if (!ok2(c.x(), c.y()) || !inRoom(ch.x(), ch.y()) || !cellFree(ch.x(), ch.y(), 0) || nearShaft(ch.x(), ch.y())) continue;
+                            put(c.x(), c.y(), 0, IdFence, &dm);                                     // a desk
+                            put(c.x(), c.y(), 1, IdPressurePlateOak, &dm);
+                            put(ch.x(), ch.y(), 0, stairId[back], &dm);                             // a chair behind the desk (facing the blackboard)
+                        }
+                    return true;
+                }
+                // a library
+                for (int z = b.minZ + 1; z <= b.maxZ - 1; z += 4)
+                    for (int x = b.minX + 1; x <= b.maxX - 1; ++x)
+                    {
+                        if ((x - b.minX) % 6 == 5) continue;                                         // a passage between sections
+                        if (!inRoom(x, z) || !cellFree(x, z, 0) || nearShaft(x, z)) continue;
+                        put(x, z, 0, IdBookshelf, &dm);
+                        if (cellFree(x, z, 1)) put(x, z, 1, IdBookshelf, &dm);
+                    }
+                for (int z = b.minZ + 3; z <= b.maxZ - 1; z += 4)                                     // reading tables in the passages
+                    for (int x = b.minX + 2; x <= b.maxX - 2; x += 5)
+                        if (ok2(x, z))
+                        {
+                            put(x, z, 0, IdFence, &dm);
+                            put(x, z, 1, IdPressurePlateOak, &dm);
+                            if (cellFree(x, z + 1, 0) && inRoom(x, z + 1) && !nearShaft(x, z + 1)) put(x, z + 1, 0, stairId[2], &dm);
+                            if (cellFree(x, z - 1, 0) && inRoom(x, z - 1) && !nearShaft(x, z - 1)) put(x, z - 1, 0, stairId[0], &dm);
+                        }
+                return true;
+            };
+            // A LAIR: camp rooms — by the walls barrels (stacked), hay bales, chests with outpost loot, ominous banners on the walls;
+            // in the center — tables with "chairs", barrels, bales.
+            auto lairRoom = [&](const QVector<int>& cs, int rid) -> bool
+            {
+                const int want = qBound(2, int(cs.size()) / 10, 16);
+                const int st = int(finHash(minx, minz, miny + lyF + rid, 0x1A12u) % quint32(cs.size()));
+                int placed = 0, dm = 0;
+                const int outpostTbl = kChestLootCount - 1;                                    // pillager_outpost — the last one in kChestLoot
+                for (int t = 0; t < cs.size() && placed < want; ++t)
+                {
+                    const int idx = cs[(st + qint64(t) * 7) % cs.size()];
+                    const int lx = idx % sx, lz = idx / sx;
+                    if (!cellFree(lx, lz, 0)) continue;
+                    const int bx = minx + lx, bz = minz + lz, byc = miny + lyF;
+                    if (!farOtherFin(bx, byc, bz, 2)) continue;
+                    const quint32 h = finHash(bx, bz, byc, 0x1A13u);
+                    const int roll = int(h % 100u);
+                    int wd = -1;
+                    for (int d = 0; d < 4 && wd < 0; ++d) if (wallAt(lx, lz, d)) wd = d;
+                    if (wd >= 0)
+                    {
+                        if (roll < 28)
+                        {   // barrels in two tiers
+                            put(lx, lz, 0, IdBarrel, &dm);
+                            if (cellFree(lx, lz, 1)) put(lx, lz, 1, IdBarrel, &dm);
+                        }
+                        else if (roll < 48)
+                        {   // hay bales
+                            put(lx, lz, 0, IdHayBale, &dm);
+                            if (cellFree(lx, lz, 1) && (h >> 8) % 2u) put(lx, lz, 1, IdHayBale, &dm);
+                        }
+                        else if (roll < 64 && chests)
+                        {   // a chest with outpost loot: more often outposts, sometimes better
+                            put(lx, lz, 0, IdChest, &dm);
+                            chests->append(ChestSite{ bx, byc - sink, bz, (h >> 12) % 100u < 60u ? outpostTbl : pickChestLoot(h >> 5, 40, 40) });
+                        }
+                        else if (roll < 82 && banners && cellFree(lx, lz, 1))
+                        {   // an ominous banner on the wall (looking into the room)
+                            const int fd = (wd + 2) % 4;
+                            put(lx, lz, 1, quint16(int(IdWallBannerBase) + fd), &dm);
+                            banners->append(BannerSite{ bx, byc + 1 - sink, bz, fd });
+                        }
+                        else continue;
+                    }
+                    else
+                    {   // the center of the room
+                        if (roll < 40 && cellFree(lx, lz, 1))
+                        {   // a table
+                            put(lx, lz, 0, IdFence, &dm);
+                            put(lx, lz, 1, IdPressurePlateOak, &dm);
+                            for (int sd = 0; sd <= 2; sd += 2)
+                            {
+                                const int cx2 = lx + dvec[sd][0], cz2 = lz + dvec[sd][1];
+                                if (cellFree(cx2, cz2, 0)) put(cx2, cz2, 0, stairId[sd], &dm);
+                            }
+                        }
+                        else if (roll < 70) put(lx, lz, 0, IdBarrel, &dm);
+                        else put(lx, lz, 0, IdHayBale, &dm);
+                    }
+                    ++placed;
+                }
+                return true;
+            };
+            // AN INDUSTRIAL ZONE (44340000): workshops by theme — a forge (blast furnaces, anvils, crafting tables), a foundry (lava baths in a frame of blackstone,
+            // cauldrons with lava, iron blocks), a workshop (crafting tables, grindstones, stonecutters, lanterns), a warehouse (barrels, crate-chests, iron).
+            const bool industrialF = (obj.code == 44340000);
+            auto industrialRoom = [&](const QVector<int>& cs, int rid) -> bool
+            {
+                const quint32 h0 = finHash(minx, minz, miny + lyF + rid, 0x1D57u);
+                const int tp = int(h0 % 100u);
+                const int theme = tp < 28 ? 0 : (tp < 50 ? 1 : (tp < 75 ? 2 : 3));       // 0 forge, 1 foundry, 2 workshop, 3 warehouse
+                int dm = 0, placed = 0;
+                const int st = int((h0 >> 8) % quint32(cs.size()));
+                // a 2×2 lava bath in a 4×4 frame (a foundry — always, a forge — in half of the rooms): the lava is bounded by a ring of blackstone
+                const bool wantPit = (theme == 1) || (theme == 0 && ((h0 >> 17) & 1u));
+                if (wantPit && cs.size() >= 30)
+                    for (int t = 0; t < cs.size(); ++t)
+                    {
+                        const int idx = cs[(st + qint64(t) * 5) % cs.size()];
+                        const int lx0 = idx % sx, lz0 = idx / sx;
+                        bool ok = true;
+                        for (int dz = 0; dz < 4 && ok; ++dz)
+                            for (int dx = 0; dx < 4; ++dx)
+                                if (lx0 + dx >= sx || lz0 + dz >= sz || roomOf[(lz0 + dz) * sx + lx0 + dx] != rid
+                                    || !cellFree(lx0 + dx, lz0 + dz, 0) || !cellFree(lx0 + dx, lz0 + dz, 1)) { ok = false; break; }
+                        if (!ok) continue;
+                        for (int dz = 0; dz < 4; ++dz)
+                            for (int dx = 0; dx < 4; ++dx)
+                            {
+                                const bool inner = (dx == 1 || dx == 2) && (dz == 1 || dz == 2);
+                                put(lx0 + dx, lz0 + dz, 0, inner ? quint16(IdLava) : quint16(IdBlackstone), &dm);
+                            }
+                        ++placed;
+                        break;
+                    }
+                const int want = qBound(2, int(cs.size()) / 9, 14);
+                for (int t = 0; t < cs.size() && placed < want; ++t)
+                {
+                    const int idx = cs[(st + 1 + qint64(t) * 7) % cs.size()];
+                    const int lx = idx % sx, lz = idx / sx;
+                    if (!cellFree(lx, lz, 0)) continue;
+                    const int bx = minx + lx, bz = minz + lz, byc = miny + lyF;
+                    if (!farOtherFin(bx, byc, bz, 2)) continue;
+                    const quint32 h = finHash(bx, bz, byc, 0x1D58u);
+                    int wd = -1;
+                    for (int d = 0; d < 4 && wd < 0; ++d) if (wallAt(lx, lz, d)) wd = d;
+                    if (wd >= 0)
+                    {   // a station of three cells along a wall
+                        const int fd = (wd + 2) % 4, ax = (wd + 1) % 4;
+                        bool ok = true;
+                        for (int k = 0; k < 3 && ok; ++k)
+                        {
+                            const int x = lx + dvec[ax][0] * k, z = lz + dvec[ax][1] * k;
+                            if (x < 0 || x >= sx || z < 0 || z >= sz || roomOf[z * sx + x] != rid
+                                || !cellFree(x, z, 0) || !wallAt(x, z, wd)) ok = false;
+                        }
+                        if (!ok) continue;
+                        quint16 a0, a1, a2;
+                        const quint16 anvilId = quint16(int(IdAnvilBase) + ((fd + 1) % 4));
+                        const quint16 bfId = quint16(int(IdBlastFurnaceBase) + fd);
+                        const quint16 grId = quint16(int(IdGrindstoneBase) + fd);
+                        const quint16 scId = quint16(int(IdStonecutterBase) + fd);
+                        switch (theme)
+                        {
+                        case 0:  a0 = bfId;        a1 = anvilId;      a2 = IdSmithingTable; break;   // a forge
+                        case 1:  a0 = IdLavaCauldron; a1 = IdIronBlock; a2 = bfId;           break;   // a foundry
+                        case 2:  a0 = IdCraftingTable; a1 = grId;     a2 = scId;             break;   // a workshop
+                        default: a0 = IdBarrel;    a1 = IdIronBlock;  a2 = IdBarrel;         break;   // a warehouse
+                        }
+                        const quint16 row[3] = { a0, a1, a2 };
+                        for (int k = 0; k < 3; ++k)
+                        {
+                            const int x = lx + dvec[ax][0] * k, z = lz + dvec[ax][1] * k;
+                            put(x, z, 0, row[k], &dm);
+                            if (theme == 3 && cellFree(x, z, 1)) put(x, z, 1, (h >> (k * 3)) & 1u ? quint16(IdBarrel) : quint16(IdIronBlock), &dm);
+                            if (theme == 1 && k == 1 && cellFree(x, z, 1)) put(x, z, 1, IdIronBlock, &dm);
+                        }
+                        if (theme == 3 && chests && cellFree(lx + dvec[fd][0], lz + dvec[fd][1], 0) && (h >> 12) % 3u == 0u)
+                        {   // a crate-chest in front of a rack
+                            const int cx2 = lx + dvec[fd][0], cz2 = lz + dvec[fd][1];
+                            put(cx2, cz2, 0, IdChest, &dm);
+                            chests->append(ChestSite{ minx + cx2, byc - sink, minz + cz2, pickChestLoot(h >> 5, 80, 20) });
+                        }
+                    }
+                    else
+                    {   // the center of the workshop: machines/racks by theme
+                        if (theme == 2 && cellFree(lx, lz, 1))
+                        {   // a crafting table on a table-crafting table with a lamp
+                            put(lx, lz, 0, IdCraftingTable, &dm);
+                            put(lx, lz, 1, IdLanternStanding, &dm);
+                        }
+                        else if (theme == 0)
+                        {   // an anvil + a cauldron
+                            put(lx, lz, 0, (h & 1u) ? quint16(int(IdAnvilBase) + int((h >> 3) % 4u)) : quint16(IdLavaCauldron), &dm);
+                        }
+                        else if (theme == 1) put(lx, lz, 0, (h & 1u) ? quint16(IdIronBlock) : quint16(IdLavaCauldron), &dm);
+                        else
+                        {   // a warehouse: a stack
+                            put(lx, lz, 0, (h & 1u) ? quint16(IdBarrel) : quint16(IdIronBlock), &dm);
+                            if (cellFree(lx, lz, 1)) put(lx, lz, 1, IdBarrel, &dm);
+                        }
+                    }
+                    ++placed;
+                }
+                return true;
+            };
+            // The altar of a church: an obsidian pattern by the wall (rows from top to bottom; '#' — obsidian, 'c' — a candle (2), 'C' — a candle (4); a space — empty).
+            // The first pattern by hash that fits the room width and height is taken (a wall behind over the whole width, the cells are free).
+            struct AltarPat { int w, h; const char* rows[6]; };
+            static const AltarPat kAltars[] = {
+                { 3, 2, { "cCc", "###" } },                                   // a row of three blocks with candles
+                { 3, 4, { " C ", "###", " # ", " # " } },                     // a cross
+                { 5, 5, { "  C  ", "  #  ", "#####", "  #  ", "  #  " } },    // a large cross
+                { 5, 5, { "c c c", "# # #", "#####", "  #  ", "  #  " } },    // a trident with candles on the points
+                { 5, 4, { "# # #", "#####", "  #  ", "  #  " } },            // a trident
+                { 5, 3, { "  C  ", " ### ", "#####" } },                      // a ziggurat
+                { 5, 3, { "c C c", "#####", "#   #" } },                      // a long throne on legs
+                { 3, 3, { " C ", "###", "# #" } },                            // a throne
+            };
+            static const int kAltarN = int(sizeof(kAltars) / sizeof(kAltars[0]));
+            auto churchAltar = [&](const QVector<int>& cs, int rid)
+            {
+                const int p0 = int(finHash(minx, minz, miny + lyF + rid, 0xA17Bu) % quint32(kAltarN));
+                const int st0 = int(finHash(minx, minz, miny + lyF + rid, 0xA17Au) % quint32(cs.size()));
+                for (int pi = 0; pi < kAltarN; ++pi)
+                {
+                    const AltarPat& pat = kAltars[(p0 + pi) % kAltarN];
+                    for (int t = 0; t < cs.size(); ++t)
+                    {
+                        const int idx = cs[(st0 + t) % cs.size()];
+                        const int lx = idx % sx, lz = idx / sx;
+                        for (int wd = 0; wd < 4; ++wd)
+                        {
+                            const int a = (wd + 1) % 4;                                          // along the wall
+                            bool ok = true;
+                            for (int u = 0; u < pat.w && ok; ++u)
+                            {
+                                const int x = lx + dvec[a][0] * u, z = lz + dvec[a][1] * u;
+                                if (x < 0 || x >= sx || z < 0 || z >= sz || roomOf[z * sx + x] != rid || !wallAt(x, z, wd)) { ok = false; break; }
+                                for (int r = 0; r < pat.h && ok; ++r)
+                                    if (pat.rows[pat.h - 1 - r][u] != ' ' && !cellFree(x, z, r)) ok = false;
+                            }
+                            if (!ok) continue;
+                            int dm = 0;
+                            for (int u = 0; u < pat.w; ++u)
+                            {
+                                const int x = lx + dvec[a][0] * u, z = lz + dvec[a][1] * u;
+                                for (int r = 0; r < pat.h; ++r)
+                                {
+                                    const char ch = pat.rows[pat.h - 1 - r][u];
+                                    if (ch == '#') put(x, z, r, IdObsidian, &dm);
+                                    else if (ch == 'c') put(x, z, r, quint16(int(IdCandleBase) + 1), &dm);
+                                    else if (ch == 'C') put(x, z, r, quint16(int(IdCandleBase) + 3), &dm);
+                                }
+                            }
+                            return;
+                        }
+                    }
+                }
+            };
+            // ——— RESIDENTIAL APARTMENT BUILDINGS (44400000): rooms are furnished sensibly, not scattered. A bedroom: a bed with the headboard to the wall, nightstands with lamps, a wardrobe, flowers.
+            // A living room: a sofa by the wall facing the TV (on a chest of drawers opposite), a coffee table between them, bookshelves, a floor lamp, plants. A kitchen: a work line
+            // by the wall (a stove, a crafting table, a sink-cauldron, barrels), a dining table with chairs. Everything — only in cells that passed cellFree (no approaches to stairs, no doors, no
+            // openings), furniture stands by the walls — the center of the room and the passages are free. Returns true if the room was furnished (then the general set of random items is not needed).
+            auto residRoom = [&](const QVector<int>& cs, int rid) -> bool
+            {
+                const int n = cs.size();
+                if (n < 10) return false;
+                const quint32 hr0 = finHash(minx + rid * 13, minz + k * 7, miny + lyF, 0x2E51Du);
+                int dummy = 0;
+                auto free1 = [&](int lx, int lz, int row) { return cellFree(lx, lz, row); };
+                // how many wall neighbors a cell has and which of them is the first
+                auto wallDirOf = [&](int lx, int lz, int skipD = -1) -> int
+                {
+                    for (int dd = 0; dd < 4; ++dd) if (dd != skipD && wallAt(lx, lz, dd)) return dd;
+                    return -1;
+                };
+                auto order = [&](quint32 seed) { QVector<int> o; o.reserve(n); const int st = int(seed % quint32(n)); for (int i = 0; i < n; ++i) o << cs[(st + i * 7) % n]; return o; };
+                // a wall nearby: a solid block on any of the three lower rows (windows with a sill also count as a wall — furniture goes under a window)
+                auto wallAny = [&](int ax, int az, int d) -> bool
+                {
+                    for (int row = 0; row < 3; ++row)
+                        if (store.get(minx + ax + dvec[d][0], miny + lyF + row - sink, minz + az + dvec[d][1]) != IdAir) return true;
+                    return false;
+                };
+                // a segment along a wall: len cells in a row by wall d, in front of them (into the room) a free cell
+                auto runAt = [&](int lx, int lz, int d, int len, int rows) -> bool
+                {
+                    const int s0 = (d == 0 || d == 2) ? 1 : 0, s1 = (d == 0 || d == 2) ? 0 : 1;       // along the wall: by an N/S wall — along X, by E/W — along Z
+                    const int fd = (d + 2) % 4;
+                    for (int i = 0; i < len; ++i)
+                    {
+                        const int x = lx + s0 * i, z = lz + s1 * i;
+                        for (int row = 0; row < rows; ++row) if (!free1(x, z, row)) return false;
+                        if (!wallAny(x, z, d)) return false;
+                        if (!free1(x + dvec[fd][0], z + dvec[fd][1], 0)) return false;     // the approach
+                    }
+                    return true;
+                };
+                auto findRun = [&](quint32 seed, int len, int rows, int& ox, int& oz, int& od, int forbidD = -1) -> bool
+                {
+                    const QVector<int> o = order(seed);
+                    for (int idx : o)
+                    {
+                        const int lx = idx % sx, lz = idx / sx;
+                        for (int q = 0; q < 4; ++q)
+                        {
+                            const int d = int(((seed >> 5) + quint32(q)) % 4u);
+                            if (d == forbidD) continue;
+                            if (runAt(lx, lz, d, len, rows)) { ox = lx; oz = lz; od = d; return true; }
+                        }
+                    }
+                    return false;
+                };
+                auto alongOf = [&](int d, int& s0, int& s1) { s0 = (d == 0 || d == 2) ? 1 : 0; s1 = (d == 0 || d == 2) ? 0 : 1; };
+                auto lamp = [&](int lx, int lz)
+                {   // a floor lamp: a fence + a lantern
+                    if (free1(lx, lz, 0) && free1(lx, lz, 1)) { put(lx, lz, 0, IdFence, &dummy); put(lx, lz, 1, IdLanternStanding, &dummy); return true; }
+                    return false;
+                };
+                auto plant = [&](int lx, int lz)
+                {
+                    if (!free1(lx, lz, 0)) return false;
+                    put(lx, lz, 0, quint16(IdFlowerPotBase + int(finHash(minx + lx, minz + lz, miny + lyF, 0xF10Au) % quint32(kFlowersCount))), &dummy);
+                    return true;
+                };
+                auto bookcase = [&](int lx, int lz, int d, int len)
+                {   // a bookcase along a wall: 2 tiers
+                    int s0, s1; alongOf(d, s0, s1);
+                    for (int i = 0; i < len; ++i)
+                    {
+                        put(lx + s0 * i, lz + s1 * i, 0, IdBookshelf, &dummy);
+                        if (free1(lx + s0 * i, lz + s1 * i, 1)) put(lx + s0 * i, lz + s1 * i, 1, IdBookshelf, &dummy);
+                    }
+                };
+                auto table = [&](int lx, int lz, int axis) -> bool
+                {   // a dining table: a fence + a plate, two chairs at the ends
+                    if (!free1(lx, lz, 0) || !free1(lx, lz, 1)) return false;
+                    put(lx, lz, 0, IdFence, &dummy);
+                    put(lx, lz, 1, IdPressurePlateOak, &dummy);
+                    for (int sd = 0; sd <= 2; sd += 2)
+                    {
+                        const int d = axis + sd;
+                        const int cx2 = lx + dvec[d][0], cz2 = lz + dvec[d][1];
+                        if (free1(cx2, cz2, 0)) put(cx2, cz2, 0, stairId[d], &dummy);
+                    }
+                    return true;
+                };
+                bool any = false;
+                int rx = 0, rz = 0, rd = 0;
+                // a large room is divided into zones: about one per 45 cells (up to 6), the types alternate — a bedroom / a living room / a kitchen
+                const int zones = n < 55 ? 1 : std::min(6, n / 45);
+                for (int zone = 0; zone < zones; ++zone)
+                {
+                const quint32 hr = hr0 + quint32(zone) * 0x9E3779B1u;
+                int type;                                                   // 0 bedroom, 1 living room, 2 kitchen-dining room
+                if (zones > 1) type = int((hr0 % 3u + quint32(zone) * 2u) % 3u);
+                else if (n < 22) type = (hr % 100u < 70u) ? 0 : 2;
+                else type = (hr % 100u < 35u) ? 0 : ((hr % 100u < 75u) ? 1 : 2);
+                if (type == 0)
+                {   // ——— BEDROOM ———
+                    // a bed: the headboard by a wall (the cell by the wall), the foot — a cell into the room; a nightstand is possible on each side of the headboard
+                    if (findRun(hr, 1, 2, rx, rz, rd))
+                    {
+                        const int fd = (rd + 2) % 4;
+                        const int fx = rx + dvec[fd][0], fz = rz + dvec[fd][1];
+                        if (free1(fx, fz, 1))
+                        {
+                            const int col = int(finHash(minx, minz, miny, 0xBED1u) % quint32(kBedsCount));
+                            const int base = int(IdBedBase) + col * 8 + rd * 2;           // foot→head looks into the wall
+                            put(fx, fz, 0, quint16(base), &dummy);
+                            put(rx, rz, 0, quint16(base + 1), &dummy);
+                            any = true;
+                            int s0, s1; alongOf(rd, s0, s1);
+                            for (int sg = -1; sg <= 1; sg += 2)
+                            {   // nightstands at the sides of the headboard (a barrel + a light)
+                                const int nx = rx + s0 * sg, nz = rz + s1 * sg;
+                                if (((hr >> (3 + sg)) & 3u) == 0u) continue;
+                                if (free1(nx, nz, 0) && wallAt(nx, nz, rd)) { put(nx, nz, 0, IdComposter, &dummy); if (free1(nx, nz, 1)) put(nx, nz, 1, IdLanternStanding, &dummy); }
+                            }
+                            // a carpet by the bed 2×1 along the feet (if free)
+                            const int cid = int(IdCarpetBase) + int(finHash(minx, minz, miny, 0xCA21u) % quint32(kCarpetsCount));
+                            const int cx3 = fx + dvec[fd][0], cz3 = fz + dvec[fd][1];
+                            if (free1(cx3, cz3, 0)) put(cx3, cz3, 0, quint16(cid), &dummy);
+                        }
+                    }
+                    // a wardrobe: barrels in two tiers, 2 cells along a wall
+                    if (findRun(hr * 3u + 11u, 2, 2, rx, rz, rd))
+                    {
+                        int s0, s1; alongOf(rd, s0, s1);
+                        for (int i = 0; i < 2; ++i) { put(rx + s0 * i, rz + s1 * i, 0, IdBarrel, &dummy); put(rx + s0 * i, rz + s1 * i, 1, IdBarrel, &dummy); }
+                        any = true;
+                    }
+                    // a writing table with a lamp or flowers
+                    if (n >= 16 && findRun(hr * 5u + 3u, 1, 2, rx, rz, rd))
+                    {
+                        if ((hr >> 9) & 1u) { put(rx, rz, 0, IdFence, &dummy); put(rx, rz, 1, IdPressurePlateOak, &dummy); const int fd2 = (rd + 2) % 4; const int ccx = rx + dvec[fd2][0], ccz = rz + dvec[fd2][1]; if (free1(ccx, ccz, 0)) put(ccx, ccz, 0, stairId[rd], &dummy); }
+                        else plant(rx, rz);
+                    }
+                    if (findRun(hr * 7u + 5u, 1, 2, rx, rz, rd)) lamp(rx, rz);
+                }
+                else if (type == 1)
+                {   // ——— LIVING ROOM ———
+                    // a sofa of 3 steps with the back to a wall, a TV on a chest of drawers by the opposite wall, a table in the middle
+                    const bool sofaOk = findRun(hr, 3, 1, rx, rz, rd);
+                    if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[resid] sofa %d at %d,%d d=%d\n", int(sofaOk), rx, rz, rd);
+                    if (sofaOk)
+                    {
+                        int s0, s1; alongOf(rd, s0, s1);
+                        for (int i = 0; i < 3; ++i) put(rx + s0 * i, rz + s1 * i, 0, stairId[rd], &dummy);
+                        any = true;
+                        const int fd = (rd + 2) % 4;
+                        const int mx = rx + s0 + dvec[fd][0] * 2, mz = rz + s1 + dvec[fd][1] * 2;      // the table 2 cells in front of the middle seat
+                        // the TV: we go from the sofa across the room to the opposite wall
+                        int tx = rx + s0 + dvec[fd][0], tz = rz + s1 + dvec[fd][1], steps = 1;
+                        while (free1(tx + dvec[fd][0], tz + dvec[fd][1], 0) && steps < 14) { tx += dvec[fd][0]; tz += dvec[fd][1]; ++steps; }
+                        if (steps >= 4 && wallAny(tx, tz, fd) && free1(tx, tz, 0) && free1(tx, tz, 1))
+                        {
+                            put(tx, tz, 0, IdBookshelf, &dummy);
+                            put(tx, tz, 1, IdBlackGlass, &dummy);
+                            if (free1(tx + s0, tz + s1, 0) && wallAny(tx + s0, tz + s1, fd)) lamp(tx + s0, tz + s1);
+                        }
+                        if (free1(mx, mz, 0)) put(mx, mz, 0, IdSlabBottom, &dummy);                      // a coffee table between the sofa and the TV
+                    }
+                    // bookshelves on the other wall
+                    if (findRun(hr * 3u + 1u, 3, 2, rx, rz, rd)) { bookcase(rx, rz, rd, 3); any = true; }
+                    if (findRun(hr * 5u + 7u, 1, 2, rx, rz, rd)) lamp(rx, rz);
+                    for (int i = 0; i < 2; ++i) if (findRun(hr * (7u + i) + 13u, 1, 1, rx, rz, rd)) plant(rx, rz);
+                    // a dining area in a large living room
+                    if (n >= 55)
+                    {
+                        const QVector<int> o = order(hr * 9u + 4u);
+                        for (int idx : o)
+                        {
+                            const int lx = idx % sx, lz = idx / sx;
+                            if (wallDirOf(lx, lz) >= 0) continue;                    // the table — deep in the room
+                            if (!free1(lx, lz, 0) || !free1(lx, lz, 1) || !free1(lx + 1, lz, 0) || !free1(lx - 1, lz, 0) || !free1(lx, lz + 1, 0) || !free1(lx, lz - 1, 0)) continue;
+                            if (table(lx, lz, (hr >> 6) & 1u)) break;
+                        }
+                    }
+                }
+                else
+                {   // ——— KITCHEN-DINING ROOM ———
+                    // a work line along a wall: a stove, a sink (a cauldron), a crafting table, a barrel-"refrigerator" in two tiers
+                    const int runLen = n >= 30 ? 4 : 3;
+                    if (findRun(hr, runLen, 2, rx, rz, rd))
+                    {
+                        int s0, s1; alongOf(rd, s0, s1);
+                        const quint16 kit[4] = { IdFurnace, IdCauldron, IdCraftingTable, IdBarrel };
+                        for (int i = 0; i < runLen; ++i)
+                        {
+                            put(rx + s0 * i, rz + s1 * i, 0, kit[(i + int(hr % 4u)) % 4], &dummy);
+                            if (kit[(i + int(hr % 4u)) % 4] == IdBarrel && free1(rx + s0 * i, rz + s1 * i, 1)) put(rx + s0 * i, rz + s1 * i, 1, IdBarrel, &dummy);
+                        }
+                        any = true;
+                    }
+                    // a dining table with chairs
+                    {
+                        const QVector<int> o = order(hr * 11u + 2u);
+                        for (int idx : o)
+                        {
+                            const int lx = idx % sx, lz = idx / sx;
+                            if (!free1(lx, lz, 0) || !free1(lx, lz, 1) || !free1(lx + 1, lz, 0) || !free1(lx - 1, lz, 0) || !free1(lx, lz + 1, 0) || !free1(lx, lz - 1, 0)) continue;
+                            if (n >= 30 && wallDirOf(lx, lz) >= 0) continue;
+                            if (table(lx, lz, (hr >> 6) & 1u)) { any = true; break; }
+                        }
+                    }
+                    if (findRun(hr * 3u + 9u, 1, 1, rx, rz, rd)) plant(rx, rz);
+                    if (findRun(hr * 5u + 1u, 1, 2, rx, rz, rd)) lamp(rx, rz);
+                }
+                if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[resid] room %d n=%d zone %d/%d type %d any=%d\n", rid, n, zone, zones, type, int(any));
+                }   // zones
+                return any;
+            };
+            for (int r = 0; r < rooms.size(); ++r)
+            {   // ——— the furnishing of ONE room (evenly, not as a heap at the start of the traversal) ———
+                const QVector<int>& cells = rooms[r];
+                if (lair && cells.size() >= 8 && lairRoom(cells, r)) continue;
+                if (industrialF && cells.size() >= 12 && industrialRoom(cells, r)) continue;
+                if (schoolF && cells.size() >= 24 && schoolRoom(r)) continue;
+                if (churchF && cells.size() >= 16) churchAltar(cells, r);
+                if (churchF && !lecternDone && chests && cells.size() >= 12)
+                {   // a lectern with a book: by a wall in a free cell, facing the room; the book text is chosen by the building hash
+                    const int st0 = int(finHash(minx, minz, miny + lyF + r, 0x1EC7u) % quint32(cells.size()));
+                    for (int t = 0; t < cells.size() && !lecternDone; ++t)
+                    {
+                        const int idx = cells[(st0 + t) % cells.size()];
+                        const int lx = idx % sx, lz = idx / sx;
+                        if (!cellFree(lx, lz, 0) || !cellFree(lx, lz, 1)) continue;
+                        for (int wd = 0; wd < 4; ++wd)
+                        {
+                            if (!wallAt(lx, lz, wd)) continue;
+                            int dm = 0;
+                            put(lx, lz, 0, quint16(int(IdLecternBase) + (wd + 2) % 4), &dm);
+                            ChestSite ls; ls.x = minx + lx; ls.y = miny + lyF - sink; ls.z = minz + lz;
+                            ls.lectern = int(finHash(minx, minz, miny, 0xB00Cu) % quint32(kBooksCount));
+                            chests->append(ls);
+                            lecternDone = true;
+                            break;
+                        }
+                    }
+                }
+                // The target count is SIZE-BASED (cells/40): a room of any area gets
+                // "its own" items — a large studio (bigPriv 553 cells) is not shortchanged, a tiny
+                // bedroom does not turn into a warehouse. Malls are denser (a request "the halls are half-empty"):
+                // cells/35, up to 20 items per hall.
+                const bool residDone = resid && !lair && !qEnvironmentVariableIsSet("MCX_NO_RESIDROOM") && cells.size() >= 10 && residRoom(cells, r);
+                const int want = residDone ? 0
+                               : panor ? qBound(8, cells.size() / 24, 28)
+                                       : qBound(priv ? 2 : 1, cells.size() / (priv ? 40 : 30), priv ? 10 : 8);
+                // Malls: the budget is SPLIT. The room traversal order is a DFS from a corner, the first h%6 cells
+                // are always wall ones: without a reserve want is eaten by shelves, the center of the hall
+                // is NEVER looked at — there were no islands/tables/mannequins at all.
+                const int freeWant = panor ? qBound(3, want / 2, 8) : 0;
+                const int wallCap = want - freeWant;
+                int pieces = 0, tables = 0, wallN = 0, menN = 0;  // "no more than 2 tables per room"
+                const int paintWant = panor ? 0 : (obj.code == 44313000 ? qMin(6 + int(cells.size() / 14), 40) : qMin(2 + int(cells.size() / 80), 6));   // a kindergarten — the walls are hung with paintings
+                int paintsN = 0;
+                for (int ci = 0; ci < cells.size() && pieces < want && floorBlocks < capFloor;
+                     ++ci)
+                {
+                    const int idx = cells[ci];
+                    const int lx = idx % sx, lz = idx / sx;
+                    const int bx = minx + lx, bz = minz + lz, byc = miny + lyF;
+                    // A candidate must be clean (and ON TOP OF THE FLOOR — the direct puts of the wall
+                    // series do not ask cellFree themselves, that is how "floating" furniture got in).
+                    if (!cellFree(lx, lz, 0)) continue;         // occupied/a door/a hole — skip
+                    const quint32 h = finHash(bx, bz, byc, 0xF1C3E0u);
+                    if (pieces && h % 6u != 0u) continue;        // the first item is guaranteed,
+                                                                 // after that — every sixth candidate
+                        const bool twoUp = ((h >> 3) & 1u) != 0u;   // the second tier of a wardrobe/rack
+                    int wdir[4], nw = 0;
+                    for (int d = 0; d < 4; ++d) if (wallAt(lx, lz, d)) wdir[nw++] = d;
+                    ++pieces;
+                    if (panor && nw) ++wallN;
+                    if (nw)
+                    {   // ——— the wall series: along the wall we are adjacent to ———
+                        const int wd = wdir[int(finHash(bx, bz, byc, 0xD4u) % quint32(nw))];  // int() AFTER the remainder!
+                        const bool alongX = (wd == 1 || wd == 3);   // a row along the wall
+                        const int s0 = alongX ? 1 : 0, s1 = alongX ? 0 : 1;
+                        const int h2 = int(h % 100u);
+                        if (panor)
+                        {   // ——— MALL: a rack along a wall / barrels / a counter ———
+                            if (h2 < 66)
+                            {   // a rack 4..8: bookshelf (every third is a barrel of "goods")
+                                const int want2 = 4 + int((h >> 7) % 5u);
+                                int okN = 0;
+                                for (; okN < want2; ++okN)
+                                {
+                                    const int rx = lx + s0 * okN, rz = lz + s1 * okN;
+                                    if (!cellFree(rx, rz, 0)) break;
+                                }
+                                for (int i = 0; i < okN; ++i)
+                                {
+                                    put(lx + s0 * i, lz + s1 * i, 0,
+                                        i % 3 == 2 ? IdBarrel : IdBookshelf, &floorBlocks);
+                                    if (twoUp && cellFree(lx + s0 * i, lz + s1 * i, 1))
+                                        put(lx + s0 * i, lz + s1 * i, 1, IdBookshelf, &floorBlocks);
+                                }
+                            }
+                            else if (h2 < 80)
+                            {   // barrels (a storage zone)
+                                put(lx, lz, 0, IdBarrel, &floorBlocks);
+                                if (twoUp && cellFree(lx, lz, 1)) put(lx, lz, 1, IdBarrel, &floorBlocks);
+                                if (((h >> 5) & 3u) && cellFree(lx + s0, lz + s1, 0))
+                                    put(lx + s0, lz + s1, 0, IdBarrel, &floorBlocks);
+                            }
+                            else if (cellFree(lx + s0, lz + s1, 0))
+                            {   // a counter: a crafting table as a cash register + a smithing table
+                                put(lx, lz, 0, IdCraftingTable, &floorBlocks);
+                                put(lx + s0, lz + s1, 0, IdSmithingTable, &floorBlocks);
+                                const int cd = (wd + 2) % 4;        // the seller "in the hall" — a chair
+                                if (cellFree(lx + dvec[cd][0], lz + dvec[cd][1], 0))
+                                    put(lx + dvec[cd][0], lz + dvec[cd][1], 0, stairId[cd], &floorBlocks);
+                            }
+                            else put(lx, lz, 0, IdBookshelf, &floorBlocks);
+                            continue;
+                        }
+                        if (h2 < 30)                              // bookshelves (a row of 1..3)
+                        {
+                            const int lenW = 1 + int((h >> 7) % 3u);
+                            int okN = 0;
+                            for (; okN < lenW; ++okN)
+                            {
+                                const int rx = lx + s0 * okN, rz = lz + s1 * okN;
+                                if (!cellFree(rx, rz, 0)) break;
+                                if (twoUp && !cellFree(rx, rz, 1)) break;
+                            }
+                            for (int i = 0; i < okN; ++i)
+                            {
+                                put(lx + s0 * i, lz + s1 * i, 0, IdBookshelf, &floorBlocks);
+                                if (twoUp) put(lx + s0 * i, lz + s1 * i, 1, IdBookshelf, &floorBlocks);
+                            }
+                            continue;
+                        }
+                        if (h2 < 40 && !panor && tables < (office ? 4 : 2) && cellFree(lx, lz, 1))
+                        {   // A TABLE BY THE WALL (v2: in small rooms a "free" cell is
+                            // rare, tables died): a fence + a top SLAB ON TOP, chairs — only from
+                            // the open sides (there is no chair at a wall), the back AWAY from the table
+                            ++tables;
+                            put(lx, lz, 0, IdFence, &floorBlocks);
+                            put(lx, lz, 1, IdPressurePlateOak, &floorBlocks);
+                            const int cd = ((h >> 6) & 1u) ? 1 : 0;     // the chair axis N-S / E-W
+                            for (int s = 0; s <= 2; s += 2)
+                            {
+                                const int d = cd + s;
+                                const int chx = lx + dvec[d][0], chz = lz + dvec[d][1];
+                                if (cellFree(chx, chz, 0)) put(chx, chz, 0, stairId[d], &floorBlocks);
+                            }
+                            continue;
+                        }
+                        if (h2 < 52 && cellFree(lx + s0, lz + s1, 0))
+                        {   // a workplace: a crafting table + a second block (4 kinds, the grindstone as a "straw")
+                            const int sec2[4] = { int(IdCartographyTable), int(IdLoom),
+                                                  int(IdSmithingTable), int(IdGrindstone) };
+                            put(lx, lz, 0, IdCraftingTable, &floorBlocks);
+                            put(lx + s0, lz + s1, 0, quint16(sec2[int((h >> 6) % 4u)]), &floorBlocks);
+                            const int cd = (wd + 2) % 4;          // a chair from the room side
+                            if (cellFree(lx + dvec[cd][0], lz + dvec[cd][1], 0))
+                                put(lx + dvec[cd][0], lz + dvec[cd][1], 0, stairId[cd], &floorBlocks);
+                            continue;
+                        }
+                        if (h2 < 58)
+                        {   // a barrel cabinet (50% a second tier, 75% a partner along the wall)
+                            put(lx, lz, 0, IdBarrel, &floorBlocks);
+                            if (twoUp && cellFree(lx, lz, 1)) put(lx, lz, 1, IdBarrel, &floorBlocks);
+                            if (((h >> 5) & 3u) && cellFree(lx + s0, lz + s1, 0))
+                                put(lx + s0, lz + s1, 0, IdBarrel, &floorBlocks);
+                            continue;
+                        }
+                        if (h2 < 66 && cellFree(lx + s0, lz + s1, 0))
+                        {   // a kitchen corner: a stove + a barrel/cauldron/composter
+                            const int kit[3] = { int(IdBarrel), int(IdCauldron), int(IdComposter) };
+                            put(lx, lz, 0, IdFurnace, &floorBlocks);
+                            put(lx + s0, lz + s1, 0, quint16(kit[int((h >> 9) % 3u)]), &floorBlocks);
+                            continue;
+                        }
+                        if (h2 < 72)
+                        {   // a seat by a wall: a step with the back to the wall (the bottom into the room)
+                            put(lx, lz, 0, stairId[wd], &floorBlocks);
+                            continue;
+                        }
+                        {   // a bed: the foot by a wall, the head a block from it, air above both
+                            const int outD = (wd + 2) % 4;
+                            const int hx = lx + dvec[outD][0], hz = lz + dvec[outD][1];
+                            if (!office && cellFree(lx, lz, 1) && cellFree(hx, hz, 0) && cellFree(hx, hz, 1)
+                                && farOtherFin(bx, byc, bz, 2))
+                            {
+                                const int col = int(finHash(bx, bz, byc, 0xBED0u) % quint32(kBedsCount));
+                                const int base = int(IdBedBase) + col * 8 + outD * 2;
+                                put(lx, lz, 0, quint16(base), &floorBlocks);      // foot
+                                put(hx, hz, 0, quint16(base + 1), &floorBlocks);  // head
+                            }
+                            else put(lx, lz, 0, IdBookshelf, &floorBlocks);       // refused — a shelf
+                            continue;
+                        }
+                    }
+                    // ——— standing in the middle of the room ———
+                    // Malls: a distance of 3 — denser (a request "the halls are half-empty"), but the islands
+                    // still do not merge into a single rack "fence"
+                    if (!farOtherFin(bx, byc, bz, panor ? 3 : 2)) { --pieces; continue; }
+                    const int h3 = int(h % 100u);
+                    if (panor)
+                    {   // ——— MALL: an island rack / a little table / a mannequin / tubs ———
+                        if (h3 < 52 || h3 >= 90)
+                        {   // an "island" rack 4..8 along the long axis (double-sided)
+                            const bool ax = ((h >> 6) & 1u) != 0u;
+                            const int q0 = ax ? 1 : 0, q1 = ax ? 0 : 1;
+                            const int lenA = 4 + int((h >> 9) % 5u);
+                            int okN = 0;
+                            for (; okN < lenA; ++okN)
+                                if (!cellFree(lx + q0 * okN, lz + q1 * okN, 0)) break;
+                            if (okN == 0) { --pieces; continue; }
+                            for (int i = 0; i < okN; ++i)
+                            {
+                                put(lx + q0 * i, lz + q1 * i, 0,
+                                    i % 3 == 2 ? IdBarrel : IdBookshelf, &floorBlocks);
+                                // the 2nd tier 75% (was 50%) — the hall looks like a "shop"
+                                if ((twoUp || ((h >> 2) & 1u) != 0u) && cellFree(lx + q0 * i, lz + q1 * i, 1))
+                                    put(lx + q0 * i, lz + q1 * i, 1, IdBookshelf, &floorBlocks);
+                            }
+                            continue;
+                        }
+                        if (h3 < 62)
+                        {   // a fitting table (a common limit — two per room)
+                            if (tables >= (office ? 4 : 2) || !cellFree(lx, lz, 1))
+                            {   // occupied/full — a floor lamp instead of a table
+                                if (cellFree(lx, lz, 1))
+                                { put(lx, lz, 0, IdFence, &floorBlocks);
+                                  put(lx, lz, 1, IdLanternStanding, &floorBlocks); }
+                                continue;
+                            }
+                            ++tables;
+                            put(lx, lz, 0, IdFence, &floorBlocks);
+                            put(lx, lz, 1, IdPressurePlateOak, &floorBlocks);   // the top ON the post
+                            const int cd = ((h >> 6) & 1u) ? 1 : 0;
+                            for (int s = 0; s <= 2; s += 2)
+                            {
+                                const int d = cd + s;
+                                const int chx = lx + dvec[d][0], chz = lz + dvec[d][1];
+                                // a chair: the back (the high side) AWAY from the table — the bottom to the table
+                                if (cellFree(chx, chz, 0)) put(chx, chz, 0, stairId[d], &floorBlocks);
+                            }
+                            continue;
+                        }
+                        if (h3 < 88 && mannequins)
+                        {   // A MANNEQUIN (26% of the free places of the hall + a guarantee of >=2 per hall below)
+                            if (!cellFree(lx, lz, 1) || !cellFree(lx, lz, 2)) { --pieces; continue; }
+                            putMannequin(bx, bz, byc);
+                            ++menN;
+                            continue;
+                        }
+                        if (h3 < 90 && cellFree(lx, lz, 0))
+                        {   // a planter with a flower (does not require two tiers — just a pot)
+                            put(lx, lz, 0, quint16(IdFlowerPotBase + int(h >> 11) % kFlowersCount), &floorBlocks);
+                            continue;
+                        }
+                        continue;
+                    }
+                    if (h3 < 26)
+                    {   // A DUMMY TABLE: a fence + a plate-top ON TOP (oak_pressure_plate —
+                        // a request instead of a slab), chairs — steps with the bottom to the table (facing away from
+                        // the table), a limit of 2 per room
+                        if (tables >= (office ? 4 : 2) || !cellFree(lx, lz, 1))
+                        {   // the limit/no room — a floor lamp or a lonely tabletop-shelf
+                            if (cellFree(lx, lz, 1))
+                            { put(lx, lz, 0, IdFence, &floorBlocks);
+                              put(lx, lz, 1, IdLanternStanding, &floorBlocks); }
+                            else put(lx, lz, 0, IdBookshelf, &floorBlocks);
+                            continue;
+                        }
+                        ++tables;
+                        put(lx, lz, 0, IdFence, &floorBlocks);
+                        put(lx, lz, 1, IdPressurePlateOak, &floorBlocks);
+                        const int cd = ((h >> 6) & 1u) ? 1 : 0;     // the chair axis N-S / E-W
+                        for (int s = 0; s <= 2; s += 2)             // two opposite chairs
+                        {
+                            const int d = cd + s;
+                            const int chx = lx + dvec[d][0], chz = lz + dvec[d][1];
+                            if (cellFree(chx, chz, 0)) put(chx, chz, 0, stairId[d], &floorBlocks);
+                        }
+                        continue;
+                    }
+                    if (h3 < 36)
+                    {   // a floor lamp: a fence post + a lantern on top
+                        if (!cellFree(lx, lz, 1)) { put(lx, lz, 0, IdBookshelf, &floorBlocks); continue; }
+                        put(lx, lz, 0, IdFence, &floorBlocks);
+                        put(lx, lz, 1, IdLanternStanding, &floorBlocks);
+                        continue;
+                    }
+                    if (h3 < 48)
+                    {   // a workshop: a loom/grindstone/smithing station (+ a partner)
+                        const int work[3] = { int(IdLoom), int(IdGrindstone), int(IdSmithingTable) };
+                        put(lx, lz, 0, quint16(work[int((h >> 6) % 3u)]), &floorBlocks);
+                        if (((h >> 13) & 3u) && cellFree(lx + 1, lz, 0))
+                            put(lx + 1, lz, 0, ((h >> 8) & 1u) ? IdCauldron : IdComposter,
+                                &floorBlocks);
+                        continue;
+                    }
+                    if (h3 < 58)
+                    {   // a corner with flowers: two pots in a row
+                        if (!cellFree(lx + 1, lz, 0)) { put(lx, lz, 0, IdComposter, &floorBlocks);
+                                                       continue; }
+                        put(lx, lz, 0, quint16(IdFlowerPotBase + int(h >> 11) % kFlowersCount), &floorBlocks);
+                        put(lx + 1, lz, 0, quint16(IdFlowerPotBase + int(h >> 14) % kFlowersCount), &floorBlocks);
+                        continue;
+                    }
+                    if (h3 < 66)
+                    {   // a utility corner: a cauldron + a composter
+                        put(lx, lz, 0, IdCauldron, &floorBlocks);
+                        if (cellFree(lx, lz + 1, 0)) put(lx, lz + 1, 0, IdComposter, &floorBlocks);
+                        continue;
+                    }
+                    if (h3 < 80 && !resid)
+                    {   // a 2×2 carpet
+                        if (!(cellFree(lx + 1, lz, 0) && cellFree(lx, lz + 1, 0)
+                              && cellFree(lx + 1, lz + 1, 0)))
+                        { put(lx, lz, 0, IdComposter, &floorBlocks); continue; }
+                        const quint16 cid = quint16(int(IdCarpetBase)
+                                                    + int((h >> 8) % quint32(kCarpetsCount)));
+                        put(lx, lz, 0, cid, &floorBlocks);
+                        put(lx + 1, lz, 0, cid, &floorBlocks);
+                        put(lx, lz + 1, 0, cid, &floorBlocks);
+                        put(lx + 1, lz + 1, 0, cid, &floorBlocks);
+                        continue;
+                    }
+                    put(lx, lz, 0, IdBookshelf, &floorBlocks);      // a fallback — so that every
+                }                                                   // room has something
+                // ——— a guaranteed table in a LARGE room (v2: in cut-up rooms a table
+                // rarely turns up, and in a bigPriv studio there were none at all) — one, if
+                // the main pass placed none ———
+                if (!panor && !residDone && tables == 0 && cells.size() >= 120)
+                {
+                    for (int ci = 0; ci < cells.size(); ++ci)
+                    {
+                        const int idx = cells[ci];
+                        const int lx = idx % sx, lz = idx / sx;
+                        const int bx = minx + lx, bz = minz + lz, byc = miny + lyF;
+                        if (occ.contains(dkey(bx, byc, bz))) continue;
+                        if (!cellFree(lx, lz, 1) || !farOtherFin(bx, byc, bz, 2)) continue;
+                        ++tables;
+                        put(lx, lz, 0, IdFence, &floorBlocks);
+                        put(lx, lz, 1, IdPressurePlateOak, &floorBlocks);
+                        const int cd = (finHash(bx, bz, byc, 0x7AB1u) >> 5) & 1u ? 1 : 0;
+                        for (int s = 0; s <= 2; s += 2)
+                        {
+                            const int d = cd + s;
+                            const int chx = lx + dvec[d][0], chz = lz + dvec[d][1];
+                            if (cellFree(chx, chz, 0)) put(chx, chz, 0, stairId[d], &floorBlocks);
+                        }
+                        break;
+                    }
+                }
+                // ——— AT LEAST TWO mannequins in each mall hall (a request "put mannequins" +
+                // "the halls are half-empty"): even if the free baskets missed a mannequin ———
+                if (panor && mannequins && menN < 2 && cells.size() >= 150)
+                {
+                    for (int ci = 0; ci < cells.size() && menN < 2; ++ci)
+                    {
+                        const int idx = cells[ci];
+                        const int lx = idx % sx, lz = idx / sx;
+                        const int bx = minx + lx, bz = minz + lz, byc = miny + lyF;
+                        if (occ.contains(dkey(bx, byc, bz))) continue;
+                        bool wallAdj = false;
+                        for (int d = 0; d < 4 && !wallAdj; ++d)
+                            if (wallAt(lx, lz, d)) wallAdj = true;
+                        if (wallAdj) continue;                     // only the "center of the hall"
+                        if (!farOtherFin(bx, byc, bz, 3)) continue;
+                        if (!cellFree(lx, lz, 0)                     // there is a floor, air, outside doors
+                            || !cellFree(lx, lz, 1) || !cellFree(lx, lz, 2)) continue;
+                        if (putMannequin(bx, bz, byc)) ++menN;
+                    }
+                }
+                // ——— PAINTINGS (painting entities; there is no "painting" block in the game — before, a non-existent
+                // block was written, and there were no paintings at all). They hang on the row +1 above the floor (the eye level), in the cell in front of
+                // the wall; first of all — on inter-room partitions (there is the most room there), then
+                // on any blind walls. Only 1×1 motifs, neighboring blocks are not affected. ———
+                if (paintWant > 0 && paints)
+                {
+                    for (int pass = 0; pass < 2; ++pass)               // 0 — partitions only, 1 — any walls
+                        for (int ci = 0; ci < cells.size() && paintsN < paintWant; ++ci)
+                        {
+                            const int idx = cells[ci];
+                            const int lx = idx % sx, lz = idx / sx;
+                            const int bx = minx + lx, bz = minz + lz;
+                            const quint32 hp = finHash(bx, bz, miny + lyF, 0xC47u);
+                            if (hp % (pass == 0 ? 3u : 7u) != 0u) continue;
+                            if (!cellFree(lx, lz, 1)) continue;         // is the hanging tier free?
+                            int face = -1;
+                            for (int d = 0; d < 4 && face < 0; ++d)
+                            {   // the holder is a wall block of the PAINTING TIER (row +1): the window glass
+                                // (strips at +1/+2) and openings ("5") are cut off by themselves
+                                const int hx0 = lx + dvec[d][0], hz0 = lz + dvec[d][1];
+                                const quint16 hid = store.get(minx + hx0, miny + lyF + 1 - sink,
+                                                              minz + hz0);
+                                if (hid == IdAir) continue;
+                                if (blockName(hid).contains(QLatin1String("glass"))) continue;
+                                if (grid[hz0 * sxy + (lyF + 1) * sx + hx0] != char(1)
+                                    && grid[hz0 * sxy + (lyF + 1) * sx + hx0] != char(4)) continue;
+                                if (pass == 0 && !partSet.contains(dkey(minx + hx0, miny + lyF + 1, minz + hz0))) continue;
+                face = (d + 2) % 4;                     // facing away from the wall, into the room
+                            }
+                            if (face < 0) continue;
+                            occ.insert(dkey(bx, miny + lyF + 1, bz));
+                            ++paintsN;
+                            paints->append(PaintingSite{ bx, miny + lyF + 1 - sink, bz, face,
+                                                         int(hp >> 8) % kPaintMotifsCount });
+                        }
+                }
+            }
+            // ——— STANDS WITH FRAMES (malls): a panel of 3 plank blocks 2 high, with item frames on both sides (swords and
+            // tools of different materials: wood 66%, stone 24%, gold 7%, iron 2.5%, diamond 0.5%; wear —
+            // durability remains 2..36%; very rarely a golden apple and a golden carrot). ———
+            auto placeRack = [&](int lx, int lz, bool ax) -> bool
+            {
+                if (!frames) return false;
+                const int q0 = ax ? 1 : 0, q1 = ax ? 0 : 1;               // the panel axis
+                const int p0 = ax ? 0 : 1, p1 = ax ? 1 : 0;               // the perpendicular: the sides with frames
+                for (int i = -1; i <= 1; ++i)
+                    for (int row = 0; row < 2; ++row)
+                    {
+                        if (!cellFree(lx + q0 * i, lz + q1 * i, row)) return false;
+                        for (int sd = -1; sd <= 1; sd += 2)
+                            if (!cellFree(lx + q0 * i + p0 * sd, lz + q1 * i + p1 * sd, row)) return false;
+                    }
+                int dummyPlaced = 0;
+                for (int i = -1; i <= 1; ++i)
+                    for (int row = 0; row < 2; ++row)
+                    {
+                        put(lx + q0 * i, lz + q1 * i, row, IdOakPlanks, &dummyPlaced);
+                        for (int sd = -1; sd <= 1; sd += 2)
+                        {
+                            const int fx = lx + q0 * i + p0 * sd, fz = lz + q1 * i + p1 * sd;
+                            const int bx = minx + fx, bz = minz + fz, byc = miny + lyF + row;
+                            occ.insert(dkey(bx, byc, bz));                 // the frame cell is occupied
+                            FrameSite fr;
+                            fr.x = bx; fr.y = byc - sink; fr.z = bz;
+                            // the side outward from the panel: by +p -> where the perpendicular is directed
+                            fr.face = ax ? (sd > 0 ? 2 : 0) : (sd > 0 ? 1 : 3);
+                            const quint32 hf = finHash(bx, bz, byc, 0xF4A3Eu);
+                            const int itemRoll = int(hf % 100u);
+                            if (itemRoll < 3) fr.kind = 5;                 // a golden apple (rarer: there is less good stuff on racks)
+                            else if (itemRoll < 6) fr.kind = 6;            // a golden carrot
+                            else
+                            {
+                                const int tr = itemRoll - 6;                // 0..93: a sword ~40, a pickaxe/axe/shovel/hoe ~13 each
+                                fr.kind = tr < 40 ? 0 : 1 + (tr - 40) / 14;
+                                if (fr.kind > 4) fr.kind = 4;
+                                // a rack: wood 66%, stone 24%, gold 7%, iron 2.5%, diamond 0.5%
+                                const quint32 hm = finHash(bx, bz, byc, 0x3A71u) % 1000u;
+                                fr.mat = hm < 660u ? 0 : hm < 900u ? 1 : hm < 970u ? 2 : hm < 995u ? 3 : 4;
+                                const int mxd = kToolMaxDur[fr.mat];
+                                const int leftPct = 2 + int(finHash(bx, bz, byc, 0x71B9u) % 35u);   // 2..36 %
+                                fr.dmg = std::max(0, std::min(mxd - 1, mxd - int(std::lround(mxd * leftPct / 100.0))));
+                            }
+                            frames->append(fr);
+                        }
+                    }
+                return true;
+            }
+            ;
+            // ——— SACRIFICIAL STANDS (malls): an obsidian 1×1 pedestal, on its top face — a frame turned upward, with a sword
+            // (the material and wear by the same chances as on the stands). ———
+            auto placeAltar = [&](int lx, int lz) -> bool
+            {
+                if (!frames || !cellFree(lx, lz, 0) || !cellFree(lx, lz, 1)) return false;
+                int dummyPlaced = 0;
+                put(lx, lz, 0, IdObsidian, &dummyPlaced);
+                const int bx = minx + lx, bz = minz + lz, byc = miny + lyF + 1;
+                occ.insert(dkey(bx, byc, bz));
+                FrameSite fr;
+                fr.x = bx; fr.y = byc - sink; fr.z = bz;
+                fr.face = 4;                                               // up
+                fr.kind = 0;
+                // the altar: noticeably more good stuff — wood 20%, stone 25%, gold 25%, iron 18%, diamond 12%
+                const quint32 hm = finHash(bx, bz, byc, 0x5AC1u) % 100u;
+                fr.mat = hm < 20u ? 0 : hm < 45u ? 1 : hm < 70u ? 2 : hm < 88u ? 3 : 4;
+                const int mxd = kToolMaxDur[fr.mat];
+                const int leftPct = 2 + int(finHash(bx, bz, byc, 0x71B9u) % 35u);
+                fr.dmg = std::max(0, std::min(mxd - 1, mxd - int(std::lround(mxd * leftPct / 100.0))));
+                frames->append(fr);
+                return true;
+            };
+            // ——— FILLING THE VOIDS (a request: "no empty areas larger than ~5×5 should remain" in malls; apartment and
+            // non-residential buildings — a bit denser, a 7×7 window). After the usual placement, in one pass we look for squares of free cells
+            // (a cell is free if one can walk/place on it — cellFree) and put an item in the center; what is placed
+            // only REDUCES the number of free cells, so one pass is enough. ———
+            {
+                const bool aptHere = (obj.code == 44400000);
+                const int G = panor ? 5 : ((aptHere || office) ? 7 : 0);
+                if (G > 0)
+                {
+                    const int hR = G / 2;
+                    QVector<char> freeMap(sx * sz, 0);
+                    for (int lz = 1; lz < sz - 1; ++lz)
+                        for (int lx = 1; lx < sx - 1; ++lx)
+                            freeMap[lz * sx + lx] = cellFree(lx, lz, 0) ? 1 : 0;
+                    auto occupy = [&](int cx, int cz, int rad)
+                    {
+                        for (int dz = -rad; dz <= rad; ++dz)
+                            for (int dx = -rad; dx <= rad; ++dx)
+                            {
+                                const int x = cx + dx, z = cz + dz;
+                                if (x >= 0 && x < sx && z >= 0 && z < sz) freeMap[z * sx + x] = 0;
+                            }
+                    };
+                    int dummy = 0;
+                    for (int lz = hR; lz < sz - hR; ++lz)
+                        for (int lx = hR; lx < sx - hR; ++lx)
+                        {
+                            if (!freeMap[lz * sx + lx]) continue;
+                            bool all = true;
+                            for (int dz = -hR; dz <= hR && all; ++dz)
+                                for (int dx = -hR; dx <= hR; ++dx)
+                                    if (!freeMap[(lz + dz) * sx + lx + dx]) { all = false; break; }
+                            if (!all) continue;
+                            const int bx = minx + lx, bz = minz + lz, byc = miny + lyF;
+                            const quint32 hg = finHash(bx, bz, byc, 0x6A9u);
+                            const int roll = int(hg % 100u);
+                            const bool ax = ((hg >> 7) & 1u) != 0u;           // the row/chair axis
+                            const int q0 = ax ? 1 : 0, q1 = ax ? 0 : 1;
+                            if (panor)
+                            {
+                                if (roll < 25 && placeRack(lx, lz, ax))
+                                {   // a stand with frames (swords/tools) — already placed
+                                }
+                                else if (roll < 35 && placeAltar(lx, lz))
+                                {   // a sacrificial stand with a sword — already placed
+                                }
+                                else if (roll < 50)
+                                {   // a trading "island" of 5 cells: racks and barrels in two tiers
+                                    for (int i = -2; i <= 2; ++i)
+                                    {
+                                        const int x = lx + q0 * i, z = lz + q1 * i;
+                                        if (!cellFree(x, z, 0)) continue;
+                                        put(x, z, 0, (i + 2) % 3 == 2 ? IdBarrel : IdBookshelf, &dummy);
+                                        if (cellFree(x, z, 1)) put(x, z, 1, IdBookshelf, &dummy);
+                                    }
+                                }
+                                else if (roll < 78 && cellFree(lx, lz, 1))
+                                {   // a little table with two "chairs"-steps
+                                    put(lx, lz, 0, IdFence, &dummy);
+                                    put(lx, lz, 1, IdPressurePlateOak, &dummy);
+                                    for (int sd = 0; sd <= 2; sd += 2)
+                                    {
+                                        const int d = (ax ? 1 : 0) + sd;
+                                        const int cx2 = lx + dvec[d][0], cz2 = lz + dvec[d][1];
+                                        if (cellFree(cx2, cz2, 0)) put(cx2, cz2, 0, stairId[d], &dummy);
+                                    }
+                                }
+                                else
+                                {   // "goods": barrels as a 2×2 block in one tier
+                                    for (int dz = 0; dz <= 1; ++dz)
+                                        for (int dx = 0; dx <= 1; ++dx)
+                                            if (cellFree(lx + dx, lz + dz, 0)) put(lx + dx, lz + dz, 0, IdBarrel, &dummy);
+                                }
+                            }
+                            else
+                            {
+                                if (roll < 40 && cellFree(lx, lz, 1))
+                                {   // a table with chairs
+                                    put(lx, lz, 0, IdFence, &dummy);
+                                    put(lx, lz, 1, IdPressurePlateOak, &dummy);
+                                    for (int sd = 0; sd <= 2; sd += 2)
+                                    {
+                                        const int d = (ax ? 1 : 0) + sd;
+                                        const int cx2 = lx + dvec[d][0], cz2 = lz + dvec[d][1];
+                                        if (cellFree(cx2, cz2, 0)) put(cx2, cz2, 0, stairId[d], &dummy);
+                                    }
+                                }
+                                else if (roll < 65 && cellFree(lx, lz, 1))
+                                {   // a floor lamp
+                                    put(lx, lz, 0, IdFence, &dummy);
+                                    put(lx, lz, 1, IdLanternStanding, &dummy);
+                                }
+                                else if (roll < 85)
+                                {   // a 2×2 carpet
+                                    const quint16 cid = quint16(int(IdCarpetBase) + int((hg >> 8) % quint32(kCarpetsCount)));
+                                    for (int dz = 0; dz <= 1; ++dz)
+                                        for (int dx = 0; dx <= 1; ++dx)
+                                            if (cellFree(lx + dx, lz + dz, 0)) put(lx + dx, lz + dz, 0, cid, &dummy);
+                                }
+                                else
+                                {   // a rack of two blocks
+                                    for (int i = 0; i <= 1; ++i)
+                                    {
+                                        const int x = lx + q0 * i, z = lz + q1 * i;
+                                        if (!cellFree(x, z, 0)) continue;
+                                        put(x, z, 0, IdBookshelf, &dummy);
+                                        if (cellFree(x, z, 1)) put(x, z, 1, IdBookshelf, &dummy);
+                                    }
+                                }
+                            }
+                            occupy(lx, lz, 2);                                   // with a reserve: neighbors must not give a new square
+                        }
+                }
+            }
+            if (panor && frames)
+            {   // a guaranteed pass: a mall gets no fewer than a few stands (by hall size), in free places
+                QVector<int> openCells;
+                for (int lz = 2; lz < sz - 2; ++lz)
+                    for (int lx = 2; lx < sx - 2; ++lx)
+                        if (cellFree(lx, lz, 0)) openCells.append(lz * sx + lx);
+                const int target = qBound(2, openCells.size() / 150, 12);
+                int racks = 0;
+                for (const FrameSite& fs : *frames) { Q_UNUSED(fs); }
+                if (!openCells.isEmpty())
+                {
+                    const int nOpen = openCells.size();
+                    const int start = int(finHash(minx, minz, miny + lyF, 0x4ACCu) % quint32(nOpen));
+                    const int stride = 7 + 2 * (nOpen % 11);               // the step is odd, to go around the hall in a scatter
+                    for (int t = 0; t < qMin(nOpen, 6000) && racks < target; ++t)
+                    {
+                        const int idx2 = openCells[(start + qint64(t) * stride) % nOpen];
+                        const int lx = idx2 % sx, lz = idx2 / sx;
+                        const bool ax = (finHash(minx + lx, minz + lz, miny + lyF, 0x9A1u) & 1u) != 0u;
+                        if (placeRack(lx, lz, ax) || placeRack(lx, lz, !ax)) ++racks;
+                    }
+                    int altars = 0;
+                    const int targetA = qBound(2, nOpen / 220, 10);
+                    for (int t = 0; t < qMin(nOpen, 4000) && altars < targetA; ++t)
+                    {
+                        const int idx2 = openCells[(start + 3 + qint64(t) * (stride + 2)) % nOpen];
+                        if (placeAltar(idx2 % sx, idx2 / sx)) ++altars;
+                    }
+                }
+            }
+            // ——— CARPET COMPOSITIONS in residential multi-storey buildings: instead of random squares — a whole carpet in a free part of the room: a runner
+            // with an edging, a large carpet in a checkerboard of contrasting colors or a carpet with a double border. They do not cover everything: a passage
+            // remains along the edges, and furniture cells and door openings are not affected (cellFree). ———
+            if (resid && !qEnvironmentVariableIsSet("MCX_NORUGS"))
+            {
+                // pairs of contrasting colors (the kCarpets indices): white/black, red/white, blue/light blue, green/lime, purple/pink,
+                // brown/orange, cyan/white, gray/light gray, black/yellow, red/black, blue/white, brown/white
+                static const int kPairs[][2] = { { 0, 15 }, { 14, 0 }, { 11, 3 }, { 13, 5 }, { 10, 6 }, { 12, 1 },
+                                                 { 9, 0 }, { 7, 8 }, { 15, 4 }, { 14, 15 }, { 11, 0 }, { 12, 0 } };
+                for (int rid = 0; rid < rooms.size(); ++rid)
+                {
+                    const QVector<int>& cs = rooms[rid];
+                    if (cs.size() < 14) continue;
+                    const quint32 hr = finHash(minx, minz, miny + lyF + rid, 0xCA9E7u);
+                    if (hr % 100u >= 75u) continue;                                     // not in every room
+                    int bx0 = sx, bx1 = -1, bz0 = sz, bz1 = -1;
+                    for (int idx : cs) { bx0 = std::min(bx0, idx % sx); bx1 = std::max(bx1, idx % sx); bz0 = std::min(bz0, idx / sx); bz1 = std::max(bz1, idx / sx); }
+                    const int W = bx1 - bx0 + 1, Hh = bz1 - bz0 + 1;
+                    QVector<char> fr(W * Hh, 0);
+                    for (int idx : cs)
+                        if (cellFree(idx % sx, idx / sx, 0)) fr[(idx / sx - bz0) * W + (idx % sx - bx0)] = 1;
+                    // the largest free rectangle (histograms)
+                    QVector<int> hgt(W, 0);
+                    int bestA = 0, rx0 = 0, rz0 = 0, rw = 0, rh = 0;
+                    for (int z = 0; z < Hh; ++z)
+                    {
+                        for (int x = 0; x < W; ++x) hgt[x] = fr[z * W + x] ? hgt[x] + 1 : 0;
+                        QVector<int> stk;
+                        for (int x = 0; x <= W; ++x)
+                        {
+                            const int cur = (x < W) ? hgt[x] : 0;
+                            while (!stk.isEmpty() && hgt[stk.last()] >= cur)
+                            {
+                                const int hh = hgt[stk.takeLast()];
+                                const int left = stk.isEmpty() ? 0 : stk.last() + 1;
+                                const int width = x - left;
+                                if (hh * width > bestA) { bestA = hh * width; rx0 = left; rz0 = z - hh + 1; rw = width; rh = hh; }
+                            }
+                            stk.append(x);
+                        }
+                    }
+                    if (rw < 3 || rh < 3 || bestA < 12) continue;
+                    // a passage along the edge: in a spacious area we step back by a cell
+                    if (rw >= 6 && rh >= 6) { ++rx0; ++rz0; rw -= 2; rh -= 2; }
+                    const int pr = int((hr >> 8) % (sizeof(kPairs) / sizeof(kPairs[0])));
+                    const quint16 cA = quint16(int(IdCarpetBase) + kPairs[pr][0]), cB = quint16(int(IdCarpetBase) + kPairs[pr][1]);
+                    const int pr2 = int((hr >> 14) % (sizeof(kPairs) / sizeof(kPairs[0])));
+                    const quint16 cC = quint16(int(IdCarpetBase) + kPairs[pr2][(hr >> 20) & 1u]);
+                    int dm2 = 0;
+                    const int kind = int((hr >> 22) % 3u);
+                    int w = rw, h = rh;
+                    bool horiz = w >= h;                                                 // a runner along the long side
+                    if (kind == 2 && std::max(w, h) >= 5 && std::min(w, h) >= 3)
+                    {   // a runner: width 3 (an edging | the middle | an edging) and length up to 9, in the center of the free area
+                        const int len = std::min(std::max(w, h), 9);
+                        const int wid = 3;
+                        const int rw2 = horiz ? len : wid, rh2 = horiz ? wid : len;
+                        const int ox = rx0 + (w - rw2) / 2, oz = rz0 + (h - rh2) / 2;
+                        for (int dz = 0; dz < rh2; ++dz)
+                            for (int dx = 0; dx < rw2; ++dx)
+                            {
+                                const int u = horiz ? dx : dz, v = horiz ? dz : dx, ul = horiz ? rw2 : rh2;
+                                const bool edge = (v == 0 || v == wid - 1 || u == 0 || u == ul - 1);
+                                put(bx0 + ox + dx, bz0 + oz + dz, 0, edge ? cA : cB, &dm2);
+                            }
+                        continue;
+                    }
+                    w = std::min(w, 8); h = std::min(h, 8);
+                    const int ox = rx0 + (rw - w) / 2, oz = rz0 + (rh - h) / 2;
+                    if (kind == 0 && w >= 4 && h >= 4)
+                    {   // a checkerboard of contrasting colors
+                        for (int dz = 0; dz < h; ++dz)
+                            for (int dx = 0; dx < w; ++dx)
+                                put(bx0 + ox + dx, bz0 + oz + dz, 0, ((dx + dz) & 1) ? cB : cA, &dm2);
+                    }
+                    else if (w >= 3 && h >= 3)
+                    {   // a carpet with an edging: the outer ring cA, inside cB (in a large one — another ring cC)
+                        for (int dz = 0; dz < h; ++dz)
+                            for (int dx = 0; dx < w; ++dx)
+                            {
+                                const int d = std::min(std::min(dx, w - 1 - dx), std::min(dz, h - 1 - dz));
+                                const quint16 c = d == 0 ? cA : (d == 1 && w >= 7 && h >= 7 ? cC : cB);
+                                put(bx0 + ox + dx, bz0 + oz + dz, 0, c, &dm2);
+                            }
+                    }
+                }
+            }
+            // ——— BEDS in private houses (a request: "far from in every one"): if no beds came up randomly on a floor, we place
+            // 1 (2 in spacious ones): the foot edge by a wall/furniture, the head — a block into the room, air above both. ———
+            if (priv || hospital)
+            {
+                auto bedsOnFloor = [&]() -> int
+                {
+                    int n = 0;
+                    for (int lz = 1; lz < sz - 1; ++lz)
+                        for (int lx = 1; lx < sx - 1; ++lx)
+                        {
+                            const quint16 b0 = store.get(minx + lx, miny + lyF - sink, minz + lz);
+                            if (b0 >= IdBedBase && b0 < IdBedMax) ++n;
+                        }
+                    return n / 2;
+                };
+                const int wantBeds = hospital ? qBound(2, openN / 28, 10) : (openN >= 90 ? 2 : 1);
+                int have = bedsOnFloor();
+                if (have < wantBeds)
+                {
+                    QVector<int> cand;
+                    for (int lz = 1; lz < sz - 1; ++lz)
+                        for (int lx = 1; lx < sx - 1; ++lx)
+                            if (cellFree(lx, lz, 0) && cellFree(lx, lz, 1)) cand.append(lz * sx + lx);
+                    const int nC = cand.size();
+                    const int st0 = nC ? int(finHash(minx, minz, miny + lyF, 0xBED1u) % quint32(nC)) : 0;
+                    for (int pass = 0; pass < 2 && have < wantBeds; ++pass)    // pass 0 — only by a wall/furniture, pass 1 — anywhere
+                        for (int t = 0; t < nC && have < wantBeds; ++t)
+                        {
+                            const int idx = cand[(st0 + t * 5) % nC];
+                            const int lx = idx % sx, lz = idx / sx;
+                            if (!cellFree(lx, lz, 0) || !cellFree(lx, lz, 1)) continue;
+                            for (int outD = 0; outD < 4; ++outD)
+                            {
+                                const int hx = lx + dvec[outD][0], hz = lz + dvec[outD][1];
+                                if (!cellFree(hx, hz, 0) || !cellFree(hx, hz, 1)) continue;
+                                if (pass == 0 && cellFree(lx - dvec[outD][0], lz - dvec[outD][1], 0)) continue;   // a wall behind
+                                const int col = int(finHash(minx + lx, minz + lz, miny + lyF, 0xBED0u) % quint32(kBedsCount));
+                                const int base = int(IdBedBase) + col * 8 + outD * 2;
+                                int dummyBed = 0;
+                                put(lx, lz, 0, quint16(base), &dummyBed);       // foot
+                                put(hx, hz, 0, quint16(base + 1), &dummyBed);   // head
+                                ++have;
+                                break;
+                            }
+                        }
+                }
+            }
+            // ——— LIVE RESIDENTS of this floor (villager / wandering_trader / trader_llama entities) ———
+            // Roles: malls — various traders, including wandering ones with a llama; private houses and residential — residents;
+            // a church (44319000) — a priest (cleric); schools/kindergartens/research buildings (44312000/44313000/44315000) —
+            // a librarian ("scholar", in a kindergarten also children); other non-residential — employees. A cell must be
+            // free for 3 blocks upward; in a house the slabs do not intersect with furniture (occ).
+            if (npcs)
+            {
+                const bool church = (obj.code == 44319000);
+                const bool school = (obj.code == 44312000 || obj.code == 44315000);
+                const bool kinder = (obj.code == 44313000);
+                int nWant = 0;
+                if (panor)        nWant = qBound(2, openN / 90, 8);
+                else if (church)  nWant = openN >= 200 ? 2 : 1;
+                else if (hospital) nWant = openN >= 200 ? 3 : 2;           // doctors and nurses (the cleric profession)
+                else if (school)  nWant = openN >= 150 ? 7 : 5;           // a teacher + pupils (children) at desks
+                else if (kinder)  nWant = openN >= 150 ? 14 : (openN >= 70 ? 10 : 7);   // a kindergarten: many children
+                else if (priv)    nWant = openN >= 70 ? 3 : (openN >= 30 ? 2 : 1);
+                else if (industrialF) nWant = openN >= 200 ? 3 : (openN >= 80 ? 2 : 1);   // workshop workers
+                else if (office)  nWant = openN >= 150 ? 2 : 1;
+                else              nWant = (k % 3 == 0) ? 1 : 0;           // apartment buildings: a resident every other floor or two
+                if (!priv && !panor && npcTotal >= (kinder ? 18 : (school || hospital ? 10 : 4))) nWant = 0;   // a 40-storey tower does not get overgrown with a crowd (a school may have a class of children)
+                if (lair) nWant = 0;                                      // raiders live in a lair, not residents
+                static const int kMerch[] = { PfButcher, PfFarmer, PfFisherman, PfFletcher, PfLeather,
+                                              PfShepherd, PfToolsmith, PfCartographer, PfWeaponsmith };
+                static const int kResid[] = { PfFarmer, PfShepherd, PfFisherman, PfMason, PfNitwit, PfNone,
+                                              PfButcher, PfFletcher, PfLeather, PfToolsmith, PfLibrarian };
+                auto findCell = [&](quint32 seed, int& ox, int& oz, int needRows) -> bool
+                {   // a cell free for needRows cells in one of the rooms (the start and the traversal — by hash)
+                    if (rooms.isEmpty()) return false;
+                    const int r0 = int(seed % quint32(rooms.size()));
+                    for (int rr = 0; rr < rooms.size(); ++rr)
+                    {
+                        const QVector<int>& cs = rooms[(r0 + rr) % rooms.size()];
+                        const int c0 = int((seed >> 7) % quint32(cs.size()));
+                        for (int t = 0; t < qMin(int(cs.size()), 120); ++t)
+                        {
+                            const int idx = cs[(c0 + t * 7) % cs.size()];
+                            const int lx = idx % sx, lz = idx / sx;
+                            bool ok = true;
+                            for (int row = 0; row < needRows && ok; ++row) ok = cellFree(lx, lz, row);
+                            if (ok) { ox = lx; oz = lz; return true; }
+                        }
+                    }
+                    return false;
+                };
+                for (int n = 0; n < nWant; ++n)
+                {
+                    int lx = 0, lz = 0;
+                    const quint32 hn = finHash(minx + n * 31, minz + k, miny + lyF, 0x7117u);
+                    if (!findCell(hn, lx, lz, 3)) break;
+                    const int bx = minx + lx, bz = minz + lz, byc = miny + lyF;
+                    NpcSite ns;
+                    ns.x = bx; ns.y = byc - sink; ns.z = bz;
+                    ns.yaw = int((hn >> 11) % 4u) * 90;
+                    ns.vtype = (hn >> 16) % 100u < 45u ? 0 : int((hn >> 20) % 7u);
+                    ns.level = 1 + int((hn >> 24) % 4u);
+                    if (panor)
+                    {
+                        const int roll = int(hn % 100u);
+                        if (roll < 55) { ns.kind = 0; ns.prof = kMerch[(hn >> 3) % 9u]; }
+                        else
+                        {   // a wandering trader; in 45% of cases a llama nearby
+                            ns.kind = 1;
+                            int ax = 0, az = 0;
+                            if (roll >= 78)
+                                for (int d = 0; d < 4; ++d)
+                                {
+                                    ax = lx + dvec[d][0]; az = lz + dvec[d][1];
+                                    if (cellFree(ax, az, 0) && cellFree(ax, az, 1)
+                                        && !(ax == lx && az == lz))
+                                    {
+                                        NpcSite llama = ns;
+                                        llama.kind = 2; llama.x = minx + ax; llama.z = minz + az;
+                                        llama.variant = int((hn >> 5) % 4u);
+                                        npcs->append(llama);
+                                        occ.insert(dkey(minx + ax, byc, minz + az));
+                                        break;
+                                    }
+                                }
+                        }
+                    }
+                    else if (industrialF)
+                    {   // the smiths of the workshop: an armorer, a weaponsmith, a toolsmith, a mason
+                        static const int kSmith[] = { 0, PfWeaponsmith, PfToolsmith, PfMason };
+                        ns.prof = kSmith[(hn >> 3) % 4u];
+                    }
+                    else if (church || hospital) ns.prof = PfCleric;
+                    else if (school)
+                    {
+                        if (n == 0) ns.prof = (hn % 4u == 0) ? PfCartographer : PfLibrarian;     // the teacher
+                        else if (obj.code == 44315000) { static const int kSci[] = { PfLibrarian, PfCartographer, PfToolsmith, PfMason }; ns.prof = kSci[(hn >> 3) % 4u]; }   // a scientific building: only adult scientists
+                        else { ns.baby = true; ns.prof = PfNone; ns.level = 1; }                  // pupils
+                    }
+                    else if (kinder)
+                    {
+                        if (n == 0) ns.prof = PfLibrarian;                  // the "scholar" kindergarten teacher
+                        else { ns.baby = true; ns.prof = PfNone; ns.level = 1; }   // children
+                    }
+                    else              ns.prof = kResid[(hn >> 3) % 11u];
+                    if (priv && ((n == 1 && (hn >> 4) % 100u < 65u) || (n == 2 && (hn >> 12) % 100u < 45u)))
+                    { ns.baby = true; ns.prof = PfNone; ns.level = 1; }   // children in a family: up to two
+                    npcs->append(ns);
+                    occ.insert(dkey(bx, byc, bz));
+                    ++npcTotal;
+                }
+                // PETS of residential houses: in multi-storey buildings (apartment blocks, 44400000) — cats (up to 7 per building, about every second floor, sometimes two),
+                // in the private sector — dogs (wolves: 1 per house with an 80% chance, in large houses sometimes a second).
+                if (npcs && !lair && (resid || priv))
+                {
+                    static const char* const kCatVars[] = { "minecraft:tabby", "minecraft:black", "minecraft:red", "minecraft:siamese", "minecraft:british_shorthair",
+                                                            "minecraft:calico", "minecraft:persian", "minecraft:ragdoll", "minecraft:white", "minecraft:jellie", "minecraft:all_black" };
+                    int nPet = 0;
+                    const quint32 hq = finHash(minx + 17, minz + k * 3, miny + lyF, 0x9E7A1u);
+                    if (priv)
+                    {
+                        if (k == 0) nPet = (hq % 100u < 80u) ? ((openN >= 70 && (hq >> 8) % 100u < 35u) ? 2 : 1) : 0;
+                    }
+                    else if (petTotal < 7)
+                        nPet = (hq % 100u < 55u) ? (((hq >> 8) % 100u < 25u) ? 2 : 1) : 0;
+                    for (int pn = 0; pn < nPet && petTotal < (priv ? 2 : 7); ++pn)
+                    {
+                        int lx = 0, lz = 0;
+                        const quint32 hpn = finHash(minx + pn * 41, minz + k + 7, miny + lyF, 0x9E7A2u);
+                        if (!findCell(hpn, lx, lz, 2)) break;
+                        NpcSite pet;
+                        pet.kind = 5;
+                        pet.animal = priv ? QStringLiteral("minecraft:wolf") : QStringLiteral("minecraft:cat");
+                        if (!priv) pet.petVariant = QString::fromLatin1(kCatVars[(hpn >> 12) % 11u]);
+                        pet.x = minx + lx; pet.z = minz + lz; pet.y = miny + lyF - sink;
+                        pet.yaw = int((hpn >> 20) % 4u) * 90;
+                        npcs->append(pet);
+                        occ.insert(dkey(pet.x, miny + lyF, pet.z));
+                        ++petTotal;
+                    }
+                }
+                if (hospital)
+                {   // patients: on beds (by the head part of the bed), up to 6 per floor; without a profession, in ordinary clothes
+                    int np = 0;
+                    for (int lz = 1; lz < sz - 1 && np < 6; ++lz)
+                        for (int lx = 1; lx < sx - 1 && np < 6; ++lx)
+                        {
+                            const quint16 b0 = store.get(minx + lx, miny + lyF - sink, minz + lz);
+                            if (b0 < IdBedBase || b0 >= IdBedMax || ((int(b0) - int(IdBedBase)) & 1) == 0) continue;     // the head part is needed
+                            const quint32 hp = finHash(minx + lx, minz + lz, miny + lyF, 0x9A71u);
+                            if (hp % 100u >= 75u) continue;
+                            NpcSite ns;
+                            ns.x = minx + lx; ns.z = minz + lz; ns.y = miny + lyF - sink; ns.yoff = 0.5625;
+                            ns.yaw = int((hp >> 8) % 4u) * 90;
+                            ns.prof = PfNone; ns.vtype = (hp >> 16) % 100u < 45u ? 0 : int((hp >> 20) % 7u); ns.level = 1;
+                            npcs->append(ns);
+                            ++np;
+                        }
+                }
+                if (industrialF && !lair && k == 0 && finHash(minx, minz, miny, 0x601E3u) % 100u < 50u)
+                {   // the workshop guard: an iron golem on the 1st floor (50% of buildings)
+                    int lx = 0, lz = 0;
+                    if (findCell(finHash(minx + 5, minz + 9, miny, 0x601E4u), lx, lz, 3))
+                    {
+                        NpcSite g; g.kind = 3; g.x = minx + lx; g.z = minz + lz; g.y = miny + lyF - sink; g.yaw = 0;
+                        npcs->append(g);
+                        occ.insert(dkey(g.x, miny + lyF, g.z));
+                    }
+                }
+                if (lair)
+                {   // raiders: A PER-FLOOR LIMIT (2..5 by floor area, not per building): pillagers 60%, vindicators 30%, an evoker 10%;
+                    // the first raider of a lair is the standard-bearer (a pillager captain with an ominous banner on the head)
+                    if (lairCapsLeft < 0)
+                    {   // the number of standard-bearers grows with the building area (floor cells of the 1st floor inside the walls): 1 per ~350 cells, up to 8
+                        int area = 0;
+                        const int rowA = lowF ? lyLow + 1 : lyLow + 2;
+                        for (int lz = 0; lz < sz; ++lz)
+                            for (int lx = 0; lx < sx; ++lx)
+                            {
+                                const char g0 = grid[lz * sxy + rowA * sx + lx];
+                                if (g0 == char(3) || g0 == char(4)) ++area;
+                            }
+                        lairCapsLeft = qBound(1, 1 + area / 350, 8);
+                    }
+                    const int capsPerFloor = std::max(1, (lairCapsLeft + std::max(1, nStories - k) - 1) / std::max(1, nStories - k));   // evenly over the remaining floors
+                    const int nM = std::max(qBound(2, openN / 45, 5), capsPerFloor + 1);
+                    int capsHere = 0;
+                    for (int n = 0; n < nM; ++n)
+                    {
+                        int lx = 0, lz = 0;
+                        const quint32 hn = finHash(minx + n * 37, minz + k * 5, miny + lyF, 0x1A15u);
+                        if (!findCell(hn, lx, lz, 3)) break;
+                        NpcSite m;
+                        m.kind = 4;
+                        const int rr = int(hn % 100u);
+                        m.variant = rr < 60 ? 4 : (rr < 90 ? 5 : 6);          // pillager / vindicator / evoker
+                        if (lairCapsLeft > 0 && capsHere < capsPerFloor) { m.variant = 4; m.captain = true; --lairCapsLeft; ++capsHere; }
+                        m.x = minx + lx; m.z = minz + lz; m.y = miny + lyF - sink;
+                        m.yaw = int((hn >> 11) % 4u) * 90;
+                        npcs->append(m);
+                        occ.insert(dkey(m.x, miny + lyF, m.z));
+                    }
+                }
+            }
+            // A KINDERGARTEN: the whole free floor is covered with multi-colored carpets (pieces of 2×2 of a random color); occupied cells (furniture, doors, stairs) are not touched.
+            // We place it after the residents: they need free cells.
+            if (obj.code == 44313000)
+                for (const QVector<int>& cs : rooms)
+                    for (int idx : cs)
+                    {
+                        const int lx = idx % sx, lz = idx / sx;
+                        if (!cellFree(lx, lz, 0) || nearShaft(lx, lz)) continue;
+                        const quint32 hc = finHash(minx + (lx >> 1), minz + (lz >> 1), miny + lyF, 0x4B1D5u);
+                        int dm2 = 0;
+                        put(lx, lz, 0, quint16(int(IdCarpetBase) + int(hc % quint32(kCarpetsCount))), &dm2);
+                    }
+        }
+    }
+    // THE LAIR BANNERS OUTSIDE: on each compass side one ominous banner on the wall of the 1st floor above the door row
+    // (2–3 rows above the floor), not on a window, the cell outside is free; closer to the middle of the facade.
+    if (lair && banners)
+    {
+        static const int sdx[4] = { 0, 1, 0, -1 }, sdz[4] = { -1, 0, 1, 0 };
+        const int lyB0 = (lowF ? lyLow + 1 : lyLow + 2) + 2;
+        const int ccx = (fx0 + fx1) / 2, ccz = (fz0 + fz1) / 2;
+        int bestScore[4] = { 1 << 20, 1 << 20, 1 << 20, 1 << 20 }, bx4[4] = {}, by4[4] = {}, bz4[4] = {};
+        bool have[4] = { false, false, false, false };
+        for (int cell : surfaceCells)
+        {
+            const int ly = (cell / sx) % sy;
+            if ((ly != lyB0 && ly != lyB0 + 1) || grid[cell] != char(1)) continue;
+            const int lx = cell % sx, lz = cell / sxy;
+            if (windowDir(lx, ly, lz)) continue;
+            for (int d = 0; d < 4; ++d)
+            {
+                const int ox = lx + sdx[d], oz = lz + sdz[d];
+                const char go = (ox < 0 || ox >= sx || oz < 0 || oz >= sz) ? char(0) : grid[oz * sxy + ly * sx + ox];
+                if (go != char(0) && go != char(2)) continue;
+                if (store.get(minx + ox, miny + ly - sink, minz + oz) != IdAir) continue;
+                const int sc2 = std::abs(sdx[d] == 0 ? lx - ccx : lz - ccz) * 4 + (ly - lyB0);
+                if (sc2 < bestScore[d]) { bestScore[d] = sc2; bx4[d] = minx + ox; by4[d] = miny + ly; bz4[d] = minz + oz; have[d] = true; }
+            }
+        }
+        for (int d = 0; d < 4; ++d)
+            if (have[d])
+            {
+                addDecor(bx4[d], by4[d], bz4[d], quint16(int(IdWallBannerBase) + d));
+                banners->append(BannerSite{ bx4[d], by4[d] - sink, bz4[d], d });
+            }
+    }
+    // A FLOATING ISLAND over a kindergarten (44313000): the center above the building, the semi-axes ~1.25 of the building size (the island is 2–3 building sizes), the height — above the roof.
+    if ((obj.code == 44313000 || obj.code == 44312000 || obj.code == 44315000) && islands && obj.closed && sx >= 6 && sz >= 6)
+    {
+        IslandSite is;
+        is.kind = obj.code == 44313000 ? 0 : 1;
+        is.cx = minx + sx / 2; is.cz = minz + sz / 2;
+        if (is.kind == 0) { is.rx = std::max(12, std::min(45, int(sx * 0.95))); is.rz = std::max(12, std::min(45, int(sz * 0.95))); }   // the island is a bit smaller than the building ×1: less shadow
+        else { is.rx = sx / 2; is.rz = sz / 2; }                         // a school: the semi-axes of the building itself
+        is.yTop = miny + sy - sink;
+        is.hash = quint32(is.cx) * 374761393u ^ quint32(is.cz) * 668265263u ^ 0x151A9Du;
+        islands->append(is);
+    }
+    // THE RAIDER SPAWN ZONE: only lairs in industrial zones and only in a large building. We take the largest rectangle of "deep" cells
+    // of the 1st-floor interior (with a further inset of a cell from the walls), in height — from the floor to a row below the lowest roof above it: the zone is certainly
+    // smaller than the building so that raiders do not spawn outside. Smaller than 8×8 or fewer than 300 cells inside — no zone.
+    if (lair && zones && obj.code == 44340000 && floors && obj.closed && storyP > 0)
+    {
+        const int rowF = lowF ? lyLow + 1 : lyLow + 2;
+        QVector<char> mask(sx * sz, 0);
+        int nIn = 0;
+        for (int lz = 2; lz < sz - 2; ++lz)
+            for (int lx = 2; lx < sx - 2; ++lx)
+            {
+                bool all = true;
+                for (int dz = -1; dz <= 1 && all; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        if (grid[(lz + dz) * sxy + rowF * sx + lx + dx] != char(3)) { all = false; break; }
+                if (all) { mask[lz * sx + lx] = 1; ++nIn; }
+            }
+        if (nIn >= 300)
+        {   // the maximum rectangle by histograms
+            QVector<int> hgt(sx, 0);
+            int bestA = 0, bx0 = 0, bx1 = -1, bz0 = 0, bz1 = -1;
+            for (int lz = 0; lz < sz; ++lz)
+            {
+                for (int lx = 0; lx < sx; ++lx) hgt[lx] = mask[lz * sx + lx] ? hgt[lx] + 1 : 0;
+                QVector<int> stk;
+                for (int lx = 0; lx <= sx; ++lx)
+                {
+                    const int h = (lx < sx) ? hgt[lx] : 0;
+                    while (!stk.isEmpty() && hgt[stk.last()] >= h)
+                    {
+                        const int hh = hgt[stk.takeLast()];
+                        const int left = stk.isEmpty() ? 0 : stk.last() + 1;
+                        const int width = lx - left;
+                        if (hh * width > bestA) { bestA = hh * width; bx0 = left; bx1 = lx - 1; bz0 = lz - hh + 1; bz1 = lz; }
+                    }
+                    stk.append(lx);
+                }
+            }
+            if (bx1 - bx0 + 1 >= 8 && bz1 - bz0 + 1 >= 8)
+            {
+                int minTop = sy;
+                for (int lz = bz0; lz <= bz1; ++lz)
+                    for (int lx = bx0; lx <= bx1; ++lx)
+                    {
+                        int top = rowF;
+                        while (top + 1 < sy && (grid[lz * sxy + (top + 1) * sx + lx] == char(3) || grid[lz * sxy + (top + 1) * sx + lx] == char(4))) ++top;
+                        minTop = std::min(minTop, top);
+                    }
+                const int rowTop = minTop - 2;                                 // below the roof lining
+                if (rowTop - rowF >= 3)
+                {
+                    LairZone z;
+                    z.x0 = minx + bx0; z.x1 = minx + bx1; z.z0 = minz + bz0; z.z1 = minz + bz1;
+                    z.y0 = miny + rowF - sink; z.y1 = miny + rowTop - sink;
+                    for (int k = 0; k < 40; ++k)
+                    {   // the floors of the stories (the walking rows) below the top of the zone: a tile 3 high on each
+                        const int fy = z.y0 + k * storyP;
+                        if (fy + 2 > z.y1) break;
+                        z.floorsY.append(fy);
+                    }
+                    if (!z.floorsY.isEmpty()) zones->append(z);
+                }
+            }
+        }
+    }
+    // A BASEMENT (a request): in ~30% of private houses — a room from 18 cells (5×5, 5×4, 4×5, 6×3, 3×6 — the first that fits) with a ceiling of 2 blocks under the floor of the 1st floor, a descent by a vertical
+    // ladder through a hatch opening in the floor. Inside either a chest with valuable loot or a heap of mobs. The place is chosen after the furniture:
+    // 9 cells of the room — there is a floor, under it is empty (neither a foundation nor a past basement); the descent cell is free 2 blocks upward,
+    // on the north side of it — the ladder holder (the house floor). The room itself is carved out later (the top of the ground is lowered).
+    if ((priv || obj.code == 44319000 || obj.code == 44315000 || obj.code == 44312000 || deepRole) && basements && floors && storyP > 0 && sx >= 5 && sz >= 5)
+    {
+        auto bHash = [](int bx, int bz, int by, quint32 salt) -> quint32
+        {
+            quint32 h = quint32(bx) * 374761393u ^ quint32(bz) * 668265263u ^ quint32(by) * 2246822519u ^ salt;
+            h ^= h >> 15; h *= 2246822519u; return h ^ (h >> 13);
+        };
+        const quint32 hb = bHash(minx, minz, miny, 0xBA5E7u);
+        const bool churchB = (obj.code == 44319000) || deepRole == 1 || deepRole == 2;        // a church: a basement in 85% (private houses 30%), the floor level a row higher; a building chosen by a point on the map — always, whatever its code
+        const bool labB = (obj.code == 44315000 || obj.code == 44312000) && (deepRole == 0 || deepRole == 3);       // deepRole 3 — one of the biggest schools: a laboratory is guaranteed            // a scientific building: an underground laboratory (as with a church — a 3×3 descent, everything else is built later)
+        const bool deepB = churchB || labB;
+        const int ly0 = deepB ? lyLow + 2 : lyLow + 1;
+        const int Wy = miny + ly0 - sink;
+        auto colOk = [&](int lx, int lz) -> bool
+        {
+            if (lx < 1 || lx >= sx - 1 || lz < 1 || lz >= sz - 1) return false;
+            const char gc = grid[lz * sxy + ly0 * sx + lx];
+            if (gc != char(3) && gc != char(4)) return false;
+            const int bx = minx + lx, bz = minz + lz;
+            if (store.get(bx, Wy - 1, bz) == IdAir) return false;              // there is no floor
+            for (int y = Wy - 4; y <= (deepB ? Wy - 3 : Wy - 2); ++y)
+                if (store.get(bx, y, bz) != IdAir) return false;               // under the floor is occupied (for a church the row Wy-2 is a foundation, we will cut it)
+            return true;
+        };
+        // A church: the interior area of the 1st floor (to choose the largest ones for secret passages).
+        int churchArea = 0;
+        if (deepB)
+            for (int lz = 0; lz < sz; ++lz)
+                for (int lx = 0; lx < sx; ++lx)
+                {
+                    const char gc = grid[lz * sxy + ly0 * sx + lx];
+                    if (gc == char(3) || gc == char(4)) ++churchArea;
+                }
+        if (deepRole || hb % 100u < (churchB ? 85u : (labB ? (obj.code == 44312000 ? 0u : 100u) : 30u)))       // schools get a laboratory only when they are chosen in advance (deepRole 3, see the reserve for the Ancient City)
+        {
+            static const int kSzP[5][2] = { { 5, 5 }, { 5, 4 }, { 4, 5 }, { 6, 3 }, { 3, 6 } };   // the width along X, the depth along Z
+            static const int kSzC[5][2] = { { 3, 3 }, { 3, 3 }, { 3, 3 }, { 3, 3 }, { 3, 3 } };   // a church: only a descent is needed (the labyrinth is built later)
+            const int (*kSz)[2] = deepB ? kSzC : kSzP;
+            bool done = false;
+            // two passes: first only places where around the hatch >= 8 of 9 cells are free (a 3×3 carpet will lie whole), then any
+            for (int pass = 0; pass < 2 && !done; ++pass)
+            for (int si = 0; si < 5 && !done; ++si)
+            {
+                const int rw = kSz[si][0], rd = kSz[si][1];
+                const int nx = sx - 1 - rw, nz = sz - 1 - rd;                          // permissible top-left corners 1..n
+                if (nx < 1 || nz < 1) continue;
+                const int nCells = nx * nz;
+                const int st = int((hb >> 8) % quint32(nCells));
+                for (int t = 0; t < nCells && !done; ++t)
+                {
+                    const int idx = (st + t) % nCells;
+                    const int lx0 = 1 + idx % nx, lz0 = 1 + idx / nx;
+                    bool ok = true;
+                    for (int dz = 0; dz < rd && ok; ++dz)
+                        for (int dx = 0; dx < rw; ++dx)
+                            if (!colOk(lx0 + dx, lz0 + dz)) { ok = false; break; }
+                    if (!ok) continue;
+                    const int hx = minx + lx0 + rw / 2, hz = minz + lz0;                // the descent: the north edge, the middle
+                    if (store.get(hx, Wy, hz) != IdAir || store.get(hx, Wy + 1, hz) != IdAir) continue;
+                    if (store.get(hx, Wy - 1, hz - 1) == IdAir) continue;               // the ladder holder (north)
+                    bool busy = doorCells.contains(dkey(hx, miny + ly0, hz));           // a door opening — not ours
+                    if (npcs) for (const NpcSite& q : *npcs) if (q.x == hx && q.z == hz && std::abs(q.y - Wy) < 3) busy = true;
+                    if (busy) continue;
+                    if (pass == 0)
+                    {
+                        int freeN = 0;
+                        for (int dz = -1; dz <= 1; ++dz)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                if (store.get(hx + dx, Wy, hz + dz) == IdAir && store.get(hx + dx, Wy - 1, hz + dz) != IdAir) ++freeN;
+                        if (freeN < 8) continue;
+                    }
+                    BasementSite bs;
+                    bs.x0 = minx + lx0; bs.x1 = minx + lx0 + rw - 1;
+                    bs.z0 = minz + lz0; bs.z1 = minz + lz0 + rd - 1;
+                    bs.cx = (bs.x0 + bs.x1) / 2; bs.cz = (bs.z0 + bs.z1) / 2;
+                    bs.wy = Wy; bs.hx = hx; bs.hz = hz;
+                    bs.church = churchB;
+                    bs.lab = labB;
+                    bs.school = labB && obj.code == 44312000;
+                    bs.forced = deepRole == 3 ? 0 : deepRole;
+                    bs.content = (hb >> 16) % 100u < (churchB ? 80u : 55u) ? 0 : 1;
+                    bs.mobType = int((hb >> 24) % 4u);                 // a zombie / skeleton / spider / witch — 25% each
+                    bs.area = churchArea;
+                    bs.size = qint64(churchArea) * qint64(sy);
+                    basements->append(bs);
+                    done = true;
+                }
+            }
+        }
+    }
+    // "Aviation beacons" (a user request): on buildings ABOVE 15 floors, starting with the 15th
+    // and then every 5th (15-20-25-30) — on the facade, on a pair of DIAGONAL corners (which pair — by
+    // the hash of the building and the tier) we hang a wall_torch near the ceiling of the floor (row +3 from the floor). The holder
+    // is a real NON-GLASS wall block; the torch cell is a block OUTWARD and there must be
+    // air there (otherwise the server will smear an unsupported wall_torch when loading the chunk). We scan
+    // 3 columns from the corner along each face of the corner — a mullion/a corner will do, glass will not.
+    if (floors && obj.closed && storyP > 0 && nStories > 15)
+    {
+        for (int k = 14; k < nStories; k += 5)
+        {
+            const int lyT = lyLow + 2 + k * storyP + 3;         // the torch tier — at the ceiling of floor k
+            if (lyT > lyHigh - 2) continue;
+            const int byS = miny + lyT - sink;                  // the store is written with "sink"
+            const int c0 = int(lineHash(pairKey(qint64(minx) + k * 31, qint64(minz))) % 4u); // the corner pair c0 and c0^3
+            // The building GRID is wider than the facade: on each side an air "margin" (for a 14 m tower the grid is
+            // 17 columns: the facade lx=1..sx-2). The former anchors hx=minx/minx+sx-1 fell into the margin —
+            // the holder was found on NO tier (zero beacons). We look for a wall by the SIGN of the grid
+            // (char 1/4) probing columns 0..2 from the edge — it works with a margin of 0..2.
+            auto faceScan = [&](bool xAxis, bool loSide, int latStart, int latDir) -> bool
+            {   // xAxis — an X-facing face (the wall is the wall column along X, the scan along Z)
+                const int nWall = xAxis ? sx : sz;              // the size along the face normal
+                const int nLat = xAxis ? sz : sx;               // the size along the face
+                for (int d = 0; d <= 2; ++d)
+                {
+                    const int wall = loSide ? d : nWall - 1 - d;
+                    const int out = loSide ? wall - 1 : wall + 1;   // the torch cell — outward, into the margin
+                    if (out < 0 || out >= nWall) continue;
+                    for (int off = 0; off <= 2; ++off)
+                    {
+                        const int lat = latStart + off * latDir;
+                        if (lat < 0 || lat >= nLat) continue;
+                        const int cw = xAxis ? (lat * sxy + lyT * sx + wall)
+                                             : (wall * sxy + lyT * sx + lat);
+                        const char g = grid[cw];
+                        if (g != char(1) && g != char(4)) continue; // glass/a hole/air — not a holder
+                        const int wxo = minx + (xAxis ? out : lat);
+                        const int wzo = minz + (xAxis ? lat : out);
+                        // The torch cell must be empty BY THE STORAGE RECORD: the grid sign in
+                        // the margin lies — the corner "glass" window trim draws char(2) there,
+                        // although there are no blocks to write (a torch would hang legally).
+                        if (store.get(wxo, byS, wzo) != IdAir) continue;
+                        const quint16 tid = xAxis ? (loSide ? IdWallTorchW : IdWallTorchE)
+                                                  : (loSide ? IdWallTorchN : IdWallTorchS);
+                        addDecor(wxo, miny + lyT, wzo, tid);        // addVoxel would raise the ground with a column
+                        ++added;
+                        return true;
+                    }
+                }
+                return false;
+            };
+            for (int cc = 0; cc < 2; ++cc)
+            {
+                const int corner = cc ? (c0 ^ 3) : c0;          // the corner 0..3: bit0 — the X side, bit1 — Z
+                const bool xLo = (corner & 1) == 0, zLo = (corner & 2) == 0;
+                faceScan(true,  xLo, zLo ? 1 : sz - 2, zLo ? 1 : -1);
+                faceScan(false, zLo, xLo ? 1 : sx - 2, xLo ? 1 : -1);
+            }
+        }
+    }
+    return added;
+}
+
+//! The "patch" of an object on XZ: the set of integer columns (blockX, blockZ) whose center falls into the projection
+//! of some mesh triangle onto the horizontal plane. This is how vegetation turns from a
+//! polygon into an area for a forest/grass, without voxelizing the mesh itself. The wall (vertical) triangles
+//! degenerate into a segment and are skipped — the patch is given only by the cap/bottom.
+//! A track axis line (points in block coordinates) -> a chain of cells where neighboring cells are connected BY A SIDE
+//! (Minecraft rails connect only orthogonally): a diagonal step is completed with a corner cell,
+//! a 180° reversal ("whiskers") is cut off.
+static QVector<QPoint> railCellChain(const QVector<QPointF>& pts)
+{
+    QVector<QPoint> cells;
+    auto push = [&cells](int x, int z)
+    {
+        const QPoint c(x, z);
+        if (!cells.isEmpty() && cells.last() == c) return;
+        if (cells.size() >= 2 && cells[cells.size() - 2] == c) { cells.removeLast(); return; }
+        if (!cells.isEmpty())
+        {
+            const QPoint l = cells.last();
+            if (l.x() != x && l.y() != z)
+                cells.append(QPoint(x, l.y()));          // a diagonal -> through a corner cell
+        }
+        cells.append(c);
+    };
+    for (int i = 0; i + 1 < pts.size(); ++i)
+    {
+        const QPointF a = pts[i], b = pts[i + 1];
+        const double len = std::hypot(b.x() - a.x(), b.y() - a.y());
+        const int n = std::max(1, int(std::ceil(len * 4.0)));
+        for (int t = (i == 0 ? 0 : 1); t <= n; ++t)
+        {
+            const double u = double(t) / n;
+            push(int(std::floor(a.x() + (b.x() - a.x()) * u)), int(std::floor(a.y() + (b.y() - a.y()) * u)));
+        }
+    }
+    return cells;
+}
+
+//! The rail shape (the kRailShapes index) by the neighbors of the chain: the directions to the prev/next cells (dx,dz by one of 4).
+//! The end of a track (one link) — straight along this link.
+static int railShapeFor(const QPoint& cur, const QPoint* prev, const QPoint* next)
+{
+    bool N = false, E = false, S = false, W = false;
+    auto mark = [&](const QPoint& o)
+    {
+        const int dx = o.x() - cur.x(), dz = o.y() - cur.y();
+        if (dx > 0) E = true; else if (dx < 0) W = true; else if (dz > 0) S = true; else if (dz < 0) N = true;
+    };
+    if (prev) mark(*prev);
+    if (next) mark(*next);
+    if (N && S) return 0;
+    if (E && W) return 1;
+    if (S && E) return 6;
+    if (S && W) return 7;
+    if (N && W) return 8;
+    if (N && E) return 9;
+    if (N || S) return 0;
+    return 1;
+}
+
+//! A column segment: x is fixed, z in [z0, z1]. A forest is stored by segments, not by column: on large data
+//! these are tens of millions of columns (gigabytes and tens of seconds of hash insertions) versus tens of thousands of segments.
+struct ColSpan { int x, z0, z1; };
+
+//! Segments from a sorted (sort+unique) list of pairKey(x, z) keys. The key order: by x, inside x
+//! non-negative z in ascending order, then negative ones — so a segment also breaks at the z=-1/0 joint
+//! (that is not terrible: segments do not have to be maximal), then everything is sorted numerically.
+static QVector<ColSpan> spansFromCols(const QList<qint64>& sorted)
+{
+    QVector<ColSpan> out;
+    if (sorted.isEmpty()) return out;
+    int px = 0, pz = 0;
+    bool have = false;
+    for (qint64 ck : sorted)
+    {
+        const int x = int(qint32(quint32(quint64(ck) >> 32))), z = int(qint32(quint32(quint64(ck) & 0xFFFFFFFFull)));
+        if (have && x == px && z == pz + 1) out.last().z1 = z;
+        else out.append(ColSpan{ x, z, z });
+        px = x; pz = z; have = true;
+    }
+    std::sort(out.begin(), out.end(), [](const ColSpan& a, const ColSpan& b)
+    { return a.x != b.x ? a.x < b.x : a.z0 < b.z0; });
+    return out;
+}
+
+//! Merge the segments of several polygons into a non-intersecting sorted set (for the "is the column in the forest?" checks).
+static QVector<ColSpan> mergeSpans(QVector<ColSpan> v)
+{
+    std::sort(v.begin(), v.end(), [](const ColSpan& a, const ColSpan& b)
+    { return a.x != b.x ? a.x < b.x : a.z0 < b.z0; });
+    QVector<ColSpan> out;
+    for (const ColSpan& c : v)
+    {
+        if (!out.isEmpty() && out.last().x == c.x && c.z0 <= out.last().z1 + 1)
+            out.last().z1 = std::max(out.last().z1, c.z1);
+        else out.append(c);
+    }
+    return out;
+}
+
+//! Whether the column (x, z) belongs to a set of segments (sorted by (x, z0), without intersections).
+static bool spansContain(const QVector<ColSpan>& v, int x, int z)
+{
+    auto it = std::upper_bound(v.constBegin(), v.constEnd(), 0, [x, z](int, const ColSpan& c)
+    { return x < c.x || (x == c.x && z < c.z0); });
+    if (it == v.constBegin()) return false;
+    --it;
+    return it->x == x && z >= it->z0 && z <= it->z1;
+}
+
+static void footprintColumns(const McWorldExporter::McObject& obj, const VxTransform& tf,
+                             QList<qint64>& out, const std::atomic_bool* cancel)
+{
+    const int nv = obj.vertices.size();
+    if (nv < 3 || obj.indices.size() < 3)
+        return;
+    QVector<QPointF> proj;
+    proj.reserve(nv);
+    for (int i = 0; i < nv; ++i)
+    {
+        const QVector3D& v = obj.vertices[i];
+        proj << QPointF(float(toBlockX(tf, v.x())), float(toBlockZ(tf, v.y())));
+    }
+    for (int i = 0; i + 2 < obj.indices.size(); i += 3)
+    {
+        if ((i & 0x3FFF) == 0 && cancel && cancel->load())
+            return;
+        const quint32 i0 = obj.indices[i], i1 = obj.indices[i + 1], i2 = obj.indices[i + 2];
+        if (i0 >= quint32(nv) || i1 >= quint32(nv) || i2 >= quint32(nv)) continue;
+        const QPointF a = proj[i0], b = proj[i1], c = proj[i2];
+        const double area = (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+        if (std::abs(area) < 1e-6) continue;                   // degenerate (a wall) — not a "patch"
+        double minx = std::min({a.x(), b.x(), c.x()}), maxx = std::max({a.x(), b.x(), c.x()});
+        double minz = std::min({a.y(), b.y(), c.y()}), maxz = std::max({a.y(), b.y(), c.y()});
+        if (maxx - minx > 20000.0 || maxz - minz > 20000.0)    // insurance against giant polygons
+            continue;
+        // Row by row along X: the intersection of the vertical x+0.5 with a triangle is a segment along Z; the cells whose
+        // center is inside are consecutive Z. Before, the whole bbox of the triangle was iterated: for thin
+        // "slivers" of a polygon triangulation that is tens of times its area.
+        const QPointF tri[3] = { a, b, c };
+        const int xLo = int(std::floor(minx)), xHi = int(std::ceil(maxx));
+        for (int X = xLo; X <= xHi; ++X)
+        {
+            const double x = double(X) + 0.5;
+            double zlo = std::numeric_limits<double>::max(), zhi = -zlo;
+            for (int e = 0; e < 3; ++e)
+            {
+                const QPointF& p0 = tri[e];
+                const QPointF& p1 = tri[(e + 1) % 3];
+                const double x0 = p0.x(), x1 = p1.x();
+                if (x < std::min(x0, x1) || x > std::max(x0, x1)) continue;
+                if (x1 == x0)
+                {   // a vertical edge exactly on the line — both ends
+                    zlo = std::min({ zlo, p0.y(), p1.y() }); zhi = std::max({ zhi, p0.y(), p1.y() });
+                    continue;
+                }
+                const double z = p0.y() + (p1.y() - p0.y()) * (x - x0) / (x1 - x0);
+                zlo = std::min(zlo, z); zhi = std::max(zhi, z);
+            }
+            if (zlo > zhi) continue;
+            const int zA = int(std::ceil(zlo - 0.5)), zB = int(std::floor(zhi - 0.5));
+            for (int Z = zA; Z <= zB; ++Z)
+                out.append(pairKey(X, Z));
+        }
+    }
+    // A list + sort/unique instead of a QSet: on forests of tens of millions of columns hash insertions were the main
+    // item of time; duplicates occur only on shared edges of neighboring triangles.
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+}
+
+// ---------------------------------------------------------------------------
+// Writing a chunk into NBT (the 1.13–1.16.5 format)
+// ---------------------------------------------------------------------------
+
+//! Packing values of width bits into a long array in the "sparse" 1.16.2+ format (DataVersion 2529+):
+//! entriesPerLong = floor(64/bits), an entry does NOT cross a long boundary, the high unused bits
+//! of each long are padding. The same format that vanilla applies to Heightmaps too.
+static void packSparse(const QVector<quint32>& values, int bits, QVector<qint64>& out)
+{
+    const int perLong = 64 / bits;
+    out.clear();
+    out.fill(0, int((values.size() + perLong - 1) / perLong));
+    for (int i = 0; i < values.size(); ++i)
+    {
+        const int li = i / perLong;
+        const int bitOff = (i % perLong) * bits;
+        out[li] |= qint64(values[i]) << bitOff;
+    }
+}
+
+//! Chunk NBT in the NATIVE Minecraft 26.x format (DataVersion 5023): sections Y=-4..19 (the world -64..319),
+//! the palettes are STRING LISTS ("minecraft:stone"), a unary palette has no data written; we do not write light and heightmaps
+//! at all — the reader computes them itself (checked with a live 26.3 server: such a chunk loads,
+//! the blocks are preserved, the game re-saves them with light/heightmaps). The format was checked against reference
+//! chunks created by a vanilla 26.3 server (packSparse 1.16.2+ matches their packing).
+//! Legacy (1.21.x): the same layout, but the block_states palette is a List<Compound>{Name} (we do not
+//! write Properties — the reader substitutes the defaults), DataVersion 4671. Checked against a chunk of a 1.21.11 world.
+static QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint16>>& sections,
+                                McWorldExporter::Format format,
+                                const QVector<ChestSite>& chestsHere = QVector<ChestSite>(),
+                                const GroundChunk& ground = GroundChunk(),
+                                const CaveSet* caves = nullptr,
+                                const QVector<PaintingSite>& paintsHere = QVector<PaintingSite>(),
+                                const QVector<SpawnerSite>& spawnersHere = QVector<SpawnerSite>(),
+                                const QVector<FluidSite>& fluidsHere = QVector<FluidSite>(),
+                                const QVector<SignSite>& signsHere = QVector<SignSite>(),
+                                const QVector<BellSite>& bellsHere = QVector<BellSite>(),
+                                const QVector<BannerSite>& bannersHere = QVector<BannerSite>(),
+                                const QVector<LairZone>& zonesHere = QVector<LairZone>(),
+                                const LairSet* lairs = nullptr,
+                                const QHash<ColKey, quint8>* biomeCells = nullptr,
+                                const QVector<CaveBe>& extraBes = QVector<CaveBe>(),
+                                const QVector<QPoint3>& heartsHere = QVector<QPoint3>(),
+                                bool blendEdge = false,
+                                const QVector<PortalStartSite>& portalsHere = QVector<PortalStartSite>(),
+                                const QHash<ColKey, QVector<QPair<qint16, quint16>>>* paleUnder = nullptr)
+{
+    const bool legacy = (format == McWorldExporter::Format::Legacy121x);
+    NbtWriter w;
+    w.beginCompound("");                    // the root compound — without a name (the root must be a named compound)
+    w.writeString("Status", QStringLiteral("minecraft:full"));
+    w.writeInt("xPos", chunkX);
+    w.writeInt("yPos", -4);                 // the lower boundary of the world -64/16
+    w.writeInt("zPos", chunkZ);
+    w.writeLong("LastUpdate", 0);
+    w.beginCompound("structures");
+    const QVector<LairSet::Start> lairStarts = lairs ? lairs->startsTouching(chunkX, chunkZ) : QVector<LairSet::Start>();
+    QVector<CaveSet::WorldStart> tplHere;                              // the structure starts of the cave template (mines, trial chambers, donor cities)
+    if (caves && !caves->empty()) caves->startsAt(chunkX, chunkZ, tplHere);
+    if (zonesHere.isEmpty() && lairStarts.isEmpty() && portalsHere.isEmpty() && tplHere.isEmpty())
+    {
+        w.beginList("References", Nbt::Compound, 0);
+        w.beginList("starts", Nbt::Compound, 0);
+    }
+    else
+    {   // a false "pillager outpost": the game spawns pillagers inside the box of the start structure (spawn_overrides pillager_outpost).
+        // The box = our zone (inside the building). The start lies in the zone center chunk, references to it are in all chunks the zone touches.
+        QVector<qint64> refs;
+        const LairZone* startZ = nullptr;
+        for (const LairZone& z : zonesHere)
+        {
+            const int scx = ((z.x0 + z.x1) / 2) >> 4, scz = ((z.z0 + z.z1) / 2) >> 4;
+            refs.append(qint64(quint32(scx)) | (qint64(quint32(scz)) << 32));
+            if (scx == chunkX && scz == chunkZ && !startZ) startZ = &z;
+        }
+        // references to starts merged by structure id (keys in a compound must not repeat)
+        QMap<QString, QVector<qint64>> refMap;
+        if (!zonesHere.isEmpty()) refMap[QStringLiteral("minecraft:pillager_outpost")] += refs;
+        for (const LairSet::Start& ls : lairStarts)
+            refMap[ls.sid].append(qint64(quint32(ls.scx)) | (qint64(quint32(ls.scz)) << 32));
+        for (const PortalStartSite& ps : portalsHere)
+            refMap[QStringLiteral("minecraft:ruined_portal")].append(qint64(quint32(ps.cx)) | (qint64(quint32(ps.cz)) << 32));
+        for (const CaveSet::WorldStart& tw : tplHere)
+            refMap[tw.id].append(qint64(quint32(tw.startCx)) | (qint64(quint32(tw.startCz)) << 32));
+        w.beginCompound("References");
+        for (auto rit = refMap.constBegin(); rit != refMap.constEnd(); ++rit)
+            w.writeLongArray(qPrintable(rit.key()), rit.value());
+        w.endCompound();
+        w.beginCompound("starts");
+        for (const CaveSet::WorldStart& tw : tplHere)
+        {   // the starts of template structures (the real mines and trial chambers of the donor) — /locate and advancements work off them, for example for entering trial chambers
+            if (!tw.here) continue;
+            bool dup = false;
+            for (const LairSet::Start& ls : lairStarts) if (ls.sid == tw.id && ls.scx == chunkX && ls.scz == chunkZ) dup = true;
+            if (dup) continue;
+            w.beginCompound(qPrintable(tw.id));
+            w.writeString("id", tw.id);
+            w.writeInt("ChunkX", chunkX); w.writeInt("ChunkZ", chunkZ);
+            w.writeInt("references", 1);
+            w.beginList("Children", Nbt::Compound, tw.pieces.size());
+            for (const CaveSet::TplPiece& pc : tw.pieces)
+            {
+                w.beginCompound(nullptr);
+                w.writeString("id", pc.id);
+                w.writeIntArray("BB", { pc.bb[0], pc.bb[1], pc.bb[2], pc.bb[3], pc.bb[4], pc.bb[5] });
+                w.writeInt("GD", 0); w.writeInt("O", -1);
+                if (pc.id == QLatin1String("minecraft:jigsaw"))
+                {   // a jigsaw piece: the box as is, the template is the original one (the game does not use it on load), without junctions
+                    w.writeInt("PosX", pc.bb[0]); w.writeInt("PosY", pc.bb[1]); w.writeInt("PosZ", pc.bb[2]);
+                    w.writeInt("ground_level_delta", 1);
+                    w.writeString("rotation", QStringLiteral("NONE"));
+                    w.beginCompound("pool_element");
+                    w.writeString("element_type", QStringLiteral("minecraft:legacy_single_pool_element"));
+                    w.writeString("location", pc.loc.isEmpty() ? QStringLiteral("minecraft:empty") : pc.loc);
+                    w.writeString("projection", QStringLiteral("rigid"));
+                    w.beginCompound("processors");
+                    w.beginList("processors", Nbt::Compound, 0);
+                    w.endCompound();
+                    w.endCompound();
+                    w.beginList("junctions", Nbt::Compound, 0);
+                }
+                else
+                    w.writeInt("MST", 0);                                    // mines: an ordinary type (the game takes the other piece fields by default)
+                w.endCompound();
+            }
+            w.endCompound();                // the start
+        }
+        for (const PortalStartSite& ps : portalsHere)
+        {   // the start of a ruined portal (the format was checked against a vanilla 26.3 world: one piece rupo with the template ruined_portal/portal_2)
+            if (ps.cx != chunkX || ps.cz != chunkZ) continue;
+            w.beginCompound("minecraft:ruined_portal");
+            w.writeString("id", QStringLiteral("minecraft:ruined_portal"));
+            w.writeInt("ChunkX", chunkX); w.writeInt("ChunkZ", chunkZ);
+            w.writeInt("references", int(portalsHere.size()));
+            w.beginList("Children", Nbt::Compound, 1);
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:rupo"));
+            w.writeIntArray("BB", { ps.bb[0], ps.bb[1], ps.bb[2], ps.bb[3], ps.bb[4], ps.bb[5] });
+            w.writeString("VerticalPlacement", QStringLiteral("on_land_surface"));
+            w.writeInt("TPX", ps.bb[0]); w.writeInt("TPY", ps.bb[1]); w.writeInt("TPZ", ps.bb[2]);
+            w.beginCompound("Properties");
+            w.writeByte("overgrown", 0);
+            w.writeFloat("mossiness", 0.2f);
+            w.writeByte("replace_with_blackstone", 0);
+            w.writeByte("vines", 0);
+            w.writeByte("cold", 0);
+            w.writeByte("air_pocket", 0);
+            w.endCompound();
+            w.writeInt("GD", 0);
+            w.writeString("Rotation", QStringLiteral("NONE"));
+            w.writeString("Mirror", QStringLiteral("NONE"));
+            w.writeInt("O", 2);
+            w.writeString("Template", QStringLiteral("minecraft:ruined_portal/portal_2"));
+            w.endCompound();                // the piece
+            w.endCompound();                // the start
+        }
+        for (const LairSet::Start& ls : lairStarts)
+        {   // the start of a stronghold / an Ancient City: one "stub" piece with the box of the main hall (the hall itself already lies as template blocks)
+            if (ls.scx != chunkX || ls.scz != chunkZ) continue;
+            w.beginCompound(qPrintable(ls.sid));
+            w.writeString("id", ls.sid);
+            w.writeInt("ChunkX", chunkX); w.writeInt("ChunkZ", chunkZ);
+            w.writeInt("references", 1);
+            w.beginList("Children", Nbt::Compound, 1);
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:jigsaw"));
+            w.writeIntArray("BB", { ls.bb[0], ls.bb[1], ls.bb[2], ls.bb[3], ls.bb[4], ls.bb[5] });
+            w.writeInt("PosX", ls.bb[0]); w.writeInt("PosY", ls.bb[1]); w.writeInt("PosZ", ls.bb[2]);
+            w.writeInt("GD", 0); w.writeInt("O", -1); w.writeInt("ground_level_delta", 1);
+            w.writeString("rotation", QStringLiteral("NONE"));
+            w.beginCompound("pool_element");
+            w.writeString("element_type", QStringLiteral("minecraft:legacy_single_pool_element"));
+            w.writeString("location", QStringLiteral("minecraft:pillager_outpost/base_plate"));
+            w.writeString("projection", QStringLiteral("rigid"));
+            w.beginCompound("processors");
+            w.beginList("processors", Nbt::Compound, 0);
+            w.endCompound();
+            w.endCompound();
+            w.beginList("junctions", Nbt::Compound, 0);
+            w.endCompound();                // the piece
+            w.endCompound();                // the start
+        }
+        if (startZ)
+        {
+            w.beginCompound("minecraft:pillager_outpost");
+            w.writeString("id", QStringLiteral("minecraft:pillager_outpost"));
+            w.writeInt("ChunkX", chunkX); w.writeInt("ChunkZ", chunkZ);
+            w.writeInt("references", int(refs.size()));
+            // The pieces: a feature_logs tile (a 6×3×7 template) on each floor inside the zone rectangle — the game takes the piece box from the template size
+            // (BB = Pos + size), so instead of a single 16×30×16 (it would stick out onto the roof) we lay low tiles on the floors of the stories.
+            struct Tile { int x, y, z; };
+            QVector<Tile> tiles;
+            for (int fy : startZ->floorsY)
+                for (int tz = startZ->z0; tz + 6 <= startZ->z1; tz += 7)
+                    for (int tx = startZ->x0; tx + 5 <= startZ->x1; tx += 6)
+                        if (tiles.size() < 160) tiles.append(Tile{ tx, fy, tz });
+            if (tiles.isEmpty()) tiles.append(Tile{ startZ->x0, startZ->floorsY.first(), startZ->z0 });
+            w.beginList("Children", Nbt::Compound, tiles.size());
+            for (const Tile& tl : tiles)
+            {
+                w.beginCompound(nullptr);
+                w.writeString("id", QStringLiteral("minecraft:jigsaw"));
+                w.writeIntArray("BB", { tl.x, tl.y, tl.z, tl.x + 5, tl.y + 2, tl.z + 6 });
+                w.writeInt("PosX", tl.x); w.writeInt("PosY", tl.y); w.writeInt("PosZ", tl.z);
+                w.writeInt("GD", 0); w.writeInt("O", -1); w.writeInt("ground_level_delta", 1);
+                w.writeString("rotation", QStringLiteral("NONE"));
+                w.beginCompound("pool_element");
+                w.writeString("element_type", QStringLiteral("minecraft:legacy_single_pool_element"));
+                w.writeString("location", QStringLiteral("minecraft:pillager_outpost/feature_logs"));
+                w.writeString("projection", QStringLiteral("rigid"));
+                w.beginCompound("processors");
+                w.beginList("processors", Nbt::Compound, 0);
+                w.endCompound();
+                w.endCompound();
+                w.beginList("junctions", Nbt::Compound, 0);
+                w.endCompound();
+            }
+            w.endCompound();
+        }
+        w.endCompound();
+    }
+    w.endCompound();
+    w.beginCompound("Heightmaps");          // empty — the game recomputes them itself
+    w.endCompound();
+    if (blendEdge)
+    {   // The export boundary: the blending_data tag turns on vanilla terrain smoothing (the same as when upgrading a world from 1.17 to 1.18) —
+        // the neighboring chunks that the game will still generate adjust the height and density to our surface
+        w.beginCompound("blending_data");
+        w.writeInt("min_section", -4);
+        w.writeInt("max_section", 20);
+        w.endCompound();
+    }
+    w.writeLong("InhabitedTime", 0);
+
+    // The sections: the object blocks are taken from the store, the GROUND is completed analytically from the column metadata
+    // (it is not in the store). Entirely stone sections (below stoneFloor, without objects) are written
+    // with a unary palette without materializing 4096 cells — on the apron this is ~8 of the 24 sections of a chunk.
+    const bool hasGround = !ground.isEmpty();
+    int groundMaxTop = 0;                   // the highest ground top in the chunk (above it — air only)
+    if (hasGround)
+        groundMaxTop = *std::max_element(ground.top.constBegin(), ground.top.constEnd());
+    // The cave template of a chunk (y=-64..63 = sections -4..3). Under the soil strip the cells are taken from
+    // the cast (the cast air = a cave); above y=63 and in the 3 top rows of a column — analytics as before.
+    CaveTemplate ctOwn;
+    const CaveTemplate* ct = nullptr;
+    if (hasGround && caves && !caves->empty() && ground.caveTpl >= 0)
+    {
+        ctOwn = caves->get(chunkX, chunkZ);        // a continuous donor block, mirrored tiling by the chunk coordinates
+        if (!ctOwn.blocks.isEmpty()) ct = &ctOwn;
+    }
+    bool lairDeep = false;                  // the chunk touches the Ancient City: the lower sections have the deep_dark biome
+    if (ct && lairs && !lairs->placed.isEmpty())
+        lairs->apply(chunkX, chunkZ, ctOwn, &lairDeep);
+    // The Pale Garden: its own landscape — the cave templates do not cut through the top 28 blocks of ground under it (there is solid rock/earth), they start deeper; other columns have 3 blocks.
+    // the donor underground cells under the Pale Garden (pits, sinkholes, voids near the surface): a column -> a list of (y, id)
+    const QVector<QPair<qint16, quint16>>* underCol[256];
+    for (int col = 0; col < 256; ++col)
+    {
+        underCol[col] = nullptr;
+        if (!paleUnder) continue;
+        const auto uit = paleUnder->constFind(pairKey(chunkX * 16 + (col & 15), chunkZ * 16 + (col >> 4)));
+        if (uit != paleUnder->constEnd()) underCol[col] = &uit.value();
+    }
+    int caveCap[256];
+    for (int col = 0; col < 256; ++col)
+    {
+        caveCap[col] = 3;
+        if (biomeCells && biomeCells->value(pairKey((chunkX * 16 + (col & 15)) >> 2, (chunkZ * 16 + (col >> 4)) >> 2), quint8(0)) == 1) caveCap[col] = 28;
+    }
+    // The Pale Garden: lava from the cave templates near the surface (within 16 blocks underground) is replaced with rock — it is not needed in the forest; deeper (lava lakes in dungeons) we do not touch.
+    if (ct && biomeCells)
+    {
+        bool paleChunk = false;
+        for (int z4 = 0; z4 < 4 && !paleChunk; ++z4)
+            for (int x4 = 0; x4 < 4; ++x4)
+                if (biomeCells->value(pairKey(chunkX * 4 + x4, chunkZ * 4 + z4), quint8(0)) == 1) { paleChunk = true; break; }
+        if (paleChunk)
+        {
+            QHash<quint16, char> lavaId;
+            auto isLavaB = [&](quint16 b) -> bool
+            {
+                if (b == IdLava) return true;
+                if (b < IdCaveBase) return false;
+                auto it = lavaId.find(b);
+                if (it == lavaId.end()) it = lavaId.insert(b, blockName(b) == QLatin1String("minecraft:lava") ? char(1) : char(0));
+                return it.value() != 0;
+            };
+            for (int col = 0; col < 256; ++col)
+            {
+                const int topG = ground.top[col];
+                for (int ty = 127; ty >= 0; --ty)
+                {
+                    if (ty - 64 < topG - 16) break;
+                    quint16& bl = ctOwn.blocks[ty * 256 + col];
+                    if (isLavaB(bl)) bl = IdStone;
+                }
+            }
+        }
+    }
+    // Underground lakes right at the surface: the donor ceiling is flat (the water stands at one level) — we bite out the top layer of water with rock
+    // in flakes (and sometimes a second one) so that the ceiling above a lake is uneven. Only where it is <= 18 blocks from the lake to the ground surface.
+    if (ct)
+    {
+        quint32 hs = quint32(chunkX) * 73856093u ^ quint32(chunkZ) * 19349663u ^ 0x1AEEu;
+        auto nextH = [&hs]() { hs ^= hs << 13; hs ^= hs >> 17; hs ^= hs << 5; return hs; };
+        for (int col = 0; col < 256; ++col)
+        {
+            const int topG = ground.top[col];
+            for (int ty = 126; ty >= 0; --ty)
+            {
+                const quint16 here = ctOwn.blocks[ty * 256 + col];
+                if (here != IdWater) continue;
+                const quint16 above = ctOwn.blocks[(ty + 1) * 256 + col];
+                if (above == IdAir || above == IdWater) break;            // the water surface is open — not a ceiling
+                if (topG - (ty - 64) <= 18 && nextH() % 100u < 42u)
+                {
+                    ctOwn.blocks[ty * 256 + col] = IdStone;
+                    if (ty > 0 && ctOwn.blocks[(ty - 1) * 256 + col] == IdWater && nextH() % 100u < 30u)
+                        ctOwn.blocks[(ty - 1) * 256 + col] = IdStone;
+                }
+                break;
+            }
+        }
+        for (int sec = 0; sec < 8; ++sec)
+        {
+            const quint16 first = ctOwn.blocks[sec * 4096];
+            bool uni = true;
+            for (int j = 1; j < 4096 && uni; ++j)
+                if (ctOwn.blocks[sec * 4096 + j] != first) uni = false;
+            ctOwn.uniId[sec] = (uni && first != IdAir) ? first : quint16(0);
+        }
+    }
+
+    // The "Pale Garden" biome (the Pale Garden forest): cells of 4×4 columns inside the chosen forest (paleCells, the key is pairKey(x>>2, z>>2)).
+    // Biomes by cells of 4×4 columns (one pattern at all heights): 0 plains, 1 pale_garden (the Pale Garden), 2 taiga (spruce forests), 3 forest
+    // (other forests with height), 4 birch_forest (around schools), 5 dappled_forest (the motley forest around kindergartens; 1.21.x does not have it — flower_forest).
+    // This is needed so that at the edge of the map the game generation smoothly (blending) continues the same type of forest.
+    int cellBiome[16];
+    bool anyOther = false;
+    for (int z4 = 0; z4 < 4; ++z4)
+        for (int x4 = 0; x4 < 4; ++x4)
+        {
+            int v = 0;
+            if (biomeCells) v = biomeCells->value(pairKey(chunkX * 4 + x4, chunkZ * 4 + z4), quint8(0));
+            cellBiome[z4 * 4 + x4] = v;
+            if (v) anyOther = true;
+        }
+    const char* const* kBiomeNames = g_biomeName;                          // depend on the climate zone
+    const bool zoneBiome = std::strcmp(g_biomeName[0], "minecraft:plains") != 0;
+    w.beginList("sections", Nbt::Compound, 24);     // all sections Y=-4..19, as vanilla writes
+    for (int si = -4; si <= 19; ++si)
+    {
+        const auto sit = sections.constFind(si);
+        const bool hasObj = (sit != sections.constEnd());
+        const int secBotY = si << 4;
+        const bool caveSec = ct && si >= -4 && si <= 3;
+        const quint16 tplUni = caveSec ? ct->uniId[si + 4] : quint16(0);
+
+        QVector<quint16> merged;            // the "objects + ground" section for the lower palette code
+        const QVector<quint16>* secP = nullptr;
+        quint16 unaryId = 0;
+        if (!hasGround)
+        {
+            if (hasObj) secP = &sit.value();
+        }
+        else if (!hasObj && secBotY + 15 <= ground.stoneFloor && (!caveSec || tplUni))
+            // Entirely under the ground: a uniform section of the cast — its block (usually deepslate), otherwise stone.
+            // Careful: the unary tplUni must be tied to stoneFloor — otherwise a uniform section
+            // of the template in a flat world would overwrite the surface (si=0 = y0..15 = the turf layer).
+            unaryId = tplUni ? tplUni : IdStone;
+        else if (hasObj || secBotY <= groundMaxTop || caveSec)
+        {   // the section touches objects and/or the ground surface — we assemble the cells
+            merged.resize(4096);
+            for (int i = 0; i < 4096; ++i)
+            {
+                const int col = ((i >> 4) & 15) * 16 + (i & 15);        // lz*16+lx (the index i = (y<<8)|(z<<4)|x)
+                const int y = secBotY | ((i >> 8) & 15);
+                quint16 blk;
+                // "y < top-3": the ground crust (turf + 2 dirt + stone) is not bitten through by a cave —
+                // otherwise at the chamfer (top=-1) the template gnawed air out in the 3 blocks under the surface,
+                // and the lowered column looked like a hole (the seal check of verify).
+                if (ct && y >= -64 && y <= 63 && y < ground.top[col] - caveCap[col] && ground.wd[col] == 0)
+                    blk = ct->blocks[(y + 64) * 256 + col];             // the underground — a cave cast
+                else
+                    blk = groundBlockAt(ground.top[col], ground.surf[col], ground.wd[col], y, chunkX * 16 + (col & 15), chunkZ * 16 + (col >> 4), !ground.art.isEmpty() && ground.art[col] != 0);
+                if (underCol[col] && ground.wd[col] == 0)
+                    for (const QPair<qint16, quint16>& ue : *underCol[col])
+                        if (ue.first == y) { blk = ue.second; break; }
+                if (hasObj && sit.value()[i]) blk = sit.value()[i];     // an object takes priority over the ground
+                merged[i] = blk;
+            }
+            secP = &merged;
+        }
+
+        // The palette: air is added only if it is really present in the section — fully filled
+        // sections get a unary palette without data (as vanilla writes, ~100 bytes instead of 2 KB).
+        QHash<quint16, int> pal;
+        QVector<quint16> palIds;
+        QVector<quint32> palIdx;
+        const QVector<quint16> emptySec;
+        const QVector<quint16>& sec = secP ? *secP : emptySec;
+        if (unaryId)
+            palIds << unaryId;
+        else if (sec.size() == 4096)
+        {
+            palIdx.fill(0, 4096);
+            for (int i = 0; i < 4096; ++i)
+            {
+                const quint16 id = sec[i];
+                int pi = pal.value(id, -1);
+                if (pi < 0) { pi = palIds.size(); pal.insert(id, pi); palIds << id; }
+                palIdx[i] = quint32(pi);
+            }
+        }
+        if (palIds.isEmpty())
+            palIds << IdAir;                // an empty section: a single [air]
+        const bool single = (palIds.size() == 1 || sec.size() != 4096);
+        int bits = 4;
+        while ((1 << bits) < palIds.size()) ++bits;
+        QVector<qint64> packed;
+        if (!single)
+            packSparse(palIdx, bits, packed);
+
+        w.beginCompound(nullptr);
+        w.writeByte("Y", qint8(si));
+        w.beginCompound("block_states");
+        if (legacy)
+        {
+            w.beginList("palette", Nbt::Compound, palIds.size());
+            for (quint16 id : palIds)
+            {
+                QVector<QPair<QString, QString>> props;
+                blockProperties(id, props);
+                w.beginCompound(nullptr);
+                {
+                    QString nm = blockName(id);
+                    if (nm.contains(QLatin1String("poplar_leaves"))) nm = QStringLiteral("minecraft:oak_leaves");        // 1.21.x: no poplar
+                    else if (nm == QLatin1String("minecraft:poplar_log")) nm = QStringLiteral("minecraft:oak_log");
+                    w.writeString("Name", nm);
+                }
+                if (!props.isEmpty())
+                {
+                    w.beginCompound("Properties");            // the values are strings (checked against a 1.21.11 world)
+                    for (const auto& kv : props)
+                        w.writeString(qPrintable(kv.first), kv.second);
+                    w.endCompound();
+                }
+                w.endCompound();
+            }
+        }
+        else
+        {
+            // 26.x: a palette without properties is a List<String> (vanilla writes it that way). But if a section has
+            // even one block with properties, the WHOLE palette becomes a List<Compound>, and each element
+            // must have the key "id" (without properties — a compound with only "id"). Before, an element
+            // without properties was written with an EMPTY name — the 26.3 server read such an element as AIR and lost whole
+            // walls around torches/stairs (hence the "floating" lights in the game).
+            bool anyProps = false;
+            for (quint16 id : palIds)
+            {
+                QVector<QPair<QString, QString>> p;
+                blockProperties(id, p);
+                if (!p.isEmpty()) { anyProps = true; break; }
+            }
+            if (!anyProps)
+            {
+                w.beginList("palette", Nbt::String, palIds.size());
+                for (quint16 id : palIds)
+                    w.writeStringElem(blockName(id));
+            }
+            else
+            {
+                w.beginList("palette", Nbt::Compound, palIds.size());
+                for (quint16 id : palIds)
+                {
+                    QVector<QPair<QString, QString>> props;
+                    blockProperties(id, props);
+                    w.beginCompound(nullptr);
+                    w.writeString("id", blockName(id));
+                    if (!props.isEmpty())
+                    {
+                        w.beginCompound("properties");
+                        for (const auto& kv : props)
+                            w.writeString(qPrintable(kv.first), kv.second);
+                        w.endCompound();
+                    }
+                    w.endCompound();
+                }
+            }
+        }
+        if (!single)
+            w.writeLongArray("data", packed);
+        w.endCompound();                    // block_states
+        w.beginCompound("biomes");          // uniform plains — a unary palette without data
+        if ((anyOther || zoneBiome) && !(lairDeep && si <= -1))
+        {
+            int pidx[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };               // value -> index in the palette
+            QVector<int> usedVals;
+            for (int vv = 0; vv < 8; ++vv)
+                for (int ci = 0; ci < 16; ++ci)
+                    if (cellBiome[ci] == vv) { pidx[vv] = usedVals.size(); usedVals.append(vv); break; }
+            w.beginList("palette", Nbt::String, usedVals.size());
+            for (int vv : usedVals)
+                w.writeStringElem(legacy && vv == 5 ? QStringLiteral("minecraft:flower_forest") : QLatin1String(kBiomeNames[vv]));
+            if (usedVals.size() > 1)
+            {
+                int bits = 1;
+                while ((1 << bits) < usedVals.size()) ++bits;               // the palette <= 6 -> 1..3 bits; the values do not cross a long boundary
+                const int per = 64 / bits, nLongs = (64 + per - 1) / per;
+                QVector<qint64> longs(nLongs, 0);
+                for (int y4 = 0; y4 < 4; ++y4)
+                    for (int z4 = 0; z4 < 4; ++z4)
+                        for (int x4 = 0; x4 < 4; ++x4)
+                        {
+                            const int i = (y4 * 4 + z4) * 4 + x4;
+                            longs[i / per] |= qint64(quint64(pidx[cellBiome[z4 * 4 + x4]]) << ((i % per) * bits));
+                        }
+                w.writeLongArray("data", longs);
+            }
+        }
+        else
+        {
+            w.beginList("palette", Nbt::String, 1);
+            w.writeStringElem(lairDeep && si <= -1 ? QStringLiteral("minecraft:deep_dark") : QStringLiteral("minecraft:plains"));
+        }
+        w.endCompound();                    // biomes
+        w.endCompound();                    // section
+    }
+
+    // The chests, pots, paintings and spawners of this chunk (a common list of block_entities).
+    // Chests: the BE key is "LootTable" (NOT "Loot" — that is the format of structure files, in
+    // the chunk block_entities the game silently loses it; checked on the 26.3 server: only LootTable
+    // survives loading/saving). The key is the same in 1.21.x and 26.x. A vanilla table, the trick
+    // is that the game generates the contents itself on first opening (it survives a non-existent table
+    // too — the chest is simply empty). We do not write LootTableSeed — a random one is used on opening.
+    // Pots (the user's remark "flowers do not grow in them"): flower_pot has NO flower property,
+    // the kind of flower lives only in the pot's BE. We write the key variants of all format generations —
+    // the server ignores unknown ones: "display"{id} (1.20.5+), "DisplayBlock"{Name} (<=1.20.4),
+    // a string "flower" (our spare one; which one took root is decided by a `data get block` probe).
+    if (!heartsHere.isEmpty())
+    {   // a "creaking heart": without a scheduled tick a block lifted from disk stays dormant and creakings do not appear —
+        // a tick on the next game tick makes the heart recompute its state (awake at night) and start spawning
+        w.beginList("block_ticks", Nbt::Compound, heartsHere.size());
+        for (const QPoint3& hp : heartsHere)
+        {
+            w.beginCompound(nullptr);
+            w.writeString("i", QStringLiteral("minecraft:creaking_heart"));
+            w.writeInt("p", 0);
+            w.writeInt("t", 1);
+            w.writeInt("x", hp.x);
+            w.writeInt("y", hp.y);
+            w.writeInt("z", hp.z);
+            w.endCompound();
+        }
+    }
+    if (!fluidsHere.isEmpty())
+    {   // fluid ticks: the sources on the chamfer spread when the chunk is loaded (water faster than lava)
+        w.beginList("fluid_ticks", Nbt::Compound, fluidsHere.size());
+        for (const FluidSite& fs : fluidsHere)
+        {
+            w.beginCompound(nullptr);
+            w.writeString("i", fs.lava ? QStringLiteral("minecraft:lava") : QStringLiteral("minecraft:water"));
+            w.writeInt("p", 0);
+            w.writeInt("t", fs.lava ? 30 : 5);
+            w.writeInt("x", fs.x);
+            w.writeInt("y", fs.y);
+            w.writeInt("z", fs.z);
+            w.endCompound();
+        }
+    }
+    // The BEs of donor structures (chests/barrels with loot, spawners): only those whose block really stayed in place —
+    // below the ground crust, not in a pond and not covered by a city object.
+    QVector<CaveBe> caveBes;
+    if (ct)
+        for (const CaveBe& b : ct->bes)
+        {
+            const int col = b.lz * 16 + b.lx;
+            if (b.y < -64 || b.y > 63 || b.y >= ground.top[col] - caveCap[col] || ground.wd[col] != 0) continue;
+            const auto os = sections.constFind(b.y >> 4);
+            if (os != sections.constEnd() && os.value().size() == 4096
+                && os.value()[((b.y & 15) << 8) | (b.lz << 4) | b.lx] != 0) continue;
+            if (legacy && b.kind == 5 && b.raw.contains("minecraft:decorated_pot")) continue;   // 1.21.x: a different format of pot sherds — the pot stays without a block entity
+            caveBes.append(b);
+        }
+    caveBes += extraBes;                                  // the chests of outposts and camps
+    const int beN = chestsHere.size() + spawnersHere.size() + caveBes.size() + signsHere.size() + bellsHere.size() + bannersHere.size() + heartsHere.size();   // paintings are entities, not BEs
+    if (beN > 0)
+    {
+        w.beginList("block_entities", Nbt::Compound, beN);
+        for (const ChestSite& cs : chestsHere)
+        {
+            w.beginCompound(nullptr);
+            if (cs.lectern >= 0)
+            {   // a lectern with a written book (the item format of 1.20.5+: id/count/components)
+                const BookText& bk = cs.lectern >= 1000 ? kSciBooks[(cs.lectern - 1000) % kSciBooksCount] : kBooks[cs.lectern % kBooksCount];
+                w.writeString("id", QStringLiteral("minecraft:lectern"));
+                w.writeInt("x", cs.x);
+                w.writeInt("y", cs.y);
+                w.writeInt("z", cs.z);
+                w.beginCompound("Book");
+                w.writeString("id", QStringLiteral("minecraft:written_book"));
+                w.writeInt("count", 1);
+                w.beginCompound("components");
+                w.beginCompound("minecraft:written_book_content");
+                w.beginCompound("title");
+                w.writeString("raw", QString::fromUtf8(bk.title));
+                w.endCompound();
+                w.writeString("author", QString::fromUtf8(cs.lectern >= 1000 ? "Кафедра физики" : "Настоятель"));
+                w.beginList("pages", Nbt::Compound, 2);
+                for (const char* pg : { bk.page1, bk.page2 })
+                {
+                    w.beginCompound(nullptr);
+                    w.writeString("raw", QString::fromUtf8(pg));
+                    w.endCompound();
+                }
+                w.endCompound();                              // written_book_content
+                w.endCompound();                              // components
+                w.endCompound();                              // Book
+                w.writeInt("Page", 0);
+                w.endCompound();                              // a list element
+                continue;
+            }
+            w.writeString("id", cs.barrel ? QStringLiteral("minecraft:barrel") : QStringLiteral("minecraft:chest"));
+            w.writeInt("x", cs.x);
+            w.writeInt("y", cs.y);
+            w.writeInt("z", cs.z);
+            w.writeString("LootTable", cs.barrel ? QLatin1String(kBarrelLoot[cs.tbl % kBarrelLootCount])
+                                              : QLatin1String(kChestLoot[cs.tbl % kChestLootCount]));
+            w.endCompound();                                  // a list element
+        }
+        for (const BannerSite& bn : bannersHere)
+        {   // an ominous banner: a white base + a pattern (rhombus, stripe_bottom, stripe_center, border, half_horizontal, circle, border)
+            static const char* const kPat[7] = { "minecraft:rhombus", "minecraft:stripe_bottom", "minecraft:stripe_center", "minecraft:border",
+                                                 "minecraft:half_horizontal", "minecraft:circle", "minecraft:border" };
+            static const char* const kCol[7] = { "cyan", "light_gray", "gray", "light_gray", "black", "light_gray", "black" };
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:banner"));
+            w.writeInt("x", bn.x); w.writeInt("y", bn.y); w.writeInt("z", bn.z);
+            w.beginList("patterns", Nbt::Compound, 7);
+            for (int k = 0; k < 7; ++k)
+            {
+                w.beginCompound(nullptr);
+                w.writeString("color", QLatin1String(kCol[k]));
+                w.writeString("pattern", QLatin1String(kPat[k]));
+                w.endCompound();
+            }
+            w.endCompound();
+        }
+        for (const QPoint3& hp : heartsHere)
+        {   // the block entity of a "creaking heart": without a record in the BE list the game creates it only on the first touch of the block — which means
+            // the heart does not tick and creakings do not appear (checked on the server: at night it stayed dormant)
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:creaking_heart"));
+            w.writeInt("x", hp.x); w.writeInt("y", hp.y); w.writeInt("z", hp.z);
+            w.endCompound();
+        }
+        for (const BellSite& bl : bellsHere)
+        {
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:bell"));
+            w.writeInt("x", bl.x); w.writeInt("y", bl.y); w.writeInt("z", bl.z);
+            w.endCompound();
+        }
+        for (const SignSite& sg : signsHere)
+        {   // a sign: the text is ordinary strings (since 1.21.5 a string in messages is a text component), wax — so that it cannot be edited
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:sign"));
+            w.writeInt("x", sg.x); w.writeInt("y", sg.y); w.writeInt("z", sg.z);
+            w.writeByte("is_waxed", 1);                       // wax: the inscription does not change in the game (this is by design)
+            for (int side = 0; side < 2; ++side)
+            {
+                w.beginCompound(side == 0 ? "front_text" : "back_text");
+                w.writeByte("has_glowing_text", 0);
+                w.writeString("color", QStringLiteral("black"));
+                // legacy (1.21.x): the string is a JSON component {"text":"…"}, as clients before 1.21.5 read it (including 1.21.1);
+                // 26.x and newer: an ordinary string = a text component.
+                auto lineText = [legacy](const QString& t) -> QString
+                {
+                    if (!legacy) return t;
+                    QString e = t;
+                    e.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+                    return QStringLiteral("{\"text\":\"%1\"}").arg(e);
+                };
+                w.beginList("messages", Nbt::String, 4);
+                w.writeStringElem(lineText(side == 0 ? sg.l1.left(30) : QString()));
+                w.writeStringElem(lineText(side == 0 ? sg.l2.left(30) : QString()));
+                w.writeStringElem(lineText(side == 0 ? sg.l3.left(30) : QString()));
+                w.writeStringElem(lineText(QString()));
+                w.endCompound();
+            }
+            w.endCompound();                                  // a list element
+        }
+        for (const CaveBe& cb : caveBes)
+        {
+            if (cb.kind == 5)
+            {   // a donor BE as is (trial_spawner, vault, dispenser, pot, suspicious sand…): the NBT fields + the coordinates
+                w.beginCompound(nullptr);
+                w.appendRaw(cb.raw);
+                w.writeInt("x", chunkX * 16 + cb.lx);
+                w.writeInt("y", cb.y);
+                w.writeInt("z", chunkZ * 16 + cb.lz);
+                w.endCompound();
+                continue;
+            }
+            static const char* const kIds[4] = { "minecraft:chest", "minecraft:trapped_chest",
+                                                 "minecraft:barrel", "minecraft:mob_spawner" };
+            w.beginCompound(nullptr);
+            w.writeString("id", QLatin1String(kIds[std::max(1, std::min(4, cb.kind)) - 1]));
+            w.writeInt("x", chunkX * 16 + cb.lx);
+            w.writeInt("y", cb.y);
+            w.writeInt("z", chunkZ * 16 + cb.lz);
+            if (cb.kind == 4)
+            {   // a structure spawner: the mob is in SpawnData.entity.id (+ SpawnPotentials) — as for our spawners
+                w.beginCompound("SpawnData");
+                w.beginCompound("entity");
+                w.writeString("id", cb.str);
+                w.endCompound();
+                w.endCompound();
+                w.beginList("SpawnPotentials", Nbt::Compound, 1);
+                w.beginCompound(nullptr);
+                w.writeInt("weight", 1);
+                w.beginCompound("data");
+                w.beginCompound("entity");
+                w.writeString("id", cb.str);
+                w.endCompound();
+                w.endCompound();
+                w.endCompound();
+            }
+            else
+                w.writeString("LootTable", cb.str);
+            w.endCompound();                                  // a list element
+        }
+        for (const SpawnerSite& sp : spawnersHere)
+        {
+            const QLatin1String mob{ kSpawnerTypes[sp.type % kSpawnerTypesCount] };
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:mob_spawner"));   // the BE type id (the block is called minecraft:spawner); with "minecraft:spawner" the game skipped the record and the spawner stayed empty
+            w.writeInt("x", sp.x);
+            w.writeInt("y", sp.y);
+            w.writeInt("z", sp.z);
+            // The vanilla 1.18+ format: the monster lies in SpawnData.entity.id (not SpawnData.id — such a
+            // spawner was loaded by the game "empty", without a mob) + we duplicate it in SpawnPotentials[0].data.entity;
+            // the other parameters are the vanilla values of the default spawner.
+            w.beginCompound("SpawnData");
+            w.beginCompound("entity");
+            w.writeString("id", mob);
+            w.endCompound();
+            w.endCompound();
+            w.beginList("SpawnPotentials", Nbt::Compound, 1);
+            w.beginCompound(nullptr);
+            w.writeInt("weight", 1);
+            w.beginCompound("data");
+            w.beginCompound("entity");
+            w.writeString("id", mob);
+            w.endCompound();
+            w.endCompound();
+            w.endCompound();
+            w.writeShort("Delay", 20);
+            w.writeShort("MinSpawnDelay", 200);
+            w.writeShort("MaxSpawnDelay", 800);
+            w.writeShort("SpawnCount", 4);
+            w.writeShort("MaxNearbyEntities", 6);
+            w.writeShort("RequiredPlayerRange", 16);
+            w.writeShort("SpawnRange", 4);
+            w.writeString("EntityId", mob);
+            w.endCompound();                                  // a list element
+        }
+    }
+
+    // We do NOT write the mall mannequins into the chunk: since 1.17 the server does NOT read the Entities tag from region chunks
+    // (the 26.x/1.21.11 smoke: armor_stands from a chunk are not loaded and would not be loaded SILENTLY) —
+    // vanilla stores entities in separate entities/r.*.mca. See buildEntityChunkNbt.
+
+    w.writeInt("DataVersion", legacy ? 4671 : 5023);
+    w.endCompound(); // root
+    return w.out;
+}
+
+//! The mannequin armor damage (the minecraft:damage component): the durability ALWAYS stays between 2 and 36% of the item maximum — the armor is
+//! "worn". The maximums by material (kArmorMats) and slot (boots, leggings, chestplate, helmet).
+static int armorDamage(const MannequinSite& ms, int slot)
+{
+    static const int kMax[5][4] = {
+        { 65, 75, 80, 55 },        // leather
+        { 195, 225, 240, 165 },    // chainmail
+        { 195, 225, 240, 165 },    // iron
+        { 91, 105, 112, 77 },      // gold
+        { 429, 495, 528, 363 } };  // diamond
+    const int mx = kMax[ms.mat % 5][slot & 3];
+    quint32 h = quint32(ms.x) * 374761393u ^ quint32(ms.z) * 668265263u ^ quint32(ms.y) * 2246822519u ^ quint32(slot) * 3266489917u;
+    h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+    const int leftPct = 2 + int(h % 35u);                       // 2..36 % remains
+    int dmg = mx - int(std::lround(mx * leftPct / 100.0));
+    dmg = std::max(0, std::min(dmg, mx - 1));                   // at least 1 unit of durability
+    return dmg;
+}
+
+//! The payload of one cell of entities/r.<rx>.<rz>.mca. The format was CHECKED against dumps of real worlds
+//! of both smoke servers (26.x and 1.21.11 — the structures are identical, only
+//! DataVersion differs): a root compound {Position: an INT_ARRAY of the absolute chunk coordinates,
+//! DataVersion, Entities: LIST<Compound>}; the region container is a standard anvil — it is
+//! assembled by buildRegionFile (the directory path is set by the caller).
+//! A mannequin = an armor_stand (a remark: "sometimes mannequins may wear pieces
+//! of armor" — armor is worn only by an armor stand, it cannot be laid out as a block). Pos/Rotation
+//! — List<Double>/List<Float>; ArmorItems — 4 slots [boots, leggings, chestplate,
+//! helmet], an empty slot is an empty compound (1.20.5+ — an item {id,count}, components by
+//! default). Disabled/Invulnerable — so that a player cannot move or break the showcase.
+static QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
+                                      const QVector<MannequinSite>& mannequinsHere, bool legacy,
+                                      const QVector<NpcSite>& npcsHere = QVector<NpcSite>(),
+                                      const QVector<PaintingSite>& paintsHere = QVector<PaintingSite>(),
+                                      const QVector<FrameSite>& framesHere = QVector<FrameSite>())
+{
+    NbtWriter w;
+    w.beginCompound("");                        // the root is a named compound
+    w.writeIntArray("Position", { chunkX, chunkZ });
+    w.writeInt("DataVersion", legacy ? 4671 : 5023);
+    w.beginList("Entities", Nbt::Compound, mannequinsHere.size() + npcsHere.size() + paintsHere.size() + framesHere.size());
+    {
+        auto pos3 = [&w](double x, double y, double z)
+        {
+            w.beginList("Pos", Nbt::Double, 3);
+            w.writeDoubleElem(x); w.writeDoubleElem(y); w.writeDoubleElem(z);
+            w.beginList("Motion", Nbt::Double, 3);
+            w.writeDoubleElem(0.0); w.writeDoubleElem(0.0); w.writeDoubleElem(0.0);
+        };
+        for (const NpcSite& n : npcsHere)
+        {   // a villager / a wandering trader / a trader llama (the formats were taken with `data get entity` from the 26.3 server)
+            w.beginCompound(nullptr);
+            w.writeString("id", n.kind == 0 ? QStringLiteral("minecraft:villager")
+                                : n.kind == 1 ? QStringLiteral("minecraft:wandering_trader")
+                                : n.kind == 2 ? QStringLiteral("minecraft:trader_llama")
+                                : n.kind == 5 ? n.animal
+                                : n.kind == 4 ? (n.variant == 0 ? QStringLiteral("minecraft:zombie")
+                                                : n.variant == 1 ? QStringLiteral("minecraft:skeleton")
+                                                : n.variant == 2 ? QStringLiteral("minecraft:spider")
+                                                : n.variant == 3 ? QStringLiteral("minecraft:witch")
+                                                : n.variant == 4 ? QStringLiteral("minecraft:pillager")
+                                                : n.variant == 5 ? QStringLiteral("minecraft:vindicator")
+                                                : n.variant == 6 ? QStringLiteral("minecraft:evoker")
+                                                : n.variant == 8 ? QStringLiteral("minecraft:slime")
+                                                                 : QStringLiteral("minecraft:enderman"))
+                                              : QStringLiteral("minecraft:iron_golem"));
+            pos3(n.x + 0.5, double(n.y) + n.yoff, n.z + 0.5);
+            w.beginList("Rotation", Nbt::Float, 2);
+            w.writeFloatElem(float(n.yaw)); w.writeFloatElem(0.f);
+            w.writeByte("PersistenceRequired", 1);
+            w.writeByte("Invulnerable", (n.kind == 4 || n.kind == 5) ? 0 : 1);         // zombies from spawners do not touch villagers; basement mobs are mortal
+            if (n.kind == 0)
+            {
+                w.beginCompound("VillagerData");
+                w.writeString("profession", QStringLiteral("minecraft:") + QLatin1String(kProfs[n.prof % 15]));
+                w.writeInt("level", n.baby ? 1 : n.level);
+                w.writeString("type", QStringLiteral("minecraft:") + QLatin1String(kVTypes[n.vtype % 7]));
+                w.endCompound();
+                w.writeInt("Age", n.baby ? -24000 : 0);
+            }
+            else if (n.kind == 3)
+                w.writeByte("PlayerCreated", 0);                      // an iron golem (guards the site)
+            else if (n.kind == 5)
+            {   // an animal: without extra fields (it does not despawn — PersistenceRequired above); for a cat we set the coat explicitly
+                if (!n.petVariant.isEmpty()) w.writeString("variant", n.petVariant);
+            }
+            else if (n.kind != 4)
+            {
+                w.writeInt("DespawnDelay", 2000000000);               // without this the trader disappears after ~40 minutes
+                if (n.kind == 2) w.writeInt("Variant", n.variant);
+            }
+            else if (n.variant == 8)
+                w.writeInt("Size", std::max(0, std::min(3, n.level)));       // a slime: the size 0..3
+            else if (n.variant == 4 || n.variant == 5)
+            {   // armed raiders: a pillager — a crossbow, a vindicator — an iron axe (both formats: HandItems before 1.21.4, equipment since 1.21.5)
+                const QString hand = (n.variant == 4) ? QStringLiteral("minecraft:crossbow") : QStringLiteral("minecraft:iron_axe");
+                // the standard-bearer: an ominous banner (a white_banner with a pattern) on the head, PatrolLeader — the captain
+                auto writeBanner = [&w]()
+                {
+                    static const char* const kPat[7] = { "minecraft:rhombus", "minecraft:stripe_bottom", "minecraft:stripe_center", "minecraft:border",
+                                                         "minecraft:half_horizontal", "minecraft:circle", "minecraft:border" };
+                    static const char* const kCol[7] = { "cyan", "light_gray", "gray", "light_gray", "black", "light_gray", "black" };
+                    w.writeString("id", QStringLiteral("minecraft:white_banner"));
+                    w.writeInt("count", 1);
+                    w.beginCompound("components");
+                    w.beginList("minecraft:banner_patterns", Nbt::Compound, 7);
+                    for (int q = 0; q < 7; ++q)
+                    {
+                        w.beginCompound(nullptr);
+                        w.writeString("color", QLatin1String(kCol[q]));
+                        w.writeString("pattern", QLatin1String(kPat[q]));
+                        w.endCompound();
+                    }
+                    w.endCompound();
+                };
+                if (n.captain) w.writeByte("PatrolLeader", 1);
+                if (legacy)
+                {
+                    w.beginList("HandItems", Nbt::Compound, 2);
+                    w.beginCompound(nullptr);
+                    w.writeString("id", hand);
+                    w.writeInt("count", 1);
+                    w.endCompound();
+                    w.beginCompound(nullptr);
+                    w.endCompound();
+                    if (n.captain)
+                    {
+                        w.beginList("ArmorItems", Nbt::Compound, 4);
+                        for (int q = 0; q < 3; ++q) { w.beginCompound(nullptr); w.endCompound(); }
+                        w.beginCompound(nullptr);
+                        writeBanner();
+                        w.endCompound();
+                    }
+                }
+                w.beginCompound("equipment");
+                w.beginCompound("mainhand");
+                w.writeString("id", hand);
+                w.writeInt("count", 1);
+                w.endCompound();
+                if (n.captain)
+                {
+                    w.beginCompound("head");
+                    writeBanner();
+                    w.endCompound();
+                }
+                w.endCompound();
+            }
+            w.endCompound();
+        }
+        for (const FrameSite& fr : framesHere)
+        {   // an item frame (the format was taken with `data get entity` from the 26.3 server): Facing — a byte 2=N 3=S 4=W 5=E
+            static const int kFacing[4] = { 2, 5, 3, 4 };               // our face 0=N,1=E,2=S,3=W
+            static const double kDx[4] = { 0, 1, 0, -1 }, kDz[4] = { -1, 0, 1, 0 };
+            static const int kYaw[4] = { 180, 270, 0, 90 };
+            const bool up = (fr.face == 4);                              // 4 — lies on a block, looks up
+            const int f = fr.face & 3;
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:item_frame"));
+            if (up) pos3(fr.x + 0.5, fr.y + 0.03125, fr.z + 0.5);
+            else    pos3(fr.x + 0.5 - kDx[f] * 0.46875, fr.y + 0.5, fr.z + 0.5 - kDz[f] * 0.46875);
+            w.beginList("Rotation", Nbt::Float, 2);
+            w.writeFloatElem(up ? 0.f : float(kYaw[f])); w.writeFloatElem(up ? -90.f : 0.f);
+            w.writeByte("Facing", qint8(up ? 1 : kFacing[f]));
+            w.writeIntArray("block_pos", { fr.x, fr.y, fr.z });
+            w.writeInt("TileX", fr.x); w.writeInt("TileY", fr.y); w.writeInt("TileZ", fr.z);
+            w.writeByte("ItemRotation", 0);
+            w.writeByte("Invulnerable", 1);
+            w.beginCompound("Item");
+            QString itemId;
+            if (fr.kind == 5) itemId = QStringLiteral("minecraft:golden_apple");
+            else if (fr.kind == 6) itemId = QStringLiteral("minecraft:golden_carrot");
+            else itemId = QStringLiteral("minecraft:%1_%2").arg(QLatin1String(kToolMatNames[fr.mat % 5]),
+                                                               QLatin1String(kToolKindNames[fr.kind % 5]));
+            w.writeString("id", itemId);
+            w.writeInt("count", 1);
+            if (fr.kind < 5)
+            {
+                w.beginCompound("components");
+                w.writeInt("minecraft:damage", fr.dmg);
+                w.endCompound();
+            }
+            w.endCompound();
+            w.endCompound();
+        }
+        for (const PaintingSite& pt : paintsHere)
+        {   // a painting entity: block_pos — the cell in front of the wall, facing 0=S 1=W 2=N 3=E (from the wall into the room)
+            static const int kFaceByte[4] = { 2, 3, 0, 1 };           // our face 0=N,1=E,2=S,3=W -> a byte
+            static const double kDx[4] = { 0, 1, 0, -1 }, kDz[4] = { -1, 0, 1, 0 };
+            const int f = pt.face & 3;
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:painting"));
+            // Pos: the cell center, shifted toward the wall by 15/32 of a block (as the game places it: z+0.96875 for facing=north)
+            pos3(pt.x + 0.5 - kDx[f] * 0.46875, pt.y + 0.5, pt.z + 0.5 - kDz[f] * 0.46875);
+            w.beginList("Rotation", Nbt::Float, 2);
+            w.writeFloatElem(float(kFaceByte[f] * 90));            // S=0 W=90 N=180 E=270
+            w.writeFloatElem(0.f);
+            w.writeByte("facing", qint8(kFaceByte[f]));
+            w.writeString("variant", QLatin1String(kPaintMotifs[pt.motif % kPaintMotifsCount]));
+            w.writeIntArray("block_pos", { pt.x, pt.y, pt.z });
+            w.writeInt("TileX", pt.x); w.writeInt("TileY", pt.y); w.writeInt("TileZ", pt.z);   // the keys of old versions
+            w.writeByte("Invulnerable", 1);
+            w.endCompound();
+        }
+        static const char* const kPart[4] = { "boots", "leggings", "chestplate", "helmet" };
+        for (const MannequinSite& ms : mannequinsHere)
+        {
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:armor_stand"));
+            w.beginList("Pos", Nbt::Double, 3);
+            w.writeDoubleElem(ms.x + 0.5);
+            w.writeDoubleElem(double(ms.y));
+            w.writeDoubleElem(ms.z + 0.5);
+            w.beginList("Motion", Nbt::Double, 3);
+            w.writeDoubleElem(0.0);
+            w.writeDoubleElem(0.0);
+            w.writeDoubleElem(0.0);
+            w.beginList("Rotation", Nbt::Float, 2);
+            w.writeFloatElem(float(ms.yaw));
+            w.writeFloatElem(0.f);
+            w.writeByte("NoGravity", 1);
+            w.writeByte("Small", 0);
+            w.writeByte("Arms", 1);                          // arms — they are visible on a mannequin
+            w.writeByte("Disabled", 1);
+            w.writeByte("Invulnerable", 1);
+            // Armor in BOTH formats (the tags do not interfere with each other — each version reads its own, the extra is ignored):
+            //  · ArmorItems — up to and including 1.21.4 (1.20.5–1.21.4: id + count(Int) + components); legacy worlds opened by an old client;
+            //  · equipment — since 1.21.5 (feet/legs/chest/head). 26.x reads only equipment, so ArmorItems is written only in legacy.
+            if (legacy)
+            {
+                w.beginList("ArmorItems", Nbt::Compound, 4);
+                for (int s = 0; s < 4; ++s)
+                {
+                    w.beginCompound(nullptr);
+                    if (ms.armor & (1 << s))
+                    {
+                        w.writeString("id", QStringLiteral("minecraft:%1_%2")
+                                                .arg(QLatin1String(kArmorMats[ms.mat % kArmorMatsCount]),
+                                                     QLatin1String(kPart[s])));
+                        w.writeInt("count", 1);
+                        w.beginCompound("components");
+                        w.writeInt("minecraft:damage", armorDamage(ms, s));
+                        w.endCompound();
+                    }
+                    w.endCompound();                              // an ArmorItems element
+                }
+            }
+            // Since 1.21.5 the equipment of entities is the compound "equipment" (feet/legs/chest/head); without it the mannequins stood naked.
+            if (ms.armor)
+            {
+                static const char* const kSlot[4] = { "feet", "legs", "chest", "head" };
+                w.beginCompound("equipment");
+                for (int s = 0; s < 4; ++s)
+                {
+                    if (!(ms.armor & (1 << s))) continue;
+                    w.beginCompound(kSlot[s]);
+                    w.writeString("id", QStringLiteral("minecraft:%1_%2")
+                                            .arg(QLatin1String(kArmorMats[ms.mat % kArmorMatsCount]),
+                                                 QLatin1String(kPart[s])));
+                    w.writeInt("count", 1);
+                    w.beginCompound("components");
+                    w.writeInt("minecraft:damage", armorDamage(ms, s));
+                    w.endCompound();
+                    w.endCompound();
+                }
+                w.endCompound();
+            }
+            w.endCompound();                                  // a list element
+        }
+    }
+    w.endCompound(); // root
+    return w.out;
+}
+
+// ---------------------------------------------------------------------------
+// level.dat and world_gen_settings.dat (gzip NBT, the 26.x and 1.21.x formats)
+// ---------------------------------------------------------------------------
+
+static void writeDimensions(NbtWriter& w, int groundTopY, const McWorldExporter::WorldOptions& world);   // below in the file (the common part of the generation)
+
+//! level.dat in the NATIVE Minecraft 26.x format (checked field by field against a level.dat created by a
+//! vanilla 26.3 server — see dump_lvldat.py). The key point: Data.version is now an INT ("storage
+//! version" 19133) and the game strictly validates it when opening a world (LevelVersion.parse);
+//! DataVersion=5023; the generation is moved into data/minecraft/world_gen_settings.dat.
+//! Legacy (1.21.x, checked against the level.dat of a world created by the 1.21.11 client — dump121.py):
+//! DataVersion/Version.Id=4671, Name "1.21.11", the generation INSIDE level.dat (WorldGenSettings),
+//! an ordinary (not compound) difficulty; version=Int 19133 is already there in 1.21.11 too — the field is the same.
+static QByteArray buildLevelDat(const QString& levelName, int spawnX, int spawnY, int spawnZ,
+                                McWorldExporter::Format format, int groundTopY,
+                                const McWorldExporter::WorldOptions& world)
+{
+    const bool legacy = (format == McWorldExporter::Format::Legacy121x);
+    NbtWriter w;
+    w.beginCompound("");
+    w.beginCompound("Data");
+    w.writeInt("version", 19133);                     // storage version — MANDATORILY an INT (it is in 1.21.11 too)!
+    w.beginCompound("Version");
+    w.writeByte("Snapshot", 0);
+    w.writeString("Series", QStringLiteral("main"));
+    w.writeInt("Id", legacy ? 4671 : 5023);
+    w.writeString("Name", legacy ? QStringLiteral("1.21.11") : QStringLiteral("26.3"));
+    w.endCompound();
+    w.writeInt("DataVersion", legacy ? 4671 : 5023);
+    if (!legacy)
+    {
+        w.beginList("version_history", Nbt::Int, 1);  // only in 26.x
+        w.writeIntElem(5023);
+    }
+    w.writeString("LevelName", levelName);
+    w.writeInt("GameType", 1);                        // creative — no fall damage from the spawn
+    w.writeByte("allowCommands", 1);                  // in 26.x this is a Byte, not an Int
+    w.writeByte("hardcore", 0);
+    if (legacy)
+    {
+        w.writeByte("Difficulty", 2);                 // normal: mobs in basements and spawners work (peaceful removed them)
+        w.writeByte("DifficultyLocked", 0);
+        w.beginCompound("DragonFight");               // otherwise the server log has ERROR "key missing: DragonFight"
+        w.writeByte("NeedsStateScanning", 1);         // (it is in the vanilla 1.21.11 world — dump121.py)
+        w.writeByte("DragonKilled", 0);
+        w.writeByte("PreviouslyKilled", 0);
+        w.endCompound();
+        w.beginCompound("WorldGenSettings");          // the generation INSIDE level.dat (in 26.x — a separate file)
+        w.writeByte("bonus_chest", 0);
+        w.writeLong("seed", qint64(world.seed));
+        // structures/villages are turned on only in the "normal" surroundings — a flat one does not need them
+        // (and otherwise the very first chunk beyond the export border would shell us with a village on a cliff).
+        w.writeByte("generate_features", world.normalSurroundings ? 1 : 0);   // the field name in 1.21.x (in 26.x — generate_structures)
+        writeDimensions(w, groundTopY, world);
+        w.endCompound();
+    }
+    else
+    {
+        w.beginCompound("difficulty_settings");
+        w.writeString("difficulty", QStringLiteral("normal"));     // mobs in basements and spawners work (peaceful removed them)
+        w.writeByte("hardcore", 0);
+        w.writeByte("locked", 0);
+        w.endCompound();
+    }
+    w.writeLong("Time", 6000);
+    w.writeLong("LastPlayed", QDateTime::currentMSecsSinceEpoch());
+    w.writeByte("initialized", 1);
+    w.writeByte("WasModded", 0);
+    w.beginCompound("spawn");                         // the new replacement of SpawnX/Y/Z
+    w.writeIntArray("pos", QVector<qint32>{ spawnX, spawnY, spawnZ });  // above the center of mass
+    w.writeFloat("pitch", 0.0f);                     // of objects: the player falls onto their scene
+    w.writeString("dimension", QStringLiteral("minecraft:overworld"));
+    w.writeFloat("yaw", 0.0f);
+    w.endCompound();
+    w.beginList("ServerBrands", Nbt::String, 1);
+    w.writeStringElem(QStringLiteral("vanilla"));
+    w.beginCompound("DataPacks");
+    w.beginList("Enabled", Nbt::String, 1);
+    w.writeStringElem(QStringLiteral("vanilla"));
+    w.beginList("Disabled", Nbt::String, 3);
+    w.writeStringElem(QStringLiteral("minecart_improvements"));
+    w.writeStringElem(QStringLiteral("redstone_experiments"));
+    w.writeStringElem(QStringLiteral("trade_rebalance"));
+    w.endCompound();                                  // DataPacks
+    w.endCompound(); // Data
+    w.endCompound(); // root
+    return gzipWrap(w.out);
+}
+
+//! dimensions{overworld(flat), the_nether, the_end} — the COMMON part for world_gen_settings.dat (26.x)
+//! and the WorldGenSettings compound inside level.dat (1.21.x): the content in both formats is identical
+//! (checked against the 26.3 and 1.21.11 worlds). The top of the flat plane is groundTopY (the median of our ground crust),
+//! below — stone down to the bottom; structures are turned off.
+static void writeDimensions(NbtWriter& w, int groundTopY, const McWorldExporter::WorldOptions& world)
+{
+    groundTopY = std::max(0, std::min(groundTopY, 300));
+    const int stoneH = groundTopY + 65 - 4;           // total layers from y=-64 to the top: top+65
+
+    w.beginCompound("dimensions");
+
+    w.beginCompound("minecraft:overworld");
+    w.beginCompound("generator");
+    if (world.normalSurroundings)
+    {
+        // A normal seed-based world: the terrain is the native noise generator (terrain, caves, ores), the biomes are the
+        // standard multi_noise preset of the overworld, we write no settings — the game takes the vanilla ones by
+        // DataVersion. OUR chunks (status=full) are never touched by the generator; cliffs at the
+        // export border are a deliberate price (smoothing the joint is a separate future task).
+        w.beginCompound("biome_source");
+        w.writeString("preset", QStringLiteral("minecraft:overworld"));
+        w.writeString("type", QStringLiteral("minecraft:multi_noise"));
+        w.endCompound();                                  // biome_source
+        // settings is MANDATORY: without it 26.x crashes with "Overworld settings missing"
+        // (WorldDimensions), the default by DataVersion is not substituted.
+        w.writeString("settings", QStringLiteral("minecraft:overworld"));
+        w.writeString("type", QStringLiteral("minecraft:noise"));
+    }
+    else
+    {
+        w.beginCompound("settings");
+        w.writeByte("features", 0);
+        w.writeString("biome", QStringLiteral("minecraft:plains"));
+        w.beginList("layers", Nbt::Compound, 4);
+        w.beginCompound(nullptr); w.writeString("block", QStringLiteral("minecraft:bedrock"));      w.writeInt("height", 1); w.endCompound();
+        w.beginCompound(nullptr); w.writeString("block", QStringLiteral("minecraft:stone"));         w.writeInt("height", stoneH); w.endCompound();
+        w.beginCompound(nullptr); w.writeString("block", QStringLiteral("minecraft:dirt"));          w.writeInt("height", 2); w.endCompound();
+        w.beginCompound(nullptr); w.writeString("block", QStringLiteral("minecraft:grass_block"));   w.writeInt("height", 1); w.endCompound();
+        w.beginList("structure_overrides", Nbt::String, 2);
+        w.writeStringElem(QStringLiteral("minecraft:strongholds"));
+        w.writeStringElem(QStringLiteral("minecraft:villages"));
+        w.writeByte("lakes", 0);
+        w.endCompound();                                  // settings
+        w.writeString("type", QStringLiteral("minecraft:flat"));
+    }
+    w.endCompound();                                  // generator
+    w.writeString("type", QStringLiteral("minecraft:overworld"));
+    w.endCompound();                                  // minecraft:overworld
+
+    w.beginCompound("minecraft:the_nether");
+    w.beginCompound("generator");
+    w.writeString("settings", QStringLiteral("minecraft:nether"));
+    w.beginCompound("biome_source");
+    w.writeString("preset", QStringLiteral("minecraft:nether"));
+    w.writeString("type", QStringLiteral("minecraft:multi_noise"));
+    w.endCompound();
+    w.writeString("type", QStringLiteral("minecraft:noise"));
+    w.endCompound();
+    w.writeString("type", QStringLiteral("minecraft:the_nether"));
+    w.endCompound();
+
+    w.beginCompound("minecraft:the_end");
+    w.beginCompound("generator");
+    w.writeString("settings", QStringLiteral("minecraft:end"));
+    w.beginCompound("biome_source");
+    w.writeString("type", QStringLiteral("minecraft:the_end"));
+    w.endCompound();
+    w.writeString("type", QStringLiteral("minecraft:noise"));
+    w.endCompound();
+    w.writeString("type", QStringLiteral("minecraft:the_end"));
+    w.endCompound();
+
+    w.endCompound();                                  // dimensions
+}
+
+//! data/minecraft/world_gen_settings.dat — a superflat generator: the neighbors of our chunks need
+//! flat ground; we put its top at the median height of our own "ground crust" so that the joint of chunks
+//! is almost a step of a couple of blocks. Structure generation is turned off. Nether/End — by the standard
+//! presets (the game creates their chunks itself). The format is a slice of a vanilla 26.3 world.
+static QByteArray buildWorldGenSettings(int groundTopY, const McWorldExporter::WorldOptions& world)
+{
+    NbtWriter w;
+    w.beginCompound("");
+    w.beginCompound("data");
+    w.writeByte("bonus_chest", 0);
+    w.writeLong("seed", qint64(world.seed));
+    w.writeByte("generate_structures", world.normalSurroundings ? 1 : 0);
+    writeDimensions(w, groundTopY, world);
+    w.endCompound();                                  // data
+    w.writeInt("DataVersion", 5023);
+    w.endCompound(); // root
+    return gzipWrap(w.out);
+}
+
+// ---------------------------------------------------------------------------
+// the region file
+// ---------------------------------------------------------------------------
+
+//! The chunks of one region -> .mca. order — the positions (localX, localZ) in writing order; payloadByPos —
+//! the chunk NBT before compression by the same key pair.
+static QByteArray buildRegionFile(const QVector<QPair<int, int>>& order,
+                                  const QHash<ColKey, QByteArray>& payloadByPos, bool precompressed = false)
+{
+    struct Loc { int sectors = 0; int offset = 0; };
+    Loc locs[32 * 32];
+
+    // First we compress ALL chunks: compression id 2 = a zlib stream (CMF/FLG+deflate+adler, without the Qt
+    // size prefix); the number of sectors must be counted by the COMPRESSED size.
+    // precompressed — the chunks are already compressed (zlibStream) in the worker threads of chunk assembly: only the layout by sectors remains here.
+    QHash<ColKey, QByteArray> compressedOwn;
+    if (!precompressed)
+        for (const QPair<int, int>& p : order)
+            compressedOwn.insert(pairKey(p.first, p.second), zlibStream(payloadByPos.value(pairKey(p.first, p.second))));
+    const QHash<ColKey, QByteArray>& compressed = precompressed ? payloadByPos : compressedOwn;
+
+    int cursor = 2; // after the two header sectors
+    for (const QPair<int, int>& p : order)
+    {
+        const QByteArray comp = compressed.value(pairKey(p.first, p.second));
+        const int dataSectors = (comp.size() + 1 + 4 + 4095) / 4096;   // payload = [4 of length][1 of type][data]
+        if (dataSectors > 255) continue;   // sectorCount lacks a byte — we skip the chunk rather than spoil the region
+        Loc& l = locs[p.second * 32 + p.first];
+        l.offset = cursor;
+        l.sectors = dataSectors;
+        cursor += dataSectors;
+    }
+
+    QByteArray file;
+    file.reserve(cursor * 4096);
+    QByteArray header(8192, char(0));
+    const quint32 now = quint32(QDateTime::currentSecsSinceEpoch());
+    char* h = header.data();
+    for (int lz = 0; lz < 32; ++lz)
+        for (int lx = 0; lx < 32; ++lx)
+        {
+            const Loc& l = locs[lz * 32 + lx];
+            if (!l.sectors) continue;
+            const int pos = (lz * 32 + lx) * 4;
+            // The coordinate table (the first header sector): ONE 4-byte BE word per chunk —
+            // the high 3 bytes = the offset in 4KiB sectors, the low byte = sectorCount (max 255).
+            // The compression type is NOT stored in the header — it is 1 byte after the length in the chunk data itself.
+            const quint32 locWord = (quint32(l.offset) << 8) | (quint32(l.sectors) & 0xFFu);
+            h[pos]     = char((locWord >> 24) & 0xFF);
+            h[pos + 1] = char((locWord >> 16) & 0xFF);
+            h[pos + 2] = char((locWord >> 8) & 0xFF);
+            h[pos + 3] = char(locWord & 0xFF);
+            // mtime in the second table (offset 4096 + pos)
+            h[4096 + pos]     = char((now >> 24) & 0xFF);
+            h[4096 + pos + 1] = char((now >> 16) & 0xFF);
+            h[4096 + pos + 2] = char((now >> 8) & 0xFF);
+            h[4096 + pos + 3] = char(now & 0xFF);
+        }
+    file.append(header);
+
+    for (const QPair<int, int>& p : order)
+    {
+        const Loc& l = locs[p.second * 32 + p.first];
+        if (!l.sectors) continue;
+        const QByteArray comp = compressed.value(pairKey(p.first, p.second));
+        QByteArray chunk;
+        chunk.reserve(4 + comp.size());
+        putBE32(chunk, quint32(comp.size() + 1));             // length = payload + the type byte
+        chunk.append(char(2));
+        chunk.append(comp);
+        const int pad = l.sectors * 4096 - chunk.size();      // alignment to sectors
+        if (pad > 0) chunk.append(QByteArray(pad, char(0)));
+        file.append(chunk);
+    }
+    return file;
+}
+
+// ---------------------------------------------------------------------------
+// McWorldExporter::Export
+// ---------------------------------------------------------------------------
+
+//! Industrial zone (44340000), churches (44319000) and all non-residential (44310000..44318000) are composite buildings (a base, domes, annexes…): touching/overlapping buildings of ONE
+//! code are assembled into ONE object (the meshes are glued) so that a complex of parts
+//! of different heights becomes one building with a common outline, common floors and partitions (the walls between parts are removed by the voxelizer by
+//! the merged flag). A complex is limited to 140×140 blocks and 60 parts — giant clusters stay separate.
+//! The codes whose parts are glued into one complex: industrial zone 44340000, church 44319000 and all non-residential 44310000..44318000
+//! (non-residential, administrative, educational, children's, healthcare, scientific, culture, museum, shopping mall).
+static bool mergeableCode(int code)
+{
+    return code == 44340000 || code == 44319000 || (code >= 44310000 && code <= 44318000 && code % 1000 == 0);
+}
+
+//! The minimum height of a building part: low annexes and blocks (including those attached to the main building) are pulled upward so that the room inside is no lower than 3 blocks.
+//! The whole mesh of the part is stretched (the bottom stays in place); sheds and private houses (their own geometry) and elevator shafts are not touched. It is called BEFORE gluing complexes: after it the parts can no longer be told apart.
+static void raiseLowBuildingParts(QVector<McWorldExporter::McObject>& objs, const VxTransform& tf, double minBlocks)
+{
+    using O = McWorldExporter::McObject;
+    for (O& o : objs)
+    {
+        if (o.kind != O::Building || !o.closed || o.lift || o.vertices.size() < 3) continue;
+        if (o.code == 44000000 || o.code == 44400002 || o.code == 44400100 || o.code == 44400110) continue;
+        double zmin = 1e300, zmax = -1e300;
+        for (const QVector3D& v : o.vertices) { zmin = std::min(zmin, double(v.z())); zmax = std::max(zmax, double(v.z())); }
+        const double hb = (zmax - zmin) * tf.zScale;
+        if (hb < 1e-6 || hb >= minBlocks) continue;
+        const double k = minBlocks / hb;
+        for (QVector3D& v : o.vertices) v.setZ(float(zmin + (double(v.z()) - zmin) * k));
+        o.extrudeH *= k;
+    }
+}
+
+static QVector<McWorldExporter::McObject> mergeIndustrial(const QVector<McWorldExporter::McObject>& in, const VxTransform& tf,
+                                                            const std::atomic_bool* cancel)
+{
+    using O = McWorldExporter::McObject;
+    QVector<int> cand;
+    for (int i = 0; i < in.size(); ++i)
+        if (in[i].kind == O::Building && in[i].closed && mergeableCode(in[i].code) && !in[i].lift
+            && in[i].vertices.size() >= 3)
+            cand << i;
+    if (cand.size() < 2) return in;
+    const int n = cand.size();
+    QVector<QList<qint64>> cols(n);
+    QHash<ColKey, int> owner;
+    QSet<quint64> edges;
+    auto addEdge = [&](int a, int b)
+    {   // we glue only parts of one code (a church with a church, a workshop with a workshop)
+        if (a != b && in[cand[a]].code == in[cand[b]].code) edges.insert((quint64(std::min(a, b)) << 32) | quint32(std::max(a, b)));
+    };
+    QVector<int> bx0(n, std::numeric_limits<int>::max()), bx1(n, std::numeric_limits<int>::min());
+    QVector<int> bz0(n, std::numeric_limits<int>::max()), bz1(n, std::numeric_limits<int>::min());
+    for (int k = 0; k < n; ++k)
+    {
+        if (cancel && cancel->load()) return in;
+        footprintColumns(in[cand[k]], tf, cols[k], cancel);
+        for (qint64 ck : cols[k])
+        {
+            const int x = keyFirst(ck), z = keySecond(ck);
+            bx0[k] = std::min(bx0[k], x); bx1[k] = std::max(bx1[k], x);
+            bz0[k] = std::min(bz0[k], z); bz1[k] = std::max(bz1[k], z);
+            auto it = owner.find(ck);
+            if (it != owner.end()) addEdge(it.value(), k); else owner.insert(ck, k);
+        }
+    }
+    static const int ddx[4] = { 1, -1, 0, 0 }, ddz[4] = { 0, 0, 1, -1 };
+    for (int k = 0; k < n; ++k)
+        for (qint64 ck : cols[k])
+        {
+            const int x = keyFirst(ck), z = keySecond(ck);
+            for (int d = 0; d < 4; ++d)
+            {
+                const auto it = owner.constFind(pairKey(x + ddx[d], z + ddz[d]));
+                if (it != owner.constEnd()) addEdge(it.value(), k);
+            }
+        }
+    if (edges.isEmpty()) return in;
+    QVector<int> par(n);
+    for (int i = 0; i < n; ++i) par[i] = i;
+    QVector<int> cnt(n, 1);
+    std::function<int(int)> find = [&](int a) { while (par[a] != a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+    QList<quint64> el = edges.values();
+    std::sort(el.begin(), el.end());
+    for (quint64 e : el)
+    {
+        const int a = find(int(e >> 32)), b = find(int(e & 0xFFFFFFFFu));
+        if (a == b) continue;
+        const int nx0 = std::min(bx0[a], bx0[b]), nx1 = std::max(bx1[a], bx1[b]);
+        const int nz0 = std::min(bz0[a], bz0[b]), nz1 = std::max(bz1[a], bz1[b]);
+        if (nx1 - nx0 > 140 || nz1 - nz0 > 140 || cnt[a] + cnt[b] > 60) continue;
+        par[b] = a; cnt[a] += cnt[b];
+        bx0[a] = nx0; bx1[a] = nx1; bz0[a] = nz0; bz1[a] = nz1;
+    }
+    QHash<int, QVector<int>> groups;                       // the root -> the cand indices
+    for (int k = 0; k < n; ++k) groups[find(k)].append(k);
+    QVector<char> drop(in.size(), 0);
+    QHash<int, O> mergedAt;                                 // the position of the first member -> the glued object
+    for (auto it = groups.constBegin(); it != groups.constEnd(); ++it)
+    {
+        const QVector<int>& g = it.value();
+        if (g.size() < 2) continue;
+        QVector<int> ord = g;
+        std::sort(ord.begin(), ord.end());
+        O m = in[cand[ord.first()]];
+        for (int q = 1; q < ord.size(); ++q)
+        {
+            const O& p = in[cand[ord[q]]];
+            const quint32 off = quint32(m.vertices.size());
+            m.vertices += p.vertices;
+            for (quint32 ix : p.indices) m.indices.append(ix + off);
+            m.extrudeH = std::max(m.extrudeH, p.extrudeH);
+            if (m.street.isEmpty() && !p.street.isEmpty()) { m.streetType = p.streetType; m.street = p.street; m.number = p.number; }
+            drop[cand[ord[q]]] = 1;
+        }
+        m.merged = true;
+        mergedAt.insert(cand[ord.first()], m);
+    }
+    if (mergedAt.isEmpty()) return in;
+    QVector<O> out;
+    out.reserve(in.size());
+    for (int i = 0; i < in.size(); ++i)
+    {
+        if (drop[i]) continue;
+        const auto mit = mergedAt.constFind(i);
+        out.append(mit != mergedAt.constEnd() ? mit.value() : in[i]);
+    }
+    return out;
+}
+
+McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objectsIn,
+                                                    const HeightSampler& heightAt,
+                                                    const QString& path,
+                                                    const QString& levelName,
+                                                    const std::atomic_bool* cancel,
+                                                    Format format,
+                                                    const ProgressFn& progress,
+                                                    const WorldOptions& world)
+{
+    Result res;
+    const bool legacy = (format == Format::Legacy121x);
+
+    // Caves (a user request): we fill the underground of all generated chunks with "casts" from
+    // the game world (cave_templates.bin from extract_caves.py). The loading is here — to fail at once,
+    // before the expensive voxelization; an empty cavesFile — we look for the file next to the exe.
+    // A FLAT WORLD — NO CAVES AT ALL (the user's decision): there is no terrain and no seed there, the underground
+    // is our "analytic" fill, and game-generated caves are not needed in a superflat
+    // (they only bit through the crust under objects — "bad" columns). Caves live only in noise.
+    CaveSet caveSet;
+    QString cavesUsed;
+    if (world.caves && world.normalSurroundings)
+    {
+        QString cavesPath = world.cavesFile;
+        if (cavesPath.isEmpty())
+        {
+            cavesPath = QCoreApplication::applicationDirPath() + QStringLiteral("/cave_templates.bin");
+            if (!QFile::exists(cavesPath))
+                cavesPath = QStringLiteral("cave_templates.bin");   // dev builds/tooling: we look in the cwd
+        }
+        QString cavesErr;
+        cavesUsed = cavesPath;
+        if (!caveSet.load(cavesPath, world.seed, &cavesErr))
+        {
+            res.error = cavesErr;
+            return res;
+        }
+    }
+    // The secret passages of churches to the stronghold and the Ancient City (lair_structures.bin; no file — the feature is simply off).
+    LairSet lairSet;
+    if (!caveSet.empty())
+    {
+        // we look next to the caves file (it is certainly found), next to the exe and in the current folder
+        QString lairPath;
+        const QStringList lairDirs = { QFileInfo(cavesUsed).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() };
+        for (const QString& dir : lairDirs)
+            if (QFile::exists(dir + QStringLiteral("/lair_structures.bin"))) { lairPath = dir + QStringLiteral("/lair_structures.bin"); break; }
+        if (lairPath.isEmpty())
+            res.lairInfo = QObject::tr("lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)").arg(lairDirs.join(QStringLiteral(", ")));
+        else if (!lairSet.load(lairPath, caveSet))
+        {
+            lairSet = LairSet();
+            res.lairInfo = QObject::tr("lair_structures.bin is damaged");
+        }
+    }
+    else
+        res.lairInfo = QObject::tr("caves must be enabled together with the normal surroundings (a noise world)");
+    QVector<PaleDonor> patchesLoaded;                              // outposts and camps (patch_*.bin next to cave_templates.bin)
+    // The real Pale Garden for the Pale Garden forest (no file — a procedural one)
+    PaleDonor paleDonor;
+    if (!caveSet.empty())
+    {
+        const QStringList paleDirs = { QFileInfo(cavesUsed).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() };
+        for (const QString& dir : paleDirs)
+            if (QFile::exists(dir + QStringLiteral("/pale_garden.bin")))
+            {
+                if (!paleDonor.load(dir + QStringLiteral("/pale_garden.bin"), caveSet)) paleDonor = PaleDonor();
+                break;
+            }
+        for (const QString& dir : paleDirs)
+        {
+            const QStringList pf = QDir(dir).entryList(QStringList() << QStringLiteral("patch_*.bin"), QDir::Files, QDir::Name);
+            if (pf.isEmpty()) continue;
+            for (const QString& fn : pf)
+            {
+                PaleDonor pd;
+                if (pd.load(dir + QLatin1Char('/') + fn, caveSet)) { pd.name = fn; patchesLoaded.append(pd); }
+            }
+            break;
+        }
+    }
+
+    tmcStepLog("export: start");
+    // 1. The extent of all objects (in map world coordinates)
+    double mnx = std::numeric_limits<double>::max(), mxx = -mnx;
+    double mny = mnx, mxy = -mny, mnz = mny, mxz = -mnz;
+    int totalVerts = 0;
+    for (const McObject& o : objectsIn)
+    {
+        totalVerts += o.vertices.size();
+        for (const QVector3D& v : o.vertices)
+        {
+            if (!std::isfinite(v.x()) || !std::isfinite(v.y()) || !std::isfinite(v.z())) continue;
+            mnx = std::min(mnx, double(v.x())); mxx = std::max(mxx, double(v.x()));
+            mny = std::min(mny, double(v.y())); mxy = std::max(mxy, double(v.y()));
+            mnz = std::min(mnz, double(v.z())); mxz = std::max(mxz, double(v.z()));
+        }
+    }
+    if (totalVerts == 0)
+    {
+        res.error = QObject::tr("Nothing to export: all meshes are empty.");
+        return res;
+    }
+
+    VxTransform tf;
+    tf.cx0 = (mnx + mxx) / 2.0;
+    tf.cy0 = (mny + mxy) / 2.0;
+    tf.yBase = mnz;
+    // Map units -> meters (1 block = 1 m): without this Mercator inflates the horizontal sizes by 1.77 times.
+    tf.sx = (world.unitsToMetersX > 1e-9) ? world.unitsToMetersX : 1.0;
+    tf.sz = (world.unitsToMetersY > 1e-9) ? world.unitsToMetersY : 1.0;
+    const double span = mxz - mnz;
+    if (span > 240.0) tf.zScale = 240.0 / span;   // height compression to fit into 0..255
+
+    // 2. Voxelization of objects — by role (see McObject::Kind):
+    //    Building/Generic — the mesh shell (floor/walls/roof, empty inside);
+    //    Vegetation       — the mesh is NOT voxelized: the polygon "patch" goes to a forest (there is a REL height)
+    //                       or to grass (without it);
+    //    Road/Railway     — of a road/overpass ribbon only the TOP cell of each
+    //                       column remains: a carpet (the nearest to the layer color) or a rail is laid on it;
+    //    Plate (csrpol)   — with a height like Building, but always brick; without a height — the polygon patch
+    //                       into the surface layer of the ground instead of turf (see colWool, step 3);
+    //    Water (hdrpol/hdrlin) — the mesh is not voxelized: the "patch" goes into a pit with water (see colWater,
+    //                       step 3), the depth = area/6, but 3..15 blocks.
+    VoxelStore store;
+    QHash<ColKey, int> colMin;
+    QHash<ColKey, int> colAnchor;     // the original (before the foundation) bottom of closed objects — the ground level by it
+    // loose — the "small" vegetation of OSM data (tMC adds it itself): a yard between houses (code 71126190, trees like vgbpol but denser) and
+    // forced taiga in the private sector (code 71111111, spruces at any area). Such patches are small and narrow, so the forest's own terrain
+    // (fading out at the boundary over 28 blocks) would be almost flat — they are given the terrain of empty lands and are not counted as "occupied" for it.
+    struct VegSite { QVector<ColSpan> spans; int treeH; int minX, maxX, minZ, maxZ; bool spruce = false; bool park = false; bool intra = false; bool loose = false; bool dense = false; int code = 0; };
+    QVector<VegSite> forests;
+    QVector<VegSite> grassPale;       // meadow/grass vegetation without height with an allowed code — spare candidates for the Pale Garden (see the Pale Garden forest choice)
+    QHash<ColKey, quint16> colPlant;  // a column -> the lawn plant (the type by the polygon area, see step 2)
+    struct ParkSite { QSet<ColKey> cols; QVector<QVector<QPointF>> rings; };   // rdcpol: the patch and the outlines (block coordinates)
+    QVector<ParkSite> parks;
+    QHash<ColKey, quint16> colWool;   // a column -> the wool id (csrpol plates without height — instead of turf)
+    QVector<BasementSite> basements;  // basements of private houses (built after the ground)
+    QVector<LairZone> lairZones;      // raider spawn zones (large industrial-zone lairs)
+    QVector<IslandSite> islandSites;  // floating islands over kindergartens
+    QVector<BannerSite> bannerSites;  // the banners of bandit lairs (outside and inside)
+    QVector<SignCand> signCands;      // candidates for address plates (the side is chosen after the roads)
+    QVector<QPoint> privCenters;      // the centers of private houses (block X/Z) — the basis for "villages"
+    QVector<QRect> privBoxes;         // their extents in blocks (x0, z0, w, h) — for demolishing a house under a square
+    QVector<QList<qint64>> pads;      // csrpol patches without height — we surround them with a wooden fence with gates
+    QVector<char> padIsLake;          // 1 — this is a lake (csrpol 51480000: water + a fence), 0 — an ordinary plate
+    QSet<ColKey> noTreePadCols;       // the columns of apiaries and farms (csrpol 52400000/52100000): we do not plant trees there
+    QVector<int> padCode;             // the CODE of the plate object (53700000/53710000 — sports/children's: we place equipment)
+    // Forests under portals to the Nether (vegpol, CODE 71111110/71126000): the patch columns + the area in REAL m².
+    // The frame is placed in 3.57 (the ground and the trees are ready).
+    struct PortalForest { QVector<ColSpan> spans; double areaM2; quint32 h; };
+    QVector<PortalForest> portalForests;
+    struct ParkCand { int cx, cz; double areaM2; quint32 h; };
+    QVector<ParkCand> parkCands;                                  // parks 71126000: candidates for floating islands
+    QSet<ColKey> roadCols;            // the columns of the roadway (wool in the ground) — we put lamp posts along them
+    QSet<ColKey> railColsAll;         // the rail columns — we plant trees (rule 3.51) without running onto the tracks
+    QHash<ColKey, int> colWater;      // a column -> the depth of the water pit (hydrography), blocks
+    QSet<ColKey> colWaterArt;         // the columns of artificial reservoirs (all outline corners are right): without a smooth descent, sandy shores and sandy bottom
+    QSet<ColKey> colWaterNat;         // the columns of natural reservoirs (resolving intersections)
+    QVector<ChestSite> chests;        // chests with loot (the positions of already written IdChest blocks)
+    QVector<PaintingSite> paints;     // the paintings of interiors (the motif is in block_entities)
+    QVector<MannequinSite> mannequins;// mall mannequins (armor_stand entities, not blocks)
+    QVector<NpcSite> npcs;            // villagers/traders/llamas (entities)
+    QVector<FrameSite> frames;        // item frames on mall stands (entities)
+    QVector<SpawnerSite> spawners;    // monster spawners (the monster type is in block_entities)
+    // Road priority (a user request): dark gray roadways and their markings are MORE IMPORTANT than the light gray
+    // pedestrian and bike paths, so drawing is moved out of the common loop into passes after it:
+    // 1) all bodies of "the rest"/highways, 2) their markings, 3) only then pedestrian/bike paths
+    // (they occupy the remaining air cells). In the old order a path met earlier in the list
+    // "ate" the highway cells together with the marking lines.
+    struct RoadJob
+    {
+        QHash<ColKey, int> road;      // a roadway cell (with widening) -> Y above the surface
+        QHash<ColKey, int> core;      // the ribbon "core" without widening (from the mesh) -> Y; the width is recomputed dynamically from it
+        int ext = 0;                  // the standard widening on each side (blocks), 0 — no widening (pedestrian, bike)
+        quint16 cid = 0;              // carpet color references (for choosing wool/markings)
+        quint16 woolId = 0;           // the roadway block — wool of the same color (into the surface layer of the ground)
+        quint16 markId = 0;           // 0 = no marking, otherwise the id of the marking carpet (lies ON the wool)
+        bool axisX = true;            // the long axis of the ribbon (splitting into cross slices)
+        bool fullCarpet = false;      // a bike path: on top of the red wool there is also a continuous carpet of the same color (cid)
+        QVector<QVector<QPointF>> lines;   // the axis lines of the object (block coordinates): the center marking follows them
+        QVector<QPointF> ends;        // the ends of the axis lines (block coordinates) — we do not lay a curb next to them
+        double endR = 0.0;            // the "end" radius: half the road width + a reserve
+        int nameId = -1;              // the index in roadNames (TYSTR+STREET from rdslin), -1 — a street without a name
+    };
+    QVector<QPair<QString, QString>> roadNames;     // (TYSTR, STREET) of unique streets
+    QHash<QString, int> roadNameIdx;
+    struct RoadLine { int obj; int nameId; bool ped; QVector<QPointF> pts; };   // the axis line of a road in block coordinates
+    QVector<RoadLine> roadLines;                    // ped — a pedestrian/bike path (signs only if it has a name)
+    int roadObjCounter = 0;
+    struct JuncPt { int x, z, a, b; };
+    QVector<JuncPt> juncPts;                        // real intersections: crossings of the AXIS lines (a,b — nameId or -1)
+    QVector<RoadJob> roadsHigh;       // dark gray roadways + highways (drawn first)
+    QVector<RoadJob> roadsEarth;      // dirt/field/forest roads (podzol) — the lowest priority: motor roads and pedestrian ones do not overlap
+    QVector<RoadJob> roadsLow;        // pedestrian/bike paths (after the roadway, only air)
+    QVector<QVector<QPointF>> crosswalks;   // pedestrian crossings (rdslin CODE 45262000): axes in block coordinates, across the roadway — drawn as a zebra, see "PEDESTRIAN CROSSINGS"
+    int storyCounter = 0;             // the total floors over the city: every 5th one has a treasure (see voxelizeObject)
+    auto colHash = [](qint64 k) -> quint32
+    {
+        const qint32 x = keyFirst(k), z = keySecond(k);
+        quint32 h = quint32(x) * 374761393u + quint32(z) * 668265263u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        return h ^ (h >> 16);
+    };
+    // Parallel voxelization of buildings: each building is computed in a private store (VoxJob) in
+    // a thread pool, then the results are MERGED into the common store strictly in the original object order —
+    // the outcome does not depend on thread scheduling. The through floor counter (treasures/spawners) in a batch
+    // is handed out by an estimate (the base of each building), after the merge the real total is taken.
+    struct VoxJob
+    {
+        const McObject* o = nullptr;
+        quint16 id = 0;
+        int sink = 0, extraBlocks = 0;
+        bool building = false, woodSingle = false;
+        int privMode = 0;
+        int deepRole = 0;                 // see BasementSite::forced
+        quint16 structId = 0;
+        int storyBase = 0, storyCounter = 0, added = 0;
+        VoxelStore store;
+        QHash<ColKey, int> colMin, colAnchor;
+        QVector<ChestSite> chests;
+        QVector<PaintingSite> paints;
+        QVector<MannequinSite> mannequins;
+        QVector<SpawnerSite> spawners;
+        QVector<NpcSite> npcs;
+        QVector<FrameSite> frames;
+        QVector<BasementSite> basements;
+        QVector<SignCand> signs;
+        QVector<BannerSite> banners;
+        QVector<LairZone> zones;
+        QVector<IslandSite> islands;
+    };
+    // Elevator shafts (bldpol, LIFT=1) are built SEPARATELY and after all buildings: only ABOVE the roof of the building they belong to
+    // (the whole part of the shaft below and inside the owner's roof is discarded). Without a building under the shaft — it is built entirely, as before.
+    struct LiftJob { const McObject* o; quint16 id; int sink, extra; quint16 structId; bool woodSingle; int privMode; };
+    QVector<LiftJob> liftJobs;
+    QVector<VoxJob*> pending;
+    struct PendingGuard { QVector<VoxJob*>& v; ~PendingGuard() { qDeleteAll(v); } } pendingGuard{ pending };
+    QThreadPool voxPool;
+    voxPool.setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
+    qint64 msFlushRun = 0, msFlushMerge = 0, nFlush = 0;
+    auto flushJobs = [&]()
+    {
+        if (pending.isEmpty()) return;
+        QElapsedTimer tFl; tFl.start();
+        ++nFlush;
+        QVector<QFuture<void>> futs;
+        futs.reserve(pending.size());
+        for (VoxJob* j : pending)
+            futs << QtConcurrent::run(&voxPool, [j, &tf, cancel]()
+            {
+                j->storyCounter = j->storyBase;
+                j->added = voxelizeObject(*j->o, tf, j->id, j->store, j->colMin, cancel, j->sink,
+                                          j->sink ? &j->colAnchor : nullptr, j->extraBlocks,
+                                          j->building, j->building ? &j->storyCounter : nullptr,
+                                          &j->chests, &j->paints, &j->mannequins, &j->spawners,
+                                          j->structId, j->woodSingle, j->privMode, &j->npcs, &j->frames, &j->basements, &j->signs, &j->banners, &j->zones, &j->islands, j->deepRole);
+                if (j->added > 0 && j->o->kind == McObject::Building && (j->o->code == 44312000 || j->o->code == 44313000 || j->o->code == 44315000))
+                    decorateWalls(j->store, j->o->code, j->id);
+            });
+        for (QFuture<void>& f : futs) f.waitForFinished();
+        msFlushRun += tFl.restart();
+        for (VoxJob* j : pending)
+        {   // merging in object order: a later object overlaps an earlier one (as before)
+            if (j->added == 0) { ++res.skippedCount; continue; }
+            ++res.objectCount;
+            for (auto cit = j->store.chunks.begin(); cit != j->store.chunks.end(); ++cit)
+            {
+                auto git = store.chunks.find(cit.key());
+                if (git == store.chunks.end()) { store.chunks.insert(cit.key(), cit.value()); continue; }
+                for (auto sit = cit->begin(); sit != cit->end(); ++sit)
+                {
+                    auto dit = git->find(sit.key());
+                    if (dit == git->end()) { git->insert(sit.key(), sit.value()); continue; }
+                    QVector<quint16>& dst = dit.value();
+                    const QVector<quint16>& src = sit.value();
+                    for (int i = 0; i < src.size(); ++i)
+                        if (src[i]) dst[i] = src[i];
+                }
+            }
+            for (auto it = j->colMin.constBegin(); it != j->colMin.constEnd(); ++it)
+            {
+                auto m = colMin.find(it.key());
+                if (m == colMin.end() || it.value() < m.value()) colMin[it.key()] = it.value();
+            }
+            for (auto it = j->colAnchor.constBegin(); it != j->colAnchor.constEnd(); ++it)
+            {
+                auto m = colAnchor.find(it.key());
+                if (m == colAnchor.end() || it.value() < m.value()) colAnchor[it.key()] = it.value();
+            }
+            chests += j->chests; paints += j->paints;
+            mannequins += j->mannequins; spawners += j->spawners; npcs += j->npcs; frames += j->frames;
+            basements += j->basements; signCands += j->signs; bannerSites += j->banners; lairZones += j->zones; islandSites += j->islands;
+            if (j->building) storyCounter += j->storyCounter - j->storyBase;
+        }
+        qDeleteAll(pending);
+        pending.clear();
+        msFlushMerge += tFl.elapsed();
+    };
+    // Rasterizing the "patches" of vegetation / water / csrpol plates without height (tens of millions of columns
+    // on large data) — in advance and in parallel: the objects are independent, and the sequential loop below
+    // then only lays the ready lists into maps. Memory: the column lists live until the object is processed.
+    // Industrial zone and churches: touching buildings of one code (44340000 / 44319000) are glued into complexes (a common outline, floors and partitions)
+    QVector<McObject> objectsRaised = objectsIn;                        // implicit data sharing: only the raised buildings are copied
+    raiseLowBuildingParts(objectsRaised, tf, 7.6);
+    const QVector<McObject> objects = mergeIndustrial(objectsRaised, tf, cancel);
+    // The points of the stronghold / the Ancient City set by the user (a chunk "x z" or "x y z" as in F3): the dungeon is built under the NEAREST building
+    // whatever its code (a few nearest suitable ones are marked, because a small or cramped building may not fit it; the nearest one that worked is used later).
+    // The priority of churches and research buildings is only for the case when no point is set.
+    QVector<int> deepRoleOf(objects.size(), 0);
+    {
+        auto chunkPoint = [](const QString& text, QPointF* pt) -> bool
+        {
+            static const QRegularExpression numRe(QStringLiteral("-?\\d+"));
+            QVector<int> nums;
+            auto it = numRe.globalMatch(text);
+            while (it.hasNext()) nums.append(it.next().captured().toInt());
+            if (nums.size() < 2) return false;
+            const QPoint ch = nums.size() >= 3 ? QPoint(nums[0], nums[2]) : QPoint(nums[0], nums[1]);
+            *pt = QPointF(ch.x() * 16 + 8, ch.y() * 16 + 8);
+            return true;
+        };
+        struct Cand { int idx; double d; };
+        auto nearestBuildings = [&](const QPointF& pt, int skip) -> QVector<int>
+        {
+            QVector<Cand> cs;
+            for (int i = 0; i < objects.size(); ++i)
+            {
+                const McObject& q = objects[i];
+                if (q.kind != McObject::Building || !q.closed || q.lift || q.extrudeH < 5.0 || i == skip) continue;
+                double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+                for (const QVector3D& v : q.vertices)
+                {
+                    const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                    ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+                }
+                if (ax1 - ax0 < 8.0 || az1 - az0 < 8.0) continue;           // too small for a maze entrance
+                cs.append({ i, std::hypot((ax0 + ax1) * 0.5 - pt.x(), (az0 + az1) * 0.5 - pt.y()) });
+            }
+            std::sort(cs.begin(), cs.end(), [](const Cand& a, const Cand& b) { return a.d < b.d; });
+            QVector<int> out;
+            for (int k = 0; k < cs.size() && k < 3; ++k) out.append(cs[k].idx);
+            return out;
+        };
+        QPointF ps, pc;
+        int firstS = -1;
+        if (chunkPoint(world.strongholdChunk, &ps))
+        {
+            const QVector<int> v = nearestBuildings(ps, -1);
+            for (int i : v) deepRoleOf[i] = 1;
+            if (!v.isEmpty()) firstS = v.first();
+        }
+        if (chunkPoint(world.cityChunk, &pc))
+            for (int i : nearestBuildings(pc, firstS)) deepRoleOf[i] = 2;       // not the same building as the stronghold's first choice
+        // The reserve for the Ancient City (church -> research building -> school): the 3 biggest schools are given a laboratory for certain, otherwise by bad luck
+        // not a single school would have one, and without churches and research buildings the city would not be built at all.
+        {
+            struct SchoolCand { int idx; double area; };
+            QVector<SchoolCand> sc;
+            for (int i = 0; i < objects.size(); ++i)
+            {
+                const McObject& q = objects[i];
+                if (q.kind != McObject::Building || !q.closed || q.lift || q.code != 44312000 || q.extrudeH < 5.0 || deepRoleOf[i]) continue;
+                double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+                for (const QVector3D& v : q.vertices)
+                {
+                    const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                    ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+                }
+                if (ax1 - ax0 < 8.0 || az1 - az0 < 8.0) continue;
+                sc.append({ i, (ax1 - ax0) * (az1 - az0) });
+            }
+            std::sort(sc.begin(), sc.end(), [](const SchoolCand& a, const SchoolCand& b) { return a.area != b.area ? a.area > b.area : a.idx < b.idx; });
+            for (int k = 0; k < sc.size() && k < 3; ++k) deepRoleOf[sc[k].idx] = 3;
+        }
+    }
+    QVector<QList<qint64>> pre(objects.size());
+    QVector<QVector<ColSpan>> preSpans(objects.size());           // forest (height >= 2.5) — by segments, we do not store the column list
+    {
+        QVector<int> todo;
+        for (int i = 0; i < objects.size(); ++i)
+        {
+            const McObject& q = objects[i];
+            if (q.kind == McObject::Vegetation || q.kind == McObject::Water
+                || (q.kind == McObject::Plate && (q.extrudeH < 1.0 || q.code == 71323000)) || q.kind == McObject::ParkingLot || q.kind == McObject::BlockCover)
+                todo.append(i);
+        }
+        std::atomic<int> next { 0 };
+        QVector<QFuture<void>> fs;
+        for (int t = 0; t < std::max(1, QThread::idealThreadCount()); ++t)
+            fs << QtConcurrent::run(&voxPool, [&]()
+            {
+                for (;;)
+                {
+                    const int k = next.fetch_add(1);
+                    if (k >= todo.size() || (cancel && cancel->load())) break;
+                    footprintColumns(objects[todo[k]], tf, pre[todo[k]], cancel);
+                    if (objects[todo[k]].kind == McObject::Vegetation && objects[todo[k]].extrudeH >= 2.5)
+                    {
+                        preSpans[todo[k]] = spansFromCols(pre[todo[k]]);
+                        pre[todo[k]] = QList<qint64>();   // free the memory at once
+                    }
+                }
+            });
+        for (QFuture<void>& f : fs) f.waitForFinished();
+        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+    }
+    int objDone = 0;
+    const int objTotal = objects.size();
+    qint64 nsByKind[10] = {}, cntByKind[10] = {};                  // debugging (MCX_LOG_STEPS): the time of sequential object preparation by kind
+    struct KindTimer { qint64& ns; QElapsedTimer t; KindTimer(qint64& s) : ns(s) { t.start(); } ~KindTimer() { ns += t.nsecsElapsed(); } };
+    for (const McObject& o : objects)
+    {
+        KindTimer kindTimer(nsByKind[std::min(9, int(o.kind))]);
+        ++cntByKind[std::min(9, int(o.kind))];
+        if (progress && (objDone % 16 == 0 || objDone + 1 == objTotal))
+            progress(objDone, objTotal, 0);                       // the "objects" phase
+        ++objDone;
+        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+        if (o.kind == McObject::ParkingLot)
+        {   // rdcpol: over the polygon patch the turf is replaced with dark gray concrete (the surface layer of the ground), the place marking — after the ground
+            QList<qint64> cols = std::move(pre[objDone - 1]);
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            static const quint16 kDarkConcrete = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
+            ParkSite ps;
+            for (qint64 ck : cols)
+            {
+                if (!colWool.contains(ck)) colWool.insert(ck, kDarkConcrete);
+                ps.cols.insert(ck);
+            }
+            for (const QVector<QPointF>& ring : o.paths)
+            {
+                QVector<QPointF> bp;
+                for (const QPointF& w : ring) bp << QPointF(toBlockX(tf, w.x()), toBlockZ(tf, w.y()));
+                if (bp.size() >= 3) ps.rings << bp;
+            }
+            parks.append(ps);
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::BlockCover)
+        {   // blkpol: 62231000 — asphalt without markings (dark gray concrete), 45300000 — a square paved with stone bricks; instead of turf
+            QList<qint64> cols = std::move(pre[objDone - 1]);
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            const bool square = (o.code == 45300000);
+            if (!square && o.code != 62231000) { ++res.skippedCount; continue; }
+            const quint16 cover = quint16(IdPaletteStart + paletteIndexOf(square ? "minecraft:stone_bricks" : "minecraft:gray_concrete"));
+            for (qint64 ck : cols)
+            {
+                if (square) colWool.insert(ck, cover);                     // the square over the asphalt
+                else if (!colWool.contains(ck)) colWool.insert(ck, cover);
+            }
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::Plate && (o.extrudeH < 1.0 || o.code == 71323000))
+        {
+            // a csrpol without height — a "plate": we do not build a mesh at all, over the polygon patch the top layer
+            // of the ground (turf) will later be replaced with wool of a calm gray palette (see below), and the patch itself
+            // is surrounded with a fence with gates (step 3.57).
+            // A threshold of 1.0, not 0.5: BuildSingleObjectMesh replaces an honest zero REL with a thin
+            // slab kMinExtrusionHeight=0.5 and gives exactly it in outRel — such "slabs" are thinner than
+            // the foundation and would go under the ground entirely.
+            QList<qint64> cols = std::move(pre[objDone - 1]);          // rasterized in advance, in parallel
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            const qint64 firstCol = *std::min_element(cols.constBegin(), cols.constEnd());
+            // The calm palette of plates (a user request): no rainbow colors — only
+            // light gray, gray and black wool (a deterministic choice by the patch hash).
+            static const char* const kGrayWools[] = { "minecraft:light_gray_wool",
+                                                      "minecraft:gray_wool", "minecraft:black_wool" };
+            int wIdx = 0;
+            for (int i = 0; i < kWoolsCount; ++i)
+                if (qstrcmp(kWools[i].name, kGrayWools[colHash(firstCol) % 3u]) == 0) { wIdx = i; break; }
+            quint16 wid = quint16(IdWoolBase + wIdx);
+            // The coverage by csrpol code: grass stays (a cemetery, the territories of social and religious facilities, an apiary, a farm), stone (a memorial), dark concrete (a gas station, an airport,
+            // an industrial enterprise, a substation); the rest (sports, etc.) — calm gray wool
+            const bool grassPad = (o.code == 53510000 || o.code == 53600000 || o.code == 53400000 || o.code == 52400000 || o.code == 52100000
+                                   || o.code == 51111000 || o.code == 51123000 || o.code == 71323000);     // a quarry/a spoil heap/a greenhouse: the surface is set by their own logic
+            if (o.code == 53530000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+            else if (o.code == 51220000 || o.code == 53110000 || o.code == 51130000 || o.code == 51460000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
+            const bool lake = (o.code == 51480000);                  // a lake: water instead of wool, the fence — as for plates
+            if (lake)
+            {
+                const int dLake = std::max(1, std::min(5, int(cols.size() / 18.0 + 0.5)));   // as for hdrpol (lakes)
+                for (qint64 ck : cols)
+                {
+                    auto wit = colWater.find(ck);
+                    if (wit == colWater.end() || dLake > wit.value()) colWater[ck] = dLake;
+                }
+            }
+            else if (!grassPad)
+                for (qint64 ck : cols)
+                    colWool.insert(ck, wid);
+            if (o.code == 52400000 || o.code == 52100000 || o.code == 51111000 || o.code == 51123000 || o.code == 71323000)
+                for (qint64 ck : cols) noTreePadCols.insert(ck);
+            pads.append(cols);
+            padIsLake.append(lake ? 1 : 0);
+            padCode.append(o.code);
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::Vegetation)
+        {
+            QList<qint64> cols = std::move(pre[objDone - 1]);          // rasterized in advance, in parallel
+            QVector<ColSpan> spans = std::move(preSpans[objDone - 1]);  // the forest — already by segments
+            if (cols.isEmpty() && spans.isEmpty()) { ++res.skippedCount; continue; }
+            if (o.code == 71111110 || o.code / 1000 == 71126)     // vegpol 71111110/71126000 and vgbpol 71126xxx
+            {   // a candidate for a portal into the Nether: the area in real m² (the coordinates are already converted to meters —
+                // WorldOptions::unitsToMetersX/Y, a column = 1 m²)
+                if (spans.isEmpty()) spans = spansFromCols(cols);
+                double area = 0;
+                for (const ColSpan& c : spans) area += double(c.z1 - c.z0 + 1);
+                portalForests.append(PortalForest{ spans, area, colHash(pairKey(spans.first().x, spans.first().z0)) });
+                if (o.code == 71126000 && area >= 6000.0)
+                {   // the center of mass of a park (by columns) — the place for an island
+                    double sx2 = 0.0, sz2 = 0.0;
+                    for (const ColSpan& c : spans) { const double n = c.z1 - c.z0 + 1; sx2 += n * c.x; sz2 += n * 0.5 * (c.z0 + c.z1); }
+                    parkCands.append(ParkCand{ int(std::lround(sx2 / area)), int(std::lround(sz2 / area)), area,
+                                               colHash(pairKey(spans.first().x, spans.first().z0) ^ 0x15A9ull) });
+                }
+            }
+            if (o.code == 71126000)
+            {   // A PARK: always with trees (mixed: oak, birch, spruce — rarely) and a lawn, regardless of the height in the data
+                if (spans.isEmpty()) spans = spansFromCols(cols);
+                VegSite vs;
+                vs.spans = spans;
+                vs.treeH = 5;
+                vs.park = true;
+                vs.minX = spans.first().x; vs.maxX = spans.last().x;
+                vs.minZ = std::numeric_limits<int>::max(); vs.maxZ = std::numeric_limits<int>::min();
+                for (const ColSpan& c : spans) { vs.minZ = std::min(vs.minZ, c.z0); vs.maxZ = std::max(vs.maxZ, c.z1); }
+                forests << vs;
+                for (const ColSpan& c : spans)
+                    for (int z = c.z0; z <= c.z1; ++z)
+                    {
+                        const qint64 ck = pairKey(c.x, z);
+                        if (!colPlant.contains(ck)) colPlant.insert(ck, quint16(IdGrassPlant));
+                    }
+            }
+            else if (o.extrudeH >= 2.5)
+            {
+                VegSite vs;
+                vs.spans = spans;
+                vs.treeH = std::max(4, std::min(7, int(o.extrudeH + 0.5)));
+                vs.intra = o.intraBlock;
+                vs.code = o.code;
+                if (o.code == 71111110)
+                {   // a forest of this code — spruces if the area is decent (>= 5000 columns ~ m²); small ones stay oaks. We do not touch the other codes.
+                    qint64 area = 0;
+                    for (const ColSpan& c : spans) area += c.z1 - c.z0 + 1;
+                    vs.spruce = area >= 5000;
+                }
+                if (o.code == 71111111) { vs.spruce = true; vs.loose = true; }     // forced taiga of the private sector (OSM data): spruces at any area
+                if (o.code == 71126190) { vs.intra = true; vs.loose = true; vs.dense = true; }   // a yard between houses (OSM data): vgbpol trees, but denser
+                vs.minX = spans.first().x; vs.maxX = spans.last().x;
+                vs.minZ = std::numeric_limits<int>::max(); vs.maxZ = std::numeric_limits<int>::min();
+                for (const ColSpan& c : spans) { vs.minZ = std::min(vs.minZ, c.z0); vs.maxZ = std::max(vs.maxZ, c.z1); }
+                forests << vs;
+            }
+            else
+            {
+                // The grass type by polygon area (a column ≈ 1 m²): >100000 m² — ripe wheat,
+                // >50000 m² — overgrown grass (tall_grass), otherwise — ordinary short. When
+                // polygons intersect the "senior" type wins (the ids grow: short < tall < wheat).
+                if (isPaleForestCode(o.code))
+                {   // a candidate for the Pale Garden (chosen only if the area is more than twice the best forest with height)
+                    VegSite gv;
+                    gv.spans = spans.isEmpty() ? spansFromCols(cols) : spans;
+                    if (!gv.spans.isEmpty())
+                    {
+                        gv.treeH = 5;
+                        gv.code = o.code;
+                        gv.minX = gv.spans.first().x; gv.maxX = gv.spans.last().x;
+                        gv.minZ = std::numeric_limits<int>::max(); gv.maxZ = std::numeric_limits<int>::min();
+                        for (const ColSpan& c : gv.spans) { gv.minZ = std::min(gv.minZ, c.z0); gv.maxZ = std::max(gv.maxZ, c.z1); }
+                        grassPale << gv;
+                    }
+                }
+                const quint16 pid = cols.size() > 100000 ? quint16(IdWheat)
+                                  : cols.size() > 50000  ? quint16(IdTallGrass)
+                                                         : quint16(IdGrassPlant);
+                for (qint64 ck : cols)
+                {
+                    auto pit = colPlant.find(ck);
+                    if (pit == colPlant.end() || pid > pit.value())
+                        colPlant[ck] = pid;
+                }
+            }
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::Water)
+        {
+            // Hydrography: over the polygon/ribbon "patch" — a pit with water. The depth is proportional to the area
+            // (1/6 of a block of area per block of depth), but not shallower than 3 and not deeper than 15 blocks; rivers
+            // (linear, hdrlin) — three times shallower (1/18, from 1 block), otherwise a narrow ribbon would give a canyon.
+            QList<qint64> cols = std::move(pre[objDone - 1]);          // rasterized in advance, in parallel
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            // lakes: small ones (up to ~1000 m²) are still small (up to 5 blocks), large ones are deeper logarithmically — 10 thousand m² ≈ 8, 100 thousand ≈ 12, 1 million ≈ 15-16 (up to 20)
+            const double nCols = double(cols.size());
+            const int lakeD = nCols <= 1000.0 ? std::max(1, std::min(5, int(nCols / 18.0 + 0.5)))
+                                              : std::min(20, int(5.0 + 3.5 * std::log10(nCols / 1000.0) + 0.5));
+            const int d = o.linear ? std::max(1, std::min(15, int(cols.size() / 18.0 + 0.5))) : lakeD;
+            // a reservoir with strictly right outline angles (a tolerance of 6°) — artificial (a pond with a fountain, an embankment): a flat bottom and no sandy shores
+            QElapsedTimer tWater; tWater.start();
+            const bool artWater = !o.linear && isRectilinearOutline(o, tf.sx, tf.sz, 6.0);
+            const qint64 msRect = tWater.restart();
+            // large reservoirs — millions of columns: we enlarge the hashes in advance in one step (without repeated rebuilding as they grow)
+            // and do not spend calls on colWaterArt.remove() while there are no artificial reservoirs
+            colWater.reserve(int(std::min<qint64>(colWater.size() + cols.size(), 2000000000ll)));
+            if (!artWater) colWaterNat.reserve(int(std::min<qint64>(colWaterNat.size() + cols.size(), 2000000000ll)));
+            const bool artEmpty = colWaterArt.isEmpty();
+            for (qint64 ck : cols)
+            {
+                auto wit = colWater.find(ck);
+                if (wit == colWater.end()) colWater.insert(ck, d);
+                else if (d > wit.value()) wit.value() = d;     // intersecting reservoirs — we take the deeper one
+                if (artWater) { if (!colWaterNat.contains(ck)) colWaterArt.insert(ck); }
+                else { colWaterNat.insert(ck); if (!artEmpty) colWaterArt.remove(ck); }
+            }
+            {
+                char buf[200];
+                snprintf(buf, sizeof buf, "water: object %d, columns %lld, isRectilinear %lld ms, hash fill %lld ms, total in colWater %lld", objDone, (long long)cols.size(), (long long)msRect, (long long)tWater.elapsed(), (long long)colWater.size());
+                tmcStepLog(buf);
+            }
+            ++res.objectCount;
+            continue;
+        }
+        quint16 id = nearestBlockId(o.color);
+        quint16 structId = 0;                                 // the structural part (foundation/floors/roof), 0 — like the walls
+        bool matWood = false;
+        int privMode = 0;                                     // 1 — a private house with a floor (brick), 2 — one-storey (logs)
+        if (!o.material.trimmed().isEmpty() && !(o.code == 44400002 || o.code == 44400100))
+        {
+            quint16 mid = materialBlockId(o.material, o.color);
+            // The wood by MAT is not applied to the other codes (wood is only for private 44400002/100,
+            // for them the material is decided by the floor logic above, and for churches 44319000): we take the object color from the 3D window.
+            if (mid == IdOakPlanks && o.code != 44319000) mid = 0;
+            if (mid)
+            {
+                id = mid;                                     // "Material from a column" is more important than the color
+                if (mid != IdDirt && mid != IdGlass && mid != IdOakPlanks)   // all except earth and wood: the foundation,
+                    structId = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+            }                                                 // floors and roof — gray concrete
+        }
+        // The structures of research institutes (44315000) — walls of stone bricks (they stand out among the buildings), the structural part is gray concrete.
+        if (o.kind == McObject::Building && o.code == 44315000)
+        {
+            id = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+            structId = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+        }
+        // Churches (44319000) — ALWAYS stone brick (not the ordinary brick of houses), unless wood is specified in the data (then planks).
+        if (o.kind == McObject::Building && o.code == 44319000 && id != IdOakPlanks)
+        {
+            id = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+            structId = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+        }
+        // Private houses 44400002/44400100: the wall material is decided by the need for a floor — the decision itself
+        // is made in voxelizeObject from the real geometry (see privMode there). The MAT column is not taken into account for them.
+        if (o.kind == McObject::Building && o.closed && (o.code == 44400002 || o.code == 44400100))
+            privMode = 1;
+        if (o.kind == McObject::Plate)
+        {   // csrpol with a height — brick, always
+            id = quint16(IdPaletteStart + paletteIndexOf("minecraft:bricks"));
+        }
+        if (o.kind == McObject::Road && o.code == 45262000)
+        {   // A PEDESTRIAN CROSSING (tMC, OSM data footway=crossing): a line across the roadway. By itself it voxelizes nothing —
+            // the zebra is drawn by a separate pass over the ready motor-road roadways (see "PEDESTRIAN CROSSINGS").
+            for (const QVector<QPointF>& pl : o.paths)
+            {
+                QVector<QPointF> bp;
+                for (const QPointF& w : pl) bp << QPointF(toBlockX(tf, w.x()), toBlockZ(tf, w.y()));
+                if (bp.size() >= 2) crosswalks.append(bp);
+            }
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::Road || o.kind == McObject::Railway)
+        {
+            if (o.kind == McObject::Railway)
+                flushJobs();                                    // rails look into the store: buildings earlier — already in it
+            VoxelStore tmp;
+            QHash<ColKey, int> tmpMin;
+            const int added = voxelizeObject(o, tf, id, tmp, tmpMin, cancel);
+            if (added == 0) { ++res.skippedCount; continue; }
+            QHash<ColKey, int> topY;                          // column -> Y of the top cell of the strip
+            for (auto cit = tmp.chunks.constBegin(); cit != tmp.chunks.constEnd(); ++cit)
+            {
+                const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+                for (auto sit = cit->constBegin(); sit != cit->constEnd(); ++sit)
+                {
+                    const int baseY = sit.key() << 4;
+                    const QVector<quint16>& sec = sit.value();
+                    for (int i = 0; i < sec.size(); ++i)
+                    {
+                        if (!sec[i]) continue;
+                        const qint64 ck = pairKey(bx0 + (i & 15), bz0 + ((i >> 4) & 15));
+                        const int y = baseY + ((i >> 8) & 15);
+                        auto t2 = topY.find(ck);
+                        if (t2 == topY.end() || y > t2.value())
+                            topY[ck] = y;
+                    }
+                }
+            }
+            if (o.kind == McObject::Road)
+            {
+                // rdslin by codes (user requests): bike path 45261000 — dark red;
+                // pedestrian 45260000/45250000/61420000 — as is (carpet by color); LIGHT GRAY
+                // 61310000/61320000/61330000 — forced lighter (like 45260000, request), the color
+                // of the source object does not matter; the other codes — 2 blocks wider on each side
+                // and dark gray; the main roads 45210000/45220000/45230000/61210000/61220000/61230000
+                // — in addition gray marking lines in the middle and along the edges of the roadway.
+                const bool bike = (o.code == 45261000);
+                const bool ped  = (o.code == 45260000 || o.code == 45250000 || o.code == 61420000);
+                const bool lgray = (o.code == 61310000 || o.code == 61320000 || o.code == 61330000);
+                const bool mark = (o.code == 45210000 || o.code == 45220000 || o.code == 45230000
+                                || o.code == 61210000 || o.code == 61220000 || o.code == 61230000);
+                int bikeIdx = -1, grayIdx = -1, markIdx = -1, whiteIdx = -1;
+                for (int i = 0; i < kCarpetsCount; ++i)
+                {
+                    if (qstrcmp(kCarpets[i].name, "minecraft:red_carpet") == 0) bikeIdx = i;
+                    else if (qstrcmp(kCarpets[i].name, "minecraft:gray_carpet") == 0) grayIdx = i;
+                    else if (qstrcmp(kCarpets[i].name, "minecraft:light_gray_carpet") == 0) markIdx = i;
+                    if (qstrcmp(kCarpets[i].name, "minecraft:white_carpet") == 0) whiteIdx = i;
+                }
+                quint16 cid = nearestCarpetId(o.color);         // pedestrian/unknown — by color
+                if (bike && bikeIdx >= 0) cid = quint16(IdCarpetBase + bikeIdx);
+                else if (lgray && markIdx >= 0)                 // forced light gray
+                    cid = quint16(IdCarpetBase + markIdx);      // (woolForCarpetId -> light_gray_wool)
+                else if (!ped && grayIdx >= 0) cid = quint16(IdCarpetBase + grayIdx);
+                QHash<ColKey, int> road = topY;                 // the roadway with the widening taken into account
+                int mx0 = 0, mx1 = -1, mz0 = 0, mz1 = -1;
+                bool axisX = true;
+                if (!topY.isEmpty())
+                {
+                    mx0 = mz0 = std::numeric_limits<int>::max();
+                    mx1 = mz1 = std::numeric_limits<int>::min();
+                    for (auto t2 = topY.constBegin(); t2 != topY.constEnd(); ++t2)
+                    {
+                        const int bx = keyFirst(t2.key()), bz = keySecond(t2.key());
+                        mx0 = std::min(mx0, bx); mx1 = std::max(mx1, bx);
+                        mz0 = std::min(mz0, bz); mz1 = std::max(mz1, bz);
+                    }
+                    axisX = (mx1 - mx0) >= (mz1 - mz0);         // the long axis of the strip
+                    // "the others" — +2 cells on each side; without marking and when converted to meters — only +1
+                    // (request: roads without marking became too wide after the coordinates were recalculated)
+                    const int roadExt = (!mark && tf.sx != 1.0) ? 1 : 2;
+                    if (!bike && !ped)
+                        for (auto t2 = topY.constBegin(); t2 != topY.constEnd(); ++t2)
+                            for (int d = 1; d <= roadExt; ++d)
+                                if (axisX)
+                                {
+                                    road.insert(pairKey(keyFirst(t2.key()), keySecond(t2.key()) + d), t2.value());
+                                    road.insert(pairKey(keyFirst(t2.key()), keySecond(t2.key()) - d), t2.value());
+                                }
+                                else
+                                {
+                                    road.insert(pairKey(keyFirst(t2.key()) + d, keySecond(t2.key())), t2.value());
+                                    road.insert(pairKey(keyFirst(t2.key()) - d, keySecond(t2.key())), t2.value());
+                                }
+                }
+                // (User request) The roadway is NOT a carpet but a full WOOL block of the same
+                // color, sunk into the terrain: we put it into the surface layer of the ground (colWool → makeGround),
+                // i.e. the wool replaces the turf and is flush with the ground. The carpet remains only for
+                // the marking — one layer right on top of the wool blocks.
+                auto woolForCarpetId = [](quint16 carpetId) -> quint16
+                {
+                    if (carpetId < IdCarpetBase || carpetId >= IdCarpetBase + kCarpetsCount)
+                        return 0;
+                    QByteArray n(kCarpets[int(carpetId) - int(IdCarpetBase)].name);
+                    n.replace(QByteArrayLiteral("_carpet"), QByteArrayLiteral("_wool"));
+                    for (int i = 0; i < kWoolsCount; ++i)       // wool — SPECIAL id range (like
+                        if (qstrcmp(kWools[i].name, n.constData()) == 0)   // csrpol), not the palette
+                            return quint16(IdWoolBase + i);
+                    return 0;
+                };
+                RoadJob job;
+                job.road = road;
+                job.cid = cid;
+                job.woolId = woolForCarpetId(cid);
+                const bool earthRoad = (o.code == 61310000 || o.code == 61320000 || o.code == 61330000 || o.code == 61330001
+                                        || o.code == 45233333 || o.code == 45200003 || o.code == 71610000);
+                {   // the roadway material: motor roads — dark concrete, pedestrian — light concrete (grass does not grow on concrete);
+                    // dirt, field roads, firebreaks and ruts — PODZOL; bike path — red wool, as it was
+                    if (earthRoad)
+                        job.woolId = IdPodzol;
+                    else if (!bike)
+                        job.woolId = ped ? quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"))
+                                         : quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
+                }
+                job.axisX = axisX;                                // the marking — by the cross slices of the strip
+                job.core = topY;
+                job.ext = (!bike && !ped && !topY.isEmpty()) ? ((!mark && tf.sx != 1.0) ? 1 : 2) : 0;
+                job.fullCarpet = bike && job.woolId != 0;          // bike path: wool + carpet of the same color
+                if (!o.street.isEmpty())
+                {
+                    const QString nk = o.streetType + QLatin1Char('\n') + o.street;
+                    auto nit = roadNameIdx.find(nk);
+                    if (nit == roadNameIdx.end())
+                    {
+                        nit = roadNameIdx.insert(nk, roadNames.size());
+                        roadNames.append(qMakePair(o.streetType, o.street));
+                    }
+                    job.nameId = nit.value();
+                }
+                {   // the road ends: the first and the last point of each axis; the radius — half-width (cells/length/2) + 2
+                    double totLen = 0.0;
+                    for (const QVector<QPointF>& pl : o.paths)
+                    {
+                        if (pl.size() < 2) continue;
+                        for (int k = 0; k + 1 < pl.size(); ++k)
+                            totLen += std::hypot(toBlockX(tf, pl[k + 1].x()) - toBlockX(tf, pl[k].x()),
+                                                 toBlockZ(tf, pl[k + 1].y()) - toBlockZ(tf, pl[k].y()));
+                        job.ends << QPointF(toBlockX(tf, pl.first().x()), toBlockZ(tf, pl.first().y()))
+                                 << QPointF(toBlockX(tf, pl.last().x()), toBlockZ(tf, pl.last().y()));
+                    }
+                    job.endR = totLen > 1.0 ? std::max(3.0, double(job.road.size()) / totLen * 0.5 + 2.0) : 0.0;
+                }
+                {   // the center lines (to find real intersections): block coordinates, every part of the object has a common obj
+                    const int objId = roadObjCounter++;
+                    for (const QVector<QPointF>& pl : o.paths)
+                    {
+                        RoadLine rl; rl.obj = objId; rl.nameId = job.nameId; rl.ped = (bike || ped);
+                        for (const QPointF& w : pl)
+                            rl.pts << QPointF(toBlockX(tf, w.x()), toBlockZ(tf, w.y()));
+                        if (rl.pts.size() >= 2) { roadLines.append(rl); job.lines.append(rl.pts); }
+                    }
+                }
+                if (mark && whiteIdx >= 0)
+                    job.markId = quint16(IdCarpetBase + whiteIdx); // the center marking — WHITE carpet (the curbs along the edges — gray)
+                if (earthRoad)
+                    roadsEarth.append(job);                     // dirt roads — after all the others, they do not cover other people's
+                else if (bike || ped)
+                    roadsLow.append(job);                       // yield to the dark gray roadway
+                else
+                    roadsHigh.append(job);
+            }
+            else
+            {
+                // Railway along the AXIS line: one rail track 1 block wide, cells are connected, rail shapes
+                // (straight, turns, slopes) by the direction of the track; double-track (two parallel tracks with
+                // a gap of 2 blocks) is ONLY code 61111000. The cell height — from the mesh strip (topY).
+                const double gauge = 3.0;                           // the shift of the second track: a rail + a gap of 2 blocks
+                QVector<QVector<QPointF>> lines;                    // the track axes in block coordinates
+                for (const QVector<QPointF>& pl : o.paths)
+                {
+                    QVector<QPointF> bp;
+                    for (const QPointF& w : pl)
+                        bp << QPointF(toBlockX(tf, w.x()), toBlockZ(tf, w.y()));
+                    if (bp.size() >= 2) lines << bp;
+                }
+                if (lines.isEmpty() && !topY.isEmpty())
+                {   // no axes — a straight line in the middle of the strip along its long axis
+                    int rx0 = std::numeric_limits<int>::max(), rx1 = std::numeric_limits<int>::min();
+                    int rz0 = rx0, rz1 = rx1;
+                    for (auto t2 = topY.constBegin(); t2 != topY.constEnd(); ++t2)
+                    {
+                        rx0 = std::min(rx0, keyFirst(t2.key())); rx1 = std::max(rx1, keyFirst(t2.key()));
+                        rz0 = std::min(rz0, keySecond(t2.key())); rz1 = std::max(rz1, keySecond(t2.key()));
+                    }
+                    const bool axisX = (rx1 - rx0) >= (rz1 - rz0);
+                    QVector<QPointF> bp;
+                    if (axisX) bp << QPointF(rx0 + 0.5, (rz0 + rz1 + 1) * 0.5) << QPointF(rx1 + 0.5, (rz0 + rz1 + 1) * 0.5);
+                    else       bp << QPointF((rx0 + rx1 + 1) * 0.5, rz0 + 0.5) << QPointF((rx0 + rx1 + 1) * 0.5, rz1 + 0.5);
+                    lines << bp;
+                }
+                if (o.code == 61111000)
+                {   // the second track: shift every point along the normal to the direction of the track
+                    const int nOrig = lines.size();
+                    for (int li = 0; li < nOrig; ++li)
+                    {
+                        const QVector<QPointF>& src = lines[li];
+                        QVector<QPointF> off;
+                        for (int pi = 0; pi < src.size(); ++pi)
+                        {
+                            const QPointF a = src[std::max(0, pi - 1)], b = src[std::min(int(src.size()) - 1, pi + 1)];
+                            double dx = b.x() - a.x(), dz = b.y() - a.y();
+                            const double l = std::hypot(dx, dz);
+                            if (l < 1e-9) { off << src[pi]; continue; }
+                            dx /= l; dz /= l;
+                            off << QPointF(src[pi].x() - dz * gauge, src[pi].y() + dx * gauge);
+                        }
+                        lines << off;
+                    }
+                }
+                auto ribbonY = [&](int x, int z, bool& ok) -> int
+                {
+                    ok = true;
+                    auto it = topY.constFind(pairKey(x, z));
+                    if (it != topY.constEnd()) return it.value();
+                    int best = 0; bool have = false;
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            auto n2 = topY.constFind(pairKey(x + dx, z + dz));
+                            if (n2 != topY.constEnd() && (!have || n2.value() > best)) { best = n2.value(); have = true; }
+                        }
+                    ok = have;
+                    return best;
+                };
+                for (const QVector<QPointF>& ln : lines)
+                {
+                    const QVector<QPoint> chain = railCellChain(ln);
+                    const int n = chain.size();
+                    if (n == 0) continue;
+                    QVector<int> ys(n, 0);
+                    int lastY = std::numeric_limits<int>::min();
+                    for (int ci = 0; ci < n; ++ci)
+                    {
+                        bool ok = false;
+                        const int y = ribbonY(chain[ci].x(), chain[ci].y(), ok);
+                        if (ok) lastY = y;
+                        ys[ci] = (lastY == std::numeric_limits<int>::min()) ? y : lastY;
+                    }
+                    // slopes no steeper than 1 block per cell (a "stepped" rail with a gap will not connect)
+                    for (int ci = 1; ci < n; ++ci) ys[ci] = std::max(ys[ci - 1] - 1, std::min(ys[ci - 1] + 1, ys[ci]));
+                    for (int ci = n - 2; ci >= 0; --ci) ys[ci] = std::max(ys[ci + 1] - 1, std::min(ys[ci + 1] + 1, ys[ci]));
+                    for (int ci = 0; ci < n; ++ci)
+                    {
+                        const QPoint& c = chain[ci];
+                        const QPoint* pv = ci > 0 ? &chain[ci - 1] : nullptr;
+                        const QPoint* nx = ci + 1 < n ? &chain[ci + 1] : nullptr;
+                        int shape = railShapeFor(c, pv, nx);
+                        if (shape <= 1 && pv && nx)
+                        {   // straight section: the slope toward the higher neighbor cell
+                            const int up = (ys[ci + 1] == ys[ci] + 1) ? ci + 1 : (ys[ci - 1] == ys[ci] + 1 ? ci - 1 : -1);
+                            if (up >= 0)
+                            {
+                                const QPoint& u = chain[up];
+                                shape = u.x() > c.x() ? 2 : u.x() < c.x() ? 3 : u.y() < c.y() ? 4 : 5;
+                            }
+                        }
+                        const qint64 ck = pairKey(c.x(), c.y());
+                        railColsAll.insert(ck);                      // trees (3.51) avoid the tracks
+                        if (store.get(c.x(), ys[ci], c.y()) != IdAir) continue;
+                        store.set(c.x(), ys[ci], c.y(), quint16(int(IdRailShapeBase) + shape));
+                        auto mit = colMin.find(ck);
+                        if (mit == colMin.end() || ys[ci] < mit.value())
+                            colMin[ck] = ys[ci];
+                    }
+                }
+            }
+            ++res.objectCount;
+            continue;
+        }
+        // Foundation: a closed body (a building) is lowered by 2 blocks — the lower logs and the floor end up
+        // in the ground, the ground level around stays the same (it is computed by colAnchor). Private
+        // sector: the floor slab is 1 block, so the sinking is also 1 block (user request).
+        const bool privSec = o.kind == McObject::Building && o.closed
+                             && (o.code == 44400002 || o.code == 44400100 || o.code == 44400110);
+        if (privSec)
+        {   // the center of the house bbox in block coordinates — later the village centers are chosen from the clusters
+            double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+            for (const QVector3D& v : o.vertices)
+            {
+                const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+            }
+            if (ax1 >= ax0)
+            {
+                privCenters.append(QPoint(int(std::floor((ax0 + ax1) * 0.5)), int(std::floor((az0 + az1) * 0.5))));
+                privBoxes.append(QRect(int(std::floor(ax0)), int(std::floor(az0)),
+                                       int(std::ceil(ax1 - ax0)) + 1, int(std::ceil(az1 - az0)) + 1));
+            }
+        }
+        const bool shedSec = o.kind == McObject::Building && o.closed && o.code == 44000000;   // shed: foundation 1 block, walls/roof 1 block
+        const int sink = o.closed ? ((privSec || shedSec) ? 1 : 2) : 0;
+        // Growth (user request): a private-sector house grows exactly to the minimal frame
+        // grid of 7 rows: foundation (1) + 1st floor room (4) + ceiling slab (1) + the row of the
+        // 2nd floor/attic (1), i.e. the span lyHigh-lyLow >= 6. Other buildings: base +2,
+        // tall (>=6 m); "low" < 6 m — +4.
+        int extraBlocks = 0;
+        if (sink)
+            extraBlocks = privSec ? qMax(0, 6 - int(std::ceil(o.extrudeH)))
+                                  : (shedSec ? 1 : (o.extrudeH >= 6.0 ? 2 : 4));   // shed: 1 instead of 2 — the foundation is a block shallower (the height above the ground is the same), and the floor/ceiling without lining give 2 blocks to the room
+        if (o.kind == McObject::Building && o.lift && o.closed)
+        {
+            liftJobs.append(LiftJob{ &o, id, sink, extraBlocks, structId, matWood, privMode });
+            continue;
+        }
+        {
+            VoxJob* j = new VoxJob;
+            j->o = &o; j->id = id; j->sink = sink; j->extraBlocks = extraBlocks;
+            j->structId = structId; j->woodSingle = matWood; j->privMode = privMode;
+            j->deepRole = deepRoleOf[objDone - 1];
+            j->building = (o.kind == McObject::Building);       // "floors"/windows — only bldpol
+            int est = 0;                                        // the floor estimate: the counter base of the next building
+            for (const VoxJob* q : pending) est += q->building && q->o->closed ? std::max(1, int(q->o->extrudeH + q->extraBlocks) / 5) : 0;
+            j->storyBase = storyCounter + est;
+            pending.append(j);
+            if (pending.size() >= 64)
+                flushJobs();
+            if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+        }
+    }
+    tmcStepLog("vox: loop over objects finished (before the last flush)");
+    for (int k = 0; k < 10; ++k)
+        if (cntByKind[k])
+        {
+            char buf[160];
+        snprintf(buf, sizeof buf, "vox: kind %d: objects %lld, preparation in the loop %lld ms", k, (long long)cntByKind[k], (long long)(nsByKind[k] / 1000000));
+            tmcStepLog(buf);
+        }
+    {
+        char buf[160];
+        snprintf(buf, sizeof buf, "vox: flush x%lld: parallel part %lld ms, merge %lld ms", (long long)nFlush, (long long)msFlushRun, (long long)msFlushMerge);
+        tmcStepLog(buf);
+    }
+    flushJobs();
+    for (const LiftJob& lj : liftJobs)
+    {
+        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+        VoxelStore tmp;
+        QHash<ColKey, int> tmpMin, tmpAnchor;
+        // sites (chests, villagers, basements…) are not needed for the shaft — nullptr: no chests and no entities inside the cut-off part
+        const int added = voxelizeObject(*lj.o, tf, lj.id, tmp, tmpMin, cancel, lj.sink, &tmpAnchor, lj.extra, true,
+                                         nullptr, nullptr, nullptr, nullptr, nullptr,
+                                         lj.structId, lj.woodSingle, lj.privMode, nullptr, nullptr, nullptr, nullptr);
+        if (added == 0) { ++res.skippedCount; continue; }
+        // the "host" top by columns: the highest non-empty block of the already written buildings
+        QHash<ColKey, int> hostTop;
+        int plane = std::numeric_limits<int>::min();
+        for (auto cit = tmp.chunks.constBegin(); cit != tmp.chunks.constEnd(); ++cit)
+        {
+            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+            QSet<int> seen;
+            for (auto sit = cit->constBegin(); sit != cit->constEnd(); ++sit)
+            {
+                const QVector<quint16>& sec = sit.value();
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    if (!sec[i]) continue;
+                    const int lc = (i & 15) | (((i >> 4) & 15) << 4);
+                    if (seen.contains(lc)) continue;
+                    seen.insert(lc);
+                    const int x = bx0 + (lc & 15), z = bz0 + (lc >> 4);
+                    for (int y = 319; y >= -64; --y)
+                        if (store.get(x, y, z) != IdAir)
+                        {
+                            hostTop.insert(pairKey(x, z), y);
+                            plane = std::max(plane, y);
+                            break;
+                        }
+                }
+            }
+        }
+        const bool hosted = !hostTop.isEmpty();
+        QSet<ColKey> shaftCols;                                   // all the shaft columns (walls and interior) — to find the room
+        for (auto cit = tmp.chunks.constBegin(); cit != tmp.chunks.constEnd(); ++cit)
+        {
+            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+            for (auto sit = cit->constBegin(); sit != cit->constEnd(); ++sit)
+            {
+                const int baseY = sit.key() << 4;
+                const QVector<quint16>& sec = sit.value();
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    if (!sec[i]) continue;
+                    const int x = bx0 + (i & 15), z = bz0 + ((i >> 4) & 15), y = baseY + ((i >> 8) & 15);
+                    if (hosted)
+                    {
+                        const auto ht = hostTop.constFind(pairKey(x, z));
+                        const int lim = ht != hostTop.constEnd() ? ht.value() : plane;   // outside the host spot — by its highest point
+                        if (y <= lim) continue;                                          // below/inside the host roof — not built
+                    }
+                    store.set(x, y, z, sec[i]);
+                    shaftCols.insert(pairKey(x, z));
+                }
+            }
+        }
+        if (hosted && !shaftCols.isEmpty())
+        {   // the shaft room above the roof: +25% chest chance (rarity — as for the treasures on building floors: 55/30/15)
+            const qint64 firstCol = *std::min_element(shaftCols.constBegin(), shaftCols.constEnd());
+            const quint32 hl = colHash(firstCol ^ 0x11F7ull);
+            if (hl % 100u < 25u)
+            {
+                QVector<qint64> cand;
+                for (qint64 ck : shaftCols)
+                {
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    const auto ht = hostTop.constFind(ck);
+                    const int y = (ht != hostTop.constEnd() ? ht.value() : plane) + 1;
+                    if (store.get(x, y, z) != IdAir || store.get(x, y + 1, z) != IdAir || store.get(x, y - 1, z) == IdAir) continue;
+                    bool inner = true;                              // a cell inside the shaft: all 8 neighboring columns are the shaft too
+                    for (int dx = -1; dx <= 1 && inner; ++dx)
+                        for (int dz = -1; dz <= 1; ++dz)
+                            if (!shaftCols.contains(pairKey(x + dx, z + dz))) { inner = false; break; }
+                    if (inner) cand.append(ck);
+                }
+                if (!cand.isEmpty())
+                {
+                    std::sort(cand.begin(), cand.end());
+                    const qint64 ck = cand[int((hl >> 8) % quint32(cand.size()))];
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    const auto ht = hostTop.constFind(ck);
+                    const int y = (ht != hostTop.constEnd() ? ht.value() : plane) + 1;
+                    store.set(x, y, z, IdChest);
+                    chests.append(ChestSite{ x, y, z, pickChestLoot(hl >> 12, 55, 30) });
+                }
+            }
+        }
+        if (!hosted)
+        {   // a shaft without a host building — an independent structure: the ground is filled under it, as before.
+            // (For a shaft on a roof colMin/colAnchor are not touched: otherwise an earth column would grow under the canopy outside the host.)
+            for (auto it = tmpMin.constBegin(); it != tmpMin.constEnd(); ++it)
+            {
+                auto m = colMin.find(it.key());
+                if (m == colMin.end() || it.value() < m.value()) colMin[it.key()] = it.value();
+            }
+            for (auto it = tmpAnchor.constBegin(); it != tmpAnchor.constEnd(); ++it)
+            {
+                auto m = colAnchor.find(it.key());
+                if (m == colAnchor.end() || it.value() < m.value()) colAnchor[it.key()] = it.value();
+            }
+        }
+        ++res.objectCount;
+    }
+    tmcStepLog("vox: elevator shafts ready");
+    // Road drawing with priority (see the declaration of roadsHigh/roadsLow): first the dark gray
+    // roadways (wool into the surface layer), on top of them the marking carpet into the air above the wool (other
+    // blocks are not touched), and only then the light gray pedestrian/bike paths — first-wins in
+    // colWool does not let them repaint the highway. In the old order a path that came earlier in the list
+    // "ate" the highway cells together with the marking lines.
+    {
+        // DYNAMIC ROAD WIDTH: the standard widening (+2 / +1 blocks on each side) is kept, but on each section it is cut if it would run into a building or
+        // come close to it (at least one block remains between the roadway and the wall); the strip cells lying under a building are excluded from the roadway.
+        // It is done BEFORE any road is drawn: then colMin contains only objects (buildings, sites), not the already laid roadways.
+        {
+            auto isBld = [&](qint64 ck) { return colMin.contains(ck); };
+            int nTrim = 0, nDrop = 0;
+            auto rebuild = [&](RoadJob& j)
+            {
+                if (j.core.isEmpty()) return;
+                QHash<ColKey, int> out;
+                out.reserve(j.road.size());
+                for (auto it = j.core.constBegin(); it != j.core.constEnd(); ++it)
+                {
+                    if (isBld(it.key())) { ++nDrop; continue; }                      // the strip under a building — not a road
+                    out.insert(it.key(), it.value());
+                    const int bx = keyFirst(it.key()), bz = keySecond(it.key());
+                    for (int sgn = -1; sgn <= 1; sgn += 2)
+                        for (int d = 1; d <= j.ext; ++d)
+                        {
+                            const qint64 c1 = j.axisX ? pairKey(bx, bz + sgn * d) : pairKey(bx + sgn * d, bz);
+                            const qint64 c2 = j.axisX ? pairKey(bx, bz + sgn * (d + 1)) : pairKey(bx + sgn * (d + 1), bz);
+                            if (isBld(c1) || isBld(c2)) { ++nTrim; break; }              // a building further on (or its wall close by) — this section is already
+                            if (!out.contains(c1)) out.insert(c1, it.value());
+                        }
+                }
+                j.road = out;
+            };
+            for (RoadJob& j : roadsHigh) rebuild(j);
+            for (RoadJob& j : roadsLow) rebuild(j);
+            for (RoadJob& j : roadsEarth) rebuild(j);
+            if (nTrim + nDrop > 0) res.lairInfo += QObject::tr("; road width trimmed near buildings: %1 sections, cells under buildings removed: %2").arg(nTrim).arg(nDrop);
+        }
+        auto paintBody = [&](const RoadJob& j)
+        {
+            for (auto t2 = j.road.constBegin(); t2 != j.road.constEnd(); ++t2)
+            {
+                const int bx = keyFirst(t2.key()), bz = keySecond(t2.key());
+                if (store.get(bx, t2.value(), bz) != IdAir) continue;     // a construction place — not a road
+                if (j.woolId)
+                {
+                    // The roadway — a WOOL BLOCK instead of turf: colWool gives it to the surface layer
+                    // of the ground, i.e. the road is flush with the terrain ("sunk", request). The cell
+                    // above the wool remains air — the marking carpet of the main roads lands on it.
+                    // First-wins: pedestrian/bike paths are drawn AFTER the roadways and do not repaint
+                    // other people's wool — the priority of the main road is kept.
+                    if (!colWool.contains(t2.key()))
+                        colWool.insert(t2.key(), j.woolId);
+                }
+                else
+                    store.set(bx, t2.value(), bz, j.cid);                 // no wool — a carpet, as before
+                if (j.woolId && j.fullCarpet)
+                    store.set(bx, t2.value(), bz, j.cid);                 // bike path: a carpet of the same color on top of the wool
+                roadCols.insert(t2.key());                              // street lamps will stand along the strip edge
+                auto mit = colMin.find(t2.key());                       // the ground exactly under the roadway
+                if (mit == colMin.end() || t2.value() < mit.value())
+                    colMin[t2.key()] = t2.value();
+            }
+        };
+        for (const RoadJob& j : roadsHigh)
+            paintBody(j);
+        for (const RoadJob& j : roadsHigh)                               // marking — a carpet into the air above the wool
+        {
+            if (!j.markId) continue;
+            // "ALONG the whole road" (user request): lines NOT by the bbox size — for an
+            // oblique/bent strip it put the outer rows only where the strip touches the edges of the
+            // size, i.e. transverse strokes at the ends. We split the cells into transverse
+            // slices by the main axis; in each slice only the middle cell is marked —
+            // the center line runs ALONG the road, repeating its turns (the edges are not marked, request).
+            if (!j.lines.isEmpty())
+            {   // the center marking follows the road axis itself (a solid 4-connected line), not the size slices: for oblique and bent roads the slices gave a dotted line "from corner to corner"
+                for (const QVector<QPointF>& pl : j.lines)
+                {
+                    int px = std::numeric_limits<int>::min(), pz = 0;
+                    auto putMark = [&](int bx, int bz)
+                    {
+                        const auto rit = j.road.constFind(pairKey(bx, bz));
+                        if (rit == j.road.constEnd()) return;
+                        const int y = rit.value();
+                        const quint16 cur = store.get(bx, y, bz);
+                        if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount)) return;
+                        store.set(bx, y, bz, j.markId);
+                    };
+                    for (int k = 0; k + 1 < pl.size(); ++k)
+                    {
+                        const double len = std::hypot(pl[k + 1].x() - pl[k].x(), pl[k + 1].y() - pl[k].y());
+                        const int n = std::max(1, int(std::ceil(len * 2.0)));
+                        for (int i = 0; i <= n; ++i)
+                        {
+                            const double u = double(i) / double(n);
+                            const int bx = int(std::floor(pl[k].x() + (pl[k + 1].x() - pl[k].x()) * u));
+                            const int bz = int(std::floor(pl[k].y() + (pl[k + 1].y() - pl[k].y()) * u));
+                            if (bx == px && bz == pz) continue;
+                            if (px != std::numeric_limits<int>::min() && bx != px && bz != pz) putMark(bx, pz);   // a diagonal step — complete the corner, the line without gaps
+                            putMark(bx, bz);
+                            px = bx; pz = bz;
+                        }
+                    }
+                }
+                continue;
+            }
+            std::map<int, std::map<int, int>> slices;   // main axis -> (transverse -> Y)
+            for (auto t2 = j.road.constBegin(); t2 != j.road.constEnd(); ++t2)
+            {
+                const int bx = keyFirst(t2.key()), bz = keySecond(t2.key());
+                slices[j.axisX ? bx : bz][j.axisX ? bz : bx] = t2.value();
+            }
+            for (const auto& sl : slices)
+            {
+                const auto& across = sl.second;
+                if (across.empty()) continue;
+                auto mid = across.begin();
+                std::advance(mid, int(across.size()) / 2);
+                const int a = mid->first;                     // only the center line (request: the edges are not needed)
+                const int y = across.at(a);
+                const int bx = j.axisX ? sl.first : a, bz = j.axisX ? a : sl.first;
+                const quint16 cur = store.get(bx, y, bz);
+                if (cur != IdAir &&
+                    !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount))
+                    continue;                                 // other people's block (a wall) is not touched
+                store.set(bx, y, bz, j.markId);
+            }
+        }
+    tmcStepLog("vox: roads: roadways ready");
+        // PEDESTRIAN CROSSINGS (zebra): strips of white carpet along the road, alternating with gaps across it. The crossing axis (across the roadway)
+        // defines where and how to draw: a cell belongs to the zebra if it lies no further than 1.5 blocks from the axis ALONG the road (a strip 3 wide) and in the "white" part of the
+        // alternation (the step is chosen so that the crossing starts and ends with a white strip). It lies ONLY on the cells of the motor road roadway —
+        // at the height of and onto the roadway block itself, so it does not hang over the roadside/sidewalk and follows the terrain; other people's blocks (walls, lamps) are not touched.
+        if (!crosswalks.isEmpty())
+        {
+            quint16 whiteC = 0;
+            for (int i = 0; i < kCarpetsCount; ++i)
+                if (qstrcmp(kCarpets[i].name, "minecraft:white_carpet") == 0) whiteC = quint16(IdCarpetBase + i);
+            QHash<ColKey, int> roadAll;                                  // a motor road cell -> Y of the carpet
+            for (const RoadJob& j : roadsHigh)
+                for (auto t2 = j.road.constBegin(); t2 != j.road.constEnd(); ++t2)
+                    if (!roadAll.contains(t2.key())) roadAll.insert(t2.key(), t2.value());
+            int nOnRoad = 0, nCells = 0;
+            if (whiteC)
+                for (const QVector<QPointF>& pl : crosswalks)
+                {
+                    double total = 0.0;
+                    for (int k = 0; k + 1 < pl.size(); ++k) total += std::hypot(pl[k + 1].x() - pl[k].x(), pl[k + 1].y() - pl[k].y());
+                    if (total < 2.0) continue;                           // too short a crossing — not drawn
+                    const int m = std::max(1, int(std::lround((total - 1.0) / 2.0)));
+                    const double pitch = total / double(2 * m + 1);     // an odd number of strips: white-empty-…-white
+                    constexpr double hw = 1.5;                           // half the zebra width along the road
+                    int before = nCells;
+                    double s0 = 0.0;
+                    for (int k = 0; k + 1 < pl.size(); ++k)
+                    {
+                        const double ax = pl[k].x(), az = pl[k].y();
+                        const double len = std::hypot(pl[k + 1].x() - ax, pl[k + 1].y() - az);
+                        if (len < 1e-6) continue;
+                        const double tx = (pl[k + 1].x() - ax) / len, tz = (pl[k + 1].y() - az) / len;   // along the crossing (across the road)
+                        const double nx = -tz, nz = tx;                                                  // along the road
+                        const int bx0 = int(std::floor(std::min(ax, pl[k + 1].x()) - hw - 1)), bx1 = int(std::floor(std::max(ax, pl[k + 1].x()) + hw + 1));
+                        const int bz0 = int(std::floor(std::min(az, pl[k + 1].y()) - hw - 1)), bz1 = int(std::floor(std::max(az, pl[k + 1].y()) + hw + 1));
+                        for (int bx = bx0; bx <= bx1; ++bx)
+                            for (int bz = bz0; bz <= bz1; ++bz)
+                            {
+                                const double vx = bx + 0.5 - ax, vz = bz + 0.5 - az;
+                                const double s = vx * tx + vz * tz, u = vx * nx + vz * nz;
+                                if (s < 0.0 || s >= len || std::fabs(u) > hw) continue;
+                                if ((int(std::floor((s0 + s) / pitch)) & 1) != 0) continue;             // an empty strip
+                                const auto rit = roadAll.constFind(pairKey(bx, bz));
+                                if (rit == roadAll.constEnd()) continue;                                  // not a roadway — not drawn
+                                const quint16 cur = store.get(bx, rit.value(), bz);
+                                if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount)) continue;
+                                store.set(bx, rit.value(), bz, whiteC);
+                                ++nCells;
+                            }
+                        s0 += len;
+                    }
+                    if (nCells > before) ++nOnRoad;
+                }
+            res.lairInfo += QObject::tr("; zebra on the roads: crossings %1 of %2 (cells %3)").arg(nOnRoad).arg(crosswalks.size()).arg(nCells);
+        }
+        for (const RoadJob& j : roadsLow)
+            paintBody(j);
+        for (const RoadJob& j : roadsEarth)                              // last: first-wins in colWool does not let them repaint
+            paintBody(j);                                                // motor and pedestrian roads
+    tmcStepLog("vox: zebras ready");
+        // OUTLINE of the motor (dark) roads with light gray carpets along the roadway edge. The edges are roadway cells that have a
+        // 4-neighbor outside this roadway. The outline does not cross other roads (pedestrian, dirt, other motor roads): a cell
+        // is skipped if it belongs to another roadway or there is a cell of another road nearby (8 neighbors). Too narrow
+        // roads (the inner cells are fewer than a third of the edge ones) are not outlined — the outline would cover them completely.
+        {
+            quint16 lgC = 0;
+            for (int i = 0; i < kCarpetsCount; ++i)
+                if (qstrcmp(kCarpets[i].name, "minecraft:light_gray_carpet") == 0) lgC = quint16(IdCarpetBase + i);
+            if (lgC)
+            {
+                QHash<ColKey, int> ownerId;                                 // cell -> roadway number (the first one won, as in colWool)
+                int idc = 0;
+                auto regOwner = [&](const QVector<RoadJob>& v, QVector<int>* idsOut)
+                {
+                    for (const RoadJob& j : v)
+                    {
+                        if (idsOut) idsOut->append(idc);
+                        for (auto t2 = j.road.constBegin(); t2 != j.road.constEnd(); ++t2)
+                            if (!ownerId.contains(t2.key())) ownerId.insert(t2.key(), idc);
+                        ++idc;
+                    }
+                };
+                QSet<ColKey> parkAll;                                       // all the parking spots (rdcpol)
+                for (const ParkSite& ps : parks) parkAll.unite(ps.cols);
+                QVector<int> highIds;
+                regOwner(roadsHigh, &highIds);
+                regOwner(roadsLow, nullptr);
+                regOwner(roadsEarth, nullptr);
+                for (int ji = 0; ji < roadsHigh.size(); ++ji)
+                {
+                    const RoadJob& j = roadsHigh[ji];
+                    const int me = highIds[ji];
+                    QVector<qint64> edge;
+                    int interior = 0;
+                    for (auto t2 = j.road.constBegin(); t2 != j.road.constEnd(); ++t2)
+                    {
+                        if (ownerId.value(t2.key(), -1) != me) continue;
+                        const int x = keyFirst(t2.key()), z = keySecond(t2.key());
+                        const bool isEdge = !j.road.contains(pairKey(x + 1, z)) || !j.road.contains(pairKey(x - 1, z))
+                                         || !j.road.contains(pairKey(x, z + 1)) || !j.road.contains(pairKey(x, z - 1));
+                        if (isEdge) edge.append(t2.key()); else ++interior;
+                    }
+                    if (edge.isEmpty() || interior * 3 < edge.size()) continue;
+                    for (qint64 ck : edge)
+                    {
+                        const int x = keyFirst(ck), z = keySecond(ck);
+                        bool foreign = false;
+                        for (int dx = -1; dx <= 1 && !foreign; ++dx)
+                            for (int dz = -1; dz <= 1; ++dz)
+                            {
+                                const auto oit = ownerId.constFind(pairKey(x + dx, z + dz));
+                                if (oit != ownerId.constEnd() && oit.value() != me) { foreign = true; break; }
+                            }
+                        if (foreign) continue;
+                        for (int dx = -1; dx <= 1 && !foreign; ++dx)              // right next to a parking lot — no curb
+                            for (int dz = -1; dz <= 1; ++dz)
+                                if (parkAll.contains(pairKey(x + dx, z + dz))) { foreign = true; break; }
+                        if (foreign) continue;
+                        for (const QPointF& e : j.ends)                           // at the road ends — no curb
+                            if (std::hypot(x + 0.5 - e.x(), z + 0.5 - e.y()) < j.endR) { foreign = true; break; }
+                        if (foreign) continue;
+                        const int y = j.road.value(ck);
+                        if (store.get(x, y, z) == IdAir) store.set(x, y, z, lgC);
+                    }
+                }
+            }
+        }
+    }
+    tmcStepLog("vox: roads finished");
+    if (store.chunks.isEmpty())
+    {
+        res.error = QObject::tr("Could not voxelize a single object (empty or too huge meshes).");
+        return res;
+    }
+
+    // Diagnostics of the export step times: MCX_LOG_STEPS=1 in the environment -> "[mcx] step ms" lines to stderr
+    // (needed to find heavy steps on big projects; in the normal mode it prints nothing).
+    tmcStepLog("export: object voxelization finished");
+    if (qEnvironmentVariableIsSet("MCX_STOP_AFTER_VOX")) { res.ok = true; return res; }   // debug: measure the voxelization without the rest of the export
+    const bool logSteps = qEnvironmentVariableIsSet("MCX_LOG_STEPS");
+    QElapsedTimer stepTimer; stepTimer.start();
+    // The start of the step of stage st (the stage name — in the window caption, see the tqt 3D window, updateLoadStatus): without a counter
+    // (total=0) the caption just shows WHAT is being done now, not the "hanging" percent of the previous step.
+    auto beginStep = [&](int st, int total = 0) { if (progress) progress(0, total, st); };
+    auto lap = [&](const char* name)
+    {
+        if (!logSteps) { stepTimer.restart(); return; }
+        const qint64 ms = stepTimer.restart();
+        // MCX_LOG_STEPS=1 — to stderr; MCX_LOG_STEPS=path — append the lines to a file (a GUI application without a console)
+        const QByteArray target = qgetenv("MCX_LOG_STEPS");
+        if (target.size() > 1)
+        {
+            QFile f(QString::fromLocal8Bit(target));
+            if (f.open(QIODevice::Append | QIODevice::Text)) f.write(QStringLiteral("[mcx] %1 %2 %3 ms\n").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), QString::fromUtf8(name)).arg(ms).toUtf8());
+        }
+        else fprintf(stderr, "[mcx] %s %lld ms\n", name, (long long)ms);
+    };
+    // 3. Ground: we fill ALL the columns of ALL the chunks touched by objects. Earlier the ground was
+    // only a "skirt" under the objects themselves, but a chunk is written with the full status and is not generated by the game —
+    // the empty columns inside it looked like drops to the abyss exactly along the chunk border grid
+    // ("the ground is pushed through, a hole through the bedrock"). The flat ground level = the median of the heights under the objects
+    // (it also goes to the generator so that neighboring chunks join without steps); the terrain above the
+    // level is kept as a hill, below it is filled up to the level (no pits remain).
+    QHash<ColKey, QVector<FluidSite>> fluidsByChunk;   // water/lava sources of the junction — fluid_ticks by chunks
+    const bool hasTerrain = bool(heightAt);
+    // FALLBACK PALE GARDEN (data without big forests and meadows, e.g. an OSM extract): if there is neither a forest nor a meadow with an allowed code
+    // with an area of 2000 columns or more, we allocate an empty 15×15 chunk site nearest to the data (on the export border or in a big void
+    // inside it) and declare it a forest with an allowed code — then it is processed as an ordinary Pale Garden (biome, donor, mansion).
+    {
+        qint64 bestEligible = 0;
+        for (const VegSite& v : forests)
+        {
+            if (v.park || v.intra || !isPaleForestCode(v.code)) continue;
+            qint64 a = 0;
+            for (const ColSpan& c : v.spans) a += c.z1 - c.z0 + 1;
+            bestEligible = std::max(bestEligible, a);
+        }
+        for (const VegSite& v : grassPale)
+        {
+            qint64 a = 0;
+            for (const ColSpan& c : v.spans) a += c.z1 - c.z0 + 1;
+            bestEligible = std::max(bestEligible, a);
+        }
+        if (bestEligible < 2000 && world.paleForestFallback)
+        {
+            constexpr int S = 15;                                       // the site side, chunks (the forest template is 14×14)
+            QSet<ColKey> occ;                                           // occupied chunks (key pairKey(cx, cz))
+            for (auto it = store.chunks.constBegin(); it != store.chunks.constEnd(); ++it) occ.insert(it.key());
+            auto occCol = [&](qint64 ck) { occ.insert(pairKey(keyFirst(ck) >> 4, keySecond(ck) >> 4)); };
+            for (auto it = colPlant.constBegin(); it != colPlant.constEnd(); ++it) occCol(it.key());
+            for (auto it = colWool.constBegin(); it != colWool.constEnd(); ++it) occCol(it.key());
+            for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it) occCol(it.key());
+            for (const qint64 ck : roadCols) occCol(ck);
+            for (const QList<qint64>& pc : pads) for (const qint64 ck : pc) occCol(ck);
+            for (const ParkSite& ps : parks) for (const qint64 ck : ps.cols) occCol(ck);
+            for (const VegSite& v : forests)
+                for (const ColSpan& c : v.spans)
+                    for (int cz = c.z0 >> 4; cz <= (c.z1 >> 4); ++cz) occ.insert(pairKey(c.x >> 4, cz));
+            if (!occ.isEmpty())
+            {
+                int bx0 = std::numeric_limits<int>::max(), bz0 = bx0, bx1 = std::numeric_limits<int>::min(), bz1 = bx1;
+                double sumX = 0, sumZ = 0;
+                for (const qint64 k : occ)
+                {
+                    const int cx = keyFirst(k), cz = keySecond(k);
+                    bx0 = std::min(bx0, cx); bx1 = std::max(bx1, cx); bz0 = std::min(bz0, cz); bz1 = std::max(bz1, cz);
+                    sumX += cx; sumZ += cz;
+                }
+                const double midX = sumX / occ.size(), midZ = sumZ / occ.size();
+                const int m = S + 2;                                    // a margin around the data
+                const int gx0 = bx0 - m, gz0 = bz0 - m;
+                const int W = (bx1 - bx0 + 1) + 2 * m, H = (bz1 - bz0 + 1) + 2 * m;
+                const qint64 cells = qint64(W) * H;
+                if (cells <= 40000000)
+                {
+                    auto gi = [W](int x, int z) { return z * W + x; };
+                    QVector<qint16> dist(int(cells), qint16(-1));
+                    QVector<int> queue;
+                    queue.reserve(occ.size() * 2);
+                    for (const qint64 k : occ) { const int i = gi(keyFirst(k) - gx0, keySecond(k) - gz0); dist[i] = 0; queue << i; }
+                    for (int qi = 0; qi < queue.size(); ++qi)           // the distance (Chebyshev) from the occupied chunks
+                    {
+                        const int i = queue[qi], x = i % W, z = i / W;
+                        for (int dz = -1; dz <= 1; ++dz)
+                            for (int dx = -1; dx <= 1; ++dx)
+                            {
+                                const int nx = x + dx, nz = z + dz;
+                                if (nx < 0 || nz < 0 || nx >= W || nz >= H) continue;
+                                const int ni = gi(nx, nz);
+                                if (dist[ni] >= 0) continue;
+                                dist[ni] = qint16(std::min<int>(dist[i] + 1, 30000));
+                                queue << ni;
+                            }
+                    }
+                    QVector<int> pre(int(qint64(W + 1) * (H + 1)), 0);  // prefix sums of occupancy
+                    for (int z = 0; z < H; ++z)
+                        for (int x = 0; x < W; ++x)
+                            pre[z * (W + 1) + x + 1 + (W + 1)] = pre[z * (W + 1) + x + 1] + pre[(z + 1) * (W + 1) + x] - pre[z * (W + 1) + x] + (dist[gi(x, z)] == 0 ? 1 : 0);
+                    auto occIn = [&](int x0, int z0) { return pre[(z0 + S) * (W + 1) + x0 + S] - pre[z0 * (W + 1) + x0 + S] - pre[(z0 + S) * (W + 1) + x0] + pre[z0 * (W + 1) + x0]; };
+                    int bestX = -1, bestZ = -1, bestMin = std::numeric_limits<int>::max();
+                    double bestC = 1e30;
+                    for (int z0 = 0; z0 + S <= H; ++z0)
+                        for (int x0 = 0; x0 + S <= W; ++x0)
+                        {
+                            if (occIn(x0, z0) != 0) continue;
+                            int mn = std::numeric_limits<int>::max();   // the site cell nearest to the data lies on its border
+                            for (int t = 0; t < S && mn > 1; ++t)
+                                mn = std::min({ mn, int(dist[gi(x0 + t, z0)]), int(dist[gi(x0 + t, z0 + S - 1)]), int(dist[gi(x0, z0 + t)]), int(dist[gi(x0 + S - 1, z0 + t)]) });
+                            const double cx = gx0 + x0 + 0.5 * S - midX, cz = gz0 + z0 + 0.5 * S - midZ;
+                            const double c = cx * cx + cz * cz;
+                            if (mn < bestMin || (mn == bestMin && c < bestC)) { bestMin = mn; bestC = c; bestX = x0; bestZ = z0; }
+                        }
+                    if (bestX >= 0)
+                    {
+                        const int cx0 = gx0 + bestX, cz0 = gz0 + bestZ;
+                        VegSite vs;
+                        vs.treeH = 5;
+                        vs.code = 71111110;
+                        for (int x = cx0 * 16; x < (cx0 + S) * 16; ++x) vs.spans << ColSpan{ x, cz0 * 16, (cz0 + S) * 16 - 1 };
+                        vs.minX = cx0 * 16; vs.maxX = (cx0 + S) * 16 - 1; vs.minZ = cz0 * 16; vs.maxZ = (cz0 + S) * 16 - 1;
+                        forests << vs;
+                        res.lairInfo += QObject::tr("%1Pale Garden: there is no suitable vegetation in the data — an empty site of %2×%2 chunks was allocated (chunks %3…%4 along X, %5…%6 along Z, gap to the data %7 chunks)")
+                                            .arg(res.lairInfo.isEmpty() ? QString() : QStringLiteral("; ")).arg(S).arg(cx0).arg(cx0 + S - 1).arg(cz0).arg(cz0 + S - 1).arg(bestMin - 1);
+                    }
+                }
+            }
+        }
+    }
+    // We create in advance the chunks where the vegetation will land (a tree crown is ±2 blocks from the column of
+    // the trunk): otherwise planting after the earth fill would create "clean" chunks with a crown over
+    // the void — the same pit along the grid that we cure below.
+    // Earlier every forest column made 25 accesses to the store.chunks hash (95 million columns × 25 — minutes in a single
+    // thread). Now: the forest columns are sorted (X, then Z), so the chunk range ±2 blocks almost
+    // does not change from column to column — we skip repeats; the other maps are first collected into a small
+    // set of unique chunks, and store.chunks is created once per chunk.
+    {
+        QSet<ColKey> need;
+        for (const VegSite& site : forests)
+            for (const ColSpan& c : site.spans)
+            {   // a tree crown is ±2 blocks from the trunk column: chunks by x±2 and by the whole z range of the segment ±2
+                const int a0 = (c.x - 2) >> 4, a1 = (c.x + 2) >> 4, b0 = (c.z0 - 2) >> 4, b1 = (c.z1 + 2) >> 4;
+                for (int cx = a0; cx <= a1; ++cx)
+                    for (int cz = b0; cz <= b1; ++cz)
+                        need.insert(pairKey(cx, cz));
+            }
+        for (auto it = colPlant.constBegin(); it != colPlant.constEnd(); ++it)
+            need.insert(pairKey(keyFirst(it.key()) >> 4, keySecond(it.key()) >> 4));
+        for (auto it = colWool.constBegin(); it != colWool.constEnd(); ++it)
+            need.insert(pairKey(keyFirst(it.key()) >> 4, keySecond(it.key()) >> 4));
+        for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it)
+            need.insert(pairKey(keyFirst(it.key()) >> 4, keySecond(it.key()) >> 4));
+        for (qint64 k : need)
+            store.chunks[k];
+    }
+    int yShift = 0;   // the "normal world": by how much the whole export is raised (decided after the survey, below);
+                      // the lambda reads it by reference — the height survey goes before the raise, all the late
+                      // calls (fill/vegetation) already get the shifted terrain.
+    auto terrainTopBlock = [&](int cx, int cz) -> int
+    {   // the terrain top in blocks (INT_MIN — there is no terrain at this point)
+        if (!hasTerrain) return std::numeric_limits<int>::min();
+        const double wx = (double(cx) + 0.5) / tf.sx + tf.cx0;       // blocks -> map units
+        const double wy = tf.cy0 - (double(cz) + 0.5) / tf.sz;
+        const double h = heightAt(wx, wy);
+        if (h <= -9998.0) return std::numeric_limits<int>::min();
+        return int(std::floor((h - tf.yBase) * tf.zScale + 1.0)) + yShift;
+    };
+    QList<qint64> touchedChunks;
+    for (auto tcIt = store.chunks.constBegin(); tcIt != store.chunks.constEnd(); ++tcIt) touchedChunks.append(tcIt.key());   // a snapshot: later sections are added to the existing chunks
+    // "Full terrain" (user request, only for the "normal world"): if the crust stands only
+    // under the object chunks, the city is a small clearing with a cliff along the perimeter. We cover with our
+    // ground an apron M chunks thick around the city rectangle (and the empty holes inside it);
+    // beyond the apron — the game's noise terrain (the junction is known, smoothing is a separate future task).
+    QList<qint64> fillChunks = touchedChunks;
+    {   // Spots without buildings (csrpol sites, parking lots, greenhouses, quarries): their chunks must get ground too, otherwise a lone site stays without a surface
+        QSet<ColKey> have(fillChunks.constBegin(), fillChunks.constEnd());
+        auto addCols = [&](const QList<qint64>& cs)
+        {
+            qint64 last = std::numeric_limits<qint64>::min();
+            for (qint64 ck : cs)
+            {
+                const qint64 c = pairKey(keyFirst(ck) >> 4, keySecond(ck) >> 4);
+                if (c == last) continue;
+                last = c;
+                if (!have.contains(c)) { have.insert(c); fillChunks.append(c); }
+            }
+        };
+        for (const QList<qint64>& pc : pads) addCols(pc);
+        for (const ParkSite& ps : parks)
+        {
+            QList<qint64> pcols;
+            pcols.reserve(ps.cols.size());
+            for (const ColKey& pk : ps.cols) pcols.append(pk.v);
+            addCols(pcols);
+        }
+    }
+    // The REAL export border — the rectangle of chunks with objects (+ the apron in the "normal world"). The chamfer and
+    // the "flowing out" water/lava (3.59b/c) are needed only on it. The empty places INSIDE the rectangle (where there are no
+    // objects and, in a flat world, no chunks with ground either) — are not an edge: the game itself will finish the same
+    // flat ground there (in the "normal world" the holes inside the rectangle are filled with our ground anyway).
+    int rcx0 = std::numeric_limits<int>::max(), rcz0 = std::numeric_limits<int>::max();
+    int rcx1 = std::numeric_limits<int>::min(), rcz1 = std::numeric_limits<int>::min();
+    for (qint64 ckKey : touchedChunks)
+    {
+        rcx0 = std::min(rcx0, keyFirst(ckKey)); rcz0 = std::min(rcz0, keySecond(ckKey));
+        rcx1 = std::max(rcx1, keyFirst(ckKey)); rcz1 = std::max(rcz1, keySecond(ckKey));
+    }
+    const int rectM = world.normalSurroundings ? std::max(0, std::min(world.apronChunks, 64)) : 0;
+    auto inExportRect = [=](int cx, int cz)
+    { return cx >= rcx0 - rectM && cx <= rcx1 + rectM && cz >= rcz0 - rectM && cz <= rcz1 + rectM; };
+    if (world.normalSurroundings)
+    {
+        const int M = std::max(0, std::min(world.apronChunks, 64)); // the apron, chunks (a setting in the dialog)
+        int cx0 = std::numeric_limits<int>::max(), cz0 = std::numeric_limits<int>::max();
+        int cx1 = std::numeric_limits<int>::min(), cz1 = std::numeric_limits<int>::min();
+        for (qint64 ckKey : touchedChunks)
+        {
+            cx0 = std::min(cx0, keyFirst(ckKey)); cz0 = std::min(cz0, keySecond(ckKey));
+            cx1 = std::max(cx1, keyFirst(ckKey)); cz1 = std::max(cz1, keySecond(ckKey));
+        }
+        const QSet<ColKey> touched(touchedChunks.constBegin(), touchedChunks.constEnd());
+        for (int cx = cx0 - M; cx <= cx1 + M; ++cx)
+            for (int cz = cz0 - M; cz <= cz1 + M; ++cz)
+            {
+                const qint64 k = pairKey(cx, cz);
+                if (touched.contains(k)) continue;
+                fillChunks << k;       // M=0: only the "hole" finishing of the city rectangle remains
+            }
+    }
+    // The chunks under floating islands get ground too (an island must not be cut along the chunk border without soil); repeats are removed.
+    for (const IslandSite& is : islandSites)
+        if (is.kind == 2)
+        for (int icz = (is.cz - is.rz - 2) >> 4; icz <= ((is.cz + is.rz + 2) >> 4); ++icz)
+            for (int icx = (is.cx - is.rx - 2) >> 4; icx <= ((is.cx + is.rx + 2) >> 4); ++icx)
+                fillChunks << pairKey(icx, icz);
+    std::sort(fillChunks.begin(), fillChunks.end());
+    fillChunks.erase(std::unique(fillChunks.begin(), fillChunks.end()), fillChunks.end());
+    // FOREST TO THE CHUNK EDGE ON THE EXPORT BORDER: if a forest gets into the outermost chunk of the exported area (the chunk has no neighbor in fillChunks), this chunk is entirely
+    // added to the forest (the same biome, trees by the common rules) — otherwise a 6+ block "clearing" remains between the occupied part of the chunk and the game world.
+    // The occupied columns (buildings, water, roads, sites) are not included in the extension.
+    {
+        const QSet<ColKey> fillSet(fillChunks.constBegin(), fillChunks.constEnd());
+        // the export border = the outer ring of the rectangle of data chunks (chunks with objects + forest chunks); the apron in the noise mode lies beyond it
+        int dcx0 = rcx0, dcx1 = rcx1, dcz0 = rcz0, dcz1 = rcz1;
+        for (const VegSite& vs : forests)
+            for (const ColSpan& c : vs.spans)
+            {
+                dcx0 = std::min(dcx0, c.x >> 4); dcx1 = std::max(dcx1, c.x >> 4);
+                dcz0 = std::min(dcz0, c.z0 >> 4); dcz1 = std::max(dcz1, c.z1 >> 4);
+            }
+        auto isEdge = [&](int cx, int cz)
+        { return cx == dcx0 || cx == dcx1 || cz == dcz0 || cz == dcz1 || !fillSet.contains(pairKey(cx - 1, cz)) || !fillSet.contains(pairKey(cx + 1, cz)) || !fillSet.contains(pairKey(cx, cz - 1)) || !fillSet.contains(pairKey(cx, cz + 1)); };
+        int nExt = 0;
+        for (VegSite& vs : forests)
+        {
+            if (vs.park) continue;
+            QSet<ColKey> edgeCh;
+            for (const ColSpan& c : vs.spans)
+                for (int cz = c.z0 >> 4; cz <= (c.z1 >> 4); ++cz)
+                    if (fillSet.contains(pairKey(c.x >> 4, cz)) && isEdge(c.x >> 4, cz)) edgeCh.insert(pairKey(c.x >> 4, cz));
+            if (edgeCh.isEmpty()) continue;
+            QVector<ColSpan> add;
+            for (const qint64 ek : edgeCh)
+            {
+                const int ecx = keyFirst(ek), ecz = keySecond(ek);
+                for (int x = ecx * 16; x < ecx * 16 + 16; ++x)
+                {
+                    int run = -1;
+                    for (int z = ecz * 16; z <= ecz * 16 + 16; ++z)
+                    {
+                        const qint64 ck = pairKey(x, z);
+                        const bool ok = z < ecz * 16 + 16 && !colMin.contains(ck) && !colWater.contains(ck) && !colWool.contains(ck) && !roadCols.contains(ck);
+                        if (ok && run < 0) run = z;
+                        else if (!ok && run >= 0) { add.append(ColSpan{ x, run, z - 1 }); run = -1; }
+                    }
+                }
+            }
+            vs.spans += add;
+            vs.spans = mergeSpans(vs.spans);
+            vs.minX = vs.spans.first().x; vs.maxX = vs.spans.last().x;
+            vs.minZ = std::numeric_limits<int>::max(); vs.maxZ = std::numeric_limits<int>::min();
+            for (const ColSpan& c : vs.spans) { vs.minZ = std::min(vs.minZ, c.z0); vs.maxZ = std::max(vs.maxZ, c.z1); }
+            nExt += int(edgeCh.size());
+        }
+        // Fields and grass (any vegetation without trees — colPlant): the outermost chunk of the area entirely gets the plant that prevails in it; the forest columns are not touched.
+        {
+            QVector<ColSpan> allF;
+            for (const VegSite& vs : forests) allF += vs.spans;
+            allF = mergeSpans(allF);
+            QHash<ColKey, QHash<quint16, int>> cnt;
+            for (auto pit = colPlant.constBegin(); pit != colPlant.constEnd(); ++pit)
+            {
+                const int cx = keyFirst(pit.key()) >> 4, cz = keySecond(pit.key()) >> 4;
+                if (fillSet.contains(pairKey(cx, cz)) && isEdge(cx, cz)) ++cnt[pairKey(cx, cz)][pit.value()];
+            }
+            int nFld = 0;
+            for (auto cit = cnt.constBegin(); cit != cnt.constEnd(); ++cit)
+            {
+                quint16 best = 0; int bestN = -1;
+                for (auto qit = cit.value().constBegin(); qit != cit.value().constEnd(); ++qit)
+                    if (qit.value() > bestN || (qit.value() == bestN && qit.key() < best)) { best = qit.key(); bestN = qit.value(); }
+                const int ecx = keyFirst(cit.key()), ecz = keySecond(cit.key());
+                for (int z = ecz * 16; z < ecz * 16 + 16; ++z)
+                    for (int x = ecx * 16; x < ecx * 16 + 16; ++x)
+                    {
+                        const qint64 ck = pairKey(x, z);
+                        if (colPlant.contains(ck) || colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck) || roadCols.contains(ck) || spansContain(allF, x, z)) continue;
+                        colPlant.insert(ck, best);
+                    }
+                ++nFld;
+            }
+            if (nFld > 0) res.lairInfo += QObject::tr("; fields and grass extended to the chunk edge on the export border: %1 chunks").arg(nFld);
+        }
+        if (nExt > 0) res.lairInfo += QObject::tr("; forest extended to the chunk edge on the export border: %1 chunks").arg(nExt);
+    }
+    // "Ground" is the heaviest phase (every column of every filled chunk), so it is also
+    // covered by progress: total = height survey (touched chunks) + fill (in the noise mode —
+    // touched + the apron).
+    const int gSurvey = int(touchedChunks.size());
+    const int gTotal = gSurvey + int(fillChunks.size());
+    // Tree planting (3.5) is part of the same stage: we count the 6×6 grid cells over the forest bbox so that the counter
+    // "X of N" goes on and does not freeze after the earth fill (the scale is monotonic: ground, then planting).
+    qint64 vegCells64 = 0;
+    for (const VegSite& site : forests)
+        vegCells64 += qint64(site.maxX / 6 - site.minX / 6 + 2) * qint64(site.maxZ / 6 - site.minZ / 6 + 2);
+    const int vegCells = int(std::min<qint64>(vegCells64, 1000000000));
+    const int progTotal = gTotal;               // the "ground" stage has its own scale; later the steps have their own stages (below)
+    int planeCols = 0;
+    QVector<int> planeSamples;
+    for (qint64 ckKey : touchedChunks)
+    {
+        if (progress && (planeCols & 0x3F) == 0)
+            progress(planeCols, progTotal, 1);                 // the "ground" phase — height survey
+        ++planeCols;
+        const int bx0 = keyFirst(ckKey) << 4, bz0 = keySecond(ckKey) << 4;
+        // Only the MEDIAN of the heights is needed: a 4×4 sample of the 256 columns of a chunk gives the same median and is 16 times cheaper
+        // (on hundreds of thousands of chunks the 512 accesses to the huge colMin/colAnchor hashes per chunk were the main cost).
+        for (int lx = 1; lx < 16; lx += 4)
+            for (int lz = 1; lz < 16; lz += 4)
+            {
+                const qint64 ck = pairKey(bx0 + lx, bz0 + lz);
+                int cand = terrainTopBlock(bx0 + lx, bz0 + lz);
+                const auto ait = colAnchor.constFind(ck);
+                const auto oit = colMin.constFind(ck);
+                if (ait != colAnchor.constEnd())
+                    cand = std::max(cand, ait.value() - 1);   // the level WITHOUT the foundation: the ground at the former mark
+                else if (oit != colMin.constEnd())
+                    cand = std::max(cand, oit.value() - 1);
+                if (cand > std::numeric_limits<int>::min() / 2)
+                    planeSamples << cand;
+            }
+    }
+    // The reference level ("plane"): under buildings without terrain — the median; with terrain — the lower quartile (20%): the terrain is now kept
+    // IN FULL (valleys too), and the plane is needed only as a mark for columns without terrain data, for the junction with the generator and for
+    // smoothing the apron (otherwise everything below the median was filled up to it and buildings in valleys ended up walled into the ground).
+    int genGroundTop = 0, planeMax = 0;
+    if (!planeSamples.isEmpty())
+    {
+        const int qi = hasTerrain ? planeSamples.size() / 5 : planeSamples.size() / 2;
+        std::nth_element(planeSamples.begin(), planeSamples.begin() + qi, planeSamples.end());
+        genGroundTop = planeSamples[qi];
+        planeMax = *std::max_element(planeSamples.constBegin(), planeSamples.constEnd());
+    }
+    genGroundTop = std::max(0, std::min(genGroundTop, 255));    // one height both for us and for the generator
+    // "Normal seed-based world" (user request): the marks of the WDF terrain are in no way connected with the
+    // absolute Minecraft Y — in the free mode the city would stand at y≈0, i.e. 60+ blocks below
+    // sea level, and the noise surroundings would surround it with a "huge pit". We raise the whole export
+    // (objects, ground, terrain — everything written) so that the ground plane ends up slightly
+    // ABOVE the average Minecraft land height (sea level 62, a typical plain ~65-70): the city stands
+    // on a ledge, not in a pit.
+    if (world.normalSurroundings)
+    {
+        yShift = 68 - genGroundTop;                               // with terrain it can also go down: the reference level is 68, not "terrain 140 above the surroundings"
+        yShift = std::min(yShift, std::max(0, 200 - genGroundTop));   // a reserve for high-rises (the terrain is cut at 255)
+        yShift = std::min(yShift, 250 - planeMax);                    // the highest point is not above 250
+        yShift = std::max(yShift, -std::max(0, genGroundTop - 40));  // and we do not go too low: the reference level >= 40
+        if (yShift != 0)
+        {
+            store.translateY(yShift);                                 // blocks (the sections will be rebuilt)
+            for (auto it = colMin.begin(); it != colMin.end(); ++it) it.value() += yShift;
+            for (auto it = colAnchor.begin(); it != colAnchor.end(); ++it) it.value() += yShift;
+            for (ChestSite& cs : chests) cs.y += yShift;              // chests — together with the houses
+            for (PaintingSite& pt : paints) pt.y += yShift;           // paintings — the same coordinates
+            for (MannequinSite& ms : mannequins) ms.y += yShift;      // mannequins (the entity Pos)
+            for (NpcSite& ns : npcs) ns.y += yShift;                  // villagers — together with the houses
+            for (FrameSite& fr : frames) fr.y += yShift;              // frames — too
+            for (BasementSite& bs : basements) bs.wy += yShift;       // basements — too
+            for (SignCand& sg : signCands) sg.y += yShift;            // signs — too
+            for (BannerSite& bn : bannerSites) bn.y += yShift;        // banners — too
+            for (LairZone& lz : lairZones) { lz.y0 += yShift; lz.y1 += yShift; }   // spawn zones — too
+            for (IslandSite& is : islandSites) is.yTop += yShift;                  // islands — too
+            for (SpawnerSite& sp : spawners) sp.y += yShift;          // spawners — their own BE
+            genGroundTop += yShift;                                   // terrainTopBlock will add it itself (by reference)
+        }
+    }
+    lap("g0 before the Pale Garden");
+    // PALE GARDEN: the biggest forest (by the number of columns) becomes a full "Pale Garden" biome — the biome on
+    // 4×4 cells along the forest outline, trees of pale oak (a 2×2 trunk, some with a "creaking heart"), moss, "eyeblossom" flowers.
+    QSet<ColKey> paleCells;
+    QHash<ColKey, QVector<QPoint3>> heartsByChunk;                // creaking hearts -> block_ticks by chunks
+    QHash<ColKey, QVector<QPair<qint16, quint16>>> paleUnder;     // the donor underground cells under the Pale Garden (pits, voids, water near the surface): column -> (y, id)
+    int paleIdx = -1;
+    {
+        qint64 bestArea = 0;
+        // a forest set by the user by chunk (WorldOptions::paleForestChunk): the forest nearest to the chunk center; otherwise — the biggest
+        bool havePick = false;
+        double pickX = 0, pickZ = 0;
+        {
+            static const QRegularExpression numRe3(QStringLiteral("-?\\d+"));
+            QVector<int> nums;
+            auto it = numRe3.globalMatch(world.paleForestChunk);
+            while (it.hasNext()) nums.append(it.next().captured().toInt());
+            if (nums.size() >= 2)
+            {
+                havePick = true;
+                pickX = (nums.size() >= 3 ? nums[0] : nums[0]) * 16 + 8;
+                pickZ = (nums.size() >= 3 ? nums[2] : nums[1]) * 16 + 8;
+            }
+        }
+        double bestD = 1e18;
+        for (int fi = 0; fi < forests.size(); ++fi)
+        {
+            if (forests[fi].park || forests[fi].intra || !isPaleForestCode(forests[fi].code)) continue;   // Pale Garden — only on the allowed vegpol codes (forest, undergrowth, shrubs, industrial crops, meadow); not parks 71126000, not lawns 71329000, not vgbpol                               // a park is not a "forest"
+            qint64 a = 0;
+            for (const ColSpan& c : forests[fi].spans) a += c.z1 - c.z0 + 1;
+            if (havePick)
+            {
+                if (a < 2000) continue;
+                double d = 1e18;
+                for (const ColSpan& c : forests[fi].spans)
+                {
+                    const double dz = pickZ < c.z0 ? c.z0 - pickZ : (pickZ > c.z1 ? pickZ - c.z1 : 0.0);
+                    d = std::min(d, std::hypot(c.x - pickX, dz));
+                }
+                if (d < bestD) { bestD = d; bestArea = a; paleIdx = fi; }
+            }
+            else if (a > bestArea) { bestArea = a; paleIdx = fi; }
+        }
+        if (havePick && paleIdx >= 0 && bestD > 200.0)
+        {   // there is no forest far from the given chunk — we take the biggest one
+            res.lairInfo += QObject::tr("%1Pale Garden: there is no forest near the given chunk").arg(res.lairInfo.isEmpty() ? QString() : QStringLiteral("; "));
+            bestArea = 0; paleIdx = -1;
+            for (int fi = 0; fi < forests.size(); ++fi)
+            {
+                if (forests[fi].park || forests[fi].intra || !isPaleForestCode(forests[fi].code)) continue;   // Pale Garden — only on the allowed vegpol codes (forest, undergrowth, shrubs, industrial crops, meadow); not parks 71126000, not lawns 71329000, not vgbpol
+                qint64 a = 0;
+                for (const ColSpan& c : forests[fi].spans) a += c.z1 - c.z0 + 1;
+                if (a > bestArea) { bestArea = a; paleIdx = fi; }
+            }
+        }
+        // Meadow/grassy vegetation without height is a candidate only if its area is MORE THAN TWICE the best forest with height; with comparable areas the forest with height wins
+        if (!havePick && !grassPale.isEmpty())
+        {
+            int gBest = -1; qint64 gArea = 0;
+            for (int gi = 0; gi < grassPale.size(); ++gi)
+            {
+                qint64 a = 0;
+                for (const ColSpan& c : grassPale[gi].spans) a += c.z1 - c.z0 + 1;
+                if (a > gArea) { gArea = a; gBest = gi; }
+            }
+            const qint64 treeBest = paleIdx >= 0 ? bestArea : 0;
+            if (gBest >= 0 && gArea >= 2000 && (paleIdx < 0 || treeBest < 2000 || gArea > 2 * treeBest))
+            {
+                forests.append(grassPale[gBest]);
+                paleIdx = forests.size() - 1;
+                bestArea = gArea;
+                res.lairInfo += QObject::tr("%1Pale Garden: meadow vegetation was chosen (%2 m², more than twice the best forest with height — %3 m²)")
+                                    .arg(res.lairInfo.isEmpty() ? QString() : QStringLiteral("; ")).arg(gArea).arg(treeBest);
+            }
+        }
+        if (paleIdx >= 0 && bestArea >= 2000)
+        {
+            for (const ColSpan& c : forests[paleIdx].spans)
+                for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
+                    paleCells.insert(pairKey(c.x >> 2, z4));
+            {   // coordinates for the player (/tp): a point inside the forest closer to the center of gravity, the chunk (as in F3), the size
+                const VegSite& pf = forests[paleIdx];
+                double sx = 0, sz = 0; qint64 n = 0;
+                for (const ColSpan& c : pf.spans) { const qint64 len = c.z1 - c.z0 + 1; sx += double(c.x) * len; sz += 0.5 * (c.z0 + c.z1) * len; n += len; }
+                int px = int(std::lround(sx / double(n))), pz = int(std::lround(sz / double(n)));
+                if (!spansContain(pf.spans, px, pz))
+                {   // the center of gravity is outside the forest (a ring, a horseshoe) — the nearest column from the middle of the list
+                    const ColSpan& mid = pf.spans[pf.spans.size() / 2];
+                    px = mid.x; pz = (mid.z0 + mid.z1) / 2;
+                }
+                res.lairInfo += QObject::tr("%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10")
+                                    .arg(res.lairInfo.isEmpty() ? QString() : QStringLiteral("; ")).arg(bestArea).arg(px).arg(pz).arg(px >> 4).arg(pz >> 4)
+                                    .arg(pf.minX).arg(pf.maxX).arg(pf.minZ).arg(pf.maxZ);
+            }
+        }
+        else
+        {
+            paleIdx = -1;
+            res.lairInfo += QObject::tr("%1Pale Garden: no suitable forest").arg(res.lairInfo.isEmpty() ? QString() : QStringLiteral("; "));
+        }
+    }
+    // Spruce forests (71111110, big): the taiga biome cells along the outline
+    QSet<ColKey> taigaCells;
+    for (int fi = 0; fi < forests.size(); ++fi)
+        if (forests[fi].spruce && fi != paleIdx)
+            for (const ColSpan& c : forests[fi].spans)
+                for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
+                    taigaCells.insert(pairKey(c.x >> 2, z4));
+    // The single biome map (a 4×4 cell -> 1 pale_garden, 2 taiga, 3 forest, 4 birch_forest, 5 dappled_forest); priority: pale > taiga > zones > forest.
+    QHash<ColKey, quint8> biomeCells;
+    // Fields: tall grass (>= 50000 m²) — meadow (at the map edge the game will continue the meadow with flowers and tall grass). Wheat fields and ordinary grass — plains (the default biome, the cells are not written).
+    for (auto pit = colPlant.constBegin(); pit != colPlant.constEnd(); ++pit)
+        if (pit.value() == quint16(IdTallGrass))
+            biomeCells.insert(pairKey(keyFirst(pit.key()) >> 2, keySecond(pit.key()) >> 2), quint8(7));
+    for (int fi = 0; fi < forests.size(); ++fi)
+        if (fi != paleIdx && !forests[fi].spruce)
+            for (const ColSpan& c : forests[fi].spans)
+                for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
+                    biomeCells.insert(pairKey(c.x >> 2, z4), quint8(forests[fi].park ? 6 : 3));   // a park — flower_forest (a flowery forest), other forests — forest
+    constexpr int kZoneR = 18;                                       // the average radius of a ragged zone around a school / research institute / kindergarten (blocks from the walls; up to ×1.45 in the tongues), where the biome changes and trees grow
+    constexpr int kZoneMax = 27;                                     // the cell scan reach (kZoneR × 1.45 with a margin)
+    for (const IslandSite& is : islandSites)
+        if (is.kind != 2)
+        for (int z4 = (is.cz - is.rz - kZoneMax) >> 2; z4 <= ((is.cz + is.rz + kZoneMax) >> 2); ++z4)
+            for (int x4 = (is.cx - is.rx - kZoneMax) >> 2; x4 <= ((is.cx + is.rx + kZoneMax) >> 2); ++x4)
+            {
+                const int px = x4 * 4 + 2, pz = z4 * 4 + 2;
+                const int dx = std::max(0, std::abs(px - is.cx) - is.rx), dz = std::max(0, std::abs(pz - is.cz) - is.rz);
+                Q_UNUSED(dx); Q_UNUSED(dz);
+                if (!zoneInside(is, px, pz, kZoneR)) continue;
+                biomeCells.insert(pairKey(x4, z4), quint8(is.kind == 1 ? 4 : 5));
+            }
+    for (const qint64 k : taigaCells) biomeCells.insert(k, quint8(2));
+    for (const qint64 k : paleCells) biomeCells.insert(k, quint8(1));
+    // Donor: the terrain of the real Pale Garden instead of the forest terrain (smoothly at the border), trees are carried over together with it.
+    struct PaleCol { int top; qint16 dy; quint8 w; quint16 surf; qint32 di = 0; qint16 pid = -1; };   // pid >= 0 — a patch (outpost/camp), otherwise the Pale Garden donor
+    QVector<PaleDonor>& patches = patchesLoaded;                   // terrain patches with structures (patch_*.bin)
+    struct PatchPlace { int pi; int x0, z0; };
+    QVector<PatchPlace> patchPlaces;
+    QSet<ColKey> patchCols;                                        // patch columns (with a margin of 3) — trees/flora are not planted there
+    QHash<ColKey, QVector<CaveBe>> extraBesByChunk;                // block entities of the patches (outpost chests)
+    QVector<PortalStartSite> portalStarts;                         // ruined portals in forests (structure starts for /locate)
+    QHash<ColKey, QVector<PortalStartSite>> portalsByChunk;        // the same by chunks touched by the frame
+    QHash<ColKey, PaleCol> paleCol;
+    bool paleDonorUsed = false;
+    // FLOATING ISLANDS above parks (71126000): above 70% of the suitable parks (area >= 6000 m²) and above every big one (>= 4 ha), not closer than 250 blocks to each other.
+    {
+        QVector<int> ord;
+        for (int i = 0; i < parkCands.size(); ++i) ord << i;
+        std::sort(ord.begin(), ord.end(), [&](int a, int b) { return parkCands[a].areaM2 != parkCands[b].areaM2 ? parkCands[a].areaM2 > parkCands[b].areaM2 : parkCands[a].h < parkCands[b].h; });
+        QVector<QPoint> chosen;
+        for (int i : ord)
+        {
+            const ParkCand& pc = parkCands[i];
+            if (pc.areaM2 < 40000 && pc.h % 100u >= 70u) continue;                 // 70% of the suitable parks, big ones (>= 4 ha) always: the biggest park massifs were skipped whole
+            bool far = true;
+            for (const QPoint& q : chosen) if (std::hypot(double(q.x() - pc.cx), double(q.y() - pc.cz)) < 250.0) { far = false; break; }
+            if (!far) continue;
+            IslandSite is;
+            is.kind = 2;
+            is.cx = pc.cx; is.cz = pc.cz;
+            is.rx = 18 + int((pc.h >> 8) % 7u); is.rz = 14 + int((pc.h >> 12) % 6u);        // ~ 40×30 blocks — the size of the former islands above kindergartens
+            is.yTop = 0;
+            is.hash = pc.h * 2654435761u ^ 0x151A9Du;
+            islandSites.append(is);
+            chosen.append(QPoint(pc.cx, pc.cz));
+        }
+    }
+    // The column ground top: the terrain as is (valleys are not filled up to the plane); in the apron (beyond the object rectangle) it smoothly (smoothstep)
+    // descends to the reference level — otherwise hills at the export edge would break off as a wall into the flat surroundings. No terrain data — the plane.
+    // Light terrain of the "empty lands" (clearings, fields, wastelands between blocks): a dense grid of height additions over the export rectangle (filled after forests and patches).
+    int erX0 = 0, erZ0 = 0, erW = 0, erH = 0;
+    QVector<qint8> emptyDelta;
+    auto addEmpty = [&](int v, int x, int z) -> int
+    {
+        if (erW == 0) return v;
+        const int gx = x - erX0, gz = z - erZ0;
+        if (gx < 0 || gx >= erW || gz < 0 || gz >= erH) return v;
+        return std::max(0, std::min(255, v + int(emptyDelta[qsizetype(gz) * erW + gx])));
+    };
+    auto groundTopCol = [&](int x, int z) -> int
+    {
+        if (!paleCol.isEmpty())
+        {
+            const auto pit = paleCol.constFind(pairKey(x, z));
+            if (pit != paleCol.constEnd()) return pit->top;
+        }
+        const int t = terrainTopBlock(x, z);
+        if (t == std::numeric_limits<int>::min()) return addEmpty(genGroundTop, x, z);
+        const int cxk = x >> 4, czk = z >> 4;
+        const int d = std::max(std::max(rcx0 - cxk, cxk - rcx1), std::max(std::max(rcz0 - czk, czk - rcz1), 0));
+        if (d <= 0 || rectM <= 0) return addEmpty(std::max(0, std::min(t, 255)), x, z);
+        double u = std::min(1.0, double(d) / double(rectM));
+        u = u * u * (3.0 - 2.0 * u);
+        return std::max(0, std::min(255, int(std::lround(double(t) * (1.0 - u) + double(genGroundTop) * u))));
+    };
+    // Columns where the relief is not made: buildings and water. Roads are NOT in this list: they follow the terrain (the marking is moved onto the final relief
+    // before the ground fill, see "roads follow the relief" below), otherwise the road would be a flat trench cut through the hills of a forest.
+    auto reliefBlocked = [&](qint64 ck) -> bool
+    {
+        return (colMin.contains(ck) && !roadCols.contains(ck)) || colWater.contains(ck) || (colWool.contains(ck) && !roadCols.contains(ck));
+    };
+    // The distance (blocks) to the border of the exported rectangle of chunks, mapped to 0..1: the donor mountains slowly come down to the user's ground within 64 blocks of the border,
+    // otherwise they are cut by a wall where the generated world of the game begins.
+    int efx0 = rcx0, efx1 = rcx1, efz0 = rcz0, efz1 = rcz1;            // the exported rectangle of chunks together with the forest chunks
+    for (const VegSite& vs : forests)
+        for (const ColSpan& c : vs.spans)
+        {
+            efx0 = std::min(efx0, c.x >> 4); efx1 = std::max(efx1, c.x >> 4);
+            efz0 = std::min(efz0, c.z0 >> 4); efz1 = std::max(efz1, c.z1 >> 4);
+        }
+    auto edgeFade = [=](int x, int z) -> double
+    {
+        if (efx1 < efx0) return 1.0;
+        const int e = std::min(std::min(x - efx0 * 16, (efx1 + 1) * 16 - 1 - x), std::min(z - efz0 * 16, (efz1 + 1) * 16 - 1 - z));
+        if (e >= 64) return 1.0;
+        if (e <= 0) return 0.0;
+        const double u = e / 64.0;
+        return u * u * (3.0 - 2.0 * u);
+    };
+    if (paleIdx >= 0 && !paleDonor.empty())
+    {
+        const VegSite& ps = forests[paleIdx];
+        const int pbx0 = ps.minX, pbz0 = ps.minZ, PW = ps.maxX - ps.minX + 1, PH = ps.maxZ - ps.minZ + 1;
+        if (qint64(PW) * PH <= 60000000ll)
+        {
+            QVector<quint8> dist(PW * PH, 0);                          // the distance (city block) to the nearest column outside the forest, up to 255
+            for (const ColSpan& c : ps.spans)
+                for (int z = c.z0; z <= c.z1; ++z) dist[(z - pbz0) * PW + (c.x - pbx0)] = 255;
+            for (int z = 0; z < PH; ++z)                                // forward pass
+                for (int x = 0; x < PW; ++x)
+                {
+                    quint8& dv = dist[z * PW + x];
+                    if (!dv) continue;
+                    const int l = (x > 0) ? dist[z * PW + x - 1] : 0, u = (z > 0) ? dist[(z - 1) * PW + x] : 0;
+                    dv = quint8(std::min<int>(dv, std::min(l, u) + 1));
+                }
+            for (int z = PH - 1; z >= 0; --z)                           // backward pass
+                for (int x = PW - 1; x >= 0; --x)
+                {
+                    quint8& dv = dist[z * PW + x];
+                    if (!dv) continue;
+                    const int r = (x + 1 < PW) ? dist[z * PW + x + 1] : 0, dn = (z + 1 < PH) ? dist[(z + 1) * PW + x] : 0;
+                    dv = quint8(std::min<int>(dv, std::min(r, dn) + 1));
+                }
+            constexpr double kBlendL = 28.0;                                // the width of the smooth transition at the forest border, blocks
+            auto donorIndex = [&](int x, int z) -> int
+            {
+                int ux = (x - pbx0) % (2 * paleDonor.W), uz = (z - pbz0) % (2 * paleDonor.H);
+                if (ux >= paleDonor.W) ux = 2 * paleDonor.W - 1 - ux;
+                if (uz >= paleDonor.H) uz = 2 * paleDonor.H - 1 - uz;
+                return uz * paleDonor.W + ux;
+            };
+            // The forest mansion in the template would be repeated over the whole big forest (the tiling is mirrored) — we keep ONE (the largest by the number of columns);
+            // the other mansion columns are replaced with a reflection of the neighboring free part of the template: the same trees and terrain continue there.
+            QSet<ColKey> keepMansion;
+            bool mansionPatch = false;
+            for (const PaleDonor& pdn : patchesLoaded) if (pdn.name.contains(QLatin1String("mansion"))) mansionPatch = true;
+            if (paleDonor.mx1 >= paleDonor.mx0 && !mansionPatch)
+            {
+                QHash<ColKey, int> comp;                                    // a mansion column -> the component number
+                QVector<int> compSize;
+                for (const ColSpan& c : ps.spans)
+                    for (int z = c.z0; z <= c.z1; ++z)
+                        if (paleDonor.mansion[donorIndex(c.x, z)]) comp.insert(pairKey(c.x, z), -1);
+                QVector<qint64> stack;
+                for (auto it = comp.begin(); it != comp.end(); ++it)
+                {
+                    if (it.value() >= 0) continue;
+                    const int id = compSize.size();
+                    compSize.append(0);
+                    it.value() = id;
+                    stack.clear(); stack.append(it.key());
+                    while (!stack.isEmpty())
+                    {
+                        const qint64 k = stack.takeLast();
+                        ++compSize[id];
+                        const int kx = keyFirst(k), kz = keySecond(k);
+                        const qint64 nb[4] = { pairKey(kx + 1, kz), pairKey(kx - 1, kz), pairKey(kx, kz + 1), pairKey(kx, kz - 1) };
+                        for (qint64 nk : nb)
+                        {
+                            auto nit = comp.find(nk);
+                            if (nit != comp.end() && nit.value() < 0) { nit.value() = id; stack.append(nk); }
+                        }
+                    }
+                }
+                // We prefer a whole mansion (not cut by the forest edge) in a direct (non-mirrored) tile; otherwise the largest.
+                QVector<char> compMirror(compSize.size(), 0);
+                for (auto it = comp.constBegin(); it != comp.constEnd(); ++it)
+                    if ((keyFirst(it.key()) - pbx0) % (2 * paleDonor.W) >= paleDonor.W || (keySecond(it.key()) - pbz0) % (2 * paleDonor.H) >= paleDonor.H) compMirror[it.value()] = 1;
+                int fullCount = 0;
+                for (const quint8 mv : paleDonor.mansion) if (mv) ++fullCount;
+                int bestComp = -1;
+                double bestScore = -1.0;
+                for (int i = 0; i < compSize.size(); ++i)
+                {
+                    const double sc = double(compSize[i]) * (compSize[i] >= fullCount * 0.97 ? 3.0 : 1.0) * (compMirror[i] ? 0.8 : 1.0);
+                    if (sc > bestScore) { bestScore = sc; bestComp = i; }
+                }
+                for (auto it = comp.constBegin(); it != comp.constEnd(); ++it)
+                    if (it.value() == bestComp) keepMansion.insert(it.key());
+                res.lairInfo += QObject::tr("; forest mansion: 1 of %1 kept").arg(compSize.size());
+            }
+            // TERRAIN AS IN THE ORIGINAL: the forest ground = the donor terrain + ONE integer height shift (all the columns are shifted equally, so the trees and the mansion carried
+            // together with the terrain stay whole — without "hanging" crowns); to the user's ground the terrain smoothly descends at the forest border (kBlendL blocks, smoothstep).
+            double hdSum = 0.0;
+            for (const qint16 hv : paleDonor.hd) hdSum += hv;
+            const double hdMeanL = paleDonor.hd.isEmpty() ? 0.0 : hdSum / double(paleDonor.hd.size());
+            double sumT = 0.0; qint64 nT = 0;
+            for (const ColSpan& c : ps.spans)
+                for (int z = c.z0; z <= c.z1; z += 3) { sumT += groundTopCol(c.x, z); ++nT; }
+            const double baseT = nT ? sumT / double(nT) : double(genGroundTop);
+            const int shiftC = int(std::lround(baseT - hdMeanL));
+            for (const ColSpan& c : ps.spans)
+                for (int z = c.z0; z <= c.z1; ++z)
+                {
+                    const qint64 ck = pairKey(c.x, z);
+                    if (reliefBlocked(ck)) continue;   // buildings and water are not touched (roads follow the terrain)
+                    int di = donorIndex(c.x, z);
+                    if (paleDonor.mansion[di] && !keepMansion.contains(ck))
+                    {   // an extra mansion: we take the reflected free column (or the bare terrain, if there is none)
+                        const int alt = paleDonor.reflectFree(di % paleDonor.W, di / paleDonor.W);
+                        if (alt >= 0) di = alt;
+                    }
+                    double wv = std::min(1.0, double(dist[(z - pbz0) * PW + (c.x - pbx0)]) / kBlendL);
+                    wv = wv * wv * (3.0 - 2.0 * wv);
+                    wv *= edgeFade(c.x, z);
+                    const int t0 = groundTopCol(c.x, z);
+                    const int tn = std::max(1, std::min(250, int(std::lround(double(t0) * (1.0 - wv) + double(paleDonor.hd[di] + shiftC) * wv))));
+                    paleCol.insert(ck, PaleCol{ tn, qint16(tn - paleDonor.hd[di]), quint8(std::lround(wv * 255.0)), wv >= 0.5 ? paleDonor.surf[di] : quint16(0), qint32(di) });
+                }
+            paleDonorUsed = !paleCol.isEmpty();
+        }
+    }
+    if (paleIdx >= 0 && paleDonor.empty())
+        res.lairInfo += QObject::tr("; Pale Garden: pale_garden.bin was not found next to cave_templates.bin — a procedural forest without the donor terrain");
+    lap("g1 Pale Garden/donor");
+    // RANDOM TERRAIN IN FORESTS on top of the standard one: a low-frequency "hilliness" (a sum of sinusoids with their own phases for each forest, ±A blocks), at the border
+    // the forest (28 blocks) smoothly fades out. Spruce/taiga forests are hillier (±12 by the sinusoid amplitude, in fact ±4…8), other forests (±8), the procedural pale oak without a donor (±10); big parks (from 6000 m²) are softer (±5), small parks are flat.
+    {
+        constexpr double kBlendR = 28.0;
+        // The forests are independent of each other and only read the common maps — we compute in parallel (on big projects it is the longest
+        // sequential step of the "Ground"), and into paleCol we put in the order of the forests: the earlier forest wins at intersections, as before.
+        struct ReliefOut { QVector<QPair<qint64, int>> cells; qint64 n = 0; };
+        QVector<ReliefOut> reliefOut(forests.size());
+        QVector<int> reliefIdx;
+        for (int fi = 0; fi < forests.size(); ++fi) reliefIdx.append(fi);
+        QtConcurrent::blockingMap(reliefIdx, [&](int fi)
+        {
+            const VegSite& fs = forests[fi];
+            if (fi == paleIdx) return;                                      // the Pale Garden terrain is not touched
+            if (fs.loose) return;                                           // yards and taiga of the private sector (OSM): the "empty lands" terrain, see below
+            if (fs.park)
+            {   // big parks (from 6000 m²) get terrain too, softer than the forest one; small ones stay flat
+                qint64 parkArea = 0;
+                for (const ColSpan& c : fs.spans) parkArea += c.z1 - c.z0 + 1;
+                if (parkArea < 6000) return;
+            }
+            const int fbx0 = fs.minX, fbz0 = fs.minZ, FW = fs.maxX - fs.minX + 1, FH = fs.maxZ - fs.minZ + 1;
+            if (FW <= 0 || FH <= 0 || qint64(FW) * FH > 60000000ll) return;
+            QVector<quint8> dist(FW * FH, 0);
+            for (const ColSpan& c : fs.spans)
+                for (int z = c.z0; z <= c.z1; ++z) dist[(z - fbz0) * FW + (c.x - fbx0)] = 255;
+            for (int z = 0; z < FH; ++z)
+                for (int x = 0; x < FW; ++x)
+                {
+                    quint8& dv = dist[z * FW + x];
+                    if (!dv) continue;
+                    const int l = (x > 0) ? dist[z * FW + x - 1] : 0, u = (z > 0) ? dist[(z - 1) * FW + x] : 0;
+                    dv = quint8(std::min<int>(dv, std::min(l, u) + 1));
+                }
+            for (int z = FH - 1; z >= 0; --z)
+                for (int x = FW - 1; x >= 0; --x)
+                {
+                    quint8& dv = dist[z * FW + x];
+                    if (!dv) continue;
+                    const int r = (x + 1 < FW) ? dist[z * FW + x + 1] : 0, dn = (z + 1 < FH) ? dist[(z + 1) * FW + x] : 0;
+                    dv = quint8(std::min<int>(dv, std::min(r, dn) + 1));
+                }
+            const double A = fs.park ? 5.0 : (fs.spruce ? 12.0 : 8.0);
+            const quint32 hs = colHash(pairKey(fs.spans.first().x, fs.spans.first().z0) ^ 0xBEEFull);
+            const double ph1 = (hs & 255u) / 40.0, ph2 = ((hs >> 8) & 255u) / 40.0, ph3 = ((hs >> 16) & 255u) / 40.0, ph4 = ((hs >> 24) & 255u) / 40.0;
+            ReliefOut& ro = reliefOut[fi];
+            for (const ColSpan& c : fs.spans)
+                for (int z = c.z0; z <= c.z1; ++z)
+                {
+                    const qint64 ck = pairKey(c.x, z);
+                    if (reliefBlocked(ck) || paleCol.contains(ck)) continue;
+                    double wv = std::min(1.0, double(dist[(z - fbz0) * FW + (c.x - fbx0)]) / kBlendR);
+                    wv = wv * wv * (3.0 - 2.0 * wv);
+                    const double n = 0.45 * std::sin(c.x / 17.0 + ph1) * std::cos(z / 21.0 + ph2) + 0.35 * std::sin((c.x + z) / 29.0 + ph3)
+                                   + 0.25 * std::sin(c.x / 8.5 + ph4) * std::sin(z / 9.5 + ph2) + 0.15 * std::cos((c.x - z) / 13.0 + ph1);
+                    const int t0 = groundTopCol(c.x, z);
+                    const int tn = std::max(1, std::min(250, t0 + int(std::lround(A * n * wv))));
+                    if (tn != t0) ro.cells.append(qMakePair(ck, tn));
+                    ++ro.n;
+                }
+        });
+        int nRelief = 0;
+        for (int fi = 0; fi < forests.size(); ++fi)
+        {
+            ReliefOut& ro = reliefOut[fi];
+            nRelief += int(ro.n);
+            for (const auto& cl : ro.cells)
+                if (!paleCol.contains(cl.first)) paleCol.insert(cl.first, PaleCol{ cl.second, 0, 0, 0 });   // w=0: only the ground mark (the donor blocks/surface are not affected)
+            ro.cells.clear(); ro.cells.squeeze();
+        }
+        if (nRelief > 0) res.lairInfo += QObject::tr("; terrain in forests: %1 columns").arg(nRelief);
+    }
+    lap("g2 forest terrain");
+    // BANDIT OUTPOSTS and ABANDONED CAMPS (cut out of a real world whole, together with the terrain): outposts — only in big spruce (taiga) forests
+    // (an area of at least 9 outposts, 48×48 -> 20736 m²), roughly one per two such "nines"; camps — in forests from 10000 m² (a taiga/ordinary camp by the forest type).
+    if (!patches.isEmpty())
+    {
+        QVector<int> outposts, campsTaiga, campsForest, mansionsP;
+        for (int i = 0; i < patches.size(); ++i)
+        {
+            if (patches[i].name.contains(QLatin1String("mansion"))) mansionsP << i;
+            else if (patches[i].name.contains(QLatin1String("outpost"))) outposts << i;
+            else if (patches[i].name.contains(QLatin1String("camp_taiga"))) campsTaiga << i;
+            else if (patches[i].name.contains(QLatin1String("wreck"))) continue;       // ships — into water bodies (below), not into forests
+            else campsForest << i;
+        }
+        auto tryPlace = [&](int fi, int pi, quint32 salt, QVector<QPoint>* keepApart = nullptr) -> bool
+        {
+            const VegSite& fs = forests[fi];
+            const PaleDonor& pd = patches[pi];
+            const int bw = fs.maxX - fs.minX + 1 - pd.W, bh = fs.maxZ - fs.minZ + 1 - pd.H;
+            if (bw <= 0 || bh <= 0) return false;
+            // Mansion: from the suitable places (up to 150) we take the one where the forest terrain fits best the terrain of the structure itself, and the height
+            // is chosen by the average deviation around — otherwise the mansion "sits in a pit"/on a fill that the smoothing ring cuts off.
+            const bool isMansion = pd.name.contains(QLatin1String("mansion")) && pd.bbx1 >= pd.bbx0 && pd.bbz1 >= pd.bbz0;
+            const int mRefX = isMansion ? (pd.bbx0 + pd.bbx1) / 2 : 0, mRefZ = isMansion ? (pd.bbz0 + pd.bbz1) / 2 : 0;
+            double fitBase = 0.0;                                           // the chosen height of the mansion reference point
+            bool haveFit = false;
+            // A patch with a building (the mansion) may be crossed by roads and paths (in OSM forests have plenty of them) outside the building itself: they follow its terrain;
+            // only the building and the strip of 6 blocks around it must be free of roads.
+            const bool hasBoxP = pd.bbx1 >= pd.bbx0 && pd.bbz1 >= pd.bbz0;
+            const auto placeable = [&](int x0, int z0) -> bool
+            {
+                for (int z = z0; z < z0 + pd.H; z += 4)                    // the whole rectangle inside the forest, without buildings, water, roads and other patches
+                    for (int x = x0; x < x0 + pd.W; x += 4)
+                    {
+                        const qint64 ck = pairKey(x, z);
+                        const int ux = x - x0, uz = z - z0;
+                        const bool nearBuilding = !hasBoxP || (ux >= pd.bbx0 - 6 && ux <= pd.bbx1 + 6 && uz >= pd.bbz0 - 6 && uz <= pd.bbz1 + 6);
+                        const bool road = roadCols.contains(ck);
+                        if (!spansContain(fs.spans, x, z) || (colMin.contains(ck) && (nearBuilding || !road)) || colWater.contains(ck) || (colWool.contains(ck) && (nearBuilding || !road))
+                            || (road && nearBuilding) || railColsAll.contains(ck) || patchCols.contains(ck) || paleCol.contains(ck) && paleCol.value(ck).pid >= 0) return false;
+                    }
+                return true;
+            };
+            int pickX = 0, pickZ = 0;
+            bool havePick = false;
+            if (isMansion)
+            {   // iterating over places: the average deviation of the forest terrain from the structure terrain on its frame +4 blocks (inside the frame the donor site is flat, and this is the measure of "pit/fill") (after the height is chosen)
+                double bestFit = 1e18, bestBase = 0.0;
+                int nValid = 0;
+                const int hdR = pd.hd[mRefZ * pd.W + mRefX];
+                for (int t = 0; t < 400 && nValid < 150; ++t)
+                {
+                    const quint32 h = colHash(pairKey(fi * 977 + int(salt & 0xFF), t) ^ (qint64(salt) << 8));
+                    const int x0 = fs.minX + int(h % quint32(bw)), z0 = fs.minZ + int((h >> 12) % quint32(bh));
+                    if (!placeable(x0, z0)) continue;
+                    ++nValid;
+                    QVector<double> diffs;
+                    for (int uz = std::max(0, pd.bbz0 - 4); uz <= std::min(pd.H - 1, pd.bbz1 + 4); uz += 2)
+                        for (int ux = std::max(0, pd.bbx0 - 4); ux <= std::min(pd.W - 1, pd.bbx1 + 4); ux += 2)
+                            diffs.append(double(groundTopCol(x0 + ux, z0 + uz)) - double(pd.hd[uz * pd.W + ux] - hdR));
+                    if (diffs.isEmpty()) continue;
+                    double mean = 0;
+                    for (double d : diffs) mean += d;
+                    mean /= diffs.size();
+                    double dev = 0;
+                    for (double d : diffs) dev += std::abs(d - mean);
+                    dev /= diffs.size();
+                    if (dev < bestFit) { bestFit = dev; bestBase = mean; pickX = x0; pickZ = z0; havePick = true; }
+                }
+                if (havePick)
+                {
+                    fitBase = bestBase; haveFit = true;
+                    if (qEnvironmentVariableIsSet("MCX_LAIRDBG"))
+                        std::fprintf(stderr, "[mansion] x0=%d z0=%d base=%.1f meanDev=%.2f of %d\n", pickX, pickZ, bestBase, bestFit, nValid);
+                }
+            }
+            for (int t = 0; t < 400; ++t)
+            {
+                const quint32 h = colHash(pairKey(fi * 977 + int(salt & 0xFF), t) ^ (qint64(salt) << 8));
+                int x0 = fs.minX + int(h % quint32(bw)), z0 = fs.minZ + int((h >> 12) % quint32(bh));
+                if (havePick) { x0 = pickX; z0 = pickZ; }
+                const bool ok = placeable(x0, z0);
+                if (!ok && havePick) return false;
+                if (!ok) continue;
+                const int ccx = x0 + pd.W / 2, ccz = z0 + pd.H / 2;
+                if (keepApart)
+                {   // outposts of one forest — not closer than 300 blocks to each other
+                    bool far = true;
+                    for (const QPoint& q : *keepApart) if (std::hypot(double(q.x() - ccx), double(q.y() - ccz)) < 300.0) { far = false; break; }
+                    if (!far) continue;
+                }
+                const bool hasBox = pd.bbx1 >= pd.bbx0 && pd.bbz1 >= pd.bbz0;
+                const int refX = hasBox ? (pd.bbx0 + pd.bbx1) / 2 : pd.W / 2, refZ = hasBox ? (pd.bbz0 + pd.bbz1) / 2 : pd.H / 2;
+                const double baseT = haveFit ? fitBase : double(groundTopCol(x0 + refX, z0 + refZ));
+                const int hdRef = pd.hd[refZ * pd.W + refX];
+                if (isMansion)
+                {   // Mansion: the site is flat within the structure frame (the column blocks travel together with the ground, so at the walls the weight must be 1 —
+                    // otherwise a wall is "led" up/down following the forest terrain), and beyond the frame the forest is smoothly (18 blocks) pulled to the site; the ring
+                    // goes beyond the cut-out patch — there is only the ground mark.
+                    constexpr int kRing = 18;
+                    for (int z = z0 + pd.bbz0 - kRing; z <= z0 + pd.bbz1 + kRing; ++z)
+                        for (int x = x0 + pd.bbx0 - kRing; x <= x0 + pd.bbx1 + kRing; ++x)
+                        {
+                            const qint64 ck = pairKey(x, z);
+                            if (reliefBlocked(ck)) continue;
+                            const int ux = x - x0, uz = z - z0;
+                            const int ddx = std::max(0, std::max(pd.bbx0 - ux, ux - pd.bbx1)), ddz = std::max(0, std::max(pd.bbz0 - uz, uz - pd.bbz1));
+                            double wb = 1.0 - std::min(1.0, std::hypot(double(ddx), double(ddz)) / double(kRing));
+                            wb = wb * wb * (3.0 - 2.0 * wb);
+                            if (wb <= 0.0) continue;
+                            const int cux = std::max(pd.bbx0, std::min(pd.bbx1, ux)), cuz = std::max(pd.bbz0, std::min(pd.bbz1, uz));   // beyond the frame — the site edge (flat)
+                            const bool inPatch = ux >= 0 && ux < pd.W && uz >= 0 && uz < pd.H;
+                            const int di = (inPatch ? uz : cuz) * pd.W + (inPatch ? ux : cux);
+                            const int hdHere = ddx == 0 && ddz == 0 ? pd.hd[di] : pd.hd[cuz * pd.W + cux];
+                            const int t0 = groundTopCol(x, z);
+                            const int tn = std::max(1, std::min(250, int(std::lround(double(t0) * (1.0 - wb) + (baseT + double(hdHere - hdRef)) * wb))));
+                            if (inPatch)
+                                paleCol.insert(ck, PaleCol{ tn, qint16(tn - pd.hd[di]), quint8(std::lround(wb * 255.0)), wb >= 0.5 ? pd.surf[di] : quint16(0), qint32(di), qint16(pi) });
+                            else
+                                paleCol.insert(ck, PaleCol{ tn, 0, 0, 0 });            // w=0: only the ground mark
+                        }
+                }
+                else
+                for (int z = z0; z < z0 + pd.H; ++z)
+                    for (int x = x0; x < x0 + pd.W; ++x)
+                    {
+                        const qint64 ck = pairKey(x, z);
+                        if (reliefBlocked(ck)) continue;
+                        const int ux = x - x0, uz = z - z0, di = uz * pd.W + ux;
+                        const int dEdge = std::min(std::min(ux, pd.W - 1 - ux), std::min(uz, pd.H - 1 - uz));
+                        double wv = std::min(1.0, double(dEdge) / 12.0);                 // the smooth edge of the patch (12 blocks)
+                        wv = wv * wv * (3.0 - 2.0 * wv);
+                        const int t0 = groundTopCol(x, z);
+                        double wt = wv;                                                     // the donor terrain weight: 1 right at the structure, beyond its frame it goes down to the user's ground within 10 blocks
+                        if (hasBox)
+                        {
+                            const int ddx = std::max(0, std::max(pd.bbx0 - ux, ux - pd.bbx1)), ddz = std::max(0, std::max(pd.bbz0 - uz, uz - pd.bbz1));
+                            double wb = 1.0 - std::min(1.0, std::hypot(double(ddx), double(ddz)) / (isMansion ? 18.0 : 10.0));
+                            wb = wb * wb * (3.0 - 2.0 * wb);
+                            wt = std::min(wv, wb);
+                        }
+                        const int tn = std::max(1, std::min(250, int(std::lround(double(t0) * (1.0 - wt) + (baseT + double(pd.hd[di] - hdRef)) * wt))));
+                        if (hasBox && pd.name.contains(QLatin1String("mansion")) && wt <= 0.0) continue;       // beyond the smoothing ring — the former forest
+                        paleCol.insert(ck, PaleCol{ tn, qint16(tn - pd.hd[di]), quint8(std::lround(wv * 255.0)), wv >= 0.5 ? pd.surf[di] : quint16(0), qint32(di), qint16(pi) });
+                    }
+                if (hasBox && pd.name.contains(QLatin1String("mansion")))
+                {   // trees do not grow near the mansion only in the structure itself (frame +3); around — a ring with procedural trees
+                    for (int z = z0 + pd.bbz0 - 3; z <= z0 + pd.bbz1 + 3; ++z)
+                        for (int x = x0 + pd.bbx0 - 3; x <= x0 + pd.bbx1 + 3; ++x) patchCols.insert(pairKey(x, z));
+                }
+                else
+                    for (int z = z0 - 3; z < z0 + pd.H + 3; ++z)
+                        for (int x = x0 - 3; x < x0 + pd.W + 3; ++x) patchCols.insert(pairKey(x, z));
+                patchPlaces.append(PatchPlace{ pi, x0, z0 });
+                if (keepApart) keepApart->append(QPoint(ccx, ccz));
+                return true;
+            }
+            return false;
+        };
+        int nOut = 0, nCamp = 0;
+        if (paleIdx >= 0 && !mansionsP.isEmpty())
+        {   // the forest mansion (cut out of the world whole, one per Pale Garden): we look for a place in the forest, on failure — no mansion
+            bool placedM = false;
+            for (int k = 0; k < 6 && !placedM; ++k) placedM = tryPlace(paleIdx, mansionsP[0], 0x3A + quint32(k) * 11u);
+            if (placedM)
+            {
+                const PatchPlace& mp = patchPlaces.last();
+                const PaleDonor& mpd = patches[mp.pi];
+                const int mx = mp.x0 + (mpd.bbx0 + mpd.bbx1) / 2, mz = mp.z0 + (mpd.bbz0 + mpd.bbz1) / 2;
+                res.lairInfo += QObject::tr("; forest mansion (cut out of the game world) placed: center x=%1 z=%2 (chunk %3 %4)").arg(mx).arg(mz).arg(mx >> 4).arg(mz >> 4);
+            }
+            else
+                res.lairInfo += QObject::tr("; forest mansion: no place was found in the Pale Garden");
+        }
+        for (int fi = 0; fi < forests.size(); ++fi)
+        {
+            const VegSite& fs = forests[fi];
+            if (fs.park || fs.intra || fi == paleIdx) continue;                 // intra-block vegetation (vgbpol) gets no structures
+            qint64 area = 0;
+            for (const ColSpan& c : fs.spans) area += c.z1 - c.z0 + 1;
+            if (fs.spruce && !outposts.isEmpty() && area >= 20736)
+            {
+                const int n = int(std::min<qint64>(4, std::max<qint64>(1, area / 90000)));       // not more often than one per ~300×300 forest blocks
+                QVector<QPoint> placedHere;
+                for (int k = 0; k < n; ++k)
+                    if (tryPlace(fi, outposts[(fi + k) % outposts.size()], 0x0A + quint32(k) * 7u, &placedHere)) ++nOut;
+            }
+            const QVector<int>& camps = fs.spruce ? campsTaiga : campsForest;
+            if (!camps.isEmpty() && area >= 10000)
+            {
+                const int n = int(std::min<qint64>(6, area / 30000 + 1));
+                for (int k = 0; k < n; ++k)
+                    if (tryPlace(fi, camps[(fi * 3 + k) % camps.size()], 0xC0 + quint32(k) * 13u)) ++nCamp;
+            }
+        }
+        res.lairInfo += QObject::tr("; bandit outposts: %1, abandoned camps: %2").arg(nOut).arg(nCamp);
+    }
+    {   // QUARRY (csrpol 51111000) — a pit with terrace steps; SPOIL HEAP (51123000) — a mound. The terrain is set through paleCol (the column top and the surface block).
+        // The distance to the spot edge (by 4 neighbors) is computed on a dense grid of the spot frame.
+        int nQuarry = 0, nHeap = 0;
+        for (int pi = 0; pi < pads.size(); ++pi)
+        {
+            const int code = padCode.value(pi, 0);
+            if (code != 51111000 && code != 51123000) continue;
+            const QList<qint64>& pc = pads[pi];
+            if (pc.size() < 150) continue;
+            int x0 = std::numeric_limits<int>::max(), x1 = std::numeric_limits<int>::min(), z0 = x0, z1 = x1;
+            for (qint64 ck : pc) { x0 = std::min(x0, keyFirst(ck)); x1 = std::max(x1, keyFirst(ck)); z0 = std::min(z0, keySecond(ck)); z1 = std::max(z1, keySecond(ck)); }
+            const qint64 gw = qint64(x1) - x0 + 3, gh = qint64(z1) - z0 + 3;
+            if (gw * gh > 40000000ll) continue;
+            const int W = int(gw), H = int(gh);
+            QVector<quint8> dist(W * H, 0);
+            for (qint64 ck : pc) dist[(keySecond(ck) - z0 + 1) * W + (keyFirst(ck) - x0 + 1)] = 255;
+            for (int z = 1; z < H - 1; ++z)
+                for (int x = 1; x < W - 1; ++x)
+                {
+                    quint8& dv = dist[z * W + x];
+                    if (!dv) continue;
+                    dv = quint8(std::min<int>(dv, std::min(dist[z * W + x - 1], dist[(z - 1) * W + x]) + 1));
+                }
+            int dmax = 1;
+            for (int z = H - 2; z >= 1; --z)
+                for (int x = W - 2; x >= 1; --x)
+                {
+                    quint8& dv = dist[z * W + x];
+                    if (!dv) continue;
+                    dv = quint8(std::min<int>(dv, std::min(dist[z * W + x + 1], dist[(z + 1) * W + x]) + 1));
+                    dmax = std::max(dmax, int(dv));
+                }
+            const double area = double(pc.size());
+            const quint16 stoneId = IdStone;
+            const quint16 gravelId = quint16(IdPaletteStart + paletteIndexOf("minecraft:gravel"));
+            const quint16 andesiteId = quint16(IdPaletteStart + paletteIndexOf("minecraft:andesite"));
+            const quint16 coalId = quint16(IdPaletteStart + paletteIndexOf("minecraft:coal_ore"));
+            const int maxDepth = std::max(6, std::min(24, int(std::sqrt(area) / 3.0)));
+            const int hHeap = std::max(5, std::min(26, 5 + int(std::sqrt(area) / 3.5)));
+            for (qint64 ck : pc)
+            {
+                const int x = keyFirst(ck), z = keySecond(ck);
+                if (colMin.contains(ck) || colWater.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck)) continue;
+                const int d = int(dist[(z - z0 + 1) * W + (x - x0 + 1)]);
+                const int t0 = groundTopCol(x, z);
+                const quint32 h = colHash(ck ^ 0x9A331ull);
+                if (code == 51111000)
+                {   // terrace steps: 5 blocks wide, a 3-block drop, an uneven edge (noise up to 2 blocks by the distance); the bottom — at maxDepth
+                    const int dn = d + int((colHash(pairKey(x >> 2, z >> 2) ^ 0x7A11ull) % 3u)) - 1;
+                    const int T = dn <= 2 ? 0 : (dn - 2) / 5 + 1;
+                    const int depth = std::min(maxDepth, T * 3);
+                    const int tn = std::max(-40, t0 - depth);
+                    quint16 surf = depth == 0 ? quint16(IdCoarseDirt) : (T % 3 == 1 ? gravelId : (T % 3 == 2 ? andesiteId : stoneId));
+                    if (depth >= 3 && h % 100u < 6u) surf = coalId;                 // rare coal seams
+                    paleCol.insert(ck, PaleCol{ tn, 0, 0, surf });
+                    if (depth > 0) ++nQuarry;
+                }
+                else
+                {   // a mound: the profile — a convex cone with noise; on the slopes stone/coal, on the crest gravel
+                    const double u = std::min(1.0, double(d) / double(std::max(3, dmax)));
+                    double prof = 1.0 - (1.0 - u) * (1.0 - u);
+                    prof *= 0.85 + 0.15 * std::sin(x * 0.31 + z * 0.23) * std::cos(z * 0.27 - x * 0.19);
+                    const int hh = int(std::lround(hHeap * std::max(0.0, std::min(1.0, prof))));
+                    const int tn = std::min(250, t0 + hh);
+                    const quint32 r = h % 100u;
+                    quint16 surf = r < 55u ? stoneId : (r < 78u ? coalId : (r < 90u ? gravelId : quint16(IdCoarseDirt)));
+                    paleCol.insert(ck, PaleCol{ tn, 0, 0, surf });
+                    if (hh > 0) ++nHeap;
+                }
+            }
+        }
+        if (nQuarry > 0) res.lairInfo += QObject::tr("; quarries: %1 columns of the stepped excavation").arg(nQuarry);
+        if (nHeap > 0) res.lairInfo += QObject::tr("; spoil heaps: %1 columns of the mound").arg(nHeap);
+    }
+    {   // LIGHT TERRAIN OF THE EMPTY LANDS: big free places (where single oaks/birches are planted, fields, wastelands) get soft hills (±4), like parks and forests.
+        // The distance to the occupied (buildings, roads, rails, water, sites, forests and patches) is computed on a dense grid; near the occupied and the export edge the addition smoothly fades out (24 blocks).
+        const int ex0 = rcx0 * 16, ez0 = rcz0 * 16;
+        const qint64 eW = qint64(rcx1 - rcx0 + 1) * 16, eH = qint64(rcz1 - rcz0 + 1) * 16;
+        if (eW > 0 && eH > 0 && eW * eH <= 400000000ll)
+        {
+            const int W3 = int(eW), H3 = int(eH);
+            QVector<quint8> ed(qsizetype(W3) * H3, 255);                       // 0 — occupied / outside the export, otherwise the distance
+            auto mark = [&](qint64 k)
+            {
+                const int gx = keyFirst(k) - ex0, gz = keySecond(k) - ez0;
+                if (gx >= 0 && gx < W3 && gz >= 0 && gz < H3) ed[qsizetype(gz) * W3 + gx] = 0;
+            };
+            for (auto it = colMin.constBegin(); it != colMin.constEnd(); ++it) mark(it.key());
+            for (auto it = colWool.constBegin(); it != colWool.constEnd(); ++it) mark(it.key());
+            for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it) mark(it.key());
+            for (const qint64 k : roadCols) mark(k);
+            for (const qint64 k : railColsAll) mark(k);
+            for (auto it = paleCol.constBegin(); it != paleCol.constEnd(); ++it) mark(it.key());
+            for (const VegSite& vs : forests)
+                if (!vs.loose)                                                  // yards and taiga of the private sector (OSM) are not counted as "occupied": hills under their trees too
+                    for (const ColSpan& c : vs.spans)
+                        for (int z = c.z0; z <= c.z1; ++z) mark(pairKey(c.x, z));
+            for (int x = 0; x < W3; ++x) { ed[x] = 0; ed[qsizetype(H3 - 1) * W3 + x] = 0; }
+            for (int z = 0; z < H3; ++z) { ed[qsizetype(z) * W3] = 0; ed[qsizetype(z) * W3 + W3 - 1] = 0; }
+            for (int z = 1; z < H3; ++z)                                         // forward pass (Manhattan)
+                for (int x = 1; x < W3; ++x)
+                {
+                    quint8& dv = ed[qsizetype(z) * W3 + x];
+                    if (!dv) continue;
+                    dv = quint8(std::min<int>(dv, std::min(ed[qsizetype(z) * W3 + x - 1], ed[qsizetype(z - 1) * W3 + x]) + 1));
+                }
+            for (int z = H3 - 2; z >= 0; --z)                                   // backward
+                for (int x = W3 - 2; x >= 0; --x)
+                {
+                    quint8& dv = ed[qsizetype(z) * W3 + x];
+                    if (!dv) continue;
+                    dv = quint8(std::min<int>(dv, std::min(ed[qsizetype(z) * W3 + x + 1], ed[qsizetype(z + 1) * W3 + x]) + 1));
+                }
+            QVector<qint8> delta(qsizetype(W3) * H3, 0);
+            const double A = hasTerrain ? 2.5 : 4.5;                              // with a ready terrain (DTM) — more careful
+            constexpr double kBlendE = 24.0;
+            QVector<int> rows;
+            for (int z = 0; z < H3; ++z) rows.append(z);
+            QtConcurrent::blockingMap(rows, [&](int gz)
+            {
+                const int z = gz + ez0;
+                for (int gx = 0; gx < W3; ++gx)
+                {
+                    const quint8 dv = ed[qsizetype(gz) * W3 + gx];
+                    if (dv < 3) continue;
+                    const int x = gx + ex0;
+                    double wv = std::min(1.0, double(dv) / kBlendE);
+                    wv = wv * wv * (3.0 - 2.0 * wv);
+                    const double n = 0.45 * std::sin(x / 19.0 + 1.3) * std::cos(z / 23.0 + 2.1) + 0.35 * std::sin((x + z) / 31.0 + 0.7)
+                                   + 0.25 * std::sin(x / 9.5 + 4.2) * std::sin(z / 10.5 + 1.9) + 0.15 * std::cos((x - z) / 14.0 + 3.3);
+                    delta[qsizetype(gz) * W3 + gx] = qint8(std::lround(A * n * wv));
+                }
+            });
+            qint64 nEmpty = 0;
+            for (qsizetype i = 0; i < delta.size(); ++i) if (delta[i]) ++nEmpty;
+            erX0 = ex0; erZ0 = ez0; erW = W3; erH = H3;
+            emptyDelta = std::move(delta);
+            if (nEmpty > 0) res.lairInfo += QObject::tr("; terrain of the empty lands: %1 columns").arg(nEmpty);
+        }
+    }
+    g_sandId = quint16(IdPaletteStart + paletteIndexOf("minecraft:sand"));
+    g_clayId = quint16(IdPaletteStart + paletteIndexOf("minecraft:clay"));
+    // CLIMATE ZONE (export/climate.h): the chunk biomes, the surface and the tree species of the export area (the world around — as before)
+    g_zone = std::max(0, std::min(int(Climate::Count) - 1, world.climateZone));
+    {
+        // cell values: 0 other, 1 Pale Garden, 2 taiga, 3 forest, 4 birch forest, 5 dappled forest, 6 flower forest, 7 meadow
+        static const char* const kPlains = "minecraft:plains";
+        const char* b[8] = { "minecraft:plains", "minecraft:pale_garden", "minecraft:taiga", "minecraft:forest", "minecraft:birch_forest",
+                             "minecraft:dappled_forest", "minecraft:flower_forest", "minecraft:meadow" };
+        switch (g_zone)
+        {
+        case Climate::Boreal:        b[0] = "minecraft:taiga"; b[3] = "minecraft:taiga"; b[5] = "minecraft:taiga"; b[6] = "minecraft:taiga"; b[7] = "minecraft:taiga"; break;
+        case Climate::Tundra:        b[0] = b[2] = b[3] = b[4] = b[5] = b[6] = b[7] = "minecraft:snowy_plains"; b[2] = b[3] = b[4] = b[5] = b[6] = "minecraft:snowy_taiga"; break;
+        case Climate::Steppe:        b[0] = b[7] = kPlains; break;
+        case Climate::Mediterranean: b[0] = b[7] = "minecraft:savanna"; b[2] = b[3] = b[4] = b[5] = b[6] = "minecraft:savanna"; break;
+        case Climate::Desert:        b[0] = b[2] = b[3] = b[4] = b[5] = b[6] = b[7] = "minecraft:desert"; break;
+        case Climate::Savanna:       b[0] = b[2] = b[3] = b[4] = b[5] = b[6] = b[7] = "minecraft:savanna"; break;
+        case Climate::Tropical:      b[0] = b[7] = "minecraft:jungle"; b[2] = b[3] = b[4] = b[5] = b[6] = "minecraft:jungle"; break;
+        default: break;
+        }
+        for (int i = 0; i < 8; ++i) g_biomeName[i] = b[i];
+        g_zoneSurface = g_zone == Climate::Desert ? g_sandId : (g_zone == Climate::Tundra ? quint16(IdPaletteStart + paletteIndexOf("minecraft:snow_block")) : quint16(IdGrass));
+        res.lairInfo += QObject::tr("; climate zone: %1").arg(Climate::name(g_zone));
+    }
+    // SMOOTH SLOPE OF THE BOTTOM: the depth of a water body column grows from the shore to the center by 1 block every ~2.5 blocks (the distance to the shore by 8 neighbors), but not more than the depth of the water body;
+    // near the shore — a 1-block shallow, not a sheer pit.
+    if (!colWater.isEmpty())
+    {   // The distance to the shore — on a dense grid (forward/backward passes by 8 neighbors until convergence): a hash walk over tens of millions of columns of a big reservoir
+        // took tens of minutes. Non-water and artificial columns do not pass the distance on (as before).
+        int wx0 = std::numeric_limits<int>::max(), wz0 = std::numeric_limits<int>::max(), wx1 = std::numeric_limits<int>::min(), wz1 = std::numeric_limits<int>::min();
+        for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it)
+        {
+            const int x = keyFirst(it.key()), z = keySecond(it.key());
+            wx0 = std::min(wx0, x); wx1 = std::max(wx1, x); wz0 = std::min(wz0, z); wz1 = std::max(wz1, z);
+        }
+        const qint64 WW = qint64(wx1) - wx0 + 3, WH = qint64(wz1) - wz0 + 3;       // a frame with a 1-cell margin: at the grid border there are enough "land" neighbors
+        if (WW * WH <= 400000000ll)
+        {
+            const int W2 = int(WW), H2 = int(WH);
+            QVector<quint8> wd(int(WW * WH), 0);                                   // 0 — not water or artificial; 255 — water, the distance is not yet known
+            QVector<char> isWater(int(WW * WH), 0);
+            for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it)
+            {
+                const int idx = (keySecond(it.key()) - wz0 + 1) * W2 + (keyFirst(it.key()) - wx0 + 1);
+                isWater[idx] = 1;
+                if (!colWaterArt.contains(it.key())) wd[idx] = 255;
+            }
+            for (int z = 1; z < H2 - 1; ++z)                                       // the initial cells: a non-artificial water has a side neighbor without water
+                for (int x = 1; x < W2 - 1; ++x)
+                {
+                    const int idx = z * W2 + x;
+                    if (!wd[idx]) continue;
+                    if (!isWater[idx - 1] || !isWater[idx + 1] || !isWater[idx - W2] || !isWater[idx + W2]) wd[idx] = 1;
+                }
+            for (int pass = 0; pass < 64; ++pass)
+            {
+                bool changed = false;
+                for (int z = 1; z < H2 - 1; ++z)
+                    for (int x = 1; x < W2 - 1; ++x)
+                    {
+                        const int idx = z * W2 + x;
+                        if (!wd[idx] || wd[idx] == 1) continue;
+                        int m = wd[idx];
+                        const int nb[4] = { idx - 1, idx - W2 - 1, idx - W2, idx - W2 + 1 };
+                        for (int k = 0; k < 4; ++k) if (wd[nb[k]] && wd[nb[k]] + 1 < m) m = wd[nb[k]] + 1;
+                        if (m < wd[idx]) { wd[idx] = quint8(m); changed = true; }
+                    }
+                for (int z = H2 - 2; z >= 1; --z)
+                    for (int x = W2 - 2; x >= 1; --x)
+                    {
+                        const int idx = z * W2 + x;
+                        if (!wd[idx] || wd[idx] == 1) continue;
+                        int m = wd[idx];
+                        const int nb[4] = { idx + 1, idx + W2 + 1, idx + W2, idx + W2 - 1 };
+                        for (int k = 0; k < 4; ++k) if (wd[nb[k]] && wd[nb[k]] + 1 < m) m = wd[nb[k]] + 1;
+                        if (m < wd[idx]) { wd[idx] = quint8(m); changed = true; }
+                    }
+                if (!changed) break;
+            }
+            for (auto it = colWater.begin(); it != colWater.end(); ++it)
+            {
+                if (colWaterArt.contains(it.key())) continue;
+                const int dv = wd[(keySecond(it.key()) - wz0 + 1) * W2 + (keyFirst(it.key()) - wx0 + 1)];
+                const int dd = dv == 0 ? 1 : dv;                               // 255 — very far from the shore (the distance is saturated)
+                const int slope = 1 + int((dd - 1) / 2.5);
+                it.value() = std::max(1, std::min(it.value(), slope));
+            }
+        }
+        else
+        {   // an unrealistically big water frame (separated lakes tens of kilometers apart) — the former hash walk
+            QHash<ColKey, int> wdist;
+            wdist.reserve(colWater.size());
+            QVector<qint64> cur;
+            for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it)
+            {
+                if (colWaterArt.contains(it.key())) continue;                 // artificial water bodies — a flat bottom, the former depth
+                const int x = keyFirst(it.key()), z = keySecond(it.key());
+                if (!colWater.contains(pairKey(x + 1, z)) || !colWater.contains(pairKey(x - 1, z)) || !colWater.contains(pairKey(x, z + 1)) || !colWater.contains(pairKey(x, z - 1)))
+                { wdist.insert(it.key(), 1); cur.append(it.key()); }
+            }
+            for (int step = 2; !cur.isEmpty(); ++step)
+            {
+                QVector<qint64> nxt;
+                for (const qint64 k : cur)
+                {
+                    const int x = keyFirst(k), z = keySecond(k);
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            const qint64 nk = pairKey(x + dx, z + dz);
+                            if (!colWater.contains(nk) || colWaterArt.contains(nk) || wdist.contains(nk)) continue;
+                            wdist.insert(nk, step);
+                            nxt.append(nk);
+                        }
+                }
+                cur = nxt;
+            }
+            for (auto it = colWater.begin(); it != colWater.end(); ++it)
+            {
+                if (colWaterArt.contains(it.key())) continue;
+                const int dd = wdist.value(it.key(), 1);
+                const int slope = 1 + int((dd - 1) / 2.5);
+                it.value() = std::max(1, std::min(it.value(), slope));
+            }
+        }
+    }
+    // The fill is ONLY the column metadata (GroundChunk): the ground is not written into the store at all, the chunk
+    // sections are assembled by buildChunkNbt (deep stone — with a unary palette without materialization,
+    // we pack only the transition layers). Earlier there was a loop y=-64..top here with store.set for every block
+    // (~130 per column, ~170 million calls per noise export with an apron) — the main time cost.
+    // Sandy shores: the distance (1..2, Chebyshev) from a dry column to the nearest non-artificial water — on a dense grid over the water frame (+2): on big reservoirs
+    // 25 hash queries for every land column were the longest step of the fill.
+    int snX0 = 0, snZ0 = 0, snW = 0, snH = 0;
+    QVector<quint8> sandNear;                                           // 0 — no water nearby
+    bool sandGrid = false;
+    if (!colWater.isEmpty() && g_sandId)
+    {
+        int ax0 = std::numeric_limits<int>::max(), az0 = std::numeric_limits<int>::max(), ax1 = std::numeric_limits<int>::min(), az1 = std::numeric_limits<int>::min();
+        for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it)
+        {
+            const int x = keyFirst(it.key()), z = keySecond(it.key());
+            ax0 = std::min(ax0, x); ax1 = std::max(ax1, x); az0 = std::min(az0, z); az1 = std::max(az1, z);
+        }
+        snX0 = ax0 - 3; snZ0 = az0 - 3;
+        const qint64 gw = qint64(ax1) - ax0 + 7, gh = qint64(az1) - az0 + 7;
+        if (gw * gh <= 400000000ll)
+        {
+            snW = int(gw); snH = int(gh);
+            QVector<char> natW(snW * snH, 0);
+            for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it)
+                if (!colWaterArt.contains(it.key())) natW[(keySecond(it.key()) - snZ0) * snW + (keyFirst(it.key()) - snX0)] = 1;
+            sandNear.fill(0, snW * snH);
+            for (int z = 3; z < snH - 3; ++z)
+                for (int x = 3; x < snW - 3; ++x)
+                {
+                    const int idx = z * snW + x;
+                    if (!natW[idx]) continue;
+                    if (natW[idx - 1] && natW[idx + 1] && natW[idx - snW] && natW[idx + snW]
+                        && natW[idx - snW - 1] && natW[idx - snW + 1] && natW[idx + snW - 1] && natW[idx + snW + 1]) continue;   // inside the water — the edges are not touched
+                    for (int dz = -2; dz <= 2; ++dz)
+                        for (int dx = -2; dx <= 2; ++dx)
+                        {
+                            const int d = std::max(std::abs(dx), std::abs(dz));
+                            if (!d) continue;
+                            quint8& sv = sandNear[idx + dz * snW + dx];
+                            if (!sv || d < sv) sv = quint8(d);
+                        }
+                }
+            sandGrid = true;
+        }
+    }
+    // The chunks that have any building / wool / water columns at all: the ground fill looks into these hashes for each of tens of millions of columns (cache misses are
+    // the longest part of the step on big projects), and the overwhelming majority of chunks (forests, fields) are not touched by them.
+    QSet<ColKey> chunksMin, chunksWool, chunksWater;
+    {
+        auto addChunks = [](QSet<ColKey>& dst, const auto& m)
+        {
+            qint64 last = std::numeric_limits<qint64>::min();
+            for (auto it = m.constBegin(); it != m.constEnd(); ++it)
+            {
+                const qint64 c = pairKey(keyFirst(it.key()) >> 4, keySecond(it.key()) >> 4);
+                if (c != last) { dst.insert(c); last = c; }
+            }
+        };
+        addChunks(chunksMin, colMin);
+        addChunks(chunksWool, colWool);
+        addChunks(chunksWater, colWater);
+    }
+    QHash<ColKey, GroundChunk> ground;
+    ground.reserve(int(fillChunks.size()));
+    auto makeGround = [&](qint64 ckKey)
+    {
+        GroundChunk g;
+        g.top.resize(256); g.surf.resize(256); g.wd.resize(256); g.art.fill(0, 256);
+        int stoneFloor = std::numeric_limits<int>::max();
+        const int bx0 = keyFirst(ckKey) << 4, bz0 = keySecond(ckKey) << 4;
+        const bool hasMin = chunksMin.contains(ckKey), hasWool = chunksWool.contains(ckKey), hasWat = chunksWater.contains(ckKey);
+        for (int lz = 0; lz < 16; ++lz)
+            for (int lx = 0; lx < 16; ++lx)
+            {
+                const int cx = bx0 + lx, cz = bz0 + lz;
+                const qint64 ck = pairKey(cx, cz);
+                int top = groundTopCol(cx, cz);
+                if (hasMin)
+                {
+                    const auto oit = colMin.constFind(ck);
+                    if (oit != colMin.constEnd())
+                        top = std::max(top, oit.value() - 1);
+                }
+                if (top > 255) top = 255;
+                quint16 surface = g_zoneSurface;              // the top block of the column (turf or csrpol wool; sand in the desert, snow in the tundra)
+                const auto wit = hasWool ? colWool.constFind(ck) : colWool.constEnd();
+                if (wit != colWool.constEnd())
+                    surface = wit.value();
+                else if (!paleCol.isEmpty())
+                {
+                    const auto pit = paleCol.constFind(ck);
+                    if (pit != paleCol.constEnd() && pit->surf) surface = pit->surf;
+                }
+                int wd = 0;                                   // the depth of the water pit (0 — land)
+                const auto witW = hasWat ? colWater.constFind(ck) : colWater.constEnd();
+                if (witW != colWater.constEnd())
+                    wd = witW.value();                        // top>=0 always (median clamp), the pit does not go below -64
+                else if (surface == IdGrass && !colWater.isEmpty() && g_sandId)
+                {   // sandy shores (partially): a dry column near water (up to 2 blocks) — sand with a chance that falls with the distance
+                    int nearD = 99;
+                    if (sandGrid)
+                    {
+                        const int gx = cx - snX0, gz = cz - snZ0;
+                        if (gx >= 0 && gx < snW && gz >= 0 && gz < snH && sandNear[gz * snW + gx]) nearD = sandNear[gz * snW + gx];
+                    }
+                    else
+                        for (int dz = -2; dz <= 2 && nearD > 1; ++dz)
+                            for (int dx = -2; dx <= 2; ++dx)
+                                if (colWater.contains(pairKey(cx + dx, cz + dz)) && !colWaterArt.contains(pairKey(cx + dx, cz + dz))) nearD = std::min(nearD, std::max(std::abs(dx), std::abs(dz)));
+                    if (nearD <= 2)
+                    {
+                        quint32 h = quint32(cx) * 374761393u ^ quint32(cz) * 668265263u ^ 0x5A4Du;
+                        h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+                        if (h % 100u < (nearD == 1 ? 70u : 35u)) surface = g_sandId;
+                    }
+                }
+                const int col = lz * 16 + lx;
+                g.top[col] = qint16(top);
+                g.surf[col] = surface;
+                g.wd[col] = quint16(wd);
+                if (wd > 0 && colWaterArt.contains(ck)) g.art[col] = 1;
+                // below (inclusive) in all the columns there is guaranteed stone: water at wd>3
+                // reaches top-3 and deeper, the ground occupies top-2..top-1 (see groundBlockAt)
+                stoneFloor = std::min(stoneFloor, wd > 0 ? top - wd - 3 : top - 3);    // under the water body bottom — up to 3 blocks of sand, then stone (for artificial ones also with a margin)
+            }
+        g.stoneFloor = stoneFloor;
+        return g;
+    };
+    lap("g3 outposts/camps+makeGround setup");
+    {   // ROADS FOLLOW THE RELIEF: the roadway marking (carpets) was laid at the level of the plane/terrain before the forest relief existed. Where the relief changed the ground
+        // of a road column, the carpet is moved onto the new ground (top+1) and colMin follows it, so the road is not a trench cut through a hill and the ground is not
+        // raised back to the old level.
+        qint64 nMoved = 0;
+        for (const qint64 ck : roadCols)
+        {
+            const auto pit = paleCol.constFind(ck);
+            if (pit == paleCol.constEnd()) continue;
+            auto mit = colMin.find(ck);
+            if (mit == colMin.end()) continue;
+            const int x = keyFirst(ck), z = keySecond(ck);
+            const int oldY = mit.value(), newY = int(pit->top) + 1;
+            if (newY == oldY) continue;
+            const quint16 b = store.get(x, oldY, z);
+            if (b != IdAir && store.get(x, newY, z) == IdAir)
+            {
+                store.erase(x, oldY, z);
+                store.set(x, newY, z, b);
+            }
+            mit.value() = newY;
+            ++nMoved;
+        }
+        if (nMoved > 0) res.lairInfo += QObject::tr("; road columns moved onto the relief: %1").arg(nMoved);
+    }
+    // Caves: a chunk is deterministically assigned a template index (different chunks — different caves,
+    // a repeat is allowed). Without the file (caveSet is empty) caveTpl stays -1 — the underground is solid rock.
+    auto assignCave = [&](GroundChunk& g, qint64 ckKey)
+    {
+        if (!caveSet.empty())
+            g.caveTpl = 0;          // the chunk underground is taken from the cave world by the chunk coordinates (CaveSet::get)
+    };
+    {   // Ground fill: makeGround only reads the common maps, the chunks are independent — we compute in blocks
+        // by threads (our own pool), then put into ground in order. Progress/cancel — from the main thread.
+        const QVector<qint64> fl(fillChunks.constBegin(), fillChunks.constEnd());
+        const int nF = fl.size();
+        QVector<GroundChunk> built(nF);
+        QThreadPool gpool;
+        gpool.setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
+        constexpr int kBlock = 64;
+        QVector<QFuture<void>> gf;
+        gf.reserve((nF + kBlock - 1) / kBlock);
+        for (int b0 = 0; b0 < nF; b0 += kBlock)
+            gf << QtConcurrent::run(&gpool, [&, b0]()
+            {
+                const int b1 = std::min(nF, b0 + kBlock);
+                for (int i2 = b0; i2 < b1; ++i2)
+                {
+                    if (cancel && cancel->load()) return;
+                    built[i2] = makeGround(fl[i2]);
+                    assignCave(built[i2], fl[i2]);
+                }
+            });
+        for (int bi = 0; bi < gf.size(); ++bi)
+        {
+            gf[bi].waitForFinished();
+            if (progress && (bi & 0x7) == 0)
+                progress(std::min(gSurvey + (bi + 1) * kBlock, gTotal), progTotal, 1);  // the "ground" phase — fill
+            if (cancel && cancel->load())
+            {
+                for (QFuture<void>& f : gf) f.waitForFinished();
+                res.cancelled = true;
+                res.error = QObject::tr("Export cancelled.");
+                return res;
+            }
+        }
+        for (int i2 = 0; i2 < nF; ++i2)
+            ground.insert(fl[i2], built[i2]);
+    }
+
+    lap("g4 ground fill");
+    {   // BRIDGES: a road or a railway that runs over water keeps its level (the plane of the ground around) and gets an artificial bridge: a deck flush with the road level
+        // (the roadway wool, for a railway — stone bricks), a stone brick girder under it and piers every 12 blocks down to the bottom. The water stays under the bridge.
+        const quint16 stoneBr = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+        qint64 nBridge = 0;
+        auto bridgeAt = [&](qint64 ck, bool rail)
+        {
+            const int x = keyFirst(ck), z = keySecond(ck);
+            const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+            if (git == ground.constEnd()) return;
+            const int col = (z & 15) * 16 + (x & 15);
+            const int wd = git->wd[col], top = git->top[col];
+            if (wd <= 0) return;
+            const auto wit = colWool.constFind(ck);
+            store.set(x, top, z, (!rail && wit != colWool.constEnd()) ? wit.value() : stoneBr);       // the deck (replaces the top row of water)
+            store.set(x, top - 1, z, stoneBr);                                                         // the girder under the deck
+            if (x % 12 == 0 && z % 12 == 0)
+                for (int y = top - 2; y >= top - wd; --y) store.set(x, y, z, stoneBr);                 // a pier down to the bottom
+            ++nBridge;
+        };
+        if (!colWater.isEmpty())
+        {
+            for (const qint64 ck : roadCols) if (colWater.contains(ck)) bridgeAt(ck, false);
+            for (const qint64 ck : railColsAll) if (colWater.contains(ck) && !roadCols.contains(ck)) bridgeAt(ck, true);
+        }
+        if (nBridge > 0) res.lairInfo += QObject::tr("; bridge columns over water (roads and railways): %1").arg(nBridge);
+    }
+    if (!patchPlaces.isEmpty())
+    {   // outposts and camps: the structure blocks (columns with weight >= 0.5), chests, the raider spawn zone
+        qint64 nBl = 0;
+        for (const PatchPlace& pp : patchPlaces)
+        {
+            const PaleDonor& pd = patches[pp.pi];
+            for (int uz = 0; uz < pd.H; ++uz)
+                for (int ux = 0; ux < pd.W; ++ux)
+                {
+                    const int x = pp.x0 + ux, z = pp.z0 + uz, di = uz * pd.W + ux;
+                    const auto pit = paleCol.constFind(pairKey(x, z));
+                    if (pit == paleCol.constEnd() || pit->pid != pp.pi || pit->w < 128) continue;
+                    if (roadCols.contains(pairKey(x, z))) continue;                // a road crosses the patch: it follows the terrain, without the donor trees on it
+                    for (quint32 k = pd.off[di]; k < pd.off[di + 1]; ++k)
+                    {
+                        const int y = pit->top + int(pd.ady[int(k)]);
+                        if (y > 319 || y < 1) continue;
+                        const quint16 id = pd.aid[int(k)];
+                        if (pd.name.contains(QLatin1String("mansion")) && (id == IdLava || blockName(id) == QLatin1String("minecraft:lava"))) continue;   // there is no lava in the mansion
+                        if (store.get(x, y, z) != IdAir) continue;
+                        store.set(x, y, z, id);
+                        ++nBl;
+                    }
+                }
+            for (const PaleDonor::PatchBe& b : pd.bes)
+            {
+                const int x = pp.x0 + b.x, z = pp.z0 + b.z, di = b.z * pd.W + b.x;
+                const auto pit = paleCol.constFind(pairKey(x, z));
+                if (pit == paleCol.constEnd() || pit->pid != pp.pi) continue;
+                const int y = pit->top + b.dy;
+                if (store.get(x, y, z) == IdAir) continue;                          // there is no block (cut off) — no record needed
+                CaveBe cb;
+                cb.lx = x & 15; cb.lz = z & 15; cb.y = y; cb.kind = b.kind; cb.str = b.str;
+                extraBesByChunk[pairKey(x >> 4, z >> 4)].append(cb);
+                Q_UNUSED(di);
+            }
+            if (pd.name.contains(QLatin1String("mansion")) && pd.bbx1 >= pd.bbx0)
+            {   // the mansion inhabitants (in the game they are created by the structure generator, the template has only blocks): vindicators, evokers, allays — on the free floor cells inside the frame
+                struct Cell { int x, y, z; quint32 h; };
+                QVector<Cell> cand;
+                for (int uz = pd.bbz0 + 2; uz <= pd.bbz1 - 2; uz += 2)
+                    for (int ux = pd.bbx0 + 2; ux <= pd.bbx1 - 2; ux += 2)
+                    {
+                        const int x = pp.x0 + ux, z = pp.z0 + uz;
+                        const auto pit = paleCol.constFind(pairKey(x, z));
+                        if (pit == paleCol.constEnd() || pit->pid != pp.pi) continue;
+                        for (int y = pit->top + 1; y < pit->top + 34; ++y)
+                            if (store.get(x, y, z) == IdAir && store.get(x, y - 1, z) != IdAir && store.get(x, y + 1, z) == IdAir && store.get(x, y + 2, z) == IdAir
+                                && store.get(x + 1, y, z) == IdAir && store.get(x - 1, y, z) == IdAir && store.get(x, y, z + 1) == IdAir && store.get(x, y, z - 1) == IdAir)
+                                cand.append(Cell{ x, y, z, colHash(pairKey(x * 7 + y, z) ^ 0x3A71ull) });
+                    }
+                std::sort(cand.begin(), cand.end(), [](const Cell& a, const Cell& b) { return a.h < b.h; });
+                QVector<Cell> taken;
+                for (const Cell& c : cand)
+                {
+                    if (taken.size() >= 18) break;
+                    bool far = true;
+                    for (const Cell& t : taken)
+                        if (std::abs(t.x - c.x) + std::abs(t.z - c.z) + std::abs(t.y - c.y) * 2 < 7) { far = false; break; }
+                    if (far) taken.append(c);
+                }
+                for (int i = 0; i < taken.size(); ++i)
+                {
+                    NpcSite m;
+                    m.kind = (i % 6 == 5) ? 5 : 4;                                     // every sixth — an allay, the rest — raiders
+                    if (m.kind == 5) m.animal = QStringLiteral("minecraft:allay");
+                    else m.variant = (i % 6 == 2) ? 6 : 5;                             // an evoker / a vindicator
+                    m.x = taken[i].x; m.y = taken[i].y; m.z = taken[i].z;
+                    m.yaw = int((taken[i].h >> 9) % 4u) * 90;
+                    npcs.append(m);
+                }
+                res.lairInfo += QObject::tr("; mansion inhabitants: %1").arg(taken.size());
+            }
+            if (pd.name.contains(QLatin1String("outpost")) && pd.bbx1 >= pd.bbx0)
+            {   // the raider spawn zone = the structure frame (like the "false outpost" of the logs): the game spawns pillagers inside
+                const auto cit = paleCol.constFind(pairKey(pp.x0 + (pd.bbx0 + pd.bbx1) / 2, pp.z0 + (pd.bbz0 + pd.bbz1) / 2));
+                if (cit != paleCol.constEnd())
+                {
+                    LairZone z;
+                    z.x0 = pp.x0 + pd.bbx0; z.x1 = pp.x0 + pd.bbx1; z.z0 = pp.z0 + pd.bbz0; z.z1 = pp.z0 + pd.bbz1;
+                    z.y0 = cit->top; z.y1 = cit->top + 30;
+                    z.floorsY.append(cit->top + 1);
+                    lairZones.append(z);
+                }
+            }
+        }
+        res.lairInfo += QObject::tr("; outpost and camp blocks: %1").arg(nBl);
+    }
+    if (!colWater.isEmpty())
+    {   // SHIPS AND SEAWEED of big water bodies. A ship is a piece of a real world (patch_wreck*.bin): it either lies on the bottom (50%) or drifts on the water with the keel 2 blocks below the waterline
+        // (without waterlogged in the blocks above the water). Only in big deep water bodies: the whole site (the patch with a 6-block margin) must be non-artificial water with a depth
+        // of 5 (bottom) / 4 (drift) or more, with a bottom drop up to 4, without bridges; ships — not closer than 90 blocks to each other.
+        QVector<int> wr;
+        for (int i = 0; i < patches.size(); ++i) if (patches[i].name.contains(QLatin1String("wreck")) && patches[i].W > 0) wr << i;
+        auto groundCol = [&](int x, int z, int& top, int& wdp, bool& art) -> bool
+        {
+            const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+            if (git == ground.constEnd()) return false;
+            const int col = (z & 15) * 16 + (x & 15);
+            top = git->top[col]; wdp = git->wd[col]; art = !git->art.isEmpty() && git->art[col] != 0;
+            return true;
+        };
+        int nWreckSunk = 0, nWreckFloat = 0;
+        if (!wr.isEmpty())
+        {
+            int wx0 = std::numeric_limits<int>::max(), wz0 = std::numeric_limits<int>::max(), wx1 = std::numeric_limits<int>::min(), wz1 = std::numeric_limits<int>::min();
+            for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it)
+            {
+                const int x = keyFirst(it.key()), z = keySecond(it.key());
+                wx0 = std::min(wx0, x); wx1 = std::max(wx1, x); wz0 = std::min(wz0, z); wz1 = std::max(wz1, z);
+            }
+            struct WCand { int x, z; quint32 h; };
+            QVector<WCand> cands;
+            constexpr int kStep = 28;
+            for (int gz = wz0 / kStep - 1; gz <= wz1 / kStep + 1; ++gz)
+                for (int gx = wx0 / kStep - 1; gx <= wx1 / kStep + 1; ++gx)
+                {
+                    const quint32 h = colHash(pairKey(gx, gz) ^ 0x57EC4ull);
+                    if (h % 100u >= 40u) continue;
+                    const int cx = gx * kStep + int((h >> 8) % quint32(kStep)), cz = gz * kStep + int((h >> 16) % quint32(kStep));
+                    int t = 0, d = 0; bool a = false;
+                    if (!groundCol(cx, cz, t, d, a) || d < 5 || a) continue;                // the center — deep natural water
+                    cands.append(WCand{ cx, cz, h });
+                }
+            std::sort(cands.begin(), cands.end(), [](const WCand& a, const WCand& b) { return a.h != b.h ? a.h < b.h : a.x < b.x; });
+            QVector<QPoint> placedW;
+            for (const WCand& c : cands)
+            {
+                bool far = true;
+                for (const QPoint& q : placedW) if (std::hypot(double(q.x() - c.x), double(q.y() - c.z)) < 90.0) { far = false; break; }
+                if (!far) continue;
+                const PaleDonor& pd = patches[wr[int((c.h >> 4) % quint32(wr.size()))]];
+                const bool floating = ((c.h >> 12) & 1u) != 0u;
+                const int need = floating ? 4 : 5;
+                const int x0 = c.x - pd.W / 2, z0 = c.z - pd.H / 2;
+                int minF = 1000, maxF = -1000, topW = -1000;
+                bool ok = true;
+                for (int z = z0; z < z0 + pd.H && ok; z += 2)
+                    for (int x = x0; x < x0 + pd.W; x += 2)
+                    {
+                        int t = 0, d = 0; bool a = false;
+                        const qint64 ck = pairKey(x, z);
+                        if (!groundCol(x, z, t, d, a) || d < need || a || colMin.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck) || colWool.contains(ck)) { ok = false; break; }
+                        minF = std::min(minF, t - d); maxF = std::max(maxF, t - d); topW = std::max(topW, t);
+                    }
+                if (!ok || maxF - minF > 4) continue;
+                // the keel line of the donor: the lowest block of the ship (hd + dy)
+                int keel = std::numeric_limits<int>::max();
+                for (int di = 0; di < pd.W * pd.H; ++di)
+                    for (quint32 k = pd.off[di]; k < pd.off[di + 1]; ++k) keel = std::min(keel, int(pd.hd[di]) + int(pd.ady[int(k)]));
+                if (keel == std::numeric_limits<int>::max()) continue;
+                const int keelY = floating ? topW - 2 : maxF - 1;
+                const QVector<quint16>& ids = floating ? pd.aidDry : pd.aid;
+                for (int uz = 0; uz < pd.H; ++uz)
+                    for (int ux = 0; ux < pd.W; ++ux)
+                    {
+                        const int di = uz * pd.W + ux;
+                        const int x = x0 + ux, z = z0 + uz;
+                        for (quint32 k = pd.off[di]; k < pd.off[di + 1]; ++k)
+                        {
+                            const int y = keelY + int(pd.hd[di]) + int(pd.ady[int(k)]) - keel;
+                            if (y < -63 || y > 318) continue;
+                            store.set(x, y, z, ids[int(k)]);
+                        }
+                    }
+                for (const PaleDonor::PatchBe& b : pd.bes)
+                {
+                    const int x = x0 + b.x, z = z0 + b.z;
+                    const int y = keelY + int(pd.hd[b.z * pd.W + b.x]) + b.dy - keel;
+                    if (store.get(x, y, z) == IdAir) continue;
+                    CaveBe cb;
+                    cb.lx = x & 15; cb.lz = z & 15; cb.y = y; cb.kind = b.kind; cb.str = b.str;
+                    extraBesByChunk[pairKey(x >> 4, z >> 4)].append(cb);
+                }
+                placedW.append(QPoint(c.x, c.z));
+                (floating ? nWreckFloat : nWreckSunk)++;
+            }
+            if (nWreckSunk + nWreckFloat > 0)
+                res.lairInfo += QObject::tr("; shipwrecks in big water bodies: %1 (on the bottom %2, on the water %3)").arg(nWreckSunk + nWreckFloat).arg(nWreckSunk).arg(nWreckFloat);
+        }
+        // seaweed: kelp (the kelp_plant stem + the kelp top) and seagrass in patches; only non-artificial water with a depth of 2 or more, an untouched bottom
+        const quint16 kelpTop = quint16(IdPaletteStart + paletteIndexOf("minecraft:kelp"));
+        const quint16 kelpStem = quint16(IdPaletteStart + paletteIndexOf("minecraft:kelp_plant"));
+        const quint16 seagr = quint16(IdPaletteStart + paletteIndexOf("minecraft:seagrass"));
+        qint64 nKelp = 0, nGrass = 0;
+        for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it)
+        {
+            const int x = keyFirst(it.key()), z = keySecond(it.key());
+            int t = 0, d = 0; bool a = false;
+            if (!groundCol(x, z, t, d, a) || a || d < 2) continue;
+            const quint32 pt = colHash(pairKey(x >> 3, z >> 3) ^ 0x5EA6ull) % 100u;          // an 8×8 patch: dense / sparse
+            const quint32 h = colHash(it.key() ^ 0x5EA7ull);
+            const int floorY = t - d;
+            if (store.get(x, floorY + 1, z) != IdAir) continue;
+            if (d >= 4 && h % 100u < (pt < 40u ? 13u : 2u))
+            {
+                const int top = std::min(d - 1, 3 + int((h >> 8) % 8u));
+                for (int i = 1; i < top; ++i) store.set(x, floorY + i, z, kelpStem);
+                store.set(x, floorY + top, z, kelpTop);
+                ++nKelp;
+            }
+            else if ((h >> 12) % 100u < (pt < 50u ? 18u : 4u))
+            {
+                store.set(x, floorY + 1, z, seagr);
+                ++nGrass;
+            }
+        }
+        if (nKelp + nGrass > 0) res.lairInfo += QObject::tr("; seaweed: kelp %1, seagrass %2 columns").arg(nKelp).arg(nGrass);
+    }
+    if (paleDonorUsed)
+    {   // donor trees and litter: columns with a weight >= 0.65 (right at the forest border tree pieces are not cut)
+        qint64 nBl = 0;
+        QSet<ColKey> lavaCols;
+        for (auto pit = paleCol.constBegin(); pit != paleCol.constEnd(); ++pit)
+        {
+            if (pit->pid >= 0 || pit->w < 235 || pit->surf == 0) continue;   // donor trees — where the terrain is almost entirely donor (the fringe at the border — procedural trees)
+            if (roadCols.contains(pit.key())) continue;                       // a road lies on the donor terrain: no trees and no underground voids on it
+            const int x = keyFirst(pit.key()), z = keySecond(pit.key());
+            const int di = pit->di;                                     // the template column (for extra mansions — the reflected free one)
+            for (quint32 k = paleDonor.off[di]; k < paleDonor.off[di + 1]; ++k)
+            {
+                const int y = pit->top + int(paleDonor.ady[int(k)]);
+                if (y > 319) break;
+                if (store.get(x, y, z) != IdAir) continue;
+                quint16 id = paleDonor.aid[int(k)];
+                if (id == IdLava || blockName(id) == QLatin1String("minecraft:lava")) continue;          // there is no lava in the Pale Garden
+                // there are few real hearts in the donor trees (in the game they are rare): some trunks get a heart — in the game there are enough of them too, so that the forest "lives"
+                if (id == paleDonor.logId && paleDonor.heartId && paleDonor.ady[int(k)] == 4 && ((x | z) & 1) == 0
+                    && colHash(pairKey(x >> 2, z >> 2) ^ 0x4EA7ull) % 100u < 22u)
+                    id = paleDonor.heartId;
+                store.set(x, y, z, id);
+                ++nBl;
+                if (id == IdLava) lavaCols.insert(pit.key());
+                if (paleDonor.heartIds.contains(id)) heartsByChunk[pairKey(x >> 4, z >> 4)].append(QPoint3{ x, y, z });
+            }
+            if (pit->surf == quint16(IdLava)) lavaCols.insert(pit.key());
+            if (!paleDonor.uoff.isEmpty() && !colMin.contains(pit.key()) && !colWater.contains(pit.key()))
+            {   // under the donor terrain (the top 28 blocks) lie its real pits and voids — we carry them as rigidly as the trees
+                QVector<QPair<qint16, quint16>> ul;
+                for (quint32 k = paleDonor.uoff[di]; k < paleDonor.uoff[di + 1]; ++k)
+                {
+                    const quint16 uidv = paleDonor.uid[int(k)];
+                    if (uidv == IdLava || blockName(uidv) == QLatin1String("minecraft:lava")) continue;
+                    ul.append(qMakePair(qint16(pit->top - int(paleDonor.udy[int(k)])), uidv));
+                }
+                if (!ul.isEmpty())
+                {
+                    int lowY = 1000;
+                    for (const auto& ue : ul) lowY = std::min(lowY, int(ue.first));
+                    const auto gu = ground.find(pairKey(x >> 4, z >> 4));
+                    if (gu != ground.end()) gu->stoneFloor = std::min(gu->stoneFloor, lowY - 1);
+                    paleUnder.insert(pit.key(), ul);
+                }
+            }
+        }
+        // Lava puddles: along the outline (8 neighbors) stone instead of moss/grass and no plants on top, otherwise the lava sets the litter on fire.
+        for (const qint64 lk : lavaCols)
+            for (int dz = -1; dz <= 1; ++dz)
+                for (int dx = -1; dx <= 1; ++dx)
+                {
+                    const int x = keyFirst(lk) + dx, z = keySecond(lk) + dz;
+                    const qint64 ck = pairKey(x, z);
+                    if (lavaCols.contains(ck)) continue;
+                    const auto git = ground.find(pairKey(x >> 4, z >> 4));
+                    const auto pc = paleCol.constFind(ck);
+                    if (git == ground.end() || pc == paleCol.constEnd()) continue;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0) continue;
+                    git->surf[col] = quint16(IdStone);
+                    for (int yy = pc->top + 1; yy <= pc->top + 2; ++yy)
+                    {
+                        const quint16 b = store.get(x, yy, z);
+                        if (b != IdAir && b != IdLava && b != paleDonor.logId && !paleDonor.heartIds.contains(b)) store.erase(x, yy, z);
+                    }
+                }
+        res.lairInfo += QObject::tr("; terrain and trees of the real Pale Garden: %1 blocks").arg(nBl);
+    }
+    lap("before 3.5");
+    beginStep(4, vegCells);
+    // 3.5 Vegetation — after the ground (the surface height is needed). Trees — roughly every 25th
+    // column of the "spot" (a deterministic hash — a forest without clearings and without rows), the grass is denser.
+    // Nothing is planted on the occupied columns (structures).
+    auto surfaceTop = [&](qint64 ck) -> int
+    {
+        int top = groundTopCol(keyFirst(ck), keySecond(ck));
+        const auto oit = colMin.constFind(ck);
+        if (oit != colMin.constEnd())
+            top = std::max(top, oit.value() - 1);
+        return std::min(top, 255);
+    };
+    // Spruce: a spruce_log trunk (2×2 for big ones), bare at the bottom, then needle tiers from top to bottom with a radius from 0 (the top) to R; even tiers are narrower than
+    // odd ones — like a real spruce. The needles cover the trunk up to the very top. The crown must not go beyond the chunks with ground.
+    const QSet<ColKey> sprFill(fillChunks.constBegin(), fillChunks.constEnd());
+    // Tree species by the climate zone: "oak" and "birch" in the planting code are replaced with the trunk+leaves pairs of the zone, the spruce cone — with a big broadleaf tree
+    // where there are no conifers; density — the share of plantings that remain (in the desert and tundra trees are rare)
+    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; };
+    const quint16 birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
+    ZoneTrees zt{ IdOakLog, IdOakLeaves, birchLogRaw, IdBirchLeaves, 100, true };
+    {
+        const quint16 aca = quint16(IdPaletteStart + paletteIndexOf("minecraft:acacia_log"));
+        const quint16 jng = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
+        switch (g_zone)
+        {
+        case Climate::Boreal:        zt.oakLog = birchLogRaw; zt.oakLeaf = IdBirchLeaves; break;
+        case Climate::Tundra:        zt.oakLog = birchLogRaw; zt.oakLeaf = IdBirchLeaves; zt.density = 30; break;
+        case Climate::Steppe:        zt.density = 35; zt.cone = false; break;
+        case Climate::Mediterranean: zt.birchLog = IdOakLog; zt.birchLeaf = IdOakLeaves; zt.density = 60; zt.cone = false; break;
+        case Climate::Desert:        zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 8, false }; break;
+        case Climate::Savanna:       zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 35, false }; break;
+        case Climate::Tropical:      zt = ZoneTrees{ jng, IdJungleLeaves, jng, IdJungleLeaves, 100, false }; break;
+        default: break;
+        }
+    }
+    auto zoneSkip = [&](int bx, int bz) { return zt.density < 100 && colHash(pairKey(bx, bz) ^ 0xD3E5ull) % 100u >= quint32(zt.density); };
+    auto zoneRemap = [&](quint16& log, quint16& leaf)
+    {
+        if (log == quint16(IdOakLog)) { log = zt.oakLog; leaf = zt.oakLeaf; }
+        else if (log == birchLogRaw) { log = zt.birchLog; leaf = zt.birchLeaf; }
+    };
+    auto plantSpruceCone = [&](int bx, int bz, int y0, int h, int R) -> bool
+    {
+        const bool wide = R >= 5;                                              // big spruces — a 2×2 trunk
+        const int x1 = bx + (wide ? 1 : 0), z1 = bz + (wide ? 1 : 0);
+        for (int cxk = (bx - R) >> 4; cxk <= ((x1 + R) >> 4); ++cxk)
+            for (int czk = (bz - R) >> 4; czk <= ((z1 + R) >> 4); ++czk)
+                if (!sprFill.contains(pairKey(cxk, czk))) return false;
+        const quint16 sprLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:spruce_log"));
+        const int bare = std::max(2, h / 5);                                   // the bare trunk at the bottom
+        for (int dy = 0; dy < h; ++dy)
+            for (int x = bx; x <= x1; ++x)
+                for (int z = bz; z <= z1; ++z)
+                    if (store.get(x, y0 + dy, z) == IdAir) store.set(x, y0 + dy, z, sprLog);
+        const int n = h - bare + 1;                                            // needle tiers (the top one — above the trunk)
+        const int topY = y0 + h;                                               // the top: a block above the trunk
+        for (int k = 0; k < n; ++k)
+        {
+            int r = (k == 0) ? 0 : std::max(1, (R * k + n - 2) / std::max(1, n - 1));
+            if (k >= 2 && (k & 1)) r = std::max(1, r - 1);                     // odd tiers are narrower — "skirts"
+            if (k == 1) r = 1;
+            const int y = topY - k;
+            const double lim = (r + (wide ? 0.75 : 0.25)) * (r + (wide ? 0.75 : 0.25));
+            for (int dx = -r; dx <= r + (wide ? 1 : 0); ++dx)
+                for (int dz = -r; dz <= r + (wide ? 1 : 0); ++dz)
+                {
+                    const double fx = wide ? dx - 0.5 : double(dx), fz = wide ? dz - 0.5 : double(dz);      // the crown center — the trunk center
+                    if (fx * fx + fz * fz > lim) continue;
+                    const int x = bx + dx, z = bz + dz;
+                    if (store.get(x, y, z) == IdAir) store.set(x, y, z, IdSpruceLeaves);
+                }
+        }
+        return true;
+    };
+    // A broadleaf tree (birch etc.): a 1×1 trunk of the given block, a "diamond" crown of radius 2 of the given leaves; the crown does not go beyond the chunks with ground
+    auto plantBroad = [&](int bx, int bz, int y0, int h, quint16 logId, quint16 leafId) -> bool
+    {
+        if (zoneSkip(bx, bz)) return true;
+        zoneRemap(logId, leafId);
+        for (int sx2 = -2; sx2 <= 2; sx2 += 4)
+            for (int sz2 = -2; sz2 <= 2; sz2 += 4)
+                if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
+        for (int dy = 0; dy < h; ++dy)
+            if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, logId);
+        const int topTree = y0 + h - 1;
+        for (int dy = -2; dy <= 1; ++dy)
+        {
+            const int r = (dy == 1) ? 1 : 2;
+            for (int dx = -r; dx <= r; ++dx)
+                for (int dz = -r; dz <= r; ++dz)
+                {
+                    if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                    if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;
+                    if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir) store.set(bx + dx, topTree + dy, bz + dz, leafId);
+                }
+        }
+        return true;
+    };
+    // A tree of arbitrary size: a trunk of height h, a spherical crown of radius R (1..3) with cut corners — for intra-block greenery of different sizes
+    auto plantSized = [&](int bx, int bz, int y0, int h, int R, quint16 logId, quint16 leafId) -> bool
+    {
+        if (zoneSkip(bx, bz)) return true;
+        zoneRemap(logId, leafId);
+        for (int sx2 = -R; sx2 <= R; sx2 += 2 * R)
+            for (int sz2 = -R; sz2 <= R; sz2 += 2 * R)
+                if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
+        for (int dy = 0; dy < h; ++dy)
+            if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, logId);
+        const int topTree = y0 + h - 1;
+        for (int dy = -R; dy <= 1; ++dy)
+        {
+            const int r = (dy == 1) ? 1 : (dy == 0 ? std::max(1, R - 1) : R);
+            for (int dx = -r; dx <= r; ++dx)
+                for (int dz = -r; dz <= r; ++dz)
+                {
+                    if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                    if (dy != 1 && r >= 2 && std::abs(dx) == r && std::abs(dz) == r) continue;
+                    if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir) store.set(bx + dx, topTree + dy, bz + dz, leafId);
+                }
+        }
+        return true;
+    };
+    // Spruce: in zones with conifers — a cone, in the others (steppe, desert, tropics…) — a big broadleaf tree of the zone instead of it
+    auto plantSpruce = [&](int bx, int bz, int y0, int h, int R) -> bool
+    {
+        if (zt.cone) return zoneSkip(bx, bz) ? true : plantSpruceCone(bx, bz, y0, h, R);
+        return plantSized(bx, bz, y0, std::max(4, std::min(h / 2 + 2, 9)), R >= 5 ? 3 : 2, IdOakLog, IdOakLeaves);
+    };
+    // Pale oak: a 2×2 trunk of height h, a "cap" crown of radius 3, moss hanging under the crown edge, a "creaking heart" in the trunk
+    auto plantPaleTree = [&](int bx, int bz, int y0, int h, quint32 hh)
+    {
+        for (int cxk = (bx - 4) >> 4; cxk <= ((bx + 5) >> 4); ++cxk)             // the crown (up to 4 blocks from the 2×2 trunk) entirely inside the fill
+            for (int czk = (bz - 4) >> 4; czk <= ((bz + 5) >> 4); ++czk)
+                if (!sprFill.contains(pairKey(cxk, czk))) return;
+        bool trunkOk = true;                                                      // the trunk entirely of pale oak (the neighbor's leaves do not interfere)
+        for (int dy = 0; dy < h; ++dy)
+            for (int dx = 0; dx <= 1; ++dx)
+                for (int dz = 0; dz <= 1; ++dz)
+                {
+                    const quint16 old = store.get(bx + dx, y0 + dy, bz + dz);
+                    if (old == IdAir || old == IdPaleLeaves || old == IdOakLeaves || old == IdPaleHangingMoss || old == IdPaleMossCarpet)
+                        store.set(bx + dx, y0 + dy, bz + dz, IdPaleLog);
+                    else if (old != IdPaleLog) trunkOk = false;
+                }
+        if (trunkOk && hh % 100u < 16u && h >= 4)
+        {
+            store.set(bx, y0 + 2, bz, IdCreakingHeart);                          // the "heart": around it a trunk of pale oak
+            heartsByChunk[pairKey(bx >> 4, bz >> 4)].append(QPoint3{ bx, y0 + 2, bz });
+        }
+        const int topTree = y0 + h - 1;
+        static const int kR[4] = { 3, 3, 2, 1 };                                 // the crown layers from top to bottom from topTree-2 to topTree+1
+        for (int li = 0; li < 4; ++li)
+        {
+            const int dy = li - 2, r = kR[li];
+            for (int dx = -r; dx <= r + 1; ++dx)
+                for (int dz = -r; dz <= r + 1; ++dz)
+                {
+                    const double fx = dx - 0.5, fz = dz - 0.5;
+                    if (fx * fx + fz * fz > (r + 0.7) * (r + 0.7)) continue;
+                    const int x = bx + dx, y = topTree + dy, z = bz + dz;
+                    if (store.get(x, y, z) != IdAir) continue;
+                    store.set(x, y, z, IdPaleLeaves);
+                    if (li == 0 && ((x * 7 + z * 13 + int(hh)) & 3) == 0 && store.get(x, y - 1, z) == IdAir)
+                        store.set(x, y - 1, z, IdPaleHangingMoss);               // moss hangs from the lowest layer of the crown
+                }
+        }
+    };
+    int vegCols = 0;
+    for (int fidx = 0; fidx < forests.size(); ++fidx)
+    {
+        const VegSite& site = forests[fidx];
+        const bool pale = (fidx == paleIdx);
+        // A 6×6 grid (~2.8% of the columns, like the former ~2.5%): in every cell one hash-shifted place, inside
+        // the forest — a tree. The work is of the order of the number of bbox cells, not the number of forest columns (tens of millions).
+        const int G = site.dense ? 4 : 6;                // yards (OSM): a 4×4 grid — 2.25 times more trees than in ordinary vegetation
+        const int gx0 = int(std::floor(double(site.minX) / G)), gx1 = int(std::floor(double(site.maxX) / G));
+        const int gz0 = int(std::floor(double(site.minZ) / G)), gz1 = int(std::floor(double(site.maxZ) / G));
+        for (int gx = gx0; gx <= gx1; ++gx)
+        for (int gz = gz0; gz <= gz1; ++gz)
+        {
+            if ((++vegCols & 0x3FF) == 0 && cancel && cancel->load())
+            {
+                res.cancelled = true;
+                res.error = QObject::tr("Export cancelled.");
+                return res;
+            }
+            if (progress && (vegCols & 0xFFFF) == 0)
+                progress(std::min(vegCols, vegCells), vegCells, 4);                  // the "trees in forests" stage
+            const quint32 hc = colHash(pairKey(gx, gz) ^ 0x7EEDull);
+            const int tx = gx * G + int(hc % G), tz = gz * G + int((hc >> 8) % G);
+            if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
+            if (!spansContain(site.spans, tx, tz)) continue;
+            const qint64 ck = pairKey(tx, tz);
+            if (colWater.contains(ck)) continue;               // we do not grow on water
+            if (colMin.contains(ck)) continue;                 // a structure column — the forest does not climb into the house
+                                                               // (after the floor was sunk by 1 block the slab
+                                                               // stopped being an obstacle for y0)
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const int y0 = surfaceTop(ck) + 1;
+            if (y0 + site.treeH + 2 > 255) continue;
+            if (store.get(bx, y0, bz) != IdAir) continue;
+            if (pale && paleDonorUsed)
+            {   // trees were carried together with the donor terrain; in the fringe at the forest border and in the ring around the mansion (there the terrain is mixed with the ground) we plant procedural ones
+                const auto pcit = paleCol.constFind(ck);
+                if (pcit != paleCol.constEnd() && pcit->pid < 0 && pcit->w >= 235 && pcit->surf != 0) continue;
+            }
+            if (paleDonorUsed && !pale && spansContain(forests[paleIdx].spans, tx, tz)) continue;
+            if (!patchCols.isEmpty() && patchCols.contains(pairKey(tx, tz))) continue;      // outposts/camps: trees do not climb into the structures   // other (overlapping) forests do not plant extra trees into the Pale Garden
+            if (pale)
+            {   // pale oak: taller than usual (6..9), 2×2 — free neighboring columns are needed
+                const quint32 hp = colHash(ck ^ 0x9A1Eull);
+                const int hh = 6 + int(hp % 4u);
+                if (y0 + hh + 4 > 255) continue;
+                if (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))) continue;
+                if (!spansContain(site.spans, bx + 1, bz + 1)) continue;
+                plantPaleTree(bx, bz, y0, hh, hp >> 4);
+                continue;
+            }
+            if (site.park)
+            {   // a park: mixed trees (oak 40%, birch 35%, spruce 25%) and not frequent — about 24% of the cells of the 6×6 grid (≈ 1 tree per 135 m²)
+                const quint32 hr = colHash(ck ^ 0x9A4Bull);
+                if (hr % 100u >= 24u) continue;                                    // 24% of the cells (was 16%): in parks there are 1.5 times more trees
+                const quint32 cls = (hr >> 8) % 100u;
+                if (cls < 40)
+                {   // oak — as in ordinary forests
+                    const int h = 5 + int((hr >> 16) % 3u);
+                    if (y0 + h + 4 > 255) continue;
+                    plantBroad(bx, bz, y0, h, IdOakLog, IdOakLeaves);
+                }
+                else if (cls < 75)
+                {   // birch: thinner and taller than the oak
+                    const int h = 6 + int((hr >> 16) % 4u);
+                    if (y0 + h + 4 > 255) continue;
+                    plantBroad(bx, bz, y0, h, quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")), IdBirchLeaves);
+                }
+                else
+                {   // a medium-sized spruce
+                    const int hs = 9 + int((hr >> 16) % 5u);
+                    if (y0 + hs + 3 > 255) continue;
+                    plantSpruce(bx, bz, y0, hs, 3);
+                }
+                continue;
+            }
+            if (site.intra && !site.dense && colHash(ck ^ 0x1A7Bull) % 3u == 0u) continue;       // intra-block vegetation (vgbpol): 1.5 times rarer (OSM yards — without thinning)
+            if (site.intra)
+            {   // trees of different sizes: small (trunk 3–4, crown 1), medium (5–6, crown 2), big (7–9, crown 3); oak and birch mixed
+                const quint32 hz = colHash(ck ^ 0x51ABEull);
+                const int roll = int(hz % 100u);
+                const int R = roll < 30 ? 1 : (roll < 75 ? 2 : 3);
+                const int h = R == 1 ? 3 + int((hz >> 8) % 2u) : (R == 2 ? 5 + int((hz >> 8) % 2u) : 7 + int((hz >> 8) % 3u));
+                if (y0 + h + 4 > 255) continue;
+                const bool birch = ((hz >> 16) % 100u) < 35u;
+                plantSized(bx, bz, y0, h, R, birch ? quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")) : quint16(IdOakLog), birch ? quint16(IdBirchLeaves) : quint16(IdOakLeaves));
+                continue;
+            }
+            if (site.spruce)
+            {   // spruces of different sizes, MUCH rarer than oaks: some cells of the grid are empty, big and giant ones are a rarity
+                const quint32 hr = colHash(ck ^ 0x5B0Eull);
+                if (hr % 100u >= 38u) continue;                                      // ~38% of the cells of the 6×6 grid
+                const quint32 cls = (hr >> 8) % 100u;
+                int hs, R;
+                if (cls < 50)      { hs = 9 + int((hr >> 16) % 5u);   R = 3; }       // ordinary 9..13
+                else if (cls < 75) { hs = 14 + int((hr >> 16) % 6u);  R = 4; }       // taller 14..19
+                else if (cls < 93) { hs = 20 + int((hr >> 16) % 8u);  R = 5; }       // big 20..27, a 2×2 trunk
+                else               { hs = 30 + int((hr >> 16) % 11u); R = 7; }       // a giant 30..40, a 2×2 trunk
+                if (y0 + hs + 3 > 255) continue;
+                if (R >= 5 && (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))
+                               || !spansContain(site.spans, bx + 1, bz) || !spansContain(site.spans, bx, bz + 1) || !spansContain(site.spans, bx + 1, bz + 1))) continue;
+                plantSpruce(bx, bz, y0, hs, R);
+                continue;
+            }
+            if (zoneSkip(bx, bz)) continue;
+            const int h = site.treeH - int(colHash(ck ^ 0x5EEDull) % 2u);   // trunks of different heights
+            for (int dy = 0; dy < h; ++dy)
+                if (store.get(bx, y0 + dy, bz) == IdAir)
+                    store.set(bx, y0 + dy, bz, zt.oakLog);
+            const int topTree = y0 + h - 1;                   // the crown — a "diamond" of oak, only through the air
+            for (int dy = -2; dy <= 1; ++dy)
+            {
+                const int r = (dy == 1) ? 1 : 2;
+                for (int dx = -r; dx <= r; ++dx)
+                    for (int dz = -r; dz <= r; ++dz)
+                    {
+                        if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;   // the top — a cross
+                        if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;   // without the far corners
+                        const int x = bx + dx, y = topTree + dy, z = bz + dz;
+                        if (store.get(x, y, z) == IdAir)
+                            store.set(x, y, z, zt.oakLeaf);
+                    }
+            }
+        }
+    }
+    if (paleIdx >= 0 && paleDonorUsed && !heartsByChunk.isEmpty())
+    {   // CREAKING HEARTS — rare and spaced apart (horror, not a "wild run"): the extra ones (closer than 32 blocks to an already kept one) become a log again,
+        // and where there is no heart at all within a radius of 50 blocks, a new one is added into a suitable trunk (not closer than 50 to the others).
+        constexpr double kMinD = 32.0, kGapD = 50.0;
+        QVector<QPoint3> all;
+        for (auto it = heartsByChunk.constBegin(); it != heartsByChunk.constEnd(); ++it) all += it.value();
+        std::sort(all.begin(), all.end(), [&](const QPoint3& a, const QPoint3& b)
+        { const quint32 ha = colHash(pairKey(a.x, a.z) ^ 0x4E1ull), hb = colHash(pairKey(b.x, b.z) ^ 0x4E1ull); return ha != hb ? ha < hb : (a.x != b.x ? a.x < b.x : a.z < b.z); });
+        QVector<QPoint3> kept;
+        auto nearKept = [&](int x, int z, double d)
+        { for (const QPoint3& q : kept) if (std::hypot(double(q.x - x), double(q.z - z)) < d) return true; return false; };
+        int nDemoted = 0;
+        QHash<ColKey, QVector<QPoint3>> newHearts;
+        for (const QPoint3& h : all)
+        {
+            if (!nearKept(h.x, h.z, kMinD)) { kept.append(h); newHearts[pairKey(h.x >> 4, h.z >> 4)].append(h); continue; }
+            const quint16 cur = store.get(h.x, h.y, h.z);
+            store.set(h.x, h.y, h.z, cur == quint16(IdCreakingHeart) ? quint16(IdPaleLog) : paleDonor.logId);
+            ++nDemoted;
+        }
+        // adding: pale oak trunks at a height of 4 above the ground (donor) — candidates on a 6×6 grid, in the "hash" order
+        int nAdded = 0;
+        if (paleDonor.heartId)
+        {
+            QVector<QPoint3> cands;
+            for (auto pit = paleCol.constBegin(); pit != paleCol.constEnd(); ++pit)
+            {
+                const int x = keyFirst(pit.key()), z = keySecond(pit.key());
+                if (((x * 7 + z * 13) % 5) != 0) continue;
+                const auto cc = pit;
+                if (cc->pid >= 0 || cc->w < 235) continue;
+                const int y = cc->top + 4;
+                if (store.get(x, y, z) == paleDonor.logId) cands.append(QPoint3{ x, y, z });
+            }
+            std::sort(cands.begin(), cands.end(), [&](const QPoint3& a, const QPoint3& b)
+            { const quint32 ha = colHash(pairKey(a.x, a.z) ^ 0x4E2ull), hb = colHash(pairKey(b.x, b.z) ^ 0x4E2ull); return ha != hb ? ha < hb : (a.x != b.x ? a.x < b.x : a.z < b.z); });
+            for (const QPoint3& c : cands)
+            {
+                if (nearKept(c.x, c.z, kGapD)) continue;
+                store.set(c.x, c.y, c.z, paleDonor.heartId);
+                kept.append(c);
+                newHearts[pairKey(c.x >> 4, c.z >> 4)].append(c);
+                ++nAdded;
+            }
+        }
+        heartsByChunk = newHearts;
+        res.lairInfo += QObject::tr("; creaking hearts: %1 (extra removed %2, added %3)").arg(kept.size()).arg(nDemoted).arg(nAdded);
+    }
+    if (paleIdx >= 0 && !paleDonorUsed)
+    {   // the Pale Garden litter: moss blocks instead of turf, a carpet of pale moss, rare eyeblossoms
+        const VegSite& ps = forests[paleIdx];
+        for (const ColSpan& c : ps.spans)
+            for (int z = c.z0; z <= c.z1; ++z)
+            {
+                const qint64 ck = pairKey(c.x, z);
+                if (colWater.contains(ck) || colMin.contains(ck) || colWool.contains(ck)) continue;
+                const quint32 hq = colHash(ck ^ 0xB1EDull);
+                const auto git = ground.find(pairKey(c.x >> 4, z >> 4));
+                if (git == ground.end()) continue;
+                const int col = (z & 15) * 16 + (c.x & 15);
+                if (git->wd[col] > 0) continue;
+                if (hq % 100u < 14u) git->surf[col] = quint16(IdPaleMossBlock);
+                const int top = git->top[col];
+                if (store.get(c.x, top + 1, z) != IdAir) continue;
+                const quint32 r2 = (hq >> 8) % 1000u;
+                if (r2 < 330) store.set(c.x, top + 1, z, IdPaleMossCarpet);
+                else if (r2 < 345) store.set(c.x, top + 1, z, (hq >> 20) & 1u ? quint16(IdEyeOpen) : quint16(IdEyeClosed));
+            }
+    }
+    // FLOATING ISLANDS above kindergartens: a "cloud" rounded lower part (calcite/white concrete), turf on top, a lake flush with the ground,
+    // slime at the shore, tropics (jungle trees, bamboo, reeds, ferns, lily pads), slimes. There are no rims — slimes sometimes fall.
+    for (const IslandSite& is : islandSites)
+    {
+        if (is.kind != 2) continue;
+        int y0 = std::min(surfaceTop(pairKey(is.cx, is.cz)), 255) + 70 + int(is.hash % 16u);   // high above the park: 70–85 blocks above the ground
+        if ((y0 & 15) == 15) ++y0;                                         // the lake and lily pads (a block above the water) are not cut by a section border
+        const int D = std::max(5, std::min(11, std::min(is.rx, is.rz) / 3));   // the "bowl" depth: thin, does not reach the buildings
+        if (y0 + 14 > 300) continue;
+        const quint16 calcite = quint16(IdPaletteStart + paletteIndexOf("minecraft:calcite"));
+        const quint16 white = quint16(IdPaletteStart + paletteIndexOf("minecraft:diorite"));
+        const quint16 sandB = quint16(IdPaletteStart + paletteIndexOf("minecraft:sand"));
+        const quint16 slime = quint16(IdPaletteStart + paletteIndexOf("minecraft:slime_block"));
+        const quint16 jungleLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
+        const quint16 bamboo = quint16(IdPaletteStart + paletteIndexOf("minecraft:bamboo"));
+        const quint16 cane = quint16(IdPaletteStart + paletteIndexOf("minecraft:sugar_cane"));
+        const quint16 fern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern"));
+        const quint16 lily = quint16(IdPaletteStart + paletteIndexOf("minecraft:lily_pad"));
+        const double ph = double(is.hash % 628u) / 100.0;
+        // the lake: an ellipse offset from the center
+        const double lcx = std::sin(ph) * is.rx * 0.18, lcz = std::cos(ph) * is.rz * 0.18;
+        const double lrx = std::max(4.0, is.rx * 0.30), lrz = std::max(4.0, is.rz * 0.26);
+        auto lakeD = [&](int dx, int dz) { const double a = (dx - lcx) / lrx, b = (dz - lcz) / lrz; return a * a + b * b; };   // <=1 inside
+        auto colGround = [&](int x, int z) { return ground.contains(pairKey(x >> 4, z >> 4)); };
+        auto hashAt = [&](int x, int z, quint32 salt) { return colHash(pairKey(x, z) ^ (qint64(is.hash) << 8) ^ salt); };
+        QVector<QPoint> land;                                              // land cells (for trees/slimes)
+        QHash<ColKey, int> topAt;
+        for (int dz = -is.rz; dz <= is.rz; ++dz)
+            for (int dx = -is.rx; dx <= is.rx; ++dx)
+            {
+                const double u = double(dx) / is.rx, v = double(dz) / is.rz;
+                const double edge = 0.12 * std::sin(dx * 0.31 + ph) + 0.10 * std::cos(dz * 0.27) + 0.06 * std::sin((dx + dz) * 0.19);
+                const double r = std::sqrt(u * u + v * v) + edge;
+                if (r > 1.0) continue;
+                const int x = is.cx + dx, z = is.cz + dz;
+                if (!colGround(x, z)) continue;
+                const bool nearLake = lakeD(dx, dz) <= 3.2;
+                int top = y0;
+                if (!nearLake && r > 0.15)                                  // soft mounds far from the lake
+                    top = y0 + int(std::lround(1.1 * std::sin(dx * 0.23 + ph) * std::cos(dz * 0.19 - ph)));
+                const int depth = 2 + int(D * std::sqrt(std::max(0.0, 1.0 - r * r)));    // a rounded "bowl"
+                for (int y = top - depth; y <= top; ++y)
+                {
+                    const int d = top - y;
+                    quint16 id;
+                    if (d == 0) id = IdGrass;
+                    else if (d <= 2) id = IdDirt;
+                    else id = (((dx * 7 + dz * 13 + y * 5) & 7) == 0) ? white : calcite;
+                    store.set(x, y, z, id);
+                }
+                topAt.insert(pairKey(x, z), top);
+                // the lake is flush: water on the three top layers, the bottom — sand
+                if (lakeD(dx, dz) <= 1.0 && r < 0.8)
+                {
+                    store.set(x, top, z, IdWater);
+                    store.set(x, top - 1, z, IdWater);
+                    store.set(x, top - 2, z, IdWater);
+                    store.set(x, top - 3, z, sandB);
+                    if (hashAt(x, z, 0x11A1u) % 100u < 9u) store.set(x, top + 1, z, lily);
+                }
+                else
+                    land.append(QPoint(x, z));
+            }
+        // slime at the shore, reeds near the water, ferns/flowers
+        for (const QPoint& c : land)
+        {
+            const int top = topAt.value(pairKey(c.x(), c.y()));
+            const int dx = c.x() - is.cx, dz = c.y() - is.cz;
+            const double ld = lakeD(dx, dz);
+            const quint32 hq = hashAt(c.x(), c.y(), 0x5A1Eu);
+            if (ld <= 1.7 && hq % 100u < 38u) { store.set(c.x(), top, c.y(), slime); continue; }        // the shore is partly slimy
+            if (ld <= 1.7 && hq % 100u < 60u && store.get(c.x(), top, c.y()) == IdGrass)
+            {   // reeds near the water: 2–3 cells
+                const int h = 2 + int((hq >> 8) % 2u);
+                for (int k = 1; k <= h; ++k) store.set(c.x(), top + k, c.y(), cane);
+                continue;
+            }
+            if (ld > 1.7 && hq % 100u < 14u) store.set(c.x(), top + 1, c.y(), fern);
+            else if (ld > 1.7 && hq % 100u < 17u) store.set(c.x(), top + 1, c.y(), quint16(IdFlowerBase + int((hq >> 10) % quint32(kFlowersCount))));
+        }
+        // slime clumps on land (2×2)
+        for (int k = 0; k < 4; ++k)
+        {
+            const quint32 hk = is.hash * 2654435761u + quint32(k) * 40503u;
+            if (land.isEmpty()) break;
+            const QPoint c = land[int(hk % quint32(land.size()))];
+            for (int dz = 0; dz <= 1; ++dz)
+                for (int dx = 0; dx <= 1; ++dx)
+                {
+                    const qint64 key = pairKey(c.x() + dx, c.y() + dz);
+                    if (topAt.contains(key) && store.get(c.x() + dx, topAt.value(key), c.y() + dz) == IdGrass)
+                        store.set(c.x() + dx, topAt.value(key), c.y() + dz, slime);
+                }
+        }
+        // jungle trees and bamboo
+        const int nTrees = std::max(5, std::min(22, int(land.size()) / 90));
+        for (int t = 0; t < nTrees && !land.isEmpty(); ++t)
+        {
+            const quint32 ht = is.hash * 1103515245u + quint32(t) * 12345u + 7u;
+            const QPoint c = land[int((ht >> 4) % quint32(land.size()))];
+            const int dx = c.x() - is.cx, dz = c.y() - is.cz;
+            if (lakeD(dx, dz) <= 2.4) continue;
+            const int top = topAt.value(pairKey(c.x(), c.y()));
+            if (store.get(c.x(), top, c.y()) != IdGrass || store.get(c.x(), top + 1, c.y()) != IdAir) continue;
+            const int h = 5 + int((ht >> 12) % 4u);
+            for (int k = 1; k <= h; ++k) store.set(c.x(), top + k, c.y(), jungleLog);
+            for (int dy = -2; dy <= 1; ++dy)
+            {
+                const int rr = (dy == 1) ? 1 : (dy == 0 ? 3 : 2);
+                for (int ex = -rr; ex <= rr; ++ex)
+                    for (int ez = -rr; ez <= rr; ++ez)
+                    {
+                        if (std::abs(ex) == rr && std::abs(ez) == rr && rr > 1) continue;
+                        if (store.get(c.x() + ex, top + h + dy, c.y() + ez) == IdAir)
+                            store.set(c.x() + ex, top + h + dy, c.y() + ez, IdJungleLeaves);
+                    }
+            }
+        }
+        for (int g = 0; g < 7 && !land.isEmpty(); ++g)
+        {   // bamboo groves
+            const quint32 hg = is.hash * 2246822519u + quint32(g) * 3266489917u + 3u;
+            const QPoint c = land[int((hg >> 3) % quint32(land.size()))];
+            if (lakeD(c.x() - is.cx, c.y() - is.cz) <= 2.0) continue;
+            const int n = 3 + int((hg >> 20) % 4u);
+            for (int q = 0; q < n; ++q)
+            {
+                const int bx = c.x() + int((hg >> (q * 3)) % 5u) - 2, bz = c.y() + int((hg >> (q * 3 + 1)) % 5u) - 2;
+                const qint64 key = pairKey(bx, bz);
+                if (!topAt.contains(key)) continue;
+                const int top = topAt.value(key);
+                if (store.get(bx, top, bz) != IdGrass || store.get(bx, top + 1, bz) != IdAir) continue;
+                const int h = 4 + int((hg >> (q + 8)) % 6u);
+                for (int k = 1; k <= h; ++k) store.set(bx, top + k, bz, bamboo);
+            }
+        }
+        // slimes: up to 8 of different sizes on land
+        for (int sl = 0; sl < 8 && !land.isEmpty(); ++sl)
+        {
+            const quint32 hs = is.hash * 668265263u + quint32(sl) * 374761393u + 11u;
+            const QPoint c = land[int((hs >> 3) % quint32(land.size()))];
+            const int top = topAt.value(pairKey(c.x(), c.y()));
+            if (store.get(c.x(), top + 1, c.y()) != IdAir) continue;
+            NpcSite m; m.kind = 4; m.variant = 8; m.level = int((hs >> 10) % 3u);
+            m.x = c.x(); m.z = c.y(); m.y = top + 1; m.yaw = int((hs >> 14) % 4u) * 90;
+            npcs.append(m);
+        }
+        // Lamps on the ground under the island (it casts a shadow on the park): two oval rings of glowing tiles flush with the ground
+        // (glowstone instead of turf), on every third one — a low lamp post; in the center — a tall stand with a lantern. The rings are slightly wider than the island.
+        {
+            const quint16 glow = quint16(IdPaletteStart + paletteIndexOf("minecraft:glowstone"));
+            auto groundCol = [&](int x, int z, int& top) -> GroundChunk*
+            {
+                const qint64 ck = pairKey(x, z);
+                if (colWater.contains(ck) || colMin.contains(ck) || colWool.contains(ck) || roadCols.contains(ck)) return nullptr;
+                auto git = ground.find(pairKey(x >> 4, z >> 4));
+                if (git == ground.end()) return nullptr;
+                const int col = (z & 15) * 16 + (x & 15);
+                if (git->wd[col] > 0) return nullptr;
+                top = git->top[col];
+                return &git.value();
+            };
+            auto lampPost = [&](int x, int z, int top, int fences)
+            {
+                bool free = true;
+                for (int dy = 1; dy <= fences + 2 && free; ++dy) if (store.get(x, top + dy, z) != IdAir) free = false;
+                if (!free) return;
+                store.set(x, top + 1, z, IdCobbleWall);
+                for (int dy = 2; dy <= fences + 1; ++dy) store.set(x, top + dy, z, IdFence);
+                store.set(x, top + fences + 2, z, IdLanternStanding);
+            };
+            const double ringK[2] = { 1.12, 0.62 };
+            for (int ri = 0; ri < 2; ++ri)
+            {
+                const double rxr = is.rx * ringK[ri], rzr = is.rz * ringK[ri];
+                const int nSeg = std::max(12, int(std::lround(2.0 * 3.14159265 * 0.5 * (rxr + rzr) / 2.0)));        // a tile every ~2 blocks
+                QSet<ColKey> done;
+                for (int t = 0; t < nSeg; ++t)
+                {
+                    const double a = 2.0 * 3.14159265 * t / nSeg;
+                    const int x = is.cx + int(std::lround(std::cos(a) * rxr)), z = is.cz + int(std::lround(std::sin(a) * rzr));
+                    if (done.contains(pairKey(x, z))) continue;
+                    done.insert(pairKey(x, z));
+                    int top = 0;
+                    GroundChunk* g = groundCol(x, z, top);
+                    if (!g) continue;
+                    g->surf[(z & 15) * 16 + (x & 15)] = glow;
+                    if (t % 3 == 0) lampPost(x + (std::cos(a) >= 0 ? 1 : -1), z, top, 3);                   // a post next to the tile, outside the ring
+                }
+            }
+            int topC = 0;
+            if (GroundChunk* gc = groundCol(is.cx, is.cz, topC))
+            {
+                Q_UNUSED(gc);
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        int tp = 0;
+                        if (GroundChunk* g2 = groundCol(is.cx + dx, is.cz + dz, tp)) g2->surf[((is.cz + dz) & 15) * 16 + ((is.cx + dx) & 15)] = glow;
+                    }
+                lampPost(is.cx, is.cz, topC, 5);                                                              // the central tall stand
+            }
+        }
+    }
+    lap("before 3.51");
+    beginStep(5);
+    // 3.51 Tree planting by the user's rules (three rules):
+    //   (1) columns inside the fill WITHOUT objects and vector coverage (just terrain) —
+    //       single trees: a 32×32 grid, in a cell a point center + hash jitter ±1 — neighbors
+    //       by cells do not come closer than 30 blocks (32−1−1); the hash gate lets 3 cells
+    //       out of 4 pass — a sparse forest, not rows;
+    //   (2) giant fields (ripe wheat, >100000 m²) — GROUPS of 2-3 trees nearby,
+    //       a 44×44 grid: the group spread ≤5 + jitter ≤1 ⇒ between groups also ≥30;
+    //   (3) "tall grass" (tall_grass, ≥50000 m²) — single trees, as in rule (1).
+    // A buffer of ±3 columns from structures/roads/tracks/sites/water/forest spots (including lamps —
+    // they are 1 column from the road): trees do not climb onto anything; a trunk is written only when ALL
+    // its cells are air (unlike a forest spot, where a skipped bottom one is allowed), the crown —
+    // only through the air. Before the grass is scattered: the grass looks at the store air and will not climb into the trunk.
+    {
+        // ATTENTION: fillChunks are the keys of CHUNKS (store.chunks), not columns!
+        const QSet<ColKey> fillChunkSet(fillChunks.constBegin(), fillChunks.constEnd());
+        auto inFill = [&](qint64 ck)
+        { return fillChunkSet.contains(pairKey(keyFirst(ck) >> 4, keySecond(ck) >> 4)); };
+        auto flat5 = [&](qint64 ck)
+        {   // the center and the 4 neighbors — one surface height (we do not put a tree on a slope)
+            const int y = surfaceTop(ck);
+            return std::abs(y - surfaceTop(pairKey(keyFirst(ck) + 1, keySecond(ck)))) <= 1
+                && std::abs(y - surfaceTop(pairKey(keyFirst(ck) - 1, keySecond(ck)))) <= 1
+                && std::abs(y - surfaceTop(pairKey(keyFirst(ck), keySecond(ck) + 1))) <= 1
+                && std::abs(y - surfaceTop(pairKey(keyFirst(ck), keySecond(ck) - 1))) <= 1;
+        };
+        const quint16 birchLogS = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
+        auto plantTree = [&](qint64 ck, int h, bool birch = false) -> bool
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            // The crown (±2) must not stick out of the fill: otherwise the chunk will be written without ground
+            // ("GROUND FAIL" in verify, holes along the chunk grid in the game).
+            for (int sx = -2; sx <= 2; sx += 4)
+                for (int sz = -2; sz <= 2; sz += 4)
+                    if (!fillChunkSet.contains(pairKey((bx + sx) >> 4, (bz + sz) >> 4)))
+                        return false;
+            const int y0 = surfaceTop(ck) + 1;
+            if (y0 + h + 3 > 255) return false;
+            for (int dy = 0; dy < h; ++dy)
+                if (store.get(bx, y0 + dy, bz) != IdAir) return false;    // not a single foreign stump in the trunk
+            if (zoneSkip(bx, bz)) return true;
+            const quint16 tLog = birch ? zt.birchLog : zt.oakLog, tLeaf = birch ? zt.birchLeaf : zt.oakLeaf;
+            for (int dy = 0; dy < h; ++dy)
+                store.set(bx, y0 + dy, bz, tLog);
+            const int topTree = y0 + h - 1;                              // the "diamond" crown, only air
+            for (int dy = -2; dy <= 1; ++dy)
+            {
+                const int r = (dy == 1) ? 1 : 2;
+                for (int dx = -r; dx <= r; ++dx)
+                    for (int dz = -r; dz <= r; ++dz)
+                    {
+                        if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                        if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;
+                        if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
+                            store.set(bx + dx, topTree + dy, bz + dz, tLeaf);
+                    }
+            }
+            return true;
+        };
+        QVector<ColSpan> allForest;                                      // the whole forest — merged segments
+        for (const VegSite& s : forests) allForest += s.spans;
+        allForest = mergeSpans(allForest);
+        auto busyNear = [&](qint64 ck, bool plantsToo)                   // a "built-up/covered" 7×7 square?
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            for (int dz = -3; dz <= 3; ++dz)
+                for (int dx = -3; dx <= 3; ++dx)
+                {
+                    const qint64 nk = pairKey(bx + dx, bz + dz);
+                    if (colMin.contains(nk) || roadCols.contains(nk) || railColsAll.contains(nk)
+                        || colWool.contains(nk) || colWater.contains(nk) || noTreePadCols.contains(nk) || spansContain(allForest, bx + dx, bz + dz)
+                        || (plantsToo && colPlant.contains(nk)))
+                        return true;
+                }
+            return false;
+        };
+        // — (1)+(3): a 32×32 grid over the whole fill (the noise world apron is also an "empty place").
+        // The grid cells are derived from the chunk coordinates (a chunk covers a 32 grid in no more than 2×2 cells).
+        // A 14×14 grid (was 24×24: three times more trees), ~48% of the cells are occupied, the point in a cell is random over the whole cell (a margin of 2): the density is 1.5 times higher than the former one (32×32, 3 of 4),
+        // and the rows disappear; ~35% of the trees are birches.
+        constexpr int kGrid = 14;
+        auto fdivG = [](int v, int d) { return v >= 0 ? v / d : -((-v + d - 1) / d); };
+        QSet<ColKey> cells32;
+        cells32.reserve(qsizetype(fillChunkSet.size()) * 4);
+        for (qint64 ck : fillChunks)
+        {
+            const int cx = keyFirst(ck), cz = keySecond(ck);
+            const int x0 = fdivG(cx << 4, kGrid), x1 = fdivG((cx << 4) + 15, kGrid);   // the cells by X for this chunk
+            const int z0 = fdivG(cz << 4, kGrid), z1 = fdivG((cz << 4) + 15, kGrid);
+            cells32.insert(pairKey(x0, z0));
+            cells32.insert(pairKey(x1, z0));
+            cells32.insert(pairKey(x0, z1));
+            cells32.insert(pairKey(x1, z1));
+        }
+        for (qint64 cj : cells32)
+        {
+            const quint32 hh = colHash(cj ^ 0x7EE5ull);
+            if (hh % 100u >= 26u) continue;                                    // ~26% of the cells (was 63%, 48%, 36%: the single trees on empty lands were too frequent)
+            const quint32 hp = colHash(cj ^ 0x51D7ull);
+            const qint64 ck = pairKey(int(keyFirst(cj)) * kGrid + 2 + int(hp % quint32(kGrid - 4)),
+                                      int(keySecond(cj)) * kGrid + 2 + int((hp >> 10) % quint32(kGrid - 4)));
+            if (!inFill(ck) || !flat5(ck)) continue;
+            const int h = 5 + int(colHash(ck ^ 0x116ull) % 3u);              // trunks 5..7
+            const bool birch = (hp >> 20) % 100u < 35u;
+            if (colPlant.value(ck, 0) == quint16(IdTallGrass))               // (3) tall grass
+            {
+                if (!busyNear(ck, false)) plantTree(ck, h, birch);
+            }
+            else if (!busyNear(ck, true)) plantTree(ck, h, birch);           // (1) clean terrain
+        }
+        // — (2): wheat fields, groups of 2-3 trees per 44×44 cell.
+        auto fdiv = [](int v, int d) { return v >= 0 ? v / d : -((-v + d - 1) / d); };
+        QSet<ColKey> cells44;
+        for (auto it = colPlant.constBegin(); it != colPlant.constEnd(); ++it)
+            if (it.value() == quint16(IdWheat))
+                cells44.insert(pairKey(fdiv(keyFirst(it.key()), 44), fdiv(keySecond(it.key()), 44)));
+        static const int kGroupOff[2][2] = { { 3, 2 }, { -3, 4 } };
+        for (qint64 cj : cells44)
+        {
+            const quint32 hh = colHash(cj ^ 0x94D3ull);
+            if (hh % 4u == 0u) continue;                                     // glades without a group
+            const qint64 ck = pairKey(keyFirst(cj) * 44 + 22 + int(hh % 3u) - 1,
+                                      keySecond(cj) * 44 + 22 + int((hh >> 2) % 3u) - 1);
+            if (colPlant.value(ck, 0) != quint16(IdWheat) || !flat5(ck)
+                || busyNear(ck, false))
+                continue;
+            const int n = 2 + int(hh >> 4) % 2;                              // 2-3 trees in a group
+            int got = plantTree(ck, 5 + int(colHash(ck ^ 0x116ull) % 3u)) ? 1 : 0;
+            for (int g = 0; g < 2 && got < n; ++g)
+            {
+                const qint64 mk = pairKey(keyFirst(ck) + kGroupOff[g][0], keySecond(ck) + kGroupOff[g][1]);
+                if (colPlant.value(mk, 0) != quint16(IdWheat) || !flat5(mk)
+                    || busyNear(mk, false))
+                    continue;
+                if (plantTree(mk, 5 + int(colHash(mk ^ 0x116ull) % 3u))) ++got;
+            }
+        }
+    }
+
+    // — trees around schools (birches, the birch_forest biome) and kindergartens (multicolored poplars, the dappled_forest biome): a 9×9 grid, ~35% of the cells (crowns do not form a solid canopy),
+    // within kZoneR of the walls, not on structures/roads/water/forests/lawns (a buffer of ±3, like the other trees).
+    {
+        const QSet<ColKey> zoneFill(fillChunks.constBegin(), fillChunks.constEnd());
+        QVector<ColSpan> forestAll;
+        for (const VegSite& vs2 : forests) forestAll += vs2.spans;
+        forestAll = mergeSpans(forestAll);
+        auto busy = [&](qint64 ck)
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            for (int dz = -3; dz <= 3; ++dz)
+                for (int dx = -3; dx <= 3; ++dx)
+                {
+                    const qint64 nk = pairKey(bx + dx, bz + dz);
+                    if (colMin.contains(nk) || roadCols.contains(nk) || railColsAll.contains(nk) || colWool.contains(nk) || colWater.contains(nk)
+                        || colPlant.contains(nk) || spansContain(forestAll, bx + dx, bz + dz))
+                        return true;
+                }
+            return false;
+        };
+        const quint16 birchLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
+        const quint16 poplarLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:poplar_log"));
+        for (const IslandSite& is : islandSites)
+        {
+            if (is.kind == 2) continue;
+            const int x0 = is.cx - is.rx - kZoneMax, x1 = is.cx + is.rx + kZoneMax, z0 = is.cz - is.rz - kZoneMax, z1 = is.cz + is.rz + kZoneMax;
+            for (int gz = z0 / 9 - 1; gz <= z1 / 9 + 1; ++gz)
+                for (int gx = x0 / 9 - 1; gx <= x1 / 9 + 1; ++gx)
+                {
+                    const quint32 hh = colHash(pairKey(gx, gz) ^ (is.kind ? 0xB1C4ull : 0xD4F9ull));
+                    if (hh % 100u >= 35u) continue;
+                    const int bx = gx * 9 + int((hh >> 8) % 7u), bz = gz * 9 + int((hh >> 14) % 7u);
+                    const int dxo = std::max(0, std::abs(bx - is.cx) - is.rx), dzo = std::max(0, std::abs(bz - is.cz) - is.rz);
+                    Q_UNUSED(dxo); Q_UNUSED(dzo);
+                    if (!zoneInside(is, bx, bz, kZoneR)) continue;
+                    const qint64 ck = pairKey(bx, bz);
+                    if (busy(ck)) continue;
+                    if (!zoneFill.contains(pairKey(bx >> 4, bz >> 4))) continue;
+                    bool crownOk = true;
+                    for (int sx2 = -3; sx2 <= 3 && crownOk; sx2 += 6)
+                        for (int sz2 = -3; sz2 <= 3; sz2 += 6)
+                            if (!zoneFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) { crownOk = false; break; }
+                    if (!crownOk) continue;
+                    const int y0 = surfaceTop(ck) + 1;
+                    const int h = 5 + int(colHash(ck ^ 0x1B1Eull) % 5u);                       // trunk 5..9
+                    if (y0 + h + 4 > 255) continue;
+                    bool free = true;
+                    for (int dy = 0; dy < h && free; ++dy) if (store.get(bx, y0 + dy, bz) != IdAir) free = false;
+                    if (!free) continue;
+                    const quint16 log = is.kind == 1 ? birchLog : poplarLog;
+                    quint16 leaf = IdBirchLeaves;
+                    if (is.kind == 0)
+                    {
+                        static const quint16 kPop[3] = { IdRedPoplarLeaves, IdOrangePoplarLeaves, IdYellowPoplarLeaves };
+                        leaf = kPop[(hh >> 20) % 3u];                                          // every tree has its own color
+                    }
+                    for (int dy = 0; dy < h; ++dy) store.set(bx, y0 + dy, bz, log);
+                    const int topTree = y0 + h - 1;
+                    for (int dy = -2; dy <= 1; ++dy)
+                    {
+                    const int r = (dy == 1) ? 1 : (is.kind == 0 && dy <= -1 ? 3 : 2);     // poplar: a wider crown
+                        for (int dx = -r; dx <= r; ++dx)
+                            for (int dz = -r; dz <= r; ++dz)
+                            {
+                                if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                                if (dy != 1 && std::abs(dx) == r && std::abs(dz) == r && r >= 2) continue;
+                                if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
+                                    store.set(bx + dx, topTree + dy, bz + dz, leaf);
+                            }
+                    }
+                }
+        }
+    }
+
+    // FLORA AND FAUNA OF FOREST BIOMES (as in the game): by 4×4 biome cells — ferns, flowers, berry bushes (taiga), leaf litter (dappled forest),
+    // flower forest — dense flowers; animals in groups (wolves/foxes/rabbits in the taiga, sheep/pigs/chickens/cows in the others, bees among flowers).
+    // Not on roads/sites/water/lawns and only where it is free above the ground.
+    {
+        const quint16 fern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern"));
+        const quint16 berry = quint16(IdPaletteStart + paletteIndexOf("minecraft:sweet_berry_bush"));
+        const quint16 brownM = quint16(IdPaletteStart + paletteIndexOf("minecraft:brown_mushroom"));
+        const quint16 redM = quint16(IdPaletteStart + paletteIndexOf("minecraft:red_mushroom"));
+        static const char* const kAnimTaiga[] = { "wolf", "wolf", "wolf", "fox", "fox", "rabbit", "rabbit", "sheep", "pig", "chicken" };
+        static const char* const kAnimForest[] = { "sheep", "sheep", "pig", "pig", "chicken", "chicken", "cow", "cow", "rabbit", "fox", "wolf" };
+        static const char* const kAnimDappled[] = { "fox", "fox", "sheep", "pig", "chicken", "cow", "rabbit", "rabbit" };
+        static const char* const kAnimFlower[] = { "rabbit", "rabbit", "rabbit", "sheep", "pig", "cow", "chicken", "bee", "bee" };
+        int nAnimals = 0;
+        QVector<qint64> cellKeys;
+        cellKeys.reserve(biomeCells.size());
+        for (auto bit = biomeCells.constBegin(); bit != biomeCells.constEnd(); ++bit)
+            if (bit.value() != 1 && bit.value() != 7) cellKeys.append(bit.key());   // the Pale Garden (1) is already carried over from the donor; the meadow (7) — without animals
+        if (g_zone == Climate::Steppe || g_zone == Climate::Mediterranean || g_zone == Climate::Desert || g_zone == Climate::Savanna || g_zone == Climate::Tundra)
+            cellKeys.clear();                                                       // ferns, berry bushes and "forest" animals — not for dry and cold zones
+        std::sort(cellKeys.begin(), cellKeys.end());
+        for (qint64 ckc : cellKeys)
+        {
+            const int v = biomeCells.value(ckc);
+            const int x4 = keyFirst(ckc), z4 = keySecond(ckc);
+            for (int lz = 0; lz < 4; ++lz)
+                for (int lx = 0; lx < 4; ++lx)
+                {
+                    const int x = x4 * 4 + lx, z = z4 * 4 + lz;
+                    const qint64 ck = pairKey(x, z);
+                    const quint32 hq = colHash(ck ^ 0xF10A5ull);
+                    const int r = int(hq % 1000u);
+                    quint16 put = 0;
+                    if (v == 2)                                                   // taiga: ferns, berry bushes, mushrooms
+                    {
+                        if (r < 80) put = fern; else if (r < 98) put = berry; else if (r < 104) put = (hq >> 12) & 1u ? brownM : redM;
+                        else if (r < 108) put = quint16(IdFlowerBase + int((hq >> 14) % 2u ? 1 : 0));
+                    }
+                    else if (v == 3)                                              // forest: ferns, flowers at the edges, mushrooms
+                    {
+                        if (r < 40) put = fern; else if (r < 55) put = quint16(IdFlowerBase + int((hq >> 14) % 2u)); else if (r < 59) put = (hq >> 12) & 1u ? brownM : redM;
+                    }
+                    else if (v == 4)                                              // birch forest: rare flowers, ferns
+                    {
+                        if (r < 25) put = fern; else if (r < 55) put = quint16(IdFlowerBase + int((hq >> 14) % 4u));
+                    }
+                    else if (v == 5)                                              // dappled forest: leaf litter, mushrooms, ferns
+                    {
+                        if (r < 220) put = IdLeafLitter; else if (r < 240) put = fern; else if (r < 246) put = (hq >> 12) & 1u ? brownM : redM;
+                    }
+                    else if (v == 6)                                              // flower forest: dense flowers of all kinds
+                    {
+                        if (r < 300) put = quint16(IdFlowerBase + int((hq >> 14) % quint32(kFlowersCount))); else if (r < 320) put = fern;
+                    }
+                    if (!put) continue;                                           // a plant appears rarely — the expensive occupancy checks are made only for them
+                    if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck) || patchCols.contains(ck)) continue;
+                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                    if (git == ground.constEnd()) continue;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0 || git->surf[col] != quint16(IdGrass)) continue;
+                    const int top = git->top[col];
+                    if (store.get(x, top + 1, z) != IdAir) continue;
+                    store.set(x, top + 1, z, put);
+                }
+            // animals: per 4×4 cell ~2% chance of a group (on average one brood per ~800 m²); the cap per export — 700 animals
+            const quint32 hc = colHash(ckc ^ 0xA21E5ull);
+            if (nAnimals >= 700 || hc % 1000u >= 22u) continue;
+            const char* sp = v == 2 ? kAnimTaiga[(hc >> 10) % 10u] : v == 5 ? kAnimDappled[(hc >> 10) % 8u] : v == 6 ? kAnimFlower[(hc >> 10) % 9u] : kAnimForest[(hc >> 10) % 11u];
+            const int grp = (QLatin1String(sp) == QLatin1String("wolf")) ? 3 : (QLatin1String(sp) == QLatin1String("bee") ? 2 : 1 + int((hc >> 20) % 3u));
+            for (int g = 0; g < grp; ++g)
+            {
+                const int x = x4 * 4 + int((hc >> (4 * g)) % 4u), z = z4 * 4 + int((hc >> (4 * g + 2)) % 4u);
+                const qint64 ck = pairKey(x, z);
+                if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)) continue;
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd() || git->wd[(z & 15) * 16 + (x & 15)] > 0) continue;
+                const int top = git->top[(z & 15) * 16 + (x & 15)];
+                if (store.get(x, top + 1, z) != IdAir || store.get(x, top + 2, z) != IdAir) continue;
+                NpcSite a;
+                a.kind = 5; a.animal = QStringLiteral("minecraft:") + QLatin1String(sp);
+                a.x = x; a.z = z; a.y = top + 1 + (QLatin1String(sp) == QLatin1String("bee") ? 2 : 0); a.yaw = int((hc >> 24) % 4u) * 90;
+                npcs.append(a);
+                ++nAnimals;
+            }
+        }
+        if (nAnimals > 0) res.lairInfo += QObject::tr("; animals in forests: %1").arg(nAnimals);
+    }
+
+    for (auto pit = colPlant.constBegin(); pit != colPlant.constEnd(); ++pit)
+    {
+        const qint64 ck = pit.key();
+        const quint16 pid = pit.value();
+        // A wheat field — a dense planting in every column (so that it reads as a field, not as sparse
+        // bushes); the other grass — a dense lawn, but not solid.
+        if (pid != quint16(IdWheat) && colHash(ck) % 2u != 0u) continue;
+        if (colWater.contains(ck)) continue;                   // we do not grow on water
+        if (colWool.contains(ck) || roadCols.contains(ck)) continue;   // on roads, parking lots and sites (concrete/wool) grass and flowers do not grow
+        const int bx = keyFirst(ck), bz = keySecond(ck);
+        {   // grass does not grow on a sandy shore
+            const auto gps = ground.constFind(pairKey(bx >> 4, bz >> 4));
+            if (gps != ground.constEnd() && g_sandId && gps->surf[(bz & 15) * 16 + (bx & 15)] == g_sandId) continue;
+        }
+        const int y = surfaceTop(ck) + 1;
+        if (y > 254) continue;
+        // Flowers on grass polygons "without height" (user request): about 1 column
+        // out of 24 instead of grass, a random kind. Wheat fields — skipped (there is a crop already).
+        if (pid == quint16(IdGrassPlant) || pid == quint16(IdTallGrass))
+        {
+            const quint32 hf = colHash(ck ^ 0xBEEF1ull);
+            if (hf % 24u == 0u)
+            {
+                if (store.get(bx, y, bz) == IdAir)
+                    store.set(bx, y, bz,
+                              quint16(IdFlowerBase + int((hf >> 8) % quint32(kFlowersCount))));
+                continue;
+            }
+        }
+        if (pid == quint16(IdTallGrass))
+        {   // the grown grass is two blocks tall: without the top half the game will break the bottom one on update
+            if (store.get(bx, y, bz) == IdAir && store.get(bx, y + 1, bz) == IdAir)
+            {
+                store.set(bx, y, bz, IdTallGrass);
+                store.set(bx, y + 1, bz, IdTallGrassUpper);
+            }
+        }
+        else if (store.get(bx, y, bz) == IdAir)
+            store.set(bx, y, bz, pid);
+    }
+
+    lap("before 3.55");
+    beginStep(6);
+    // 3.55 "Forest treasures" (user requests): in random places of forest spots (~1/384 of the columns)
+    // a SINGLE chest stands on the ground (double ones — only urban), NOT CLOSER THAN 30 BLOCKS to each
+    // other inside a polygon (the radius by the Euclidean metric). We place them BEFORE the grass is scattered — the grass
+    // will not climb into the chest.
+    {
+        int fsCols = 0;
+        for (int fiC = 0; fiC < forests.size(); ++fiC)
+        {
+            const VegSite& site = forests[fiC];
+            const bool paleF = (fiC == paleIdx);                // Pale Garden: about 2.5 times more chests (a grid of 12, radius 18) and often expensive
+            QVector<QPoint> placed;                             // the treasures of THIS polygon — for the radius
+            // a 20×20 grid (~1/400 of the columns, like the former 1/384): one hash-shifted place per cell
+            const int G = paleF ? 12 : 20;
+            const int gx0 = int(std::floor(double(site.minX) / G)), gx1 = int(std::floor(double(site.maxX) / G));
+            const int gz0 = int(std::floor(double(site.minZ) / G)), gz1 = int(std::floor(double(site.maxZ) / G));
+            for (int gx = gx0; gx <= gx1; ++gx)
+            for (int gz = gz0; gz <= gz1; ++gz)
+            {
+                if ((++fsCols & 0x3FF) == 0 && cancel && cancel->load())
+                {
+                    res.cancelled = true;
+                    res.error = QObject::tr("Export cancelled.");
+                    return res;
+                }
+                const quint32 hc = colHash(pairKey(gx, gz) ^ 0xC0FFEEull);
+                const int tx = gx * G + int(hc % G), tz = gz * G + int((hc >> 8) % G);
+                if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
+                if (!spansContain(site.spans, tx, tz)) continue;
+                const qint64 ck = pairKey(tx, tz);
+                if (colWater.contains(ck) || colMin.contains(ck)) continue;   // on water/under buildings — skipped
+                const int bx = keyFirst(ck), bz = keySecond(ck);
+                bool far = true;
+                for (const QPoint& p : placed)
+                {
+                    const long long dx = p.x() - bx, dz = p.y() - bz;
+                    if (dx * dx + dz * dz < (paleF ? 324 : 900)) { far = false; break; }       // 30² blocks (in the Pale Garden 18²)
+                }
+                if (!far) continue;
+                const int y = surfaceTop(ck) + 1;
+                if (y > 254) continue;
+                if (paleF && patchCols.contains(ck)) continue;                // not inside the mansion / a patch
+                {
+                    const quint16 here = store.get(bx, y, bz);
+                    if (paleF && (here == IdPaleMossCarpet || here == IdLeafLitter || here == IdGrassPlant || here == IdTallGrass))
+                        store.erase(bx, y, bz);                                   // the chest displaces the forest litter
+                    else if (here != IdAir) continue;                             // the place is already taken by a tree/planting
+                }
+                store.set(bx, y, bz, IdChest);
+                if (paleF)
+                {   // Pale Garden: 35% expensive (mansion/pyramid/outpost/sunken treasure), 25% medium, the rest everyday
+                    const quint32 hq = colHash(ck ^ 0x51ull);
+                    const int rich = kChestLootCount - 3;                         // woodland_mansion
+                    int tbl;
+                    if ((hq >> 8) % 100u < 12u) tbl = rich;                       // every eighth treasure — as in the mansion
+                    else tbl = pickChestLoot(hq, 40, 25);
+                    chests.append(ChestSite{ bx, y, bz, tbl });
+                }
+                else
+                    chests.append(ChestSite{ bx, y, bz, pickChestLoot(colHash(ck ^ 0x51ull), 85, 15) });   // treasures in forests — without the expensive ones
+                placed.append(QPoint(bx, bz));
+            }
+        }
+    }
+
+    lap("before 3.57");
+    beginStep(7);
+    // 3.57 Street furniture (user requests): wooden fences around csrpol sites (with no
+    // fewer than two gates and solid outer corners) and lamp posts along roads —
+    // a village composition "plinth + post + lantern", but taller than the game analogs. Everything stands on the
+    // ground by surfaceTop (already with the noise lift taken into account).
+    {
+        auto gateIdFor = [](qint64 ck, const QSet<ColKey>& pad) -> quint16
+        {   // the gate faces "away from the spot" (outward)
+            const int x2 = keyFirst(ck), z2 = keySecond(ck);
+            if (pad.contains(pairKey(x2 - 1, z2))) return IdGateE;
+            if (pad.contains(pairKey(x2 + 1, z2))) return IdGateW;
+            if (pad.contains(pairKey(x2, z2 - 1))) return IdGateS;
+            return IdGateN;
+        };
+        static const int dxs[4] = { 1, -1, 0, 0 };
+        static const int dzs[4] = { 0, 0, 1, -1 };
+        // — site fences: a ring of free columns right around the spot, two gates roughly
+        //   opposite each other (deterministically by the hash). The ring is built by FLARING over 8 neighbors:
+        //   along the edges the result is the same row, and on the OUTER CORNERS diagonal cells appear —
+        //   without them the fence diverged at the corners and the posts did not connect.
+        int nSportEq = 0;
+        for (int padIdx = 0; padIdx < pads.size(); ++padIdx)
+        {
+            const QList<qint64>& padCols = pads[padIdx];
+            const QSet<ColKey> pad(padCols.constBegin(), padCols.constEnd());
+            if (padCode.value(padIdx, 0) == 71323000 && !padIsLake.value(padIdx, 0))
+            {   // GREENHOUSE (hothouse, orangery): a plank frame with glass (walls 4 blocks, a flat glass roof with beams), inside real beds — rows of beds (farmland) with
+                // plantings (wheat, carrots, potatoes, beetroot), between pairs of rows irrigation ditches with water, aisles, lamps under the roof; the entrance — an opening of 3 cells
+                int gx0 = std::numeric_limits<int>::max(), gx1 = std::numeric_limits<int>::min(), gz0 = gx0, gz1 = gx1;
+                for (qint64 ck : padCols)
+                {
+                    gx0 = std::min(gx0, keyFirst(ck)); gx1 = std::max(gx1, keyFirst(ck));
+                    gz0 = std::min(gz0, keySecond(ck)); gz1 = std::max(gz1, keySecond(ck));
+                }
+                const bool rowsAlongX = (gx1 - gx0) >= (gz1 - gz0);                   // the bed rows run along the long axis
+                auto isBoundary = [&](int x, int z)
+                {
+                    return !pad.contains(pairKey(x + 1, z)) || !pad.contains(pairKey(x - 1, z)) || !pad.contains(pairKey(x, z + 1)) || !pad.contains(pairKey(x, z - 1));
+                };
+                QVector<qint64> bnd;
+                for (qint64 ck : padCols) if (isBoundary(keyFirst(ck), keySecond(ck))) bnd << ck;
+                std::sort(bnd.begin(), bnd.end());
+                QPoint gate(1 << 28, 1 << 28);
+                if (!bnd.isEmpty())
+                {
+                    const qint64 gk = bnd[int(colHash(bnd.first() ^ 0x6A7Eull) % quint32(bnd.size()))];
+                    gate = QPoint(keyFirst(gk), keySecond(gk));
+                }
+                const quint16 crops[4] = { IdWheat, IdCarrots, IdPotatoes, IdBeetroots };
+                int nBed = 0, dbgNoGround = 0, dbgInterior = 0;
+                for (qint64 ck : padCols)
+                {
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    if (colMin.contains(ck) || colWater.contains(ck)) continue;
+                    const int y0 = surfaceTop(ck) + 1;
+                    if (y0 + 6 > 250) continue;
+                    const bool boundary = isBoundary(x, z);
+                    if (boundary)
+                    {
+                        const bool inGate = std::abs(x - gate.x()) <= 1 && std::abs(z - gate.y()) <= 1;
+                        int free4 = 0;
+                        if (!pad.contains(pairKey(x + 1, z))) ++free4;
+                        if (!pad.contains(pairKey(x - 1, z))) ++free4;
+                        if (!pad.contains(pairKey(x, z + 1))) ++free4;
+                        if (!pad.contains(pairKey(x, z - 1))) ++free4;
+                        const bool post = free4 >= 2 || ((x + z) & 3) == 0;
+                        for (int dy = 0; dy < 4; ++dy)
+                        {
+                            if (inGate && dy < 3) continue;                              // the entrance opening 3 high
+                            if (store.get(x, y0 + dy, z) != IdAir) continue;
+                            store.set(x, y0 + dy, z, (post || dy == 0 || inGate) ? IdOakPlanks : IdGlass);
+                        }
+                        if (store.get(x, y0 + 4, z) == IdAir) store.set(x, y0 + 4, z, IdOakPlanks);
+                        continue;
+                    }
+                    // the roof
+                    if (store.get(x, y0 + 4, z) == IdAir) store.set(x, y0 + 4, z, (x & 3) == 0 ? IdOakPlanks : IdGlass);
+                    // beds: a chain of rows along the axis, period 6: 0 — aisle, 1-2 — bed, 3 — a ditch with water, 4-5 — bed
+                    const int r = rowsAlongX ? (z - gz0) : (x - gx0);
+                    const int c = rowsAlongX ? (x - gx0) : (z - gz0);
+                    const int ph = ((r % 6) + 6) % 6;
+                    const bool nearWall = !pad.contains(pairKey(x + 1, z)) || !pad.contains(pairKey(x - 1, z)) || !pad.contains(pairKey(x, z + 1)) || !pad.contains(pairKey(x, z - 1))
+                                          || !pad.contains(pairKey(x + 1, z + 1)) || !pad.contains(pairKey(x - 1, z - 1)) || !pad.contains(pairKey(x + 1, z - 1)) || !pad.contains(pairKey(x - 1, z + 1));
+                    auto git = ground.find(pairKey(x >> 4, z >> 4));
+                    if (git == ground.end()) { ++dbgNoGround; continue; }
+                    ++dbgInterior;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    const bool crossAisle = (c % 14) == 0 || (std::abs(x - gate.x()) <= 1 && std::abs(z - gate.y()) <= 3 && false);
+                    if (nearWall || ph == 0 || crossAisle)
+                    {   // aisle: trampled earth, under the roof a lamp every 8 cells
+                        if (git->wd[col] == 0) git->surf[col] = IdDirtPath;
+                        if (ph == 0 && (c % 8) == 4 && store.get(x, y0 + 3, z) == IdAir) store.set(x, y0 + 3, z, IdLanternHung);
+                        continue;
+                    }
+                    if (ph == 3)
+                    {   // irrigation ditch: water flush with the beds
+                        if (git->wd[col] == 0)
+                        {
+                            git->wd[col] = 1;
+                            if (git->art.isEmpty()) git->art.fill(0, 256);
+                            git->art[col] = 1;
+                        }
+                        continue;
+                    }
+                    git->surf[col] = IdFarmland;
+                    const quint16 crop = crops[colHash(pairKey(r / 3, c / 18) ^ padCols.first() ^ 0x6C0Full) % 4u];
+                    if (store.get(x, y0, z) == IdAir) { store.set(x, y0, z, crop); ++nBed; }
+                }
+                nSportEq += nBed > 0 ? 1 : 0;
+                if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[greenhouse] cols=%d beds=%d interior=%d noGround=%d bbox x %d..%d z %d..%d\n", int(padCols.size()), nBed, dbgInterior, dbgNoGround, gx0, gx1, gz0, gz1);
+                continue;
+            }
+            QVector<qint64> ring;
+            for (qint64 ck : padCols)
+            {
+                const int bx = keyFirst(ck), bz = keySecond(ck);
+                for (int ddy = -1; ddy <= 1; ++ddy)
+                    for (int ddx = -1; ddx <= 1; ++ddx)
+                    {
+                        if (!ddx && !ddy) continue;
+                        const qint64 nk = pairKey(bx + ddx, bz + ddy);
+                        if (pad.contains(nk) || colMin.contains(nk) || colWater.contains(nk))
+                            continue;                       // the fence does not climb onto a road/structure/water
+                        ring << nk;
+                    }
+            }
+            std::sort(ring.begin(), ring.end());
+            ring.erase(std::unique(ring.begin(), ring.end()), ring.end());
+            if (ring.size() < 8) continue;              // a degenerate spot — not fenced
+            auto freeAt = [&](int ri)
+            {
+                const qint64 ck = ring.at(ri);
+                const int y = surfaceTop(ck) + 1;
+                return y <= 254 && store.get(keyFirst(ck), y, keySecond(ck)) == IdAir;
+            };
+            auto findFree = [&](int start)
+            {
+                for (int s = 0; s < 8; ++s)
+                {
+                    const int ri = (start + s) % int(ring.size());
+                    if (freeAt(ri)) return ri;
+                }
+                return -1;
+            };
+            const quint32 h0 = colHash(ring.first() ^ 0xFECEull);
+            const int gateA = findFree(int(h0 % quint32(ring.size())));
+            const int gateB = findFree((gateA >= 0 ? gateA : 0) + int(ring.size()) / 2
+                                       + int(h0 >> 8) % 3);
+            for (int ri = 0; ri < int(ring.size()); ++ri)
+            {
+                if (!freeAt(ri)) continue;              // occupied (a fence of a neighboring spot/a post/a planting)
+                const qint64 ck = ring.at(ri);
+                const int y = surfaceTop(ck) + 1;
+                store.set(keyFirst(ck), y, keySecond(ck),
+                          (ri == gateA || ri == gateB) ? gateIdFor(ck, pad) : IdFence);
+            }
+            // Iron golems: on a fenced site (except lakes) a 25% chance is counted TWICE (deterministically
+            // by the spot hash) — a site has 0, 1 or 2 golems. They stand on free columns inside the spot closer to
+            // the center of its bbox; the second one — not closer than 3 blocks to the first.
+            if (!padIsLake.value(padIdx, 0))
+            {
+                int gx0 = std::numeric_limits<int>::max(), gx1 = std::numeric_limits<int>::min();
+                int gz0 = gx0, gz1 = gx1;
+                for (qint64 ck : padCols)
+                {
+                    gx0 = std::min(gx0, keyFirst(ck)); gx1 = std::max(gx1, keyFirst(ck));
+                    gz0 = std::min(gz0, keySecond(ck)); gz1 = std::max(gz1, keySecond(ck));
+                }
+                const double mx = 0.5 * (gx0 + gx1), mz = 0.5 * (gz0 + gz1);
+                QVector<QPoint> golemAt;
+                for (int roll = 0; roll < 2; ++roll)
+                {
+                    if (colHash(ring.first() ^ (0x601E3ull + quint64(roll) * 0x9E37ull)) % 100u >= 25u) continue;
+                    qint64 best = 0; double bestD = 1e18; bool have = false;
+                    for (qint64 ck : padCols)
+                    {
+                        const int y = surfaceTop(ck) + 1;
+                        if (y > 253 || store.get(keyFirst(ck), y, keySecond(ck)) != IdAir) continue;
+                        bool nearOther = false;
+                        for (const QPoint& q : golemAt)
+                            if (std::max(std::abs(q.x() - keyFirst(ck)), std::abs(q.y() - keySecond(ck))) < 3) nearOther = true;
+                        if (nearOther) continue;
+                        const double d = (keyFirst(ck) - mx) * (keyFirst(ck) - mx) + (keySecond(ck) - mz) * (keySecond(ck) - mz);
+                        if (d < bestD) { bestD = d; best = ck; have = true; }
+                    }
+                    if (!have) continue;
+                    NpcSite g;
+                    g.kind = 3;                                          // minecraft:iron_golem
+                    g.x = keyFirst(best); g.z = keySecond(best);
+                    g.y = surfaceTop(best) + 1;                          // surfaceTop already includes the yShift lift
+                    g.yaw = int(colHash(best ^ 0x601Eull) % 4u) * 90;
+                    npcs.append(g);
+                    golemAt.append(QPoint(g.x, g.z));
+                }
+            }
+            // SPORTS EQUIPMENT on sites (CODE 53700000 — sports, 53710000 — children's): by the size and shape of the site — a football pitch (goals, the center
+            // line and circle in white wool), volleyball/tennis (a net on posts), basketball (two backboards with cauldron hoops), workout (pull-up bars, parallel bars, benches) or a children's
+            // playground (swings, a sandbox, a carousel, benches). We place only on free columns inside the spot not closer than 1 block to the fence and with air above them.
+            if (!padIsLake.value(padIdx, 0) && padCols.size() >= 90)
+            {
+                int bx0 = std::numeric_limits<int>::max(), bx1 = std::numeric_limits<int>::min(), bz0 = bx0, bz1 = bx1;
+                for (qint64 ck : padCols)
+                {
+                    bx0 = std::min(bx0, keyFirst(ck)); bx1 = std::max(bx1, keyFirst(ck));
+                    bz0 = std::min(bz0, keySecond(ck)); bz1 = std::max(bz1, keySecond(ck));
+                }
+                const int Lx = bx1 - bx0 + 1, Lz = bz1 - bz0 + 1;
+                const bool alongX = Lx >= Lz;                                 // the long axis
+                const int L = alongX ? Lx : Lz, Wd = alongX ? Lz : Lx;        // the length / width of the site
+                const double fillRatio = double(padCols.size()) / double(std::max(1, Lx * Lz));   // 1 — a rectangle, less — a ragged outline
+                const quint32 hp = colHash(ring.first() ^ 0x5B027ull);
+                // the "u-axis" along the length, the "v-axis" across; to(u, v) -> (x, z)
+                auto toXZ = [&](int u, int v) { return alongX ? QPoint(bx0 + u, bz0 + v) : QPoint(bx0 + v, bz0 + u); };
+                auto inside = [&](int u, int v, int margin)
+                {
+                    const QPoint q = toXZ(u, v);
+                    for (int dz2 = -margin; dz2 <= margin; ++dz2)
+                        for (int dx2 = -margin; dx2 <= margin; ++dx2)
+                            if (!pad.contains(pairKey(q.x() + dx2, q.y() + dz2))) return false;
+                    return true;
+                };
+                int resX0 = 1, resX1 = 0, resZ0 = 1, resZ1 = 0;                  // the area occupied by the court (x, z): ordinary items are not placed there
+                auto freeCol = [&](int u, int v, int h) -> bool
+                {   // the column is inside (a 1-block margin) and there is air h blocks above the ground
+                    if (!inside(u, v, 1)) return false;
+                    const QPoint q = toXZ(u, v);
+                    if (q.x() >= resX0 && q.x() <= resX1 && q.y() >= resZ0 && q.y() <= resZ1) return false;
+                    const int y = surfaceTop(pairKey(q.x(), q.y())) + 1;
+                    if (y + h > 253) return false;
+                    for (int dy = 0; dy < h; ++dy) if (store.get(q.x(), y + dy, q.y()) != IdAir) return false;
+                    return true;
+                };
+                auto put1 = [&](int u, int v, int dy, quint16 id)
+                {
+                    const QPoint q = toXZ(u, v);
+                    store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1 + dy, q.y(), id);
+                };
+                // a post (fence) of height h; false — did not fit
+                auto post = [&](int u, int v, int h) -> bool
+                {
+                    if (!freeCol(u, v, h)) return false;
+                    for (int dy = 0; dy < h; ++dy) put1(u, v, dy, IdFence);
+                    return true;
+                };
+                int whiteWool = -1;
+                for (int i = 0; i < kWoolsCount; ++i) if (qstrcmp(kWools[i].name, "minecraft:white_wool") == 0) { whiteWool = i; break; }
+                auto paint = [&](int u, int v)
+                {   // white marking: we change the top ground block in the column to white wool
+                    if (whiteWool < 0 || !inside(u, v, 0)) return;
+                    const QPoint q = toXZ(u, v);
+                    auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
+                    if (git != ground.end() && git->wd[(q.y() & 15) * 16 + (q.x() & 15)] == 0) git->surf[(q.y() & 15) * 16 + (q.x() & 15)] = quint16(IdWoolBase + whiteWool);
+                };
+                int nEq = 0;
+                const int vc = Wd / 2;
+                const int padKind = padCode.value(padIdx, 0);
+                const bool sportPad = (padKind == 53700000 || padKind == 53710000);
+                auto flowerAt = [&](int u, int v)
+                {   // a flower on the grass (only in a free column, air above the ground)
+                    if (!freeCol(u, v, 1)) return false;
+                    const QPoint q = toXZ(u, v);
+                    put1(u, v, 0, quint16(IdFlowerBase + int(colHash(pairKey(q.x(), q.y()) ^ 0xF10Eull) % quint32(kFlowersCount))));
+                    return true;
+                };
+                if (!sportPad)
+                {   // ——— other csrpol by codes ———
+                    quint16 hayBale = IdHayBale;
+                    switch (padKind)
+                    {
+                    case 53510000:
+                    {   // CEMETERY: rows of graves every 3 blocks along and 4 across: a gravestone (a stone wall 2 blocks) or a cross (a fence), in front of it a mound of coarse dirt; rare flowers
+                        for (int v = 2; v < Wd - 2; v += 4)
+                            for (int u = 2; u < L - 2; u += 3)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 31, v * 17) ^ ring.first() ^ 0xC3E7ull);
+                                if (hq % 100u >= 70u) continue;
+                                if (!(freeCol(u, v, 3) && freeCol(u, v + 1, 1) && freeCol(u, v + 2, 1))) continue;
+                                if ((hq >> 8) % 100u < 55u)
+                                {   // a gravestone
+                                    put1(u, v, 0, IdStoneBrickWall);
+                                    put1(u, v, 1, IdStoneBrickWall);
+                                }
+                                else
+                                {   // a cross
+                                    put1(u, v, 0, IdFence); put1(u, v, 1, IdFence); put1(u, v, 2, IdFence);
+                                    if (freeCol(u - 1, v, 2) && freeCol(u + 1, v, 2)) { put1(u - 1, v, 1, IdFence); put1(u + 1, v, 1, IdFence); }
+                                }
+                                put1(u, v + 1, 0, IdCoarseDirt);                          // a grave mound
+                                put1(u, v + 2, 0, IdCoarseDirt);
+                                if ((hq >> 16) % 100u < 25u) flowerAt(u + 1, v + 1);
+                                ++nEq;
+                            }
+                        // benches at the edge
+                        for (int k = 0; k < 2; ++k)
+                        {
+                            const int u0 = 1 + k * std::max(4, L - 5);
+                            bool ok = true;
+                            for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, 1, 1);
+                            if (!ok) continue;
+                            for (int u = u0; u < u0 + 3; ++u) put1(u, 1, 0, alongX ? IdStairsS : IdStairsE);
+                            ++nEq;
+                        }
+                        break;
+                    }
+                    case 53530000:
+                    {   // MONUMENT, MEMORIAL: a stone site, in the center an obelisk (a 6-block wall on a 3×3 stone brick base) with an eternal flame (a lantern), flowers and benches around
+                        const int uc = L / 2, vm = Wd / 2;
+                        bool ok = true;
+                        for (int du = -1; du <= 1 && ok; ++du) for (int dv = -1; dv <= 1 && ok; ++dv) ok = freeCol(uc + du, vm + dv, 8);
+                        if (ok)
+                        {
+                            const quint16 sb = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+                            for (int du = -1; du <= 1; ++du) for (int dv = -1; dv <= 1; ++dv) put1(uc + du, vm + dv, 0, sb);
+                            for (int dy = 1; dy <= 6; ++dy) put1(uc, vm, dy, IdStoneBrickWall);
+                            put1(uc, vm, 7, IdLanternStanding);
+                            ++nEq;
+                            for (int a = 0; a < 4; ++a)
+                            {
+                                const int du = (a & 1) ? 3 : -3, dv = (a & 2) ? 3 : -3;
+                                if (freeCol(uc + du, vm + dv, 1)) { put1(uc + du, vm + dv, 0, quint16(IdFlowerPotBase + int(colHash(pairKey(a, uc) ^ 0x3E3ull) % quint32(kFlowersCount)))); ++nEq; }
+                            }
+                            for (int sd = -1; sd <= 1; sd += 2)
+                            {
+                                bool b2 = true;
+                                for (int dv = -1; dv <= 1 && b2; ++dv) b2 = freeCol(uc + 5 * sd, vm + dv, 1);
+                                if (!b2) continue;
+                                for (int dv = -1; dv <= 1; ++dv) put1(uc + 5 * sd, vm + dv, 0, sd < 0 ? (alongX ? IdStairsE : IdStairsS) : (alongX ? IdStairsW : IdStairsN));
+                                ++nEq;
+                            }
+                        }
+                        break;
+                    }
+                    case 51220000:
+                    {   // GAS STATION: a canopy on four supports (a 9×5 slab roof), under it two pumps (a blast furnace) with an indicator lantern; barrels (fuel) nearby
+                        const int uc = L / 2, vm = Wd / 2;
+                        const int du = std::min(4, std::max(2, L / 2 - 2)), dv = std::min(2, std::max(1, Wd / 2 - 2));
+                        bool ok = true;
+                        for (int a = -du; a <= du && ok; ++a) for (int b2 = -dv; b2 <= dv && ok; ++b2) ok = freeCol(uc + a, vm + b2, 5);
+                        if (ok)
+                        {
+                            for (int a : { -du, du }) for (int b2 : { -dv, dv }) for (int dy = 0; dy < 4; ++dy) put1(uc + a, vm + b2, dy, IdFence);
+                            for (int a = -du; a <= du; ++a) for (int b2 = -dv; b2 <= dv; ++b2) put1(uc + a, vm + b2, 4, IdSlabBottom);
+                            for (int a : { -du / 2, du / 2 })
+                            {
+                                put1(uc + a, vm, 0, quint16(int(IdBlastFurnaceBase) + (alongX ? 0 : 1)));
+                                put1(uc + a, vm, 1, IdLanternStanding);
+                            }
+                            ++nEq;
+                            for (int a = -1; a <= 1; a += 2)
+                                if (freeCol(uc + a, Wd - 2, 1)) { put1(uc + a, Wd - 2, 0, IdBarrel); ++nEq; }
+                        }
+                        break;
+                    }
+                    case 52400000:
+                    {   // APIARY: hives on posts in a grid every 4 blocks, flowers around, bees near the hives
+                        int nHive = 0;
+                        for (int v = 2; v < Wd - 2; v += 4)
+                            for (int u = 2; u < L - 2; u += 4)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 29, v * 13) ^ ring.first() ^ 0xA9E7ull);
+                                if (hq % 100u >= 65u || !freeCol(u, v, 2)) continue;
+                                put1(u, v, 0, IdFence);
+                                put1(u, v, 1, quint16(IdPaletteStart + paletteIndexOf("minecraft:beehive")));
+                                ++nHive; ++nEq;
+                                if (nHive <= 8)
+                                {
+                                    const QPoint q = toXZ(u, v);
+                                    NpcSite bee;
+                                    bee.kind = 5; bee.animal = QStringLiteral("minecraft:bee");
+                                    bee.x = q.x(); bee.z = q.y(); bee.y = surfaceTop(pairKey(q.x(), q.y())) + 3;
+                                    bee.yaw = int((hq >> 10) % 4u) * 90;
+                                    npcs.append(bee);
+                                }
+                            }
+                        for (int v = 1; v < Wd - 1; ++v)
+                            for (int u = 1; u < L - 1; ++u)
+                                if (colHash(pairKey(u * 7 + 1, v * 11 + 3) ^ ring.first() ^ 0xF1A7ull) % 100u < 22u) flowerAt(u, v);
+                        break;
+                    }
+                    case 51460000:
+                    {   // ELECTRIC SUBSTATION: 2×2×2 transformers of iron blocks with insulators (fences) on the top corners, towers (a fence of 8 with a crossbar) along the edges
+                        for (int v = 2; v < Wd - 3; v += 6)
+                            for (int u = 2; u < L - 3; u += 6)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 23, v * 19) ^ ring.first() ^ 0xE1ECull);
+                                if (hq % 100u >= 75u) continue;
+                                bool ok = true;
+                                for (int du = 0; du < 2 && ok; ++du) for (int dv = 0; dv < 2 && ok; ++dv) ok = freeCol(u + du, v + dv, 4);
+                                if (!ok) continue;
+                                for (int du = 0; du < 2; ++du) for (int dv = 0; dv < 2; ++dv)
+                                {
+                                    put1(u + du, v + dv, 0, IdIronBlock); put1(u + du, v + dv, 1, IdIronBlock);
+                                    if (du == dv || (hq & 1u)) { put1(u + du, v + dv, 2, IdFence); put1(u + du, v + dv, 3, IdFence); }
+                                }
+                                ++nEq;
+                            }
+                        for (int k = 0; k < 2; ++k)
+                        {
+                            const int u0 = 1 + k * std::max(3, L - 4), v0 = Wd / 2;
+                            bool ok = true;
+                            for (int dv = -1; dv <= 1 && ok; ++dv) ok = freeCol(u0, v0 + dv, 9);
+                            if (!ok) continue;
+                            for (int dy = 0; dy < 9; ++dy) put1(u0, v0, dy, IdFence);
+                            for (int dv = -1; dv <= 1; ++dv) put1(u0, v0 + dv, 7, IdFence);
+                            put1(u0, v0 - 1, 6, IdFence); put1(u0, v0 + 1, 6, IdFence);
+                            ++nEq;
+                        }
+                        break;
+                    }
+                    case 52100000:
+                    {   // AGRICULTURAL OBJECTS (territory): a 7×5 pen with animals, hay bales, barrels, drinkers (cauldrons)
+                        if (L >= 12 && Wd >= 9)
+                        {
+                            const int u0 = 2, v0 = 2;
+                            bool ok = true;
+                            for (int u = u0; u < u0 + 7 && ok; ++u) for (int v = v0; v < v0 + 5 && ok; ++v) ok = freeCol(u, v, 1);
+                            if (ok)
+                            {
+                                for (int u = u0; u < u0 + 7; ++u) { put1(u, v0, 0, IdFence); put1(u, v0 + 4, 0, IdFence); }
+                                for (int v = v0 + 1; v < v0 + 4; ++v) { put1(u0, v, 0, IdFence); if (v != v0 + 2) put1(u0 + 6, v, 0, IdFence); }
+                                put1(u0 + 6, v0 + 2, 0, alongX ? IdGateE : IdGateS);
+                                put1(u0 + 1, v0 + 3, 0, IdCauldron);                         // a drinker
+                                static const char* const kFarm[] = { "minecraft:cow", "minecraft:pig", "minecraft:sheep", "minecraft:chicken" };
+                                const int na = 2 + int(ring.first() % 3u);
+                                for (int a = 0; a < na; ++a)
+                                {
+                                    const QPoint q = toXZ(u0 + 2 + a, v0 + 1 + (a % 3));
+                                    NpcSite an;
+                                    an.kind = 5; an.animal = QString::fromLatin1(kFarm[(ring.first() >> (a * 3)) % 4u]);
+                                    an.x = q.x(); an.z = q.y(); an.y = surfaceTop(pairKey(q.x(), q.y())) + 1;
+                                    an.yaw = a * 90;
+                                    npcs.append(an);
+                                }
+                                ++nEq;
+                            }
+                        }
+                        for (int v = 2; v < Wd - 2; v += 5)
+                            for (int u = 11; u < L - 2; u += 5)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 17, v * 31) ^ ring.first() ^ 0x5E7Dull);
+                                if (hq % 100u >= 60u) continue;
+                                if (!freeCol(u, v, 2)) continue;
+                                if ((hq >> 8) % 3u == 0u) { put1(u, v, 0, IdBarrel); if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, IdBarrel); }
+                                else { put1(u, v, 0, hayBale); if ((hq >> 12) & 1u) put1(u, v, 1, hayBale); if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, hayBale); }
+                                ++nEq;
+                            }
+                        break;
+                    }
+                    case 51130000:
+                    {   // INDUSTRIAL ENTERPRISE (territory): stacks of containers (multicolored wool 4×2×2), barrels, pipes (fences)
+                        for (int v = 2; v < Wd - 3; v += 6)
+                            for (int u = 2; u < L - 5; u += 7)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 37, v * 41) ^ ring.first() ^ 0x1D05ull);
+                                if (hq % 100u >= 65u) continue;
+                                if ((hq >> 8) % 4u == 0u)
+                                {   // barrels
+                                    if (!freeCol(u, v, 2)) continue;
+                                    put1(u, v, 0, IdBarrel); put1(u, v, 1, IdBarrel);
+                                    if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, IdBarrel);
+                                    ++nEq;
+                                    continue;
+                                }
+                                bool ok = true;
+                                for (int du = 0; du < 4 && ok; ++du) for (int dv = 0; dv < 2 && ok; ++dv) ok = freeCol(u + du, v + dv, 2);
+                                if (!ok) continue;
+                                static const int kContainerWools[] = { 1, 5, 11, 14, 3, 4 };
+                                const int wc = std::min(kWoolsCount - 1, kContainerWools[(hq >> 12) % 6u]);
+                                for (int du = 0; du < 4; ++du) for (int dv = 0; dv < 2; ++dv)
+                                {
+                                    put1(u + du, v + dv, 0, quint16(IdWoolBase + wc));
+                                    if (((hq >> 20) & 1u) || du < 2) put1(u + du, v + dv, 1, quint16(IdWoolBase + wc));
+                                }
+                                ++nEq;
+                            }
+                        break;
+                    }
+                    case 53110000:
+                    {   // AIRPORT: white runway marking — center dashes 5 every 4, side lines, threshold stripes at the ends, lights along the edges
+                        const int vA = 2, vB = Wd - 3;
+                        for (int u = 1; u < L - 1; ++u)
+                        {
+                            paint(u, vA); paint(u, vB);                                      // the edges
+                            if ((u / 5) % 2 == 0) paint(u, vc);                              // the center dashes
+                        }
+                        for (int end = 0; end < 2; ++end)
+                            for (int v = vA + 2; v <= vB - 2; v += 2)
+                                for (int k = 0; k < 4; ++k) paint(end == 0 ? 2 + k : L - 3 - k, v);
+                        for (int u = 4; u < L - 3; u += 8)
+                            for (int v : { 1, Wd - 2 }) if (freeCol(u, v, 1)) { put1(u, v, 0, IdLanternStanding); ++nEq; }
+                        break;
+                    }
+                    case 53600000:
+                    case 53400000:
+                    {   // TERRITORIES OF SOCIAL AND RELIGIOUS OBJECTS (and others): a lawn with benches along the perimeter, flower beds and flowers; without wool
+                        for (int k = 0; k < 4; ++k)
+                        {
+                            const int u0 = 2 + (k & 1) * std::max(4, L - 7);
+                            const int v0 = (k & 2) ? std::max(2, Wd - 3) : 2;
+                            bool ok = true;
+                            for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
+                            if (!ok) continue;
+                            for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, alongX ? ((k & 2) ? IdStairsN : IdStairsS) : ((k & 2) ? IdStairsW : IdStairsE));
+                            ++nEq;
+                        }
+                        for (int v = 3; v < Wd - 3; v += 6)
+                            for (int u = 3; u < L - 3; u += 6)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 13, v * 7) ^ ring.first() ^ 0xC1A5ull);
+                                if (hq % 100u >= 55u) continue;
+                                int made = 0;
+                                for (int du = 0; du < 2; ++du) for (int dv = 0; dv < 2; ++dv) if (flowerAt(u + du, v + dv)) ++made;
+                                if (made) ++nEq;
+                            }
+                        break;
+                    }
+                    default:
+                        break;                                                  // other codes (pipes, towers, tanks, etc.) — without furnishing
+                    }
+                    nSportEq += nEq;
+                    if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[csr] code=%d bbox x %d..%d z %d..%d cols=%d eq=%d\n", padKind, bx0, bx1, bz0, bz1, int(padCols.size()), nEq);
+                    continue;
+                }
+                QVector<QPoint> barAt;                                           // pull-up bars of the site: no more than two, not closer than 12 blocks to each other
+                auto canBar = [&](int u, int v)
+                {
+                    if (barAt.size() >= 2) return false;
+                    for (const QPoint& q : barAt) if (std::max(std::abs(q.x() - u), std::abs(q.y() - v)) < 12) return false;
+                    return true;
+                };
+                // COURTS AND FIELDS. We take the largest axis-aligned rectangle lying entirely inside the spot (with a 1-block margin from the edge) — so both rotated and oval spots are found. By its size and
+                // the spot area a kind is chosen: football / mini-football / basketball / hockey / tennis / volleyball. The court stands in the center of the rectangle, marked with white wool on the ground.
+                bool courtBuilt = false;
+                auto buildCourt = [&]() -> bool
+                {
+                    if (padKind != 53700000) return false;
+                    const int Wg = Lx, Hg = Lz;
+                    QVector<int> hgt(Wg, 0);
+                    int bestA = 0, bL = 0, bB = 0, bW = 0, bH = 0;
+                    for (int zi = 0; zi < Hg; ++zi)
+                    {
+                        for (int xi = 0; xi < Wg; ++xi)
+                        {
+                            const int x = bx0 + xi, z = bz0 + zi;
+                            bool ok = true;
+                            for (int dz2 = -1; dz2 <= 1 && ok; ++dz2) for (int dx2 = -1; dx2 <= 1 && ok; ++dx2) ok = pad.contains(pairKey(x + dx2, z + dz2));
+                            hgt[xi] = ok ? hgt[xi] + 1 : 0;
+                        }
+                        QVector<QPair<int, int>> st;                                      // (start, height)
+                        for (int xi = 0; xi <= Wg; ++xi)
+                        {
+                            const int cur = xi < Wg ? hgt[xi] : 0;
+                            int start = xi;
+                            while (!st.isEmpty() && st.last().second >= cur)
+                            {
+                                const int hh = st.last().second, s0 = st.last().first;
+                                st.removeLast();
+                                if (hh * (xi - s0) > bestA) { bestA = hh * (xi - s0); bL = s0; bB = zi; bW = xi - s0; bH = hh; }
+                                start = s0;
+                            }
+                            st.append(qMakePair(start, cur));
+                        }
+                    }
+                    if (bestA < 100) return false;
+                    const int rx0 = bx0 + bL, rz0 = bz0 + bB - bH + 1;                      // the rectangle [rx0, rx0+bW) × [rz0, rz0+bH)
+                    const bool longX = bW >= bH;
+                    const int a = longX ? bW : bH, b = longX ? bH : bW;
+                    const int area = int(padCols.size());
+                    struct Kind { int id; int w; };
+                    QVector<Kind> opts;
+                    if (a >= 36 && b >= 20 && area >= 1500) opts.append({ 0, area >= 2800 ? 8 : 3 });   // a football pitch
+                    if (a >= 26 && b >= 14 && area <= 3200) opts.append({ 1, 3 });                                        // mini-football / handball
+                    if (a >= 22 && b >= 11 && area <= 2200) opts.append({ 2, 4 });                                        // basketball
+                    if (a >= 26 && b >= 14 && area >= 900 && area <= 4500) opts.append({ 3, area >= 2800 ? 3 : 2 });      // a hockey box
+                    if (a >= 24 && b >= 10 && area <= 1400) opts.append({ 4, 2 });                                        // tennis
+                    if (a >= 16 && b >= 8 && area <= 1000) opts.append({ 5, 3 });                                         // volleyball
+                    if (opts.isEmpty()) return false;
+                    int wsum = 0;
+                    for (const Kind& k : opts) wsum += k.w;
+                    int pickW = int(hp % quint32(wsum)), kindSel = opts.first().id;
+                    for (const Kind& k : opts) { if (pickW < k.w) { kindSel = k.id; break; } pickW -= k.w; }
+                    int Lc, Wc;
+                    switch (kindSel)
+                    {
+                    case 0:  Lc = std::min(a - 2, 60); Wc = std::min(b - 0, 36); break;
+                    case 1:  Lc = std::min(a - 2, 34); Wc = std::min(b, 18); break;
+                    case 2:  Lc = std::min(a - 2, 28); Wc = std::min(b, 15); break;
+                    case 3:  Lc = std::min(a - 2, 30); Wc = std::min(b - 2, 15); break;
+                    case 4:  Lc = std::min(a - 2, 24); Wc = std::min(b - 2, 11); break;
+                    default: Lc = std::min(a - 2, 18); Wc = std::min(b - 2, 9); break;
+                    }
+                    if (Lc < 12 || Wc < 7) return false;
+                    const int ou = 1 + (a - 2 - Lc) / 2, ov = (b - Wc) / 2;                    // the court offset in the rectangle (along the length a margin is left for the goals)
+                    const int ox = longX ? rx0 + ou : rx0 + ov, oz = longX ? rz0 + ov : rz0 + ou;
+                    auto cxz = [&](int cu, int cv) { return longX ? QPoint(ox + cu, oz + cv) : QPoint(ox + cv, oz + cu); };
+                    auto cPaint = [&](int cu, int cv)
+                    {
+                        if (whiteWool < 0) return;
+                        const QPoint q = cxz(cu, cv);
+                        if (!pad.contains(pairKey(q.x(), q.y()))) return;
+                        auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
+                        if (git != ground.end() && git->wd[(q.y() & 15) * 16 + (q.x() & 15)] == 0) git->surf[(q.y() & 15) * 16 + (q.x() & 15)] = quint16(IdWoolBase + whiteWool);
+                    };
+                    auto cPut = [&](int cu, int cv, int dy, quint16 id)
+                    {
+                        const QPoint q = cxz(cu, cv);
+                        if (!pad.contains(pairKey(q.x(), q.y()))) return;
+                        const int y = surfaceTop(pairKey(q.x(), q.y())) + 1 + dy;
+                        if (y < 254 && store.get(q.x(), y, q.y()) == IdAir) store.set(q.x(), y, q.y(), id);
+                    };
+                    auto cFence = [&](int cu, int cv, int h) { for (int dy = 0; dy < h; ++dy) cPut(cu, cv, dy, IdFence); };
+                    const int vc2 = Wc / 2, uc2 = Lc / 2;
+                    auto outline = [&]()
+                    {
+                        for (int cu = 0; cu < Lc; ++cu) { cPaint(cu, 0); cPaint(cu, Wc - 1); }
+                        for (int cv = 0; cv < Wc; ++cv) { cPaint(0, cv); cPaint(Lc - 1, cv); }
+                    };
+                    auto circle = [&](int cu0, int cv0, int rad)
+                    {
+                        for (int ang = 0; ang < 96; ++ang)
+                        {
+                            const double t = ang * 3.14159265358979 / 48.0;
+                            cPaint(cu0 + int(std::lround(rad * std::cos(t))), cv0 + int(std::lround(rad * std::sin(t))));
+                        }
+                    };
+                    auto goal = [&](int cu, int halfW, int h)
+                    {   // a goal in the plane cu: two posts and a crossbar 2*halfW+1 wide
+                        cFence(cu, vc2 - halfW, h); cFence(cu, vc2 + halfW, h);
+                        for (int cv = vc2 - halfW + 1; cv < vc2 + halfW; ++cv) cPut(cu, cv, h - 1, IdFence);
+                    };
+                    // is it free under the court: nothing stands on the marking itself
+                    for (int cu = -1; cu <= Lc; ++cu)
+                        for (int cv = -1; cv <= Wc; ++cv)
+                        {
+                            const QPoint q = cxz(cu, cv);
+                            if (!pad.contains(pairKey(q.x(), q.y()))) continue;
+                            if (store.get(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1, q.y()) != IdAir) return false;
+                        }
+                    switch (kindSel)
+                    {
+                    case 0:
+                    {   // a football pitch: the outline, the center line and circle, penalty areas 8×18 (from a length of 44), goals 7 wide and 3 high behind the lines
+                        outline();
+                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
+                        circle(uc2, vc2, std::max(3, std::min(5, Wc / 6)));
+                        cPaint(uc2, vc2);
+                        if (Lc >= 44 && Wc >= 24)
+                            for (int end = 0; end < 2; ++end)
+                            {
+                                const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
+                                for (int d = 0; d <= 8; ++d) { cPaint(base + step * d, vc2 - 9); cPaint(base + step * d, vc2 + 9); }
+                                for (int cv = vc2 - 9; cv <= vc2 + 9; ++cv) cPaint(base + step * 8, cv);
+                            }
+                        goal(-1, 3, 3); goal(Lc, 3, 3);
+                        break;
+                    }
+                    case 1:
+                    {   // mini-football / handball: the outline, the center, goal areas in an arc, goals 5 wide
+                        outline();
+                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
+                        circle(uc2, vc2, 3);
+                        for (int end = 0; end < 2; ++end)
+                        {
+                            const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
+                            for (int cv = vc2 - 4; cv <= vc2 + 4; ++cv) cPaint(base + step * 5, cv);
+                            for (int d = 0; d <= 5; ++d) { cPaint(base + step * d, vc2 - 4); cPaint(base + step * d, vc2 + 4); }
+                        }
+                        goal(-1, 2, 3); goal(Lc, 2, 3);
+                        break;
+                    }
+                    case 2:
+                    {   // basketball: the outline, the center, the circle, "keys" 5×5 at the hoops; backboards on posts behind the end lines
+                        outline();
+                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
+                        circle(uc2, vc2, 2);
+                        for (int end = 0; end < 2; ++end)
+                        {
+                            const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
+                            for (int d = 0; d <= 5; ++d) { cPaint(base + step * d, vc2 - 2); cPaint(base + step * d, vc2 + 2); }
+                            for (int cv = vc2 - 2; cv <= vc2 + 2; ++cv) cPaint(base + step * 5, cv);
+                            const int pu = end == 0 ? -1 : Lc, du = end == 0 ? 1 : -1;
+                            cFence(pu, vc2, 3);
+                            for (int cv = vc2 - 1; cv <= vc2 + 1; ++cv) cPut(pu, cv, 3, quint16(IdWoolBase + std::max(0, whiteWool)));
+                            cPut(pu + du, vc2, 2, IdCauldron);
+                        }
+                        break;
+                    }
+                    case 3:
+                    {   // a hockey box: boards of fences along the outline with 3-wide openings in the middle of the long sides, the center and blue lines, goals 3 wide
+                        for (int cu = -1; cu <= Lc; ++cu) for (int cv : { -1, Wc })
+                            if (std::abs(cu - uc2) > 1) cPut(cu, cv, 0, IdFence);
+                        for (int cv = 0; cv < Wc; ++cv) for (int cu : { -1, Lc }) cPut(cu, cv, 0, IdFence);
+                        for (int cv = 0; cv < Wc; ++cv) { cPaint(uc2, cv); cPaint(uc2 - 6, cv); cPaint(uc2 + 6, cv); }
+                        circle(uc2, vc2, 3);
+                        goal(2, 1, 2); goal(Lc - 3, 1, 2);
+                        break;
+                    }
+                    case 4:
+                    {   // tennis: the outline, a net in the center on posts behind the side lines, service lines ±6, the center service line
+                        outline();
+                        for (int cv = 1; cv < Wc - 1; ++cv) { cPaint(uc2 - 6, cv); cPaint(uc2 + 6, cv); }
+                        for (int cu = uc2 - 6; cu <= uc2 + 6; ++cu) cPaint(cu, vc2);
+                        cFence(uc2, -1, 3); cFence(uc2, Wc, 3);
+                        for (int cv = 0; cv < Wc; ++cv) cPut(uc2, cv, 1, IdFence);
+                        break;
+                    }
+                    default:
+                    {   // volleyball: the outline, a net in the center on posts, attack lines 3 blocks from the net
+                        outline();
+                        for (int cv = 0; cv < Wc; ++cv) { cPaint(uc2 - 3, cv); cPaint(uc2 + 3, cv); }
+                        cFence(uc2, -1, 3); cFence(uc2, Wc, 3);
+                        for (int cv = 0; cv < Wc; ++cv) cPut(uc2, cv, 1, IdFence);
+                        break;
+                    }
+                    }
+                    // the court zone (with a 1-block margin) is unavailable to ordinary items; for hockey the margin for the boards is already included
+                    const QPoint pA = cxz(-2, -2), pB = cxz(Lc + 1, Wc + 1);
+                    resX0 = std::min(pA.x(), pB.x()); resX1 = std::max(pA.x(), pB.x());
+                    resZ0 = std::min(pA.y(), pB.y()); resZ1 = std::max(pA.y(), pB.y());
+                    if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[court] kind=%d rect %dx%d court %dx%d area=%d\n", kindSel, a, b, Lc, Wc, area);
+                    return true;
+                };
+                bool kidsPad = (padKind == 53710000);
+                if (!kidsPad)
+                {
+                    courtBuilt = buildCourt();
+                    if (courtBuilt) ++nEq;
+                    else if (padCols.size() < 700 && hp % 100u < 30u) kidsPad = true;       // a small sports/children's playground (the code 53700000 unites both kinds)
+                }
+                if (kidsPad)
+                {   // CHILDREN'S PLAYGROUND
+                    // swings: a frame of two posts 4 high with a crossbar and two seats
+                    for (int k = 0; k < 2; ++k)
+                    {
+                        const int u0 = 2 + k * 6, v0 = std::max(1, vc - 3);
+                        if (u0 + 1 >= L - 1 || v0 + 5 >= Wd) break;
+                        bool ok = true;
+                        for (int v = v0; v <= v0 + 4 && ok; ++v) ok = freeCol(u0, v, 4);
+                        if (!ok) continue;
+                        post(u0, v0, 4); post(u0, v0 + 4, 4);
+                        for (int v = v0 + 1; v <= v0 + 3; ++v) put1(u0, v, 3, IdFence);
+                        for (int sv : { v0 + 1, v0 + 3 })
+                        {
+                            put1(u0, sv, 2, IdFence);                         // ropes
+                            put1(u0, sv, 1, IdSlabTop);                       // the seat
+                        }
+                        ++nEq;
+                    }
+                    // a 3×3 sandbox with a slab rim
+                    {
+                        const int u0 = std::max(2, L - 6), v0 = std::max(1, vc - 1);
+                        bool ok = u0 + 3 < L - 1 && v0 + 3 < Wd - 1;
+                        for (int u = u0; u <= u0 + 2 && ok; ++u) for (int v = v0; v <= v0 + 2 && ok; ++v) ok = freeCol(u, v, 1);
+                        if (ok)
+                        {
+                            for (int u = u0 - 1; u <= u0 + 3; ++u) for (int v = v0 - 1; v <= v0 + 3; ++v)
+                            {
+                                const bool edge = (u == u0 - 1 || u == u0 + 3 || v == v0 - 1 || v == v0 + 3);
+                                if (!freeCol(u, v, 1)) continue;
+                                if (edge) put1(u, v, 0, IdSlabBottom);
+                                else if (g_sandId) { const QPoint q = toXZ(u, v); store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())), q.y(), g_sandId); }
+                            }
+                            ++nEq;
+                        }
+                    }
+                    // a carousel: a cauldron on a post with four fence spokes
+                    {
+                        const int u0 = L / 2, v0 = std::max(2, Wd - 4);
+                        if (freeCol(u0, v0, 2) && freeCol(u0 - 1, v0, 1) && freeCol(u0 + 1, v0, 1) && freeCol(u0, v0 - 1, 1) && freeCol(u0, v0 + 1, 1))
+                        {
+                            put1(u0, v0, 0, IdFence); put1(u0, v0, 1, IdCauldron);
+                            put1(u0 - 1, v0, 0, IdFence); put1(u0 + 1, v0, 0, IdFence); put1(u0, v0 - 1, 0, IdFence); put1(u0, v0 + 1, 0, IdFence);
+                            ++nEq;
+                        }
+                    }
+                    // a bench at the edge
+                    for (int k = 0; k < 2; ++k)
+                    {
+                        const int u0 = 2 + k * (std::max(4, L - 6)), v0 = 1;
+                        bool ok = true;
+                        for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
+                        if (!ok) continue;
+                        const quint16 st = alongX ? IdStairsS : IdStairsE;    // the back toward the fence
+                        for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, st);
+                        ++nEq;
+                    }
+                }
+                else if (courtBuilt)
+                {
+                    // the court is already built (see buildCourt)
+                }
+                else
+                {   // WORKOUT: pull-up bars (a frame 4 wide), parallel bars, benches
+                    int k = 0;
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        const int u0 = 2 + i * std::max(12, L / 2), v0 = 2 + (i % 2) * std::max(0, Wd - 6);
+                        if (u0 + 3 >= L - 1 || v0 + 1 >= Wd || !canBar(u0, v0)) continue;
+                        bool ok = true;
+                        for (int u = u0; u <= u0 + 3 && ok; ++u) ok = freeCol(u, v0, 4);
+                        if (!ok) continue;
+                        post(u0, v0, 4); post(u0 + 3, v0, 4);
+                        put1(u0 + 1, v0, 3, IdFence); put1(u0 + 2, v0, 3, IdFence);           // the crossbar
+                        barAt.append(QPoint(u0, v0));
+                        ++k;
+                    }
+                    for (int i = 0; i < 1; ++i)
+                    {   // parallel bars: two parallel poles on posts (one set per site)
+                        const int u0 = 3 + i * 7, v0 = std::max(2, vc - 1);
+                        bool ok = u0 + 4 < L - 1 && v0 + 2 < Wd - 1;
+                        for (int u = u0; u <= u0 + 3 && ok; ++u) ok = freeCol(u, v0, 2) && freeCol(u, v0 + 2, 2);
+                        if (!ok) continue;
+                        for (int vv : { v0, v0 + 2 })
+                        {
+                            put1(u0, vv, 0, IdFence); put1(u0 + 3, vv, 0, IdFence);
+                            for (int u = u0; u <= u0 + 3; ++u) put1(u, vv, 1, IdFence);
+                        }
+                        ++k;
+                    }
+                    for (int i = 0; i < 2; ++i)
+                    {   // a bench-press bench
+                        const int u0 = 2 + i * std::max(4, L - 7), v0 = std::max(1, Wd - 2);
+                        bool ok = true;
+                        for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
+                        if (!ok) continue;
+                        for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, IdSlabBottom);
+                        ++k;
+                    }
+                    nEq = k;
+                }
+                // EVEN FILLING: the site is divided into windows of ~9×9 blocks; in each window with free space (at least 25 inner columns) where there is nothing yet, we try to put
+                // one item (a bench, parallel bars, a pull-up bar, a balance log; on children's ones — swings, a sandbox, a carousel, a bench, a rocker). We do not put much more often: one window — one item.
+                {
+                    const bool kids = kidsPad;
+                    int nBars = 0;                                                   // parallel bars: no more than two per site
+                    auto occupiedAt = [&](int u, int v)
+                    {
+                        const QPoint q = toXZ(u, v);
+                        return store.get(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1, q.y()) != IdAir;
+                    };
+                    auto tryPiece = [&](int kind, int u, int v) -> bool
+                    {
+                        if (kids)
+                        {
+                            if (kind == 0)
+                            {   // swings
+                                bool ok = true;
+                                for (int vv = v; vv <= v + 4 && ok; ++vv) ok = freeCol(u, vv, 4);
+                                if (!ok) return false;
+                                post(u, v, 4); post(u, v + 4, 4);
+                                for (int vv = v + 1; vv <= v + 3; ++vv) put1(u, vv, 3, IdFence);
+                                for (int sv : { v + 1, v + 3 }) { put1(u, sv, 2, IdFence); put1(u, sv, 1, IdSlabTop); }
+                                return true;
+                            }
+                            if (kind == 1)
+                            {   // a bench
+                                bool ok = true;
+                                for (int uu = u; uu < u + 3 && ok; ++uu) ok = freeCol(uu, v, 1);
+                                if (!ok) return false;
+                                for (int uu = u; uu < u + 3; ++uu) put1(uu, v, 0, alongX ? IdStairsS : IdStairsE);
+                                return true;
+                            }
+                            if (kind == 2)
+                            {   // a 3×3 sandbox with a rim
+                                bool ok = true;
+                                for (int uu = u - 1; uu <= u + 3 && ok; ++uu) for (int vv = v - 1; vv <= v + 3 && ok; ++vv) ok = freeCol(uu, vv, 1);
+                                if (!ok) return false;
+                                for (int uu = u - 1; uu <= u + 3; ++uu) for (int vv = v - 1; vv <= v + 3; ++vv)
+                                {
+                                    const bool edge = (uu == u - 1 || uu == u + 3 || vv == v - 1 || vv == v + 3);
+                                    if (edge) put1(uu, vv, 0, IdSlabBottom);
+                                    else if (g_sandId) { const QPoint q = toXZ(uu, vv); store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())), q.y(), g_sandId); }
+                                }
+                                return true;
+                            }
+                            if (kind == 3)
+                            {   // a carousel
+                                if (!(freeCol(u, v, 2) && freeCol(u - 1, v, 1) && freeCol(u + 1, v, 1) && freeCol(u, v - 1, 1) && freeCol(u, v + 1, 1))) return false;
+                                put1(u, v, 0, IdFence); put1(u, v, 1, IdCauldron);
+                                put1(u - 1, v, 0, IdFence); put1(u + 1, v, 0, IdFence); put1(u, v - 1, 0, IdFence); put1(u, v + 1, 0, IdFence);
+                                return true;
+                            }
+                            {   // a rocker: a slab on a post, length 5
+                                bool ok = true;
+                                for (int uu = u; uu < u + 5 && ok; ++uu) ok = freeCol(uu, v, 2);
+                                if (!ok) return false;
+                                put1(u + 2, v, 0, IdFence);
+                                put1(u, v, 1, IdSlabBottom); put1(u + 1, v, 1, IdSlabBottom); put1(u + 3, v, 1, IdSlabBottom); put1(u + 4, v, 1, IdSlabBottom);
+                                put1(u + 2, v, 1, IdSlabTop);
+                                return true;
+                            }
+                        }
+                        if (kind == 0)
+                        {   // a bench
+                            bool ok = true;
+                            for (int uu = u; uu < u + 3 && ok; ++uu) ok = freeCol(uu, v, 1);
+                            if (!ok) return false;
+                            for (int uu = u; uu < u + 3; ++uu) put1(uu, v, 0, IdSlabBottom);
+                            return true;
+                        }
+                        if (kind == 1)
+                        {   // parallel bars (no more than two per site)
+                            if (nBars >= 2) return false;
+                            bool ok = true;
+                            for (int uu = u; uu <= u + 3 && ok; ++uu) ok = freeCol(uu, v, 2) && freeCol(uu, v + 2, 2);
+                            if (!ok) return false;
+                            for (int vv : { v, v + 2 })
+                            {
+                                put1(u, vv, 0, IdFence); put1(u + 3, vv, 0, IdFence);
+                                for (int uu = u; uu <= u + 3; ++uu) put1(uu, vv, 1, IdFence);
+                            }
+                            ++nBars;
+                            return true;
+                        }
+                        if (kind == 2)
+                        {   // a pull-up bar (no more than two per site, not closer than 12 blocks to each other)
+                            if (!canBar(u, v)) return false;
+                            bool ok = true;
+                            for (int uu = u; uu <= u + 3 && ok; ++uu) ok = freeCol(uu, v, 4);
+                            if (!ok) return false;
+                            post(u, v, 4); post(u + 3, v, 4);
+                            put1(u + 1, v, 3, IdFence); put1(u + 2, v, 3, IdFence);
+                            barAt.append(QPoint(u, v));
+                            return true;
+                        }
+                        {   // a balance log: a row of slabs on low supports
+                            bool ok = true;
+                            for (int uu = u; uu < u + 5 && ok; ++uu) ok = freeCol(uu, v, 2);
+                            if (!ok) return false;
+                            for (int uu = u; uu < u + 5; ++uu) put1(uu, v, 0, IdSlabTop);
+                            return true;
+                        }
+                    };
+                    constexpr int kWin = 8;
+                    const int nKinds = kids ? 5 : 4;
+                    for (int v0 = 1; v0 < Wd - 1; v0 += kWin)
+                        for (int u0 = 1; u0 < L - 1; u0 += kWin)
+                        {
+                            int interior = 0;
+                            bool has = false;
+                            for (int vv = v0; vv < std::min(v0 + kWin, Wd - 1) && !has; ++vv)
+                                for (int uu = u0; uu < std::min(u0 + kWin, L - 1); ++uu)
+                                {
+                                    if (!inside(uu, vv, 1)) continue;
+                                    ++interior;
+                                    if (occupiedAt(uu, vv)) { has = true; break; }
+                                }
+                            if (has || interior < 20) continue;
+                            for (int t = 0; t < 48; ++t)
+                            {
+                                const quint32 hq = colHash(pairKey(u0 * 31 + t, v0 * 17) ^ ring.first() ^ 0x5CA9ull);
+                                const int u = u0 + int(hq % quint32(kWin)), v = v0 + int((hq >> 8) % quint32(kWin));
+                                static const int kSportKinds[8] = { 0, 3, 0, 2, 3, 0, 1, 3 };       // a bench, a balance beam, a pull-up bar, parallel bars (rare)
+                                const int pickK = kids ? int(((hq >> 16) + quint32(t)) % quint32(nKinds)) : kSportKinds[((hq >> 16) + quint32(t)) % 8u];
+                                if (tryPiece(pickK, u, v)) { ++nEq; break; }
+                            }
+                        }
+                }
+                nSportEq += nEq;
+                if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[sport] code=%d bbox x %d..%d z %d..%d cols=%d L=%d W=%d eq=%d\n", padCode.value(padIdx, 0), bx0, bx1, bz0, bz1, int(padCols.size()), L, Wd, nEq);
+            }
+        }
+        if (nSportEq > 0) res.lairInfo += QObject::tr("; equipment on sports grounds: %1 items").arg(nSportEq);
+        // — lamp posts: at a road column by hash ~1/24 we look for a free neighboring NON-road
+        //   column and put a post (not closer than 10 blocks to the others); distance + hash = "along the road,
+        //   not a picket fence". The composition: a plinth of a cobblestone wall, 6 fence posts, at the top toward the
+        //   road a wing of one post goes out, under it a lantern hangs (hanging=true).
+        QVector<QPoint> poles;
+        QVector<qint64> rc(roadCols.constBegin(), roadCols.constEnd());
+        std::sort(rc.begin(), rc.end());
+        for (qint64 ck : rc)
+        {
+            if (colHash(ck ^ 0xFA11ull) % 24u != 0u) continue;
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            for (int d = 0; d < 4; ++d)
+            {
+                const int px = bx + dxs[d], pz = bz + dzs[d];
+                const qint64 pk = pairKey(px, pz);
+                if (roadCols.contains(pk) || colMin.contains(pk) || colWater.contains(pk)) continue;
+                const int y0 = surfaceTop(pk) + 1;
+                if (y0 + 6 > 254) continue;
+                bool free = true;
+                for (int dy = 0; dy < 7 && free; ++dy)       // the plinth + 6 posts of the stand
+                    if (store.get(px, y0 + dy, pz) != IdAir) free = false;
+                if (free && store.get(bx, y0 + 6, bz) != IdAir) free = false;    // the wing above the road
+                if (free && store.get(bx, y0 + 5, bz) != IdAir) free = false;    // the place for the lantern
+                bool near = false;
+                for (const QPoint& p : poles)
+                    if (std::max(std::abs(p.x() - px), std::abs(p.y() - pz)) < 10) { near = true; break; }
+                if (!free || near) continue;
+                store.set(px, y0, pz, IdCobbleWall);
+                for (int dy = 1; dy <= 6; ++dy) store.set(px, y0 + dy, pz, IdFence);
+                store.set(bx, y0 + 6, bz, IdFence);          // the wing: a post sideways, toward the road
+                store.set(bx, y0 + 5, bz, IdLanternHung);    // the lantern hangs under the wing
+                poles.append(QPoint(px, pz));
+                break;
+            }
+        }
+        // — PARK PATHS (CODE 71126000) are well lit: at road columns inside a park there are low lamp posts (a plinth of a cobblestone wall, 3 fence posts,
+        //   a lantern on top) no less often than every ~6 blocks; street posts are taller (the same distance for them).
+        {
+            QVector<ColSpan> parkSpansAll;
+            for (const VegSite& vs3 : forests) if (vs3.park) parkSpansAll += vs3.spans;
+            if (!parkSpansAll.isEmpty())
+            {
+                parkSpansAll = mergeSpans(parkSpansAll);
+                for (qint64 ck : rc)
+                {
+                    const int bx = keyFirst(ck), bz = keySecond(ck);
+                    if (!spansContain(parkSpansAll, bx, bz)) continue;
+                    if (colHash(ck ^ 0x9A8Cull) % 3u != 0u) continue;
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        const int px = bx + dxs[d], pz = bz + dzs[d];
+                        const qint64 pk = pairKey(px, pz);
+                        if (roadCols.contains(pk) || colMin.contains(pk) || colWater.contains(pk) || colWool.contains(pk)) continue;
+                        const int y0 = surfaceTop(pk) + 1;
+                        if (y0 + 5 > 254) continue;
+                        bool free = true;
+                        for (int dy = 0; dy < 5 && free; ++dy)
+                            if (store.get(px, y0 + dy, pz) != IdAir) free = false;
+                        bool near = false;
+                        for (const QPoint& p : poles)
+                            if (std::max(std::abs(p.x() - px), std::abs(p.y() - pz)) < 6) { near = true; break; }
+                        if (!free || near) continue;
+                        store.set(px, y0, pz, IdCobbleWall);
+                        for (int dy = 1; dy <= 3; ++dy) store.set(px, y0 + dy, pz, IdFence);
+                        store.set(px, y0 + 4, pz, IdLanternStanding);
+                        poles.append(QPoint(px, pz));
+                        break;
+                    }
+                }
+            }
+        }
+        // ——— PORTALS TO THE NETHER in forests (vegpol, CODE 71111110/71126000; request: the forest area is at least
+        //     5000 REAL m² — see PortalForest::areaM2 — and no more than one portal within a
+        //     radius of 1000 blocks; there are no portals on csrpol). Forests are taken from big to small
+        //     (deterministically), a portal gets a forest around which there is no other one yet.
+        //     The frame is vanilla: 4×5 obsidian (the bottom/top rows of 4, posts 2×3), in an
+        //     ACTIVE one (10% of forests) the interior 2×2 of tiers y+1..y+2 — portal blocks (axis —
+        //     the direction of the frame extent: it stands along X → axis=x), the row y+3 inside stays
+        //     air. A "ruined" one — vanilla ruins our way: the bottom row is whole, the posts/top
+        //     arc with deterministic gaps (~25%), some of the remainder — crying_obsidian.
+        //     The frame is entirely inside the forest spot on flat ground (not a road/water/structure), the volume
+        //     4×5 is air (the trees are already planted), otherwise we try the next point of this forest. ———
+        {
+            struct Cand { int x, z; bool runX; };
+            QVector<int> order;
+            for (int i = 0; i < portalForests.size(); ++i)
+                if (portalForests[i].areaM2 >= 2500.0) order.append(i);
+            std::sort(order.begin(), order.end(), [&](int a, int b)
+            {
+                if (portalForests[a].areaM2 != portalForests[b].areaM2)
+                    return portalForests[a].areaM2 > portalForests[b].areaM2;
+                return portalForests[a].h < portalForests[b].h;
+            });
+            QVector<QPoint> placedPortals;                        // the centers of the portals already standing (blocks)
+            for (int fi : order)
+            {
+                const PortalForest& pf = portalForests[fi];
+                const quint32 h = pf.h;
+                // 10% of forests are active by hash; and in a big world (more than 5000 blocks along at least one side) the biggest forest with a portal always gets an ACTIVE one,
+                // so that at least one working portal exists (MCX_BIGWORLD=1 enables this rule in the test).
+                const bool bigWorld = std::max((mxx - mnx) * tf.sx, (mxy - mny) * tf.sz) >= 5000.0 || qEnvironmentVariableIsSet("MCX_BIGWORLD");
+                const bool active = ((h >> 16) % 100u) < 10u || (bigWorld && placedPortals.isEmpty());
+                QVector<Cand> cands;                              // the frame entirely in the forest spot
+                const bool xFirst = ((h >> 8) & 1u) != 0u;
+                {   // we take candidates by segments: along Z — inside a segment (step 5), along X — by checking the neighboring x
+                    const int nSp = pf.spans.size();
+                    const int sp0 = nSp ? int((h >> 3) % quint32(nSp)) : 0;
+                    for (int t = 0; t < nSp && cands.size() < 20000; ++t)
+                    {
+                        const ColSpan& c = pf.spans[(sp0 + t) % nSp];
+                        for (int z = c.z0; z + 3 <= c.z1 && cands.size() < 20000; z += 5)
+                        {
+                            bool okX = true;
+                            for (int i = 1; i < 4 && okX; ++i)
+                                if (!spansContain(pf.spans, c.x + i, z)) okX = false;
+                            if (okX && xFirst) cands.append(Cand{ c.x, z, true });
+                            else cands.append(Cand{ c.x, z, false });
+                        }
+                    }
+                }
+                if (cands.isEmpty()) continue;
+                const int off = int((h >> 4) % quint32(cands.size()));
+                const int tries = std::min(int(cands.size()), 6000);
+                for (int ci = 0; ci < tries; ++ci)
+                {
+                    const Cand& c = cands[int((qint64(off) + qint64(ci) * 7919) % cands.size())];
+                    {   // not closer than 1000 blocks to an already standing portal
+                        bool far = true;
+                        for (const QPoint& pp : placedPortals)
+                            if (std::hypot(double(pp.x() - c.x), double(pp.y() - c.z)) < 1000.0) { far = false; break; }
+                        if (!far) continue;                       // too close to someone else's portal
+                    }
+                    int yb = 0; bool ok = true;
+                    for (int i = 0; i < 4 && ok; ++i)
+                    {   // the floor is flat, not a road/water, the height is within the world bounds
+                        const int bx = c.runX ? c.x + i : c.x;
+                        const int bz = c.runX ? c.z : c.z + i;
+                        const qint64 ck = pairKey(bx, bz);
+                        if (colMin.contains(ck) || colWater.contains(ck)
+                            || roadCols.contains(ck)) { ok = false; break; }
+                        const int y = surfaceTop(ck);
+                        if (i == 0) yb = y;
+                        else if (y != yb) { ok = false; break; }
+                    }
+                    if (!ok || yb + 6 > 254) continue;
+                    const int y0 = yb + 1;                        // the bottom row of the frame
+                    auto cellAt = [&](int i, int dy)
+                    { return pairKey(c.runX ? c.x + i : c.x, c.runX ? c.z : c.z + i); };
+                    for (int dy = 0; dy < 5 && ok; ++dy)          // the frame volume — air
+                        for (int i = 0; i < 4; ++i)
+                            if (store.get(keyFirst(cellAt(i, dy)), y0 + dy,
+                                          keySecond(cellAt(i, dy))) != IdAir)
+                                { ok = false; break; }
+                    if (!ok) continue;
+                    // ——— here we go: 14 cells of the frame (i — along the axis, dy — height) ———
+                    quint32 s = h ^ 0x0BADu;
+                    auto lcg = [&s]()
+                    { s = s * 1664525u + 1013904223u; return s; };
+                    for (int dy = 0; dy < 5; ++dy)
+                        for (int i = 0; i < 4; ++i)
+                        {
+                            const bool frame = dy == 0 || dy == 4
+                                            || (i == 0 || i == 3);      // 14 cells of the perimeter
+                            if (!frame) continue;
+                            const qint64 ck = cellAt(i, dy);
+                            const int bx = keyFirst(ck), bz = keySecond(ck);
+                            if (!active)
+                            {   // "ruined": the bottom is whole, the posts/top break deterministically
+                                if (dy > 0 && (lcg() >> 16) % 100u < 25u) continue;
+                                store.set(bx, y0 + dy, bz,
+                                          (dy > 0 && (lcg() >> 16) % 100u < 20u)
+                                              ? IdCryingObsidian : IdObsidian);
+                            }
+                            else store.set(bx, y0 + dy, bz, IdObsidian);
+                        }
+                    if (active)
+                    {   // active: portal 2×2 (i=1..2, dy=1..2), the row dy=3 inside — air
+                        const quint16 pid = c.runX ? IdPortalX : IdPortalZ;
+                        for (int dy = 1; dy <= 2; ++dy)
+                            for (int i = 1; i <= 2; ++i)
+                            {
+                                const qint64 ck = cellAt(i, dy);
+                                store.set(keyFirst(ck), y0 + dy, keySecond(ck), pid);
+                            }
+                    }
+                    // LAVA PITS around the portal (request): 3..6 pits 1×1 of depth 1 (lava at a level below the floor, air above it)
+                    // on a flat free floor within a radius of 5 blocks from the frame; the neighboring floor blocks around a pit are replaced
+                    // with magma with a 60% chance. A pit does not touch the frame cells and does not climb onto a road/water.
+                    {
+                        const quint16 magma = quint16(IdPaletteStart + paletteIndexOf("minecraft:magma_block"));
+                        const int nPits = 3 + int(lcg() >> 16) % 4;
+                        QVector<QPoint> pits;
+                        for (int tr = 0; tr < 60 && pits.size() < nPits; ++tr)
+                        {
+                            const int i = int(lcg() >> 16) % 12 - 4;            // along the axis: -4..7
+                            const int o = int(lcg() >> 16) % 11 - 5;            // across: -5..5
+                            if (i >= -1 && i <= 4 && o >= -1 && o <= 1) continue;   // the frame itself and right next to it
+                            const int bx = c.runX ? c.x + i : c.x + o;
+                            const int bz = c.runX ? c.z + o : c.z + i;
+                            bool near = false;
+                            for (const QPoint& q : pits)
+                                if (std::abs(q.x() - bx) <= 1 && std::abs(q.y() - bz) <= 1) near = true;
+                            if (near) continue;
+                            bool good = true;
+                            for (int dz = -1; dz <= 1 && good; ++dz)
+                                for (int dx = -1; dx <= 1; ++dx)
+                                {
+                                    const qint64 ck = pairKey(bx + dx, bz + dz);
+                                    if (colMin.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)
+                                        || !ground.contains(pairKey((bx + dx) >> 4, (bz + dz) >> 4))
+                                        || surfaceTop(ck) != yb || store.get(bx + dx, yb + 1, bz + dz) != IdAir
+                                        || store.get(bx + dx, yb, bz + dz) != IdAir)
+                                    { good = false; break; }
+                                }
+                            if (!good) continue;
+                            {   // a pit: the ground top in this column is lowered by 2 (lava at yb-1, air above it)
+                                auto git2 = ground.find(pairKey(bx >> 4, bz >> 4));
+                                if (git2 != ground.end())
+                                {
+                                    const int col2 = (bz & 15) * 16 + (bx & 15);
+                                    git2->top[col2] = qint16(yb - 2);
+                                }
+                            }
+                            store.set(bx, yb - 1, bz, IdLava);
+                            for (int d4 = 0; d4 < 4; ++d4)
+                            {
+                                const int nx = bx + (d4 == 0) - (d4 == 1), nz = bz + (d4 == 2) - (d4 == 3);
+                                if ((lcg() >> 16) % 100u < 60u) store.set(nx, yb, nz, magma);
+                            }
+                            pits.append(QPoint(bx, bz));
+                        }
+                    }
+                    {   // PORTAL RUINS AS IN THE ORIGINAL: a netherrack spot (rarer toward the edges) with magma inclusions, gold blocks and a chest with ruined_portal loot
+                        const quint16 nether = quint16(IdPaletteStart + paletteIndexOf("minecraft:netherrack"));
+                        const quint16 magmaR = quint16(IdPaletteStart + paletteIndexOf("minecraft:magma_block"));
+                        const quint16 goldB = quint16(IdPaletteStart + paletteIndexOf("minecraft:gold_block"));
+                        const double ecx = c.x + (c.runX ? 1.5 : 0.0), ecz = c.z + (c.runX ? 0.0 : 1.5);
+                        QVector<QPoint> flatCells;
+                        for (int dz = -8; dz <= 8; ++dz)
+                            for (int dx = -8; dx <= 8; ++dx)
+                            {
+                                const int bx = c.x + dx, bz = c.z + dz;
+                                const qint64 ck = pairKey(bx, bz);
+                                const double ex = (bx - ecx) * (c.runX ? 0.7 : 1.0), ez = (bz - ecz) * (c.runX ? 1.0 : 0.7);
+                                const double dd = std::hypot(ex, ez);
+                                const int pr = dd < 2.6 ? 90 : dd < 4.6 ? 62 : dd < 6.6 ? 28 : dd < 8.0 ? 8 : 0;
+                                if (!pr || (lcg() >> 16) % 100u >= quint32(pr)) continue;
+                                if (colMin.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)) continue;
+                                const auto git3 = ground.find(pairKey(bx >> 4, bz >> 4));
+                                if (git3 == ground.end()) continue;
+                                const int col3 = (bz & 15) * 16 + (bx & 15);
+                                if (git3->wd[col3] > 0 || surfaceTop(ck) != yb) continue;
+                                git3->surf[col3] = ((lcg() >> 16) % 100u < 14u) ? magmaR : nether;
+                                if (store.get(bx, yb + 1, bz) == IdAir) flatCells.append(QPoint(bx, bz));
+                            }
+                        // gold blocks (1–2) on the spot and a chest next to the frame
+                        int nGold = 1 + int((lcg() >> 16) % 2u);
+                        for (int tr = 0; tr < 40 && nGold > 0 && !flatCells.isEmpty(); ++tr)
+                        {
+                            const QPoint q = flatCells[int((lcg() >> 16) % quint32(flatCells.size()))];
+                            const bool onFrame = (c.runX ? (q.y() == c.z && q.x() >= c.x && q.x() <= c.x + 3) : (q.x() == c.x && q.y() >= c.z && q.y() <= c.z + 3));
+                            if (onFrame || store.get(q.x(), yb + 1, q.y()) != IdAir) continue;
+                            store.set(q.x(), yb + 1, q.y(), goldB);
+                            --nGold;
+                        }
+                        for (int tr = 0; tr < 60 && !flatCells.isEmpty(); ++tr)
+                        {
+                            const QPoint q = flatCells[int((lcg() >> 16) % quint32(flatCells.size()))];
+                            const int ai = c.runX ? q.x() - c.x : q.y() - c.z, ao = c.runX ? q.y() - c.z : q.x() - c.x;
+                            if (ai < -1 || ai > 4 || std::abs(ao) < 2 || std::abs(ao) > 4) continue;
+                            if (store.get(q.x(), yb + 1, q.y()) != IdAir) continue;
+                            store.set(q.x(), yb + 1, q.y(), IdChest);
+                            chests.append(ChestSite{ q.x(), yb + 1, q.y(), kChestLootCount - 2 });
+                            break;
+                        }
+                        PortalStartSite ps;
+                        const int fx0 = c.x, fx1 = c.runX ? c.x + 3 : c.x, fz0 = c.z, fz1 = c.runX ? c.z : c.z + 3;
+                        ps.bb[0] = fx0 - 3; ps.bb[1] = y0 - 1; ps.bb[2] = fz0 - 3; ps.bb[3] = fx1 + 3; ps.bb[4] = y0 + 5; ps.bb[5] = fz1 + 3;
+                        ps.cx = ((ps.bb[0] + ps.bb[3]) / 2) >> 4; ps.cz = ((ps.bb[2] + ps.bb[5]) / 2) >> 4;
+                        portalStarts.append(ps);
+                        for (int pz = ps.bb[2] >> 4; pz <= (ps.bb[5] >> 4); ++pz)
+                            for (int px = ps.bb[0] >> 4; px <= (ps.bb[3] >> 4); ++px)
+                                portalsByChunk[pairKey(px, pz)].append(ps);
+                    }
+                    placedPortals.append(QPoint(c.x, c.z));
+                    break;                                          // one portal per forest
+                }
+            }
+        }
+    }
+
+    // PARKING LOT MARKING (rdcpol): light gray carpets. From every long enough edge of the outline inward into the polygon, perpendicular
+    // to the edge, lines 12 blocks long run with a step of 7 blocks along the edge (if it does not fit into the parking lot — not drawn; if the parking lot is wider than three
+    // line lengths (36) — the lines only from one of the opposite sides). A line does not touch (including diagonally) lines already laid from other edges — there are no intersections;
+    // if a line touches another object (a building, a road, rails, water, any block at the carpet height) — it is not drawn at all.
+    {
+        quint16 lgCarpet = 0;
+        int nParkWall = 0;
+        for (int i = 0; i < kCarpetsCount; ++i)
+            if (qstrcmp(kCarpets[i].name, "minecraft:white_carpet") == 0) lgCarpet = quint16(IdCarpetBase + i);   // the parking marking — white
+        if (lgCarpet)
+            for (const ParkSite& ps : parks)
+            {
+                QHash<ColKey, int> owner;                                  // a marking cell -> the line number
+                int lineNo = 0;
+                for (const QVector<QPointF>& ring : ps.rings)
+                    for (int e = 0; e < ring.size(); ++e)
+                    {
+                        const QPointF p0 = ring[e], p1 = ring[(e + 1) % ring.size()];
+                        const double len = std::hypot(p1.x() - p0.x(), p1.y() - p0.y());
+                        if (len < 8.0) continue;
+                        const double dx = (p1.x() - p0.x()) / len, dz = (p1.y() - p0.y()) / len;
+                        auto inside = [&](double x, double z) { return ps.cols.contains(pairKey(int(std::floor(x)), int(std::floor(z)))); };
+                        double nx = -dz, nz = dx;                           // the normal into the polygon
+                        const double mx = (p0.x() + p1.x()) * 0.5, mz = (p0.y() + p1.y()) * 0.5;
+                        if (!inside(mx + nx * 2.0, mz + nz * 2.0))
+                        {
+                            nx = -nx; nz = -nz;
+                            if (!inside(mx + nx * 2.0, mz + nz * 2.0)) continue;
+                        }
+                        for (double t = 3.5; t <= len - 3.5; t += 7.0)
+                        {
+                            QVector<qint64> cells;
+                            bool ok = true;
+                            // The parking depth across (up to 36 = 3 line lengths): the first exit from the spot along the normal.
+                            // A 12-block line MUST fit entirely, otherwise it is not drawn; if the depth is less than 36, the lines are drawn
+                            // only from one side (where the start cell is "earlier" than the exit point), from the opposite one — not.
+                            double exitSl = -1.0;
+                            int exX = 0, exZ = 0;
+                            for (double sl = 0.5; sl <= 36.0; sl += 0.5)
+                            {
+                                const double x = p0.x() + dx * t + nx * sl, z = p0.y() + dz * t + nz * sl;
+                                const int fx = int(std::floor(x)), fz = int(std::floor(z));
+                                const qint64 ck = pairKey(fx, fz);
+                                if (!ps.cols.contains(ck)) { exitSl = sl; exX = fx; exZ = fz; break; }
+                                if (sl <= 12.0 && (cells.isEmpty() || cells.last() != ck)) cells.append(ck);
+                            }
+                            if (exitSl >= 0.0 && exitSl <= 12.0) continue;              // the line length is greater than the parking lot — no lines
+                            if (cells.size() < 5) continue;
+                            if (exitSl >= 0.0)
+                            {   // depth < 36: only one of the two opposite sides
+                                const int sx0 = keyFirst(cells.first()), sz0 = keySecond(cells.first());
+                                if (!(sx0 < exX || (sx0 == exX && sz0 < exZ))) continue;
+                            }
+                            for (qint64 ck : cells)
+                            {   // touches another object — the line is not drawn
+                                const int cxk = keyFirst(ck), czk = keySecond(ck);
+                                if (colMin.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck) || colWater.contains(ck)
+                                    || store.get(cxk, surfaceTop(ck) + 1, czk) != IdAir) { ok = false; break; }
+                            }
+                            if (!ok) continue;
+                            for (qint64 ck : cells)
+                            {   // touching someone else's line (3×3) — cancel
+                                for (int ax = -1; ax <= 1 && ok; ++ax)
+                                    for (int az = -1; az <= 1; ++az)
+                                    {
+                                        const auto oit = owner.constFind(pairKey(keyFirst(ck) + ax, keySecond(ck) + az));
+                                        if (oit != owner.constEnd() && oit.value() != lineNo) { ok = false; break; }
+                                    }
+                                if (!ok) break;
+                            }
+                            if (!ok) continue;
+                            for (qint64 ck : cells) owner.insert(ck, lineNo);
+                            ++lineNo;
+                        }
+                    }
+                for (auto it = owner.constBegin(); it != owner.constEnd(); ++it)
+                {
+                    const int x = keyFirst(it.key()), z = keySecond(it.key());
+                    const int y = surfaceTop(it.key()) + 1;
+                    if (y > 254 || store.get(x, y, z) != IdAir) continue;
+                    store.set(x, y, z, lgCarpet);
+                }
+                // STONE FENCE of a parking lot with marking: a ring of columns right behind the spot edge (by 8 neighbors). The fence does not touch the roadway: columns within 1 block of
+                // a road (including an adjacent one) stay an opening — the entrance is there. It does not climb onto buildings, water, rails, other parking lots; if there is no entrance (the parking lot does not adjoin a road),
+                // we leave a three-cell opening at a random place of the ring.
+                if (!owner.isEmpty())
+                {
+                    QVector<qint64> ringW;
+                    for (qint64 ck : ps.cols)
+                    {
+                        const int bx = keyFirst(ck), bz = keySecond(ck);
+                        for (int ddz = -1; ddz <= 1; ++ddz)
+                            for (int ddx = -1; ddx <= 1; ++ddx)
+                            {
+                                if (!ddx && !ddz) continue;
+                                const qint64 nk = pairKey(bx + ddx, bz + ddz);
+                                if (!ps.cols.contains(nk)) ringW << nk;
+                            }
+                    }
+                    std::sort(ringW.begin(), ringW.end());
+                    ringW.erase(std::unique(ringW.begin(), ringW.end()), ringW.end());
+                    auto nearRoad = [&](qint64 ck)
+                    {
+                        const int bx = keyFirst(ck), bz = keySecond(ck);
+                        for (int ddz = -1; ddz <= 1; ++ddz)
+                            for (int ddx = -1; ddx <= 1; ++ddx)
+                                if (roadCols.contains(pairKey(bx + ddx, bz + ddz))) return true;
+                        return false;
+                    };
+                    QVector<char> skip(ringW.size(), 0);
+                    bool anyEntrance = false;
+                    for (int i = 0; i < ringW.size(); ++i)
+                        if (nearRoad(ringW[i])) { skip[i] = 1; anyEntrance = true; }
+                    if (!anyEntrance && ringW.size() > 12)
+                    {
+                        const int g0 = int(colHash(ringW.first() ^ 0x9A7Eull) % quint32(ringW.size()));
+                        for (int q = 0; q < 3; ++q) skip[(g0 + q) % ringW.size()] = 1;
+                    }
+                    int nWall = 0;
+                    for (int i = 0; i < ringW.size(); ++i)
+                    {
+                        if (skip[i]) continue;
+                        const qint64 ck = ringW[i];
+                        if (colMin.contains(ck) || colWater.contains(ck) || railColsAll.contains(ck) || roadCols.contains(ck)) continue;
+                        bool other = false;
+                        for (const ParkSite& po : parks) if (&po != &ps && po.cols.contains(ck)) { other = true; break; }
+                        if (other) continue;
+                        const int x = keyFirst(ck), z = keySecond(ck);
+                        const int y = surfaceTop(ck) + 1;
+                        if (y > 253 || store.get(x, y, z) != IdAir) continue;
+                        store.set(x, y, z, IdStoneFence);
+                        ++nWall;
+                    }
+                    nParkWall += nWall;
+                }
+            }
+    }
+
+    // VILLAGES (request): raids in Minecraft happen in a "village" — an area with villager points of interest (a bell, beds,
+    // work blocks). Private houses already carry beds; to make the village real, in the places where private houses cluster
+    // (clusters on a 128-block grid) we put a square: a bell, a well, work blocks, lanterns, three villagers and a golem.
+    // Villages — NOT closer than 1000 blocks to each other; the square is built at a free place near the cluster center,
+    // trees and grass on it are cut down (VoxelStore::erase).
+    QVector<BellSite> bellSites;
+    beginStep(10);                                                   // "villages, signs, basements"
+    if (!privCenters.isEmpty())
+    {
+        struct Bucket { qint64 sx = 0, sz = 0; int n = 0; };
+        QHash<ColKey, Bucket> buckets;
+        for (const QPoint& pc : privCenters)
+        {
+            Bucket& b = buckets[pairKey(int(std::floor(pc.x() / 128.0)), int(std::floor(pc.y() / 128.0)))];
+            b.sx += pc.x(); b.sz += pc.y(); ++b.n;
+        }
+        QVector<QPair<int, qint64>> order2;                      // (the number of houses, the cell key) — in descending order
+        for (auto it = buckets.constBegin(); it != buckets.constEnd(); ++it)
+            order2.append(qMakePair(it.value().n, it.key()));
+        std::sort(order2.begin(), order2.end(), [](const QPair<int, qint64>& a, const QPair<int, qint64>& b)
+        { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+        // The distance between villages — 500 blocks (request: "count by half"; in big areas the villages come out twice
+        // as often along each axis).
+        QVector<QPoint> vcenters;
+        for (const auto& oc : order2)
+        {
+            const Bucket& b = buckets[oc.second];
+            if (b.n < 3 && !vcenters.isEmpty()) break;            // single houses do not form villages themselves
+            const QPoint c(int(b.sx / b.n), int(b.sz / b.n));
+            const double minD = 500.0;
+            bool far = true;
+            for (const QPoint& q : vcenters)
+                if (std::hypot(double(q.x() - c.x()), double(q.y() - c.y())) < minD) { far = false; break; }
+            if (far) vcenters.append(c);
+        }
+        auto isVeg = [](quint16 bid)
+        {
+            return bid == IdAir || bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter
+                || bid == IdPaleHangingMoss || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass
+                || bid == IdTallGrassUpper || bid == IdWheat || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
+        };
+        // The site (2R+1)² is free: no houses/water/roads/rails/csrpol wool, the height difference <= 3, only grass/trees on it.
+        auto siteOk = [&](int cx, int cz, int R) -> bool
+        {
+            int tmin = 1 << 20, tmax = -(1 << 20);
+            for (int dz = -R; dz <= R; ++dz)
+                for (int dx = -R; dx <= R; ++dx)
+                {
+                    const int x = cx + dx, z = cz + dz;
+                    const qint64 ck = pairKey(x, z);
+                    if (colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
+                        || roadCols.contains(ck) || railColsAll.contains(ck)) return false;
+                    if (!ground.contains(pairKey(x >> 4, z >> 4))) return false;
+                    const int t = surfaceTop(ck);
+                    if (t > 235) return false;
+                    tmin = std::min(tmin, t); tmax = std::max(tmax, t);
+                    if (tmax - tmin > 3) return false;
+                    for (int y = t + 1; y <= t + 8; ++y)
+                        if (!isVeg(store.get(x, y, z))) return false;       // a fence/post/furniture — the place is taken
+                }
+            return true;
+        };
+        // Searching for a site by rings around vc (a step of 3 blocks along the ring), up to the radius maxR.
+        auto findSite = [&](const QPoint& vc, int R, int maxR, int& ox, int& oz) -> bool
+        {
+            // Rings with a step of 1 up to a radius of 32 and 2 beyond: earlier a step of 3 could skip a free spot exactly the size of the
+            // square (the center did not hit the grid) and give a false "no place" -> an extra house demolition.
+            for (int r = 0; r <= maxR; r += (r < 32 ? 1 : 2))
+            {
+                const int aStep = (r < 32) ? 1 : 2;
+                for (int a = -r; a <= r; a += (r ? aStep : 1))
+                {
+                    const int cand[4][2] = { { a, -r }, { a, r }, { -r, a }, { r, a } };
+                    for (int q = 0; q < (r ? 4 : 1); ++q)
+                        if (siteOk(vc.x() + cand[q][0], vc.y() + cand[q][1], R))
+                        { ox = vc.x() + cand[q][0]; oz = vc.y() + cand[q][1]; return true; }
+                }
+            }
+            return false;
+        };
+        // Demolition of the private house nearest to vc (allowed by the user if there is no place): we erase its blocks, columns,
+        // entities and basement. It returns the center of the freed place.
+        QSet<int> demolished;
+        auto demolishNear = [&](const QPoint& vc, QPoint& outC) -> bool
+        {
+            int best = -1; double bd = 1e18;
+            for (int i = 0; i < privCenters.size(); ++i)
+            {
+                if (demolished.contains(i)) continue;
+                const double d = std::hypot(double(privCenters[i].x() - vc.x()), double(privCenters[i].y() - vc.y()));
+                if (d < bd) { bd = d; best = i; }
+            }
+            if (best < 0 || bd > 160.0) return false;
+            demolished.insert(best);
+            const QRect bx = privBoxes[best];
+            const int x0 = bx.x() - 1, x1 = bx.x() + bx.width(), z0 = bx.y() - 1, z1 = bx.y() + bx.height();
+            int ymin = 1 << 20;
+            for (int z = z0; z <= z1; ++z)
+                for (int x = x0; x <= x1; ++x)
+                {
+                    const auto it = colMin.constFind(pairKey(x, z));
+                    if (it != colMin.constEnd()) ymin = std::min(ymin, it.value());
+                }
+            if (ymin == (1 << 20)) return false;
+            for (int z = z0; z <= z1; ++z)
+                for (int x = x0; x <= x1; ++x)
+                {
+                    for (int y = std::max(-64, ymin - 2); y <= std::min(319, ymin + 70); ++y)
+                        if (store.get(x, y, z) != IdAir) store.erase(x, y, z);
+                    colMin.remove(pairKey(x, z));
+                    colAnchor.remove(pairKey(x, z));
+                    // the ground top in the metadata was raised under the house foundation (max(..., colMin-1)): we return the natural
+                    // level, otherwise the village square will stand on the house "pedestal", and surfaceTop will diverge from ground.top
+                    auto gh = ground.find(pairKey(x >> 4, z >> 4));
+                    if (gh != ground.end())
+                    {
+                        const int col = (z & 15) * 16 + (x & 15);
+                        if (gh->wd[col] == 0)
+                            gh->top[col] = qint16(groundTopCol(x, z));
+                    }
+                }
+            auto inBox = [&](int x, int z) { return x >= x0 && x <= x1 && z >= z0 && z <= z1; };
+            auto prune = [&](auto& v) { for (int i = v.size() - 1; i >= 0; --i) if (inBox(v[i].x, v[i].z)) v.removeAt(i); };
+            prune(chests); prune(paints); prune(mannequins); prune(spawners); prune(npcs); prune(frames);
+            for (int i = basements.size() - 1; i >= 0; --i)
+                if (inBox(basements[i].cx, basements[i].cz)) basements.removeAt(i);
+            outC = bx.center();
+            return true;
+        };
+        const quint16 cobble = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobblestone"));
+        const bool forceDemolish = qEnvironmentVariableIsSet("MCX_FORCE_DEMOLISH");   // a test hook
+        for (const QPoint& vc : vcenters)
+        {
+            int px = 0, pz = 0, R = 5;
+            bool placed = false;
+            if (!forceDemolish)
+            {
+                placed = findSite(vc, 5, 128, px, pz);                        // the full 11×11 square
+                if (!placed) { R = 3; placed = findSite(vc, 3, 128, px, pz); }   // a compact 7×7
+            }
+            if (!placed)
+            {   // no place — we demolish the nearest house and put the square in its place
+                QPoint c;
+                if (demolishNear(vc, c))
+                {
+                    R = 5; placed = findSite(c, 5, 12, px, pz);
+                    if (!placed) { R = 3; placed = findSite(c, 3, 12, px, pz); }
+                }
+            }
+            if (!placed) continue;
+            auto topAt = [&](int x, int z) { return surfaceTop(pairKey(x, z)); };
+            // we cut down trees/grass on the square and above it
+            for (int dz = -R; dz <= R; ++dz)
+                for (int dx = -R; dx <= R; ++dx)
+                {
+                    const int x = px + dx, z = pz + dz, t = topAt(x, z);
+                    for (int y = t + 1; y <= t + 16; ++y)
+                    {
+                        const quint16 bid = store.get(x, y, z);
+                        if (bid != IdAir && isVeg(bid)) store.erase(x, y, z);
+                    }
+                }
+            auto put = [&](int dx, int dz, int dy, quint16 bid)
+            { const int x = px + dx, z = pz + dz; store.set(x, topAt(x, z) + dy, z, bid); };
+            put(0, 0, 1, IdBell);                                         // the bell — the center
+            bellSites.append(BellSite{ px, topAt(px, pz) + 1, pz });
+            {   // trampled earth: the square spot (a circle R+0.5) — a path with coarse_dirt inclusions, plus 4 trails of 7 blocks
+                auto setSurf = [&](int x, int z, quint16 sid) -> bool
+                {
+                    auto git = ground.find(pairKey(x >> 4, z >> 4));
+                    if (git == ground.end()) return false;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0 || git->surf[col] != IdGrass) return false;
+                    git->surf[col] = sid;
+                    return true;
+                };
+                for (int dz = -R; dz <= R; ++dz)
+                    for (int dx = -R; dx <= R; ++dx)
+                    {
+                        if (dx * dx + dz * dz > (R + 0.5) * (R + 0.5)) continue;
+                        const int x = px + dx, z = pz + dz;
+                        setSurf(x, z, (colHash(pairKey(x, z) ^ 0xD177ull) % 4u == 0u) ? IdCoarseDirt : IdDirtPath);
+                    }
+                static const int ax[4] = { 1, -1, 0, 0 }, az[4] = { 0, 0, 1, -1 };
+                for (int d = 0; d < 4; ++d)
+                    for (int k = R + 1; k <= R + 7; ++k)
+                    {
+                        const int x = px + ax[d] * k, z = pz + az[d] * k;
+                        const qint64 ck = pairKey(x, z);
+                        if (colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
+                            || roadCols.contains(ck) || railColsAll.contains(ck)) break;
+                        if (!setSurf(x, z, IdDirtPath)) break;
+                        const int t = topAt(x, z);
+                        for (int y = t + 1; y <= t + 4; ++y)
+                            if (isVeg(store.get(x, y, z)) && store.get(x, y, z) != IdAir) store.erase(x, y, z);
+                    }
+            }
+            if (R >= 5)
+            {
+                // a 3×3 well at the right-back: a ring of cobblestone, water inside, 4 posts and a slab roof
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -5; dx <= -3; ++dx)
+                        put(dx, dz, 1, (dx == -4 && dz == 0) ? quint16(IdWater) : cobble);
+                for (int sxp = -5; sxp <= -3; sxp += 2)
+                    for (int szp = -1; szp <= 1; szp += 2)
+                    { put(sxp, szp, 2, IdFence); put(sxp, szp, 3, IdFence); }
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -5; dx <= -3; ++dx)
+                        put(dx, dz, 4, IdSlabBottom);
+                // lanterns on posts at the corners of the square
+                for (int sxp = -3; sxp <= 3; sxp += 6)
+                    for (int szp = -4; szp <= 4; szp += 8)
+                    { put(sxp, szp, 1, IdFence); put(sxp, szp, 2, IdFence); put(sxp, szp, 3, IdLanternStanding); }
+            }
+            // villager work blocks around the bell
+            put(3, 0, 1, IdComposter);
+            put(0, 3, 1, IdBarrel);
+            put(0, -3, 1, IdSmithingTable);
+            put(3, 3, 1, IdLoom);
+            // villagers and a golem
+            static const int kProf[4] = { PfFarmer, PfLibrarian, PfCleric, PfToolsmith };
+            for (int ni = 0; ni < 3; ++ni)
+            {
+                NpcSite v;
+                v.kind = 0; v.prof = kProf[ni % 4]; v.level = 2 + ni;
+                v.x = px + (ni == 0 ? 1 : ni == 1 ? -1 : 2); v.z = pz + (ni == 0 ? 1 : ni == 1 ? 2 : -1);
+                v.y = topAt(v.x, v.z) + 1;
+                v.vtype = 0; v.yaw = ni * 90;
+                npcs.append(v);
+            }
+            NpcSite g; g.kind = 3; g.x = px - 1; g.z = pz - 2; g.y = topAt(g.x, g.z) + 1;
+            npcs.append(g);
+        }
+    }
+
+    // SIGNS WITH ADDRESSES: one per house, on the side of the nearest road (searching outward up to 24 blocks over road columns);
+    // no road nearby — the first suitable side. Line 1 — TYSTR, line 2 — STREET, line 3 — NUMBR+ADDNUM.
+    QVector<SignSite> signSites;
+    {
+        static const int sdx[4] = { 0, 1, 0, -1 }, sdz[4] = { -1, 0, 1, 0 };
+        for (const SignCand& sc : signCands)
+        {
+            int bestD = -1, bestDist = 1 << 20;
+            for (int d = 0; d < 4; ++d)
+            {
+                if (!sc.ok[d]) continue;
+                int dist = 99;
+                for (int k = 1; k <= 24; ++k)
+                    if (roadCols.contains(pairKey(sc.x[d] + sdx[d] * k, sc.z[d] + sdz[d] * k))) { dist = k; break; }
+                if (dist < bestDist) { bestDist = dist; bestD = d; }
+            }
+            if (bestD < 0) continue;
+            const int x = sc.x[bestD], z = sc.z[bestD];
+            if (store.get(x, sc.y, z) != IdAir) continue;                           // the cell is taken by someone else's block
+            if (store.get(x - sdx[bestD], sc.y, z - sdz[bestD]) == IdAir) continue; // the wall is gone (the house was demolished)
+            store.set(x, sc.y, z, quint16(int(IdWallSignBase) + bestD));
+            signSites.append(SignSite{ x, sc.y, z, sc.l1, sc.l2, sc.l3 });
+        }
+    }
+    QHash<ColKey, QVector<BannerSite>> bannersByChunk;
+    for (const BannerSite& bn : bannerSites)
+        bannersByChunk[pairKey(bn.x >> 4, bn.z >> 4)].append(bn);
+    QHash<ColKey, QVector<LairZone>> zonesByChunk;          // raider spawn zones -> all the chunks they touch
+    for (const LairZone& z : lairZones)
+        for (int zcz = z.z0 >> 4; zcz <= (z.z1 >> 4); ++zcz)
+            for (int zcx = z.x0 >> 4; zcx <= (z.x1 >> 4); ++zcx)
+                zonesByChunk[pairKey(zcx, zcz)].append(z);
+    QHash<ColKey, QVector<BellSite>> bellsByChunk;
+    for (const BellSite& bl : bellSites)
+        bellsByChunk[pairKey(bl.x >> 4, bl.z >> 4)].append(bl);
+
+    // SIGNPOSTS AT INTERSECTIONS (request): named rdslin streets (TYSTR+STREET). An intersection — the places where the roadways of two DIFFERENT
+    // named streets cross or touch (columns with a neighbor of another name). Close points (up to 10 blocks) are merged into
+    // one intersection; next to it on free ground by the roadway we put a stone_brick_wall post 4 high and on its sides — signs
+    // (waxed, like on houses): line 1 — TYSTR, line 2 — STREET. More than 4 streets — a second row of signs below (up to 8). The post — stone_brick_wall 4 high, a lantern on top.
+    {
+        static const int ndx[4] = { 1, -1, 0, 0 }, ndz[4] = { 0, 0, 1, -1 };
+        // Real intersections — where the AXIS lines of two different roads cross (or abut each other, a tolerance of 1.5 blocks)
+        // at an angle of at least ~12°; the roadway width does not matter. At least one name is needed; pedestrian/bike paths
+        // are counted only if they have a name themselves; one and the same street (the same TYSTR+STREET) does not form an intersection.
+        {
+            struct Sg { int line; double x0, z0, x1, z1; };
+            QVector<Sg> sgs;
+            QHash<ColKey, QVector<int>> sgGrid;
+            constexpr double kCell = 24.0, kTol = 1.5;
+            for (int li = 0; li < roadLines.size(); ++li)
+            {
+                const QVector<QPointF>& pt = roadLines[li].pts;
+                for (int k = 0; k + 1 < pt.size(); ++k)
+                {
+                    const Sg g{ li, pt[k].x(), pt[k].y(), pt[k + 1].x(), pt[k + 1].y() };
+                    if (std::hypot(g.x1 - g.x0, g.z1 - g.z0) < 1e-6) continue;
+                    const int idx = sgs.size();
+                    sgs.append(g);
+                    const int cx0 = int(std::floor((std::min(g.x0, g.x1) - kTol) / kCell)), cx1 = int(std::floor((std::max(g.x0, g.x1) + kTol) / kCell));
+                    const int cz0 = int(std::floor((std::min(g.z0, g.z1) - kTol) / kCell)), cz1 = int(std::floor((std::max(g.z0, g.z1) + kTol) / kCell));
+                    for (int cz = cz0; cz <= cz1; ++cz)
+                        for (int cx = cx0; cx <= cx1; ++cx)
+                            sgGrid[pairKey(cx, cz)].append(idx);
+                }
+            }
+            for (auto it = sgGrid.constBegin(); it != sgGrid.constEnd(); ++it)
+            {
+                const QVector<int>& lst = it.value();
+                const int cellX = keyFirst(it.key()), cellZ = keySecond(it.key());
+                for (int ia = 0; ia < lst.size(); ++ia)
+                    for (int ib = ia + 1; ib < lst.size(); ++ib)
+                    {
+                        const Sg& a = sgs[lst[ia]]; const Sg& b = sgs[lst[ib]];
+                        const RoadLine& la = roadLines[a.line]; const RoadLine& lb = roadLines[b.line];
+                        if (la.obj == lb.obj) continue;                              // parts of one road
+                        const bool namedA = la.nameId >= 0, namedB = lb.nameId >= 0;
+                        if (!namedA && !namedB) continue;                           // at least one name is needed
+                        if (namedA && namedB && la.nameId == lb.nameId) continue;   // the same street
+                        if ((la.ped && !namedA) || (lb.ped && !namedB)) continue;   // an unnamed pedestrian/bike path — not an intersection
+                        const double d1x = a.x1 - a.x0, d1z = a.z1 - a.z0, d2x = b.x1 - b.x0, d2z = b.z1 - b.z0;
+                        const double len1 = std::hypot(d1x, d1z), len2 = std::hypot(d2x, d2z);
+                        const double cr = d1x * d2z - d1z * d2x;
+                        if (std::abs(cr) / (len1 * len2) < 0.2) continue;           // almost parallel — not an intersection
+                        const double ex = b.x0 - a.x0, ez = b.z0 - a.z0;
+                        const double t = (ex * d2z - ez * d2x) / cr;                // the position on a
+                        const double u = (ex * d1z - ez * d1x) / cr;                // the position on b
+                        const double tolA = kTol / len1, tolB = kTol / len2;
+                        if (t < -tolA || t > 1.0 + tolA || u < -tolB || u > 1.0 + tolB) continue;
+                        const double px = a.x0 + t * d1x, pz = a.z0 + t * d1z;
+                        if (int(std::floor(px / kCell)) != cellX || int(std::floor(pz / kCell)) != cellZ) continue;   // we count in one cell
+                        juncPts.append(JuncPt{ int(std::floor(px)), int(std::floor(pz)), la.nameId, lb.nameId });
+                    }
+            }
+        }
+        std::sort(juncPts.begin(), juncPts.end(), [](const JuncPt& a, const JuncPt& b)
+        { return a.x != b.x ? a.x < b.x : (a.z != b.z ? a.z < b.z : (a.a != b.a ? a.a < b.a : a.b < b.b)); });
+        QHash<ColKey, QVector<int>> jGrid;                         // a 10×10 grid for merging the points
+        for (int i = 0; i < juncPts.size(); ++i)
+            jGrid[pairKey(int(std::floor(juncPts[i].x / 10.0)), int(std::floor(juncPts[i].z / 10.0)))].append(i);
+        QVector<char> jUsed(juncPts.size(), 0);
+        auto isVegJ = [](quint16 bid)
+        {
+            return bid == IdAir || bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter
+                || bid == IdPaleHangingMoss || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass
+                || bid == IdTallGrassUpper || bid == IdWheat || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
+        };
+        static const int sdxJ[4] = { 0, 1, 0, -1 }, sdzJ[4] = { -1, 0, 1, 0 };
+        int posts = 0;
+        for (int i = 0; i < juncPts.size(); ++i)
+        {
+            if (jUsed[i]) continue;
+            QSet<int> names;
+            double sxm = 0, szm = 0; int cnt = 0;
+            const int gx = int(std::floor(juncPts[i].x / 10.0)), gz = int(std::floor(juncPts[i].z / 10.0));
+            for (int dgx = -1; dgx <= 1; ++dgx)
+                for (int dgz = -1; dgz <= 1; ++dgz)
+                {
+                    const auto git = jGrid.constFind(pairKey(gx + dgx, gz + dgz));
+                    if (git == jGrid.constEnd()) continue;
+                    for (int q : git.value())
+                    {
+                        if (jUsed[q]) continue;
+                        if (std::hypot(double(juncPts[q].x - juncPts[i].x), double(juncPts[q].z - juncPts[i].z)) > 10.0) continue;
+                        jUsed[q] = 1;
+                        if (juncPts[q].a >= 0) names.insert(juncPts[q].a);      // -1 — an unnamed road: it does not go into the list of names
+                        if (juncPts[q].b >= 0) names.insert(juncPts[q].b);
+                        sxm += juncPts[q].x; szm += juncPts[q].z; ++cnt;
+                    }
+                }
+            if (names.isEmpty() || cnt == 0) continue;
+            const int cx = int(std::lround(sxm / cnt)), cz = int(std::lround(szm / cnt));
+            // the post place: free 1×1 ground next to the roadway (within 2 blocks), closer to the intersection center
+            int bestX = 0, bestZ = 0, bestD = 1 << 20;
+            for (int r = 1; r <= 9; ++r)
+            {
+                for (int dz = -r; dz <= r; ++dz)
+                    for (int dx = -r; dx <= r; ++dx)
+                    {
+                        if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                        const int x = cx + dx, z = cz + dz;
+                        const qint64 ck = pairKey(x, z);
+                        if (roadCols.contains(ck) || colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
+                            || railColsAll.contains(ck)) continue;
+                        if (!ground.contains(pairKey(x >> 4, z >> 4))) continue;
+                        bool nearRoad = false;
+                        for (int k = 0; k < 4 && !nearRoad; ++k)
+                            for (int st = 1; st <= 2; ++st)
+                                if (roadCols.contains(pairKey(x + ndx[k] * st, z + ndz[k] * st))) { nearRoad = true; break; }
+                        if (!nearRoad) continue;
+                        const int t = surfaceTop(ck);
+                        if (t > 245) continue;
+                        bool freeCol = true;
+                        for (int y = t + 1; y <= t + 5 && freeCol; ++y)
+                            if (!isVegJ(store.get(x, y, z))) freeCol = false;
+                        for (int k = 0; k < 4 && freeCol; ++k)           // the sign cells on the sides — are free
+                            for (int y = t + 2; y <= t + 3; ++y)
+                                if (!isVegJ(store.get(x + sdxJ[k], y, z + sdzJ[k]))) { freeCol = false; break; }
+                        if (!freeCol) continue;
+                        const int d2 = dx * dx + dz * dz;
+                        if (d2 < bestD) { bestD = d2; bestX = x; bestZ = z; }
+                    }
+                if (bestD < (1 << 20)) break;
+            }
+            if (bestD == (1 << 20)) continue;
+            const int t0 = surfaceTop(pairKey(bestX, bestZ));
+            for (int k = 0; k < 4; ++k)                                   // clearing the grass under the post and signs
+                for (int y = t0 + 1; y <= t0 + 5; ++y)
+                {
+                    const int x = bestX + (k == 0 ? 0 : sdxJ[k - 1]), z = bestZ + (k == 0 ? 0 : sdzJ[k - 1]);
+                    if (store.get(x, y, z) != IdAir && isVegJ(store.get(x, y, z))) store.erase(x, y, z);
+                }
+            for (int y = t0 + 1; y <= t0 + 4; ++y)
+                store.set(bestX, y, bestZ, IdStoneBrickWall);              // a post of stone brick wall
+            store.set(bestX, t0 + 5, bestZ, IdLanternStanding);            // a lantern at the very top
+            QList<int> nm = names.values();
+            std::sort(nm.begin(), nm.end());
+            for (int k = 0; k < nm.size() && k < 8; ++k)
+            {
+                const int d = k % 4, y = t0 + 3 - (k / 4);
+                const int x = bestX + sdxJ[d], z = bestZ + sdzJ[d];
+                store.set(x, y, z, quint16(int(IdWallSignBase) + d));
+                signSites.append(SignSite{ x, y, z, roadNames[nm[k]].first, roadNames[nm[k]].second, QString() });
+            }
+            ++posts;
+        }
+        Q_UNUSED(posts);
+    }
+    QHash<ColKey, QVector<SignSite>> signsByChunk;
+    for (const SignSite& sg : signSites)
+        signsByChunk[pairKey(sg.x >> 4, sg.z >> 4)].append(sg);
+
+    // BASEMENTS of private houses: we take out a room (the ground top in these columns is lowered to wy-5), lay a cobblestone floor,
+    // make a hatch in the house floor (iron, covered with a 3×3 carpet) and a vertical ladder (the holder — a block on the north side),
+    // a chest or mobs.
+    {
+        const quint16 cobbleB = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobblestone"));
+        // CHURCH DUNGEON: a maze of corridors 2 blocks wide under the building and around it, in 1–2 levels. A maze cell is a 4×4 block
+        // square (the grid step is 5: between cells a 1-block wall), the cell core is 2×2, the passage between neighbors is 2 wide (3 blocks long through the wall).
+        // "Transition zones" 3×3 / 4×4 — at forks (always), turns (sometimes) and dead ends (always); a dead end — a room with a chest.
+        // The entrance — a ladder from the church; the lower level is connected by a ladder from the farthest dead end of the upper one. The maze walls — the ground itself
+        // (only corridors are carved: the ground top in a column is lowered, the ceiling and floor are added with blocks). Chests in dead ends (2–4), an expensive one —
+        // one, in the deepest dead end (guarded by 3 mobs); zombies, skeletons, spiders, witches and endermen roam the corridors.
+        // deepSpots/deepFloor (optional): the chest cells on the LOWEST level of the maze (not the "expensive" chest — earlier) and the level of their floor —
+        // a secret shaft is hidden under one of such chests later.
+        auto buildChurchDungeon = [&](const BasementSite& bs, QVector<QPoint>* deepSpots = nullptr, int* deepFloor = nullptr) -> bool
+        {
+            const int Wy = bs.wy;
+            quint32 seed = colHash(pairKey(bs.hx, bs.hz) ^ 0xD06E0ull) | 1u;
+            auto rnd = [&seed](int mod) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return mod > 0 ? int(seed % quint32(mod)) : 0; };
+            auto colAt = [&](int x, int z, int& col) -> GroundChunk*
+            {
+                auto it = ground.find(pairKey(x >> 4, z >> 4));
+                if (it == ground.end()) return nullptr;
+                col = (z & 15) * 16 + (x & 15);
+                return &it.value();
+            };
+            const int fl1 = Wy - 7, fl2 = Wy - 11;
+            auto usable = [&](int x, int z, int floorY) -> bool
+            {
+                if (x == bs.hx && z == bs.hz && floorY != fl1) return false;             // the descent column belongs only to the 1st level
+                int col; GroundChunk* g = colAt(x, z, col);
+                if (!g || g->wd[col] > 0) return false;
+                if (g->top[col] < floorY + 3) return false;                              // above the corridor ceiling at least 1 layer of ground is needed
+                for (int y = floorY; y <= floorY + 2; ++y)
+                    if (store.get(x, y, z) != IdAir) return false;
+                return true;
+            };
+            static const int dxs[4] = { 0, 1, 0, -1 }, dzs[4] = { -1, 0, 1, 0 };          // 0=N,1=E,2=S,3=W
+            const int N = 6, M = 6, P = 5;
+            struct Maze { QVector<char> vis, e, s; int cnt = 0; };                         // e — a passage to the east, s — to the south of the cell
+            auto newMaze = [&]() { Maze m; m.vis.fill(0, N * M); m.e.fill(0, N * M); m.s.fill(0, N * M); return m; };
+            auto passage = [&](const Maze& m, int i, int j, int d) -> bool
+            {   // is there a passage from cell (i,j) in direction d
+                if (d == 1) return i + 1 < N && m.e[j * N + i];
+                if (d == 3) return i > 0 && m.e[j * N + i - 1];
+                if (d == 2) return j + 1 < M && m.s[j * N + i];
+                return j > 0 && m.s[(j - 1) * N + i];
+            };
+            int ox = 0, oz = 0;
+            auto cx0 = [&](int i) { return ox + P * i + 1; };
+            auto cz0 = [&](int j) { return oz + P * j + 1; };
+            auto coreOk = [&](int i, int j, int fy) -> bool
+            {
+                for (int a = 1; a <= 2; ++a)
+                    for (int b = 1; b <= 2; ++b)
+                        if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false;
+                return true;
+            };
+            // passage blocks: from (i,j) to the east — x cx0+3..cx0+5, z cz0+1..cz0+2; to the south — z cz0+3..cz0+5, x cx0+1..cx0+2
+            auto passOk = [&](int i, int j, int d, int fy) -> bool
+            {
+                if (d == 1) { for (int a = 3; a <= 5; ++a) for (int b = 1; b <= 2; ++b) if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false; }
+                else        { for (int a = 1; a <= 2; ++a) for (int b = 3; b <= 5; ++b) if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false; }
+                return true;
+            };
+            auto genMaze = [&](int fy, int sI, int sJ, int blockDir, Maze& m) -> int
+            {
+                m = newMaze();
+                if (!coreOk(sI, sJ, fy)) return 0;
+                QVector<QPoint> stk;
+                stk.append(QPoint(sI, sJ)); m.vis[sJ * N + sI] = 1; m.cnt = 1;
+                while (!stk.isEmpty())
+                {
+                    const QPoint c = stk.last();
+                    int cand[4], nc = 0;
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
+                        if (ni < 0 || ni >= N || nj < 0 || nj >= M || m.vis[nj * N + ni]) continue;
+                        if (c.x() == sI && c.y() == sJ && d == blockDir) continue;
+                        if (!coreOk(ni, nj, fy)) continue;
+                        const bool fwd = (d == 1 || d == 2);
+                        if (!(fwd ? passOk(c.x(), c.y(), d, fy) : passOk(ni, nj, (d == 3) ? 1 : 2, fy))) continue;
+                        cand[nc++] = d;
+                    }
+                    if (nc == 0) { stk.removeLast(); continue; }
+                    const int d = cand[rnd(nc)];
+                    const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
+                    if (d == 1) m.e[c.y() * N + c.x()] = 1; else if (d == 3) m.e[nj * N + ni] = 1;
+                    else if (d == 2) m.s[c.y() * N + c.x()] = 1; else m.s[nj * N + ni] = 1;
+                    m.vis[nj * N + ni] = 1; ++m.cnt;
+                    stk.append(QPoint(ni, nj));
+                }
+                return m.cnt;
+            };
+            struct MazeInfo { QVector<int> dist; QVector<QPoint> leaves; QVector<QPoint> order; };
+            auto analyze = [&](const Maze& m, int sI, int sJ) -> MazeInfo
+            {
+                MazeInfo mi;
+                mi.dist.fill(-1, N * M);
+                QVector<QPoint> q; q.append(QPoint(sI, sJ)); mi.dist[sJ * N + sI] = 0;
+                for (int h = 0; h < q.size(); ++h)
+                {
+                    const QPoint c = q[h];
+                    mi.order.append(c);
+                    int deg = 0;
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        if (!passage(m, c.x(), c.y(), d)) continue;
+                        ++deg;
+                        const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
+                        if (mi.dist[nj * N + ni] >= 0) continue;
+                        mi.dist[nj * N + ni] = mi.dist[c.y() * N + c.x()] + 1;
+                        q.append(QPoint(ni, nj));
+                    }
+                    if (deg == 1 && !(c.x() == sI && c.y() == sJ)) mi.leaves.append(c);
+                }
+                return mi;
+            };
+            // ---- level 1: the entrance — the core of cell (2,0), the descent column = its north-west core block = (hx,hz)
+            const int sI1 = 2, sJ1 = 0;
+            ox = bs.hx - (P * sI1 + 2); oz = bs.hz - 2;
+            Maze mz1, mz2;
+            const int n1 = genMaze(fl1, sI1, sJ1, 0, mz1);                               // the north is closed: the ladder holder is there
+            if (n1 < 10) return false;
+            MazeInfo m1 = analyze(mz1, sI1, sJ1);
+            // ---- the lower level: from the farthest dead end of the upper one (the ladder at the wall of the dead-end room farthest from the passage)
+            int connI = -1, connJ = -1, connOd = -1, n2 = 0;
+            QPoint ladd2(0, 0);                                                           // the ladder block between levels (a column)
+            int ladFace = 0;                                                              // where the ladder faces (the index IdLadderN+..)
+            MazeInfo m2;
+            if (!m1.leaves.isEmpty() && rnd(100) < 70)
+            {
+                QPoint far = m1.leaves.first();
+                for (const QPoint& l : m1.leaves)
+                    if (m1.dist[l.y() * N + l.x()] > m1.dist[far.y() * N + far.x()]) far = l;
+                int od = -1;
+                for (int d = 0; d < 4; ++d) if (passage(mz1, far.x(), far.y(), d)) od = d;
+                const int f = (od + 2) % 4;                                               // the far wall of the dead end — the holder
+                int lx = cx0(far.x()) + 1, lz = cz0(far.y()) + 1;
+                if (f == 2) lz = cz0(far.y()) + 2;
+                if (f == 1) lx = cx0(far.x()) + 2;
+                n2 = genMaze(fl2, far.x(), far.y(), f, mz2);
+                if (n2 >= 8)
+                {
+                    connI = far.x(); connJ = far.y(); connOd = od; ladd2 = QPoint(lx, lz);
+                    ladFace = (f + 2) % 4;
+                    m2 = analyze(mz2, connI, connJ);
+                }
+                else n2 = 0;
+            }
+            // ---- the set of level columns: cores, passages, rooms 3×3/4×4 (forks, turns, dead ends)
+            struct RoomR { int x0, z0, x1, z1; };
+            QHash<int, RoomR> rooms1, rooms2;
+            auto buildCols = [&](const Maze& m, int fy, bool isLower, QHash<int, RoomR>& rooms) -> QVector<QPoint>
+            {
+                QSet<ColKey> seen; QVector<QPoint> out;
+                auto add = [&](int x, int z) { if (seen.contains(pairKey(x, z))) return; seen.insert(pairKey(x, z)); out.append(QPoint(x, z)); };
+                for (int j = 0; j < M; ++j)
+                    for (int i = 0; i < N; ++i)
+                    {
+                        if (!m.vis[j * N + i]) continue;
+                        for (int a = 1; a <= 2; ++a) for (int b = 1; b <= 2; ++b) add(cx0(i) + a, cz0(j) + b);          // the core
+                        if (i + 1 < N && m.e[j * N + i]) for (int a = 3; a <= 5; ++a) for (int b = 1; b <= 2; ++b) add(cx0(i) + a, cz0(j) + b);
+                        if (j + 1 < M && m.s[j * N + i]) for (int a = 1; a <= 2; ++a) for (int b = 3; b <= 5; ++b) add(cx0(i) + a, cz0(j) + b);
+                        // a room
+                        int deg = 0, dirs[4] = { 0, 0, 0, 0 };
+                        for (int d = 0; d < 4; ++d) if (passage(m, i, j, d)) { ++deg; dirs[d] = 1; }
+                        const bool isEntrance = (!isLower && i == sI1 && j == sJ1);
+                        const bool isConn = (connI >= 0 && i == connI && j == connJ);
+                        if (isEntrance || (isConn && isLower)) continue;                  // the entrance and the start of the lower level — only the core
+                        const bool straight = (deg == 2 && ((dirs[0] && dirs[2]) || (dirs[1] && dirs[3])));
+                        int size = 0;
+                        if (deg == 1) size = (rnd(2) ? 4 : 3);
+                        if (isConn && !isLower) size = 3;                                  // the connector room — only 3×3, oriented toward the passage
+                        else if (deg >= 3) size = (rnd(100) < 60 ? 4 : 3);
+                        else if (deg == 2 && !straight && rnd(100) < 45) size = 3;
+                        if (!size) continue;
+                        RoomR r;
+                        if (size == 4) r = RoomR{ cx0(i), cz0(j), cx0(i) + 3, cz0(j) + 3 };
+                        else
+                        {   // 3×3 inside the cell, must contain the core; at a dead end it grows toward the passage
+                            int ox3 = rnd(2), oz3 = rnd(2);
+                            if (deg == 1)
+                            {
+                                const int od = dirs[0] ? 0 : dirs[1] ? 1 : dirs[2] ? 2 : 3;
+                                if (od == 0) oz3 = 0; else if (od == 2) oz3 = 1;
+                                if (od == 3) ox3 = 0; else if (od == 1) ox3 = 1;
+                            }
+                            r = RoomR{ cx0(i) + ox3, cz0(j) + oz3, cx0(i) + ox3 + 2, cz0(j) + oz3 + 2 };
+                        }
+                        bool ok = true;
+                        for (int z = r.z0; z <= r.z1 && ok; ++z) for (int x = r.x0; x <= r.x1; ++x) if (!usable(x, z, fy)) { ok = false; break; }
+                        if (!ok) continue;
+                        // the ladder column down (the L1 connector) must not fall out of the holder wall: the connector room is already oriented
+                        for (int z = r.z0; z <= r.z1; ++z) for (int x = r.x0; x <= r.x1; ++x) add(x, z);
+                        rooms.insert(j * N + i, r);
+                    }
+                return out;
+            };
+            QVector<QPoint> cols2;
+            if (n2 > 0) cols2 = buildCols(mz2, fl2, true, rooms2);
+            const QVector<QPoint> cols1 = buildCols(mz1, fl1, false, rooms1);
+            // ---- writing: first the lower level (it uses the original ground tops), then the upper one
+            QHash<ColKey, QPair<int, quint16>> origMap;                                // the original column top/surface before any edits
+            auto origOf = [&](int x, int z, GroundChunk* g, int col) -> QPair<int, quint16>
+            {
+                const qint64 k = pairKey(x, z);
+                auto it = origMap.find(k);
+                if (it == origMap.end()) it = origMap.insert(k, qMakePair(int(g->top[col]), quint16(g->surf[col])));
+                return it.value();
+            };
+            auto fillCeiling = [&](int x, int z, int fromY, GroundChunk* g, int col)
+            {
+                const QPair<int, quint16> o = origOf(x, z, g, col);
+                const int orig = o.first;
+                const quint16 surf = o.second;
+                for (int y = fromY; y <= orig; ++y)
+                {
+                    const quint16 id = (y == orig) ? surf : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
+                    if (store.get(x, y, z) == IdAir) store.set(x, y, z, id);          // building blocks (the church floor) are not overwritten
+                }
+            };
+            const bool hasConn = (n2 > 0);
+            auto isConnCol = [&](int x, int z) { return hasConn && x == ladd2.x() && z == ladd2.y(); };
+            auto carve = [&](const QVector<QPoint>& cols, int floorY, bool lower)
+            {
+                for (const QPoint& c : cols)
+                {
+                    const int x = c.x(), z = c.y();
+                    int col; GroundChunk* g = colAt(x, z, col);
+                    if (!g) continue;
+                    if (!lower && x == bs.hx && z == bs.hz) continue;                       // the descent column — separately
+                    const bool isConn = isConnCol(x, z);
+                    if (lower)
+                    {
+                        if (!isConn) fillCeiling(x, z, floorY + 3, g, col);
+                        g->top[col] = qint16(floorY - 1);
+                        store.set(x, floorY, z, cobbleB);
+                        if (store.get(x, floorY - 1, z) == IdAir) store.set(x, floorY - 1, z, cobbleB);       // a floor in two layers
+                    }
+                    else
+                    {
+                        for (int y = floorY + 1; y <= floorY + 2; ++y) store.erase(x, y, z);   // air (removes the stone filled by the lower level)
+                        fillCeiling(x, z, floorY + 3, g, col);
+                        if (!isConn)
+                        {
+                            g->top[col] = qint16(std::min<int>(g->top[col], floorY - 1));
+                            store.set(x, floorY, z, cobbleB);
+                            if (store.get(x, floorY - 1, z) == IdAir) store.set(x, floorY - 1, z, cobbleB);   // a floor in two layers
+                        }
+                        else
+                            g->top[col] = qint16(std::min<int>(g->top[col], fl2 - 1));
+                    }
+                }
+            };
+            if (n2 > 0) carve(cols2, fl2, true);
+            carve(cols1, fl1, false);
+            // the descent column from the church
+            {
+                int col; GroundChunk* g = colAt(bs.hx, bs.hz, col);
+                if (!g) return false;
+                origOf(bs.hx, bs.hz, g, col);
+                store.erase(bs.hx, Wy - 1, bs.hz);
+                store.erase(bs.hx, Wy - 2, bs.hz);
+                g->top[col] = qint16(fl1 - 1);
+                store.set(bs.hx, fl1, bs.hz, cobbleB);
+                for (int y = fl1 + 1; y <= Wy - 2; ++y) store.set(bs.hx, y, bs.hz, IdLadderS);   // the holder — north (the maze wall)
+            }
+            // the ladder between levels
+            if (n2 > 0)
+            {
+                const quint16 lad = quint16(int(IdLadderN) + ladFace);
+                for (int y = fl2 + 1; y <= fl1 + 2; ++y) store.set(ladd2.x(), y, ladd2.y(), lad);
+            }
+            // the hatch and a 3×3 carpet above it (a wooden one — no lever is needed)
+            {
+                const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
+                const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        const int x = bs.hx + dx, z = bs.hz + dz;
+                        if (store.get(x, bs.wy, z) != IdAir) continue;
+                        if (!(dx == 0 && dz == 0) && store.get(x, bs.wy - 1, z) == IdAir) continue;
+                        store.set(x, bs.wy, z, carpet);
+                    }
+                store.set(bs.hx, bs.wy - 1, bs.hz, IdOakTrapdoor);
+            }
+            // chests: in dead ends (2–4), one expensive — in the deepest dead end; guards
+            struct Spot { int level; QPoint cell; int dist; };
+            QVector<Spot> spots;
+            for (const QPoint& l : m1.leaves)
+                if (!(connI >= 0 && l.x() == connI && l.y() == connJ)) spots.append(Spot{ 1, l, m1.dist[l.y() * N + l.x()] });
+            if (n2 > 0)
+                for (const QPoint& l : m2.leaves) spots.append(Spot{ 2, l, 100 + m2.dist[l.y() * N + l.x()] });
+            std::sort(spots.begin(), spots.end(), [](const Spot& a, const Spot& b) { return a.dist > b.dist; });
+            const int nChest = std::min(int(spots.size()), 2 + rnd(3));
+            static const int kMobVar[5] = { 0, 1, 2, 3, 7 };                           // zombie, skeleton, spider, witch, enderman
+            auto blockOfSpot = [&](const Spot& sp, int& bx, int& bz)
+            {   // the chest block: the center of the dead-end room (or of the core)
+                const auto& rm = (sp.level == 1) ? rooms1 : rooms2;
+                const auto it = rm.constFind(sp.cell.y() * N + sp.cell.x());
+                if (it != rm.constEnd()) { bx = (it->x0 + it->x1) / 2; bz = (it->z0 + it->z1) / 2; }
+                else { bx = cx0(sp.cell.x()) + 1; bz = cz0(sp.cell.y()) + 1; }
+                if (isConnCol(bx, bz) || (sp.level == 1 && bx == bs.hx && bz == bs.hz)) { bx += 1; }
+            };
+            for (int k = 0; k < nChest; ++k)
+            {
+                const Spot& sp = spots[k];
+                int x, z; blockOfSpot(sp, x, z);
+                const int fy = (sp.level == 1 ? fl1 : fl2) + 1;
+                store.set(x, fy, z, IdChest);
+                const bool rich = (k == 0);
+                if (deepSpots && sp.level == (n2 > 0 ? 2 : 1))
+                {
+                    if (rich) deepSpots->append(QPoint(x, z)); else deepSpots->prepend(QPoint(x, z));
+                }
+                chests.append(ChestSite{ x, fy, z, rich ? kLootT1 + rnd(kChestLootCount - kLootT1) : pickChestLoot(quint32(rnd(1 << 20)), 55, 45) });
+                if (rich)
+                {   // guards — 3 mobs on the nearest columns of the same level
+                    const QVector<QPoint>& lc = (sp.level == 1) ? cols1 : cols2;
+                    QVector<QPoint> near;
+                    for (const QPoint& c : lc)
+                    {
+                        if (c.x() == x && c.y() == z) continue;
+                        if (std::max(std::abs(c.x() - x), std::abs(c.y() - z)) <= 3) near.append(c);
+                    }
+                    int g = 0;
+                    while (!near.isEmpty() && g < 3)
+                    {
+                        const QPoint c = near.takeAt(rnd(int(near.size())));
+                        NpcSite m; m.kind = 4; m.variant = kMobVar[rnd(5)]; m.x = c.x(); m.z = c.y(); m.y = fy; m.yaw = rnd(4) * 90;
+                        npcs.append(m);
+                        ++g;
+                    }
+                }
+            }
+            if (deepSpots)
+            {   // the other dead ends of the lower level (without a chest) are also candidates for a shaft: the chest will be placed on the spot when the shaft is built
+                const int deepLevel = (n2 > 0) ? 2 : 1;
+                if (deepFloor) *deepFloor = (deepLevel == 2) ? fl2 : fl1;
+                for (int k = nChest; k < spots.size(); ++k)
+                    if (spots[k].level == deepLevel)
+                    {
+                        int x, z; blockOfSpot(spots[k], x, z);
+                        deepSpots->append(QPoint(x, z));
+                    }
+            }
+            // roaming mobs along the corridors of both levels
+            const int totalCells = n1 + n2;
+            const int nMob = std::max(4, std::min(12, totalCells / 5));
+            for (int k = 0; k < nMob; ++k)
+            {
+                const bool low = (n2 > 0 && rnd(100) < 45);
+                const QVector<QPoint>& lc = low ? cols2 : cols1;
+                if (lc.size() < 4) continue;
+                const QPoint c = lc[rnd(int(lc.size()))];
+                if ((!low && c.x() == bs.hx && c.y() == bs.hz) || (low && isConnCol(c.x(), c.y()))) continue;
+                NpcSite m; m.kind = 4; m.variant = kMobVar[rnd(5)]; m.x = c.x(); m.z = c.y(); m.y = (low ? fl2 : fl1) + 1; m.yaw = rnd(4) * 90;
+                npcs.append(m);
+            }
+            // cobwebs under the corridor ceiling and rare lanterns in room corners (little light; the maze mobs do not despawn anyway — PersistenceRequired)
+            {
+                const quint16 web = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobweb"));
+                auto decorate = [&](const QVector<QPoint>& cols, int floorY, bool lower, const QHash<int, RoomR>& rooms)
+                {
+                    for (const QPoint& c : cols)
+                    {
+                        if ((!lower && c.x() == bs.hx && c.y() == bs.hz) || (lower && isConnCol(c.x(), c.y()))) continue;
+                        if (store.get(c.x(), floorY + 1, c.y()) != IdAir) continue;                // a chest/ladder
+                        if (rnd(100) < 7 && store.get(c.x(), floorY + 2, c.y()) == IdAir) store.set(c.x(), floorY + 2, c.y(), web);
+                    }
+                    for (auto it = rooms.constBegin(); it != rooms.constEnd(); ++it)
+                    {
+                        if (rnd(100) >= 55) continue;
+                        const int x = it->x0, z = it->z0;
+                        if ((!lower && x == bs.hx && z == bs.hz) || (lower && isConnCol(x, z))) continue;
+                        if (store.get(x, floorY + 1, z) == IdAir && store.get(x, floorY, z) != IdAir) store.set(x, floorY + 1, z, IdLanternStanding);
+                    }
+                };
+                decorate(cols1, fl1, false, rooms1);
+                if (n2 > 0) decorate(cols2, fl2, true, rooms2);
+            }
+            return true;
+        };
+        // UNDERGROUND LABORATORY of a science building (44315000): a complex under the building 9 blocks below the walking level — a 3×N corridor along the south from the shaft and up to 6 rooms
+        // 7×6 on the sides (openings 3 wide). In the rooms simple redstone mechanisms: a lamp panel with levers, chains of repeaters with a delay, a music
+        // panel (buttons + note blocks), a "flower" of pistons around a block with a lever, a safe behind an iron door with buttons, an office. The light — lamps with redstone blocks in the ceiling.
+        // The entrance — a hatch under a 3×3 carpet and a ladder at the north end of the corridor. The dead-end chests of the corridor are candidates for the Ancient City entrance (deepSpots/deepFloor).
+        auto buildLab = [&](const BasementSite& bs, QVector<QPoint>* deepSpots, int* deepFloor) -> bool
+        {
+            if (caveSet.empty()) return false;
+            const int Wy = bs.wy, fl = Wy - 9, y1 = fl + 1;
+            QHash<QString, quint16> stCache;
+            auto stId = [&](const char* name, std::initializer_list<std::pair<const char*, const char*>> pr) -> quint16
+            {
+                CaveState s;
+                s.name = QString::fromLatin1(name);
+                for (const auto& kv : pr) s.props.append(qMakePair(QString::fromLatin1(kv.first), QString::fromLatin1(kv.second)));
+                const QString key = caveStateKey(s);
+                const auto ci = stCache.constFind(key);
+                if (ci != stCache.constEnd()) return ci.value();
+                int idx = -1;
+                for (int i = 0; i < caveSet.states.size(); ++i) if (caveStateKey(caveSet.states[i]) == key) { idx = i; break; }
+                if (idx < 0)
+                {
+                    idx = caveSet.states.size();
+                    caveSet.states.append(s);
+                    caveSet.idOf.append(caveStateToId(s, idx));
+                }
+                stCache.insert(key, caveSet.idOf[idx]);
+                return caveSet.idOf[idx];
+            };
+            static const char* const kDn[4] = { "north", "east", "south", "west" };
+            auto colAt = [&](int x, int z, int& col) -> GroundChunk*
+            {
+                auto it = ground.find(pairKey(x >> 4, z >> 4));
+                if (it == ground.end()) return nullptr;
+                col = (z & 15) * 16 + (x & 15);
+                return &it.value();
+            };
+            auto usable = [&](int x, int z) -> bool
+            {
+                int col; GroundChunk* g = colAt(x, z, col);
+                if (!g || g->wd[col] > 0 || g->top[col] < fl + 4) return false;
+                for (int y = fl - 1; y <= fl + 3; ++y)
+                    if (store.get(x, y, z) != IdAir) return false;
+                return true;
+            };
+            const quint16 floorB = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+            const quint16 wallB = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+            const quint16 ironB = quint16(IdIronBlock);
+            const quint16 lampOn = stId("minecraft:redstone_lamp", { { "lit", "true" } });
+            const quint16 lampOff = stId("minecraft:redstone_lamp", { { "lit", "false" } });
+            const quint16 rsBlock = stId("minecraft:redstone_block", {});
+            static const int dxs[4] = { 0, 1, 0, -1 }, dzs[4] = { -1, 0, 1, 0 };
+            const int kRoomU0[3] = { 2, 10, 18 };
+            for (int attempt = 0; attempt < 2; ++attempt)
+            {
+                const int vs = attempt == 0 ? 1 : -1;                                       // the v-axis: +x or -x
+                auto wxz = [&](int u, int v, int& x, int& z) { x = bs.hx + vs * (v - 1); z = bs.hz + u; };
+                auto dirOf = [&](int du, int dv) -> int { return du > 0 ? 2 : du < 0 ? 0 : (dv * vs > 0 ? 1 : 3); };
+                auto ok = [&](int u, int v) { int x, z; wxz(u, v, x, z); return usable(x, z); };
+                int Lc = 0;                                                                  // the corridor length: the maximal prefix of suitable columns
+                for (int u = 0; u < 26; ++u)
+                {
+                    if (!(ok(u, 0) && ok(u, 1) && ok(u, 2))) break;
+                    Lc = u + 1;
+                }
+                if (Lc < 10) continue;
+                struct RoomL { int u0, side; bool on; };                                      // side: +1 south-v (v>=4), -1 (v<=-2)
+                QVector<RoomL> rl;
+                int nOn = 0;
+                for (int c = 0; c < 3; ++c)
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        RoomL r{ kRoomU0[c], side, false };
+                        if (r.u0 + 7 <= Lc)
+                        {
+                            bool good = true;
+                            for (int ru = 0; ru < 7 && good; ++ru)
+                            {
+                                for (int rd = 0; rd < 6 && good; ++rd) good = ok(r.u0 + ru, side > 0 ? 4 + rd : -2 - rd);
+                                if (good && ru >= 2 && ru <= 4) good = ok(r.u0 + ru, side > 0 ? 3 : -1);      // the opening in the wall to the corridor
+                            }
+                            r.on = good;
+                        }
+                        if (r.on) ++nOn;
+                        rl.append(r);
+                    }
+                if (nOn < 2) continue;
+                // ——— the set of columns and writing ———
+                QSet<ColKey> carved;
+                QVector<QPoint> cols;
+                auto addC = [&](int u, int v)
+                {
+                    int x, z; wxz(u, v, x, z);
+                    if (carved.contains(pairKey(x, z))) return;
+                    carved.insert(pairKey(x, z));
+                    cols.append(QPoint(x, z));
+                };
+                for (int u = 0; u < Lc; ++u) for (int v = 0; v <= 2; ++v) addC(u, v);
+                auto roomUV = [&](const RoomL& r, int ru, int rd, int& u, int& v) { u = r.u0 + ru; v = r.side > 0 ? 4 + rd : -2 - rd; };
+                for (const RoomL& r : rl)
+                {
+                    if (!r.on) continue;
+                    for (int ru = 0; ru < 7; ++ru) for (int rd = 0; rd < 6; ++rd) { int u, v; roomUV(r, ru, rd, u, v); addC(u, v); }
+                    for (int ru = 2; ru <= 4; ++ru) addC(r.u0 + ru, r.side > 0 ? 3 : -1);     // the opening
+                }
+                for (const QPoint& c : cols)
+                {
+                    int col; GroundChunk* g = colAt(c.x(), c.y(), col);
+                    if (!g) return false;
+                }
+                // the original top/surface before edits and the ceiling
+                for (const QPoint& c : cols)
+                {
+                    int col; GroundChunk* g = colAt(c.x(), c.y(), col);
+                    const int orig = g->top[col];
+                    const quint16 surf = g->surf[col];
+                    for (int y = fl + 4; y <= orig; ++y)
+                    {
+                        const quint16 id = (y == orig) ? surf : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
+                        if (store.get(c.x(), y, c.y()) == IdAir) store.set(c.x(), y, c.y(), id);
+                    }
+                    g->top[col] = qint16(fl - 1);
+                    store.set(c.x(), fl, c.y(), floorB);
+                    if (store.get(c.x(), fl - 1, c.y()) == IdAir) store.set(c.x(), fl - 1, c.y(), floorB);
+                }
+                // the descent column (u=0,v=1): a shaft from the house floor
+                {
+                    int col; GroundChunk* g = colAt(bs.hx, bs.hz, col);
+                    if (!g) return false;
+                    store.erase(bs.hx, Wy - 1, bs.hz);
+                    store.erase(bs.hx, Wy - 2, bs.hz);
+                    for (int y = fl + 4; y <= Wy - 3; ++y) store.erase(bs.hx, y, bs.hz);
+                    g->top[col] = qint16(fl - 1);
+                    for (int y = fl + 1; y <= Wy - 2; ++y) store.set(bs.hx, y, bs.hz, IdLadderS);   // the holder — north (soil/wall)
+                }
+                // lining the walls with stone brick (8 neighbors outside the set of columns), ceiling lights
+                QSet<ColKey> lined;
+                for (const QPoint& c : cols)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            const qint64 nk = pairKey(c.x() + dx, c.y() + dz);
+                            if (carved.contains(nk) || lined.contains(nk)) continue;
+                            lined.insert(nk);
+                            for (int y = fl + 1; y <= fl + 3; ++y)
+                                if (store.get(keyFirst(nk), y, keySecond(nk)) == IdAir)
+                                    store.set(keyFirst(nk), y, keySecond(nk), wallB);
+                        }
+                auto putAt = [&](int u, int v, int dy, quint16 id)
+                {
+                    int x, z; wxz(u, v, x, z);
+                    store.set(x, y1 + dy, z, id);
+                };
+                auto chestAt = [&](int u, int v, int tbl)
+                {
+                    int x, z; wxz(u, v, x, z);
+                    store.set(x, y1, z, IdChest);
+                    chests.append(ChestSite{ x, y1, z, tbl });
+                };
+                auto lampAt = [&](int u, int v)
+                {
+                    int x, z; wxz(u, v, x, z);
+                    if (store.get(x, fl + 3, z) != IdAir) return;
+                    store.set(x, fl + 3, z, lampOn);
+                    store.set(x, fl + 4, z, rsBlock);
+                };
+                for (int u = 3; u < Lc; u += 6) lampAt(u, 1);                                   // the corridor lighting
+                // ——— room mechanisms ———
+                QHash<ColKey, char> kind;                                                       // (x,z) -> W wire, L lever, R repeater (N-S 'n' / E-W 'e')
+                QVector<QPair<QPoint, int>> wires;                                              // the wire positions
+                auto mark = [&](int u, int v, char k) { int x, z; wxz(u, v, x, z); kind.insert(pairKey(x, z), k); };
+                auto leverFloor = [&](int u, int v) { putAt(u, v, 0, stId("minecraft:lever", { { "face", "floor" }, { "facing", "north" }, { "powered", "false" } })); mark(u, v, 'L'); };
+                auto wireAt = [&](int u, int v) { int x, z; wxz(u, v, x, z); wires.append(qMakePair(QPoint(x, z), 0)); mark(u, v, 'W'); };
+                auto repeaterAt = [&](int u, int v, int towardInput, int delay)
+                {
+                    putAt(u, v, 0, stId("minecraft:repeater", { { "delay", delay == 1 ? "1" : delay == 2 ? "2" : delay == 3 ? "3" : "4" }, { "facing", kDn[towardInput] },
+                                                                { "locked", "false" }, { "powered", "false" } }));
+                    mark(u, v, (towardInput & 1) ? 'e' : 'n');
+                };
+                auto buttonAt = [&](int u, int v, int faceDir) { putAt(u, v, 0, stId("minecraft:stone_button", { { "face", "wall" }, { "facing", kDn[faceDir] }, { "powered", "false" } })); };
+                int nMech = 0;
+                int ri = 0;
+                for (const RoomL& r : rl)
+                {
+                    ++ri;
+                    if (!r.on) continue;
+                    ++nMech;
+                    auto RU = [&](int ru, int rd, int& u, int& v) { roomUV(r, ru, rd, u, v); };
+                    const int dRu = dirOf(1, 0), dRd = (r.side > 0) ? dirOf(0, 1) : dirOf(0, -1);   // world directions +ru and +rd
+                    const int dRuNeg = (dRu + 2) & 3, dRdNeg = (dRd + 2) & 3;
+                    int u, v;
+                    RU(1, 4, u, v); lampAt(u, v);                                                    // the room ceiling lamps
+                    RU(5, 4, u, v); lampAt(u, v);
+                    RU(3, 1, u, v); lampAt(u, v);
+                    switch (nMech % 6)
+                    {
+                    case 1:
+                        for (int rd = 1; rd <= 5; rd += 2)                                           // three lines: a lever — a wire — a lamp
+                        {
+                            RU(0, rd, u, v); leverFloor(u, v);
+                            for (int ru = 1; ru <= 4; ++ru) { RU(ru, rd, u, v); wireAt(u, v); }
+                            RU(5, rd, u, v); putAt(u, v, 0, lampOff);
+                        }
+                        break;
+                    case 2:
+                        for (int rd = 1; rd <= 4; rd += 3)                                           // a lever — a chain of repeaters with a delay — lamps
+                        {
+                            RU(0, rd, u, v); leverFloor(u, v);
+                            RU(1, rd, u, v); wireAt(u, v);
+                            for (int ru = 2; ru <= 4; ++ru) { RU(ru, rd, u, v); repeaterAt(u, v, dRuNeg, 4); }
+                            RU(5, rd, u, v); wireAt(u, v);
+                            RU(6, rd, u, v); putAt(u, v, 0, lampOff);
+                        }
+                        break;
+                    case 3:
+                        for (int ru = 1; ru <= 5; ru += 1)                                           // music: a note block and a button next to it
+                        {
+                            RU(ru, 3, u, v);
+                            static const char* const kNote[5] = { "0", "4", "7", "12", "16" };
+                            putAt(u, v, 0, stId("minecraft:note_block", { { "instrument", "basedrum" }, { "note", kNote[ru - 1] }, { "powered", "false" } }));
+                            RU(ru, 2, u, v); buttonAt(u, v, dRdNeg);                                  // a button on the note block itself (from the entrance side)
+                        }
+                        break;
+                    case 4:
+                        {   // a "flower" of pistons: a block with a lever in the center, pistons around facing up
+                            RU(3, 3, u, v); putAt(u, v, 0, ironB);
+                            RU(3, 2, u, v); putAt(u, v, 0, stId("minecraft:lever", { { "face", "wall" }, { "facing", kDn[dRdNeg] }, { "powered", "false" } }));
+                            RU(2, 3, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
+                            RU(4, 3, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
+                            RU(3, 4, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
+                        }
+                        break;
+                    case 5:
+                        {   // a safe: a 3×2 niche in the far corner behind an iron door, buttons outside and inside
+                            for (int dy = 0; dy < 3; ++dy)
+                            {
+                                RU(3, 3, u, v); putAt(u, v, dy, wallB);
+                                RU(3, 5, u, v); putAt(u, v, dy, wallB);
+                                RU(4, 3, u, v); putAt(u, v, dy, wallB);
+                                RU(5, 3, u, v); putAt(u, v, dy, wallB);
+                                RU(6, 3, u, v); putAt(u, v, dy, wallB);
+                            }
+                            RU(3, 4, u, v);
+                            putAt(u, v, 0, stId("minecraft:iron_door", { { "facing", kDn[dRuNeg] }, { "half", "lower" }, { "hinge", "left" }, { "open", "false" }, { "powered", "false" } }));
+                            putAt(u, v, 1, stId("minecraft:iron_door", { { "facing", kDn[dRuNeg] }, { "half", "upper" }, { "hinge", "left" }, { "open", "false" }, { "powered", "false" } }));
+                            putAt(u, v, 2, wallB);
+                            RU(2, 3, u, v); buttonAt(u, v, dRuNeg);                                   // outside — on the block (3,3)
+                            RU(4, 5, u, v); buttonAt(u, v, dRu);                                      // inside — on the block (3,5)
+                            RU(6, 5, u, v); chestAt(u, v, kLootT1 + int(colHash(pairKey(bs.hx, bs.hz) ^ 0x5AFEull) % quint32(kChestLootCount - kLootT1)));
+                        }
+                        break;
+                    default:
+                        {   // an office
+                            RU(0, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
+                            RU(1, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
+                            RU(5, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
+                            RU(6, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
+                            RU(3, 5, u, v); putAt(u, v, 0, IdCraftingTable);
+                            RU(2, 5, u, v); putAt(u, v, 0, IdCartographyTable);
+                            RU(4, 5, u, v); putAt(u, v, 0, IdFurnace);
+                        }
+                        break;
+                    }
+                    Q_UNUSED(dRu); Q_UNUSED(dRd);
+                }
+                // wires with connections
+                for (const auto& w : wires)
+                {
+                    QVector<QPair<QString, QString>> pr;
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        const auto kit = kind.constFind(pairKey(w.first.x() + dxs[d], w.first.y() + dzs[d]));
+                        bool con = false;
+                        if (kit != kind.constEnd())
+                            con = (*kit == 'W' || *kit == 'L' || (*kit == 'n' && (d & 1) == 0) || (*kit == 'e' && (d & 1) == 1));
+                        pr << qMakePair(QString::fromLatin1(kDn[d]), con ? QStringLiteral("side") : QStringLiteral("none"));
+                    }
+                    CaveState s;
+                    s.name = QStringLiteral("minecraft:redstone_wire");
+                    s.props = pr;
+                    s.props << qMakePair(QStringLiteral("power"), QStringLiteral("0"));
+                    const QString key = caveStateKey(s);
+                    int idx = -1;
+                    for (int i = 0; i < caveSet.states.size(); ++i) if (caveStateKey(caveSet.states[i]) == key) { idx = i; break; }
+                    if (idx < 0) { idx = caveSet.states.size(); caveSet.states.append(s); caveSet.idOf.append(caveStateToId(s, idx)); }
+                    store.set(w.first.x(), y1, w.first.y(), caveSet.idOf[idx]);
+                }
+                // the hatch and a 3×3 carpet above it
+                {
+                    const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
+                    const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            const int x = bs.hx + dx, z = bs.hz + dz;
+                            if (store.get(x, bs.wy, z) != IdAir) continue;
+                            if (!(dx == 0 && dz == 0) && store.get(x, bs.wy - 1, z) == IdAir) continue;
+                            store.set(x, bs.wy, z, carpet);
+                        }
+                    store.set(bs.hx, bs.wy - 1, bs.hz, IdOakTrapdoor);
+                }
+                // a chest at the start of the corridor (everyday/medium) and candidates for a secret shaft — the end of the corridor
+                chestAt(2, 0, pickChestLoot(colHash(pairKey(bs.hx, bs.hz) ^ 0x1AB5ull), 40, 50));
+                if (deepSpots)
+                {
+                    for (int u = Lc - 1; u >= std::max(4, Lc - 5); --u)
+                    {
+                        int x, z; wxz(u, 1, x, z);
+                        if (store.get(x, y1, z) == IdAir) deepSpots->append(QPoint(x, z));
+                    }
+                    if (deepFloor) *deepFloor = fl;
+                }
+                Q_UNUSED(nMech);
+                return true;
+            }
+            return false;
+        };
+        // We build the church dungeons first; for each we remember the lower-level chests — a secret shaft is hidden under one of them.
+        QVector<QVector<QPoint>> deepSpots(basements.size());
+        QVector<int> deepFloor(basements.size(), 0);
+        for (int i = 0; i < basements.size(); ++i)
+        {
+            if (basements[i].church)
+            {
+                if (!buildChurchDungeon(basements[i], &deepSpots[i], &deepFloor[i])) deepSpots[i].clear();
+            }
+            else if (basements[i].lab)
+            {
+                if (!buildLab(basements[i], &deepSpots[i], &deepFloor[i])) deepSpots[i].clear();
+            }
+        }
+        // SECRET PASSAGES: in the biggest church — a shaft to the End portal (a stronghold room, y≈23), in the second biggest — to the Ancient
+        // City (Deep Dark, y≈-49). The entrance — not in the church itself, but in the maze under it: the floor under one of the chests of the LOWER level is replaced
+        // with a hatch, then a ladder goes down. The structure template is placed so that its entrance column coincides with the shaft; the rectangles of the two
+        // structures do not intersect.
+        if (!lairSet.empty())
+        {
+            QVector<int> order;                                   // churches with a maze, in descending "size" (area × height)
+            for (int i = 0; i < basements.size(); ++i)
+                if (basements[i].church && !deepSpots[i].isEmpty()) order.append(i);
+            std::stable_sort(order.begin(), order.end(), [&](int a, int b)
+            { return basements[a].size != basements[b].size ? basements[a].size > basements[b].size : basements[a].hx < basements[b].hx; });
+            int nChurch = 0;
+            for (const BasementSite& b : basements) if (b.church) ++nChurch;
+            res.lairInfo.prepend(QObject::tr("churches: %1, with a maze: %2").arg(nChurch).arg(order.size()) + ((res.lairInfo.isEmpty() || res.lairInfo.startsWith(QLatin1String("; "))) ? QString() : QStringLiteral("; ")));
+            const int sS = lairSet.find(QStringLiteral("stronghold")), sC = lairSet.find(QStringLiteral("ancient_city"));
+            auto churchCentre = [&](int bi) { return QPointF(basements[bi].cx, basements[bi].cz); };
+            // does dead end c fit under the entrance of structure s (the chunks around the shaft and the whole main hall, the depth) — without regard to the neighboring structure
+            auto candOk = [&](int s2, int bi, const QPoint& c, LairPlace& pl) -> bool
+            {
+                const LairStruct& ls = lairSet.st[s2];
+                if (deepFloor[bi] - ls.floorY < 8) return false;
+                const int X = c.x(), Z = c.y();
+                if (!ground.contains(pairKey(X >> 4, Z >> 4)) || !ground.contains(pairKey((X - 1) >> 4, (Z - 1) >> 4))) return false;
+                pl = LairPlace(); pl.s = s2; pl.tx = X - ls.ex; pl.tz = Z - ls.ez; pl.sx = X; pl.sz = Z;
+                const int rx0 = ((ls.room[0] + pl.tx) >> 4) - 1, rx1 = ((ls.room[3] + pl.tx) >> 4) + 1;
+                const int rz0 = ((ls.room[2] + pl.tz) >> 4) - 1, rz1 = ((ls.room[5] + pl.tz) >> 4) + 1;
+                for (int dcz = rz0; dcz <= rz1; ++dcz)
+                    for (int dcx = rx0; dcx <= rx1; ++dcx)
+                        if (!ground.contains(pairKey(dcx, dcz))) return false;
+                for (int dcz = -1; dcz <= 1; ++dcz)
+                    for (int dcx = -1; dcx <= 1; ++dcx)
+                        if (!ground.contains(pairKey((X >> 4) + dcx, (Z >> 4) + dcz))) return false;
+                return true;
+            };
+            // the shaft of one structure must not pass through the rectangle of another
+            auto conflict = [&](const LairPlace& a, const LairPlace& b) -> bool
+            { return lairSet.rectOf(a).adjusted(-2, -2, 2, 2).contains(b.sx, b.sz) || lairSet.rectOf(b).adjusted(-2, -2, 2, 2).contains(a.sx, a.sz); };
+            // the first suitable dead end of church bi for structure s2; dead ends are tried from the farthest from the point away (the maze "goes away" from the neighboring church)
+            auto planFor = [&](int s2, int bi, const LairPlace* avoid, const QPointF& away, LairPlace& out) -> bool
+            {
+                QVector<QPoint> cands = deepSpots[bi];
+                std::stable_sort(cands.begin(), cands.end(), [&](const QPoint& a, const QPoint& b)
+                { return std::hypot(a.x() - away.x(), a.y() - away.y()) > std::hypot(b.x() - away.x(), b.y() - away.y()); });
+                for (const QPoint& c : cands)
+                {
+                    LairPlace pl;
+                    if (!candOk(s2, bi, c, pl)) continue;
+                    if (avoid && conflict(pl, *avoid)) continue;
+                    out = pl;
+                    return true;
+                }
+                return false;
+            };
+            // a pair: structure s1 in church b1 and s2 in b2 — both are placed together (so that the shaft of the first does not interfere with the second)
+            auto tryPair = [&](int s1, int b1, int s2, int b2, LairPlace& p1, LairPlace& p2) -> bool
+            {
+                QVector<QPoint> cands = deepSpots[b1];
+                const QPointF away = churchCentre(b2);
+                std::stable_sort(cands.begin(), cands.end(), [&](const QPoint& a, const QPoint& b)
+                { return std::hypot(a.x() - away.x(), a.y() - away.y()) > std::hypot(b.x() - away.x(), b.y() - away.y()); });
+                for (const QPoint& c : cands)
+                {
+                    LairPlace pl1;
+                    if (!candOk(s1, b1, c, pl1)) continue;
+                    LairPlace pl2;
+                    if (planFor(s2, b2, &pl1, churchCentre(b1), pl2)) { p1 = pl1; p2 = pl2; return true; }
+                }
+                return false;
+            };
+            auto buildShaft = [&](int bi, const LairPlace& pl)
+            {
+                const LairStruct& ls = lairSet.st[pl.s];
+                const int X = pl.sx, Z = pl.sz, fl = deepFloor[bi], fy = ls.floorY;
+                GroundChunk& g = ground.find(pairKey(X >> 4, Z >> 4)).value();
+                g.top[(Z & 15) * 16 + (X & 15)] = qint16(fy);
+                store.set(X, fy, Z, cobbleB);
+                for (int y = fy + 1; y <= fl - 1; ++y)
+                {
+                    store.set(X, y, Z, IdLadderS);
+                    if (store.get(X, y, Z - 1) == IdAir) store.set(X, y, Z - 1, cobbleB);
+                }
+                store.set(X, fl, Z, IdOakTrapdoor);
+                if (store.get(X, fl + 1, Z) == IdAir)
+                {   // the dead end had no chest — we put it on top of the hatch (the entrance is hidden exactly under the chest)
+                    store.set(X, fl + 1, Z, IdChest);
+                    chests.append(ChestSite{ X, fl + 1, Z, pickChestLoot(colHash(pairKey(X, Z) ^ 0xC4E57ull), 40, 60) });
+                }
+                lairSet.placed.append(pl);
+                if (basements[bi].forced)
+                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)").arg(ls.id).arg(X).arg(Z);
+                else if (basements[bi].lab)
+                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)").arg(ls.id).arg(X).arg(Z);
+                else
+                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)")
+                                        .arg(ls.id).arg(X).arg(Z).arg(order.indexOf(bi) + 1).arg(order.size());
+                if (qEnvironmentVariableIsSet("MCX_LAIRDBG"))
+                    std::fprintf(stderr, "[lair] %s shaft x=%d z=%d floorY=%d levelFloor=%d tx=%d tz=%d\n", qPrintable(ls.id), X, Z, fy, fl, pl.tx, pl.tz);
+            };
+            // churches set by the user by chunk coordinates (WorldOptions::lairChurchChunks: "x z; x z" or "x y z; x y z" as in F3)
+            QVector<int> forced;
+            {
+                const QStringList groups = world.lairChurchChunks.split(QRegularExpression(QStringLiteral("[;|\\n]")), Qt::SkipEmptyParts);
+                QVector<QPoint> chunks;
+                static const QRegularExpression numRe(QStringLiteral("-?\\d+"));
+                for (const QString& g : groups)
+                {
+                    QVector<int> nums;
+                    auto it = numRe.globalMatch(g);
+                    while (it.hasNext()) nums.append(it.next().captured().toInt());
+                    if (nums.size() >= 3) chunks.append(QPoint(nums[0], nums[2]));
+                    else if (nums.size() == 2) chunks.append(QPoint(nums[0], nums[1]));
+                }
+                if (groups.size() < 2 && chunks.isEmpty())
+                {   // without ";" — six/four numbers in a row
+                    QVector<int> nums;
+                    auto it = numRe.globalMatch(world.lairChurchChunks);
+                    while (it.hasNext()) nums.append(it.next().captured().toInt());
+                    if (nums.size() == 6) chunks << QPoint(nums[0], nums[2]) << QPoint(nums[3], nums[5]);
+                    else if (nums.size() == 4) chunks << QPoint(nums[0], nums[1]) << QPoint(nums[2], nums[3]);
+                }
+                for (const QPoint& ch : chunks)
+                {
+                    int best = -1; double bd = 1e18;
+                    for (int bi : order)
+                    {
+                        const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
+                        if (d < bd) { bd = d; best = bi; }
+                    }
+                    if (best >= 0 && bd <= 48.0 && !forced.contains(best)) forced.append(best);
+                    else res.lairInfo += QObject::tr("; no church with a maze in chunk (%1, %2)").arg(ch.x()).arg(ch.y());
+                }
+            }
+            // the building separately for the stronghold / the Ancient City (WorldOptions::strongholdChunk / cityChunk: "x z" or "x y z" as in F3): the NEAREST of those that
+            // were marked for the point (any code); if none of them got a maze — the old rule (a church with a maze within 48 blocks of the point)
+            auto churchByChunk = [&](const QString& text, const QString& what, int role) -> int
+            {
+                static const QRegularExpression numRe2(QStringLiteral("-?\\d+"));
+                QVector<int> nums;
+                auto it = numRe2.globalMatch(text);
+                while (it.hasNext()) nums.append(it.next().captured().toInt());
+                if (nums.size() < 2) return -1;
+                const QPoint ch = nums.size() >= 3 ? QPoint(nums[0], nums[2]) : QPoint(nums[0], nums[1]);
+                int best = -1; double bd = 1e18;
+                for (int bi : order)
+                {
+                    if (basements[bi].forced != role) continue;
+                    const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
+                    if (d < bd) { bd = d; best = bi; }
+                }
+                if (best >= 0) return best;
+                for (int bi : order)
+                {
+                    const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
+                    if (d < bd) { bd = d; best = bi; }
+                }
+                if (best >= 0 && (bd <= 48.0 || text.trimmed().startsWith(QLatin1Char('~')))) return best;     // "~" — a choice by a click on the map: just the nearest church
+                res.lairInfo += QObject::tr("; %1: no church with a maze in chunk (%2, %3)").arg(what).arg(ch.x()).arg(ch.y());
+                return -1;
+            };
+            const int fixS = churchByChunk(world.strongholdChunk, QStringLiteral("stronghold"), 1);
+            const int fixC = churchByChunk(world.cityChunk, QStringLiteral("Ancient City"), 2);
+            QVector<int> autoOrder;                                // for the automatic choice — without the buildings that were marked for a point
+            for (int bi : order) if (!basements[bi].forced) autoOrder.append(bi);
+            LairPlace pl1, pl2;
+            bool done = false;
+            if (sS >= 0 && sC >= 0 && (fixS >= 0 || fixC >= 0) && fixS != fixC)
+            {   // buildings are set for specific structures (by points on the map): the second one (if not set) is chosen automatically
+                if (fixS >= 0 && fixC >= 0)
+                {
+                    if (tryPair(sS, fixS, sC, fixC, pl1, pl2)) { buildShaft(fixS, pl1); buildShaft(fixC, pl2); done = true; }
+                    else
+                    {   // the two points are close (the rectangles of the structures get in each other's way): the stronghold stays where the point is,
+                        // the city goes to the nearest marked building where it does not conflict with it
+                        if (planFor(sS, fixS, nullptr, QPointF(-1e9, -1e9), pl1))
+                        {
+                            buildShaft(fixS, pl1);
+                            done = true;
+                            QVector<int> cityCands;
+                            cityCands.append(fixC);
+                            for (int bi : order) if (basements[bi].forced == 2 && bi != fixC) cityCands.append(bi);
+                            bool cityOk = false;
+                            for (int bi : cityCands)
+                                if (bi != fixS && planFor(sC, bi, &pl1, QPointF(pl1.sx, pl1.sz), pl2)) { buildShaft(bi, pl2); cityOk = true; break; }
+                            if (!cityOk) res.lairInfo += QObject::tr("; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other's way");
+                        }
+                    }
+                }
+                else
+                {
+                    for (int k = 0; k < autoOrder.size() && !done; ++k)
+                    {
+                        const int bs_ = fixS >= 0 ? fixS : autoOrder[k];
+                        const int bc_ = fixC >= 0 ? fixC : autoOrder[k];
+                        if (bs_ == bc_) continue;
+                        if (tryPair(sS, bs_, sC, bc_, pl1, pl2)) { buildShaft(bs_, pl1); buildShaft(bc_, pl2); done = true; }
+                    }
+                    if (!done)
+                    {   // there is no suitable second building: we place the chosen structure alone, the other one is left to the fallbacks below
+                        const int fb = fixS >= 0 ? fixS : fixC;
+                        if (planFor(fixS >= 0 ? sS : sC, fb, nullptr, QPointF(-1e9, -1e9), pl1)) { buildShaft(fb, pl1); done = true; }
+                    }
+                }
+                if (!done) res.lairInfo += QObject::tr("; the entrances cannot be placed in the given buildings — choosing automatically");
+            }
+            if (!done && sS >= 0 && sC >= 0 && forced.size() >= 2)
+            {   // two given churches: the stronghold — in the bigger one (if it works out), otherwise vice versa
+                const int bigger = (basements[forced[0]].size >= basements[forced[1]].size) ? forced[0] : forced[1];
+                const int smaller = (bigger == forced[0]) ? forced[1] : forced[0];
+                if (tryPair(sS, bigger, sC, smaller, pl1, pl2)) { buildShaft(bigger, pl1); buildShaft(smaller, pl2); done = true; }
+                else if (tryPair(sS, smaller, sC, bigger, pl1, pl2)) { buildShaft(smaller, pl1); buildShaft(bigger, pl2); done = true; }
+                else res.lairInfo += QObject::tr("; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically");
+            }
+            if (!done)
+            {   // automatically: the biggest by "size"; the stronghold in the biggest of the suitable ones, the city in the next one (together, so as not to interfere)
+                if (sS >= 0 && sC >= 0 && !qEnvironmentVariableIsSet("MCX_CITY_FROM_LAB"))        // debug: the city only through the laboratory
+                {
+                    for (int i = 0; i < autoOrder.size() && !done; ++i)
+                        for (int j = 0; j < autoOrder.size() && !done; ++j)
+                        {
+                            if (i == j) continue;
+                            if (tryPair(sS, autoOrder[i], sC, autoOrder[j], pl1, pl2)) { buildShaft(autoOrder[i], pl1); buildShaft(autoOrder[j], pl2); done = true; }
+                        }
+                }
+                if (!done)
+                {   // at least one structure
+                    bool placedS = false;
+                    for (int bi : autoOrder)
+                        if (sS >= 0 && !placedS && planFor(sS, bi, nullptr, QPointF(-1e9, -1e9), pl1)) { buildShaft(bi, pl1); placedS = true; break; }
+                    if (!placedS) res.lairInfo += QObject::tr("; stronghold — no suitable church was found");
+                }
+            }
+            // FALLBACK for the Ancient City: there is no suitable church — the entrance from the underground laboratory of a research building (the biggest — first), then of a school
+            if (sC >= 0)
+            {
+                bool cityPlaced = false;
+                const LairPlace* strong = nullptr;
+                for (const LairPlace& pp : lairSet.placed) { if (pp.s == sC) cityPlaced = true; else if (pp.s == sS) strong = &pp; }
+                if (!cityPlaced)
+                {
+                    QVector<int> labs;
+                    for (int i = 0; i < basements.size(); ++i) if (basements[i].lab && !deepSpots[i].isEmpty()) labs.append(i);
+                    std::stable_sort(labs.begin(), labs.end(), [&](int a, int b)
+                    {   // research buildings first, schools after them; inside a group — the biggest first
+                        if (basements[a].school != basements[b].school) return !basements[a].school;
+                        return basements[a].size != basements[b].size ? basements[a].size > basements[b].size : basements[a].hx < basements[b].hx;
+                    });
+                    const LairPlace avoidCopy = strong ? *strong : LairPlace();
+                    for (int bi : labs)
+                    {
+                        LairPlace plc;
+                        if (planFor(sC, bi, strong ? &avoidCopy : nullptr, strong ? QPointF(strong->sx, strong->sz) : QPointF(-1e9, -1e9), plc))
+                        {
+                            buildShaft(bi, plc);
+                            cityPlaced = true;
+                            break;
+                        }
+                    }
+                    if (!cityPlaced)
+                        res.lairInfo += QObject::tr("; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)");
+                }
+            }
+        }
+        for (const BasementSite& bs : basements)
+        {
+            if (bs.church || bs.lab) continue;
+            bool ok = true;
+            for (int z = bs.z0 - 1; z <= bs.z1 + 1 && ok; ++z)     // the room + a ring of walls: the ground must be solid down to wy-2
+                for (int x = bs.x0 - 1; x <= bs.x1 + 1; ++x)
+                {
+                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                    if (git == ground.constEnd()) { ok = false; break; }
+                    const int tp = git->top[(z & 15) * 16 + (x & 15)];
+                    if (tp < bs.wy - (bs.church ? 3 : 2) || git->wd[(z & 15) * 16 + (x & 15)] > 0) { ok = false; break; }
+                }
+            if (!ok) continue;
+            if (bs.church)
+                for (int z = bs.z0; z <= bs.z1; ++z)
+                    for (int x = bs.x0; x <= bs.x1; ++x)
+                        store.erase(x, bs.wy - 2, z);                       // the bottom row of the church's double floor slab — into the room
+            for (int z = bs.z0; z <= bs.z1; ++z)
+                for (int x = bs.x0; x <= bs.x1; ++x)
+                {
+                    auto git = ground.find(pairKey(x >> 4, z >> 4));
+                    git->top[(z & 15) * 16 + (x & 15)] = qint16(bs.wy - 5);
+                    store.set(x, bs.wy - 4, z, cobbleB);                    // the basement floor
+                }
+            store.erase(bs.hx, bs.wy - 1, bs.hz);                           // an opening in the house floor
+            for (int y = bs.wy - 3; y <= bs.wy - 2; ++y)
+                store.set(bs.hx, y, bs.hz, IdLadderS);                      // facing south: the holder — north
+            store.set(bs.x0, bs.wy - 3, bs.z1, IdLanternStanding);          // light in two corners by the far wall
+            store.set(bs.x1, bs.wy - 3, bs.z1, IdLanternStanding);
+            // a 3×3 carpet on top of the hatch (the center — the hatch cell): we put it on free cells of the house floor; the hatch itself — always
+            {
+                const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
+                const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        const int x = bs.hx + dx, z = bs.hz + dz;
+                        const bool center = (dx == 0 && dz == 0);
+                        if (store.get(x, bs.wy, z) != IdAir) continue;                       // occupied by furniture/a block
+                        if (!center && store.get(x, bs.wy - 1, z) == IdAir) continue;       // no floor under the carpet
+                        store.set(x, bs.wy, z, carpet);
+                    }
+                // The hatch: while it is covered with a carpet (the carpet on the hatch cell always lands — it is free by the search condition), in 30% of cases
+                // we put an ordinary wooden one (opens by hand, no lever is needed); otherwise an iron one + a lever on the ceiling next to
+                // the ladder (powers the hatch through the floor block). A hatch not covered with a carpet is always iron.
+                const bool covered = (store.get(bs.hx, bs.wy, bs.hz) >= IdCarpetBase
+                                      && store.get(bs.hx, bs.wy, bs.hz) < IdCarpetBase + kCarpetsCount);
+                const bool woodHatch = covered && (colHash(pairKey(bs.hx, bs.hz) ^ 0x7A9Dull) % 100u) < 30u;
+                store.set(bs.hx, bs.wy - 1, bs.hz, woodHatch ? IdOakTrapdoor : IdIronTrapdoor);   // flush with the floor
+                if (!woodHatch)
+                    store.set(bs.hx - 1, bs.wy - 2, bs.hz, IdLeverCeil);
+            }
+            const quint32 hc = colHash(pairKey(bs.cx, bs.cz) ^ 0xBA5E1ull);
+            if (bs.content == 0)
+            {
+                const int tbl = bs.church ? pickChestLoot(hc >> 3, 20, 30)    // church: 20% everyday, 30% medium, 50% expensive
+                                          : pickChestLoot(hc >> 3, 30, 35);   // house: 30% everyday, 35% medium, 35% expensive
+                store.set(bs.x1, bs.wy - 3, bs.z0 + 1, IdChest);            // a chest in the corner by the east wall
+                chests.append(ChestSite{ bs.x1, bs.wy - 3, bs.z0 + 1, tbl });
+                if (tbl >= kLootT1)
+                {   // the expensive chest is guarded by 2–3 mobs next to it (the nearest free cells of the room)
+                    QVector<QPoint> near;
+                    for (int z = bs.z0; z <= bs.z1; ++z)
+                        for (int x = bs.x0; x <= bs.x1; ++x)
+                        {
+                            if ((x == bs.hx && z == bs.hz) || (x == bs.x1 && z == bs.z0 + 1)) continue;
+                            if (z == bs.z1 && (x == bs.x0 || x == bs.x1)) continue;     // lanterns
+                            near.append(QPoint(x, z));
+                        }
+                    std::sort(near.begin(), near.end(), [&](const QPoint& p, const QPoint& q)
+                    {
+                        const int dp = std::abs(p.x() - bs.x1) + std::abs(p.y() - (bs.z0 + 1));
+                        const int dq = std::abs(q.x() - bs.x1) + std::abs(q.y() - (bs.z0 + 1));
+                        return dp != dq ? dp < dq : (p.y() != q.y() ? p.y() < q.y() : p.x() < q.x());
+                    });
+                    const int nGuard = std::min(int(near.size()), 2 + int((hc >> 6) % 2u));
+                    for (int i = 0; i < nGuard; ++i)
+                    {
+                        NpcSite m;
+                        m.kind = 4; m.variant = bs.mobType; m.x = near[i].x(); m.z = near[i].y(); m.y = bs.wy - 3;
+                        m.yaw = int((hc >> (16 + i)) % 4u) * 90;
+                        npcs.append(m);
+                    }
+                }
+            }
+            else
+            {
+                QVector<QPoint> cells;                                      // the room cells, except the descent and lanterns
+                for (int z = bs.z0; z <= bs.z1; ++z)
+                    for (int x = bs.x0; x <= bs.x1; ++x)
+                    {
+                        if ((x == bs.hx && z == bs.hz) || (z == bs.z1 && (x == bs.x0 || x == bs.x1))) continue;
+                        cells.append(QPoint(x, z));
+                    }
+                const int area = (bs.x1 - bs.x0 + 1) * (bs.z1 - bs.z0 + 1);
+                const int n = std::min(int(cells.size()), 3 + int((hc >> 4) % 3u) + (area >= 20 ? 2 : 1));   // 4..7 mobs
+                const int st = int((hc >> 9) % quint32(std::max(1, int(cells.size()))));
+                auto gcdI = [](int p, int q) { while (q) { const int r = p % q; p = q; q = r; } return p; };
+                int stp = 1;                                                // the step is coprime with the number of cells — mobs do not coincide
+                for (int cand : { 5, 3, 7, 2, 4 })
+                    if (!cells.isEmpty() && gcdI(cand, int(cells.size())) == 1) { stp = cand; break; }
+                for (int i = 0; i < n; ++i)
+                {
+                    const QPoint c = cells[(st + i * stp) % cells.size()];
+                    NpcSite m;
+                    m.kind = 4; m.variant = bs.mobType;
+                    m.x = c.x(); m.z = c.y(); m.y = bs.wy - 3;
+                    m.yaw = int((hc >> (13 + i)) % 4u) * 90;
+                    npcs.append(m);
+                }
+            }
+        }
+    }
+
+    lap("before 3.59");
+    beginStep(9);
+    // 3.59 Extra ground fill for "late" chunks: the site fences (3.57) and lamp posts are written
+    // into the store AFTER the main fill and at the rectangle edge can create a chunk that did not
+    // get into fillChunks — such a chunk is still written (its blocks are in the store), but without ground: in the game
+    // a fence/post would hang above the abyss (verify "bad" columns). The same formulas as above.
+    for (const qint64 ckKey : store.chunks.keys())
+        if (!ground.contains(ckKey))
+        {
+            GroundChunk g = makeGround(ckKey);
+            assignCave(g, ckKey);
+            ground.insert(ckKey, g);
+        }
+
+    lap("before 3.59b");
+    // 3.59b The "chamfer" of the junction with the game world (a user request instead of the "Ground up to the junction" choice
+    // removed from the dialog — the apron is now always off): instead of a sheer cliff the outer edge of
+    // our ground steps down toward the border — the column before the last one above the abyss goes down by 1,
+    // the outermost — by 2. Pond columns (wd>0) and columns with an object (a structure, a fence,
+    // a post, a planting — anything rising up to 7 blocks above the surface) are not lowered.
+    QHash<ColKey, QVector<quint8>> taperDrop;   // which columns got a chamfer — needed by pass 3.59c
+    {
+        static const qint8 dX[4] = { -1, 1, 0, 0 }, dZ[4] = { 0, 0, -1, 1 };
+        for (auto git = ground.begin(); git != ground.end(); ++git)
+        {
+            GroundChunk& g = git.value();
+            const int cx = int(keyFirst(git.key())), cz = int(keySecond(git.key()));
+            QVector<quint8> drop(256, 0);
+            bool any = false;
+            for (int d = 0; d < 4; ++d)
+            {
+                if (ground.contains(pairKey(cx + int(dX[d]), cz + int(dZ[d])))
+                    || inExportRect(cx + int(dX[d]), cz + int(dZ[d])))
+                    continue;                                   // this side is not a joint
+                const bool neg = (dX[d] < 0) || (dZ[d] < 0);
+                // A ragged edge: the chamfer line is shifted inward by 0..3 blocks (noise along the edge by the world coordinate, a step of 3 blocks); the strip between the edge and the line
+                // stays lowered by 2, then steps 2 and 1. A column occupied by an object (except vegetation) is not lowered; vegetation is lowered together with the column.
+                for (int k = 0; k < 16; ++k)
+                {
+                    const int along = (d < 2) ? (cz << 4) + k : (cx << 4) + k;
+                    const int o = int(colHash(pairKey(along / 3, d + 77) ^ 0xFA5CAull) % 4u);
+                    for (int p = 0; p <= o + 1 && p < 16; ++p)
+                    {
+                        const int off = neg ? p : 15 - p;
+                        const int lx = (d < 2) ? off : k, lz = (d < 2) ? k : off;
+                        const int col = lz * 16 + lx;
+                        const quint8 want = quint8(p == o + 1 ? 1 : 2);
+                        if (drop[col] >= want || g.wd[col] > 0)
+                            continue;
+                        const int bx = (cx << 4) + lx, bz = (cz << 4) + lz;
+                        bool freeCol = true;                    // a column occupied by an object is not lowered (vegetation — it can be)
+                        for (int y = int(g.top[col]) - 3; y <= int(g.top[col]) + 7; ++y)
+                        {
+                            const quint16 sb = store.get(bx, y, bz);
+                            if (sb && !isVegBlockId(sb)) { freeCol = false; break; }
+                        }
+                        if (!freeCol)
+                            continue;
+                        const int delta = int(want) - int(drop[col]);                 // by how much more we lower (on a repeated pass over the column)
+                        for (int y = int(g.top[col]) + 1; y <= int(g.top[col]) + 24; ++y)   // vegetation goes down together with the ground
+                        {
+                            const quint16 sb = store.get(bx, y, bz);
+                            if (!sb) continue;
+                            store.erase(bx, y, bz);
+                            store.set(bx, y - delta, bz, sb);
+                        }
+                        drop[col] = qMax(drop[col], want);
+                        any = true;
+                    }
+                }
+            }
+            if (!any)
+                continue;
+            int sFloor = std::numeric_limits<int>::max();
+            for (int col = 0; col < 256; ++col)
+            {
+                if (drop[col])
+                    g.top[col] = qint16(int(g.top[col]) - drop[col]);
+                sFloor = std::min(sFloor, int(g.top[col]) - (g.wd[col] > 0 ? int(g.wd[col]) + 3 : 3));
+            }
+            g.stoneFloor = sFloor;
+            taperDrop.insert(git.key(), drop);
+        }
+    }
+
+    lap("before 3.58");
+    // 3.58 Fence connections: the fence connections are a PERSISTENT block state (Properties
+    // north/east/south/west), the client draws the arms by them, NOT by the neighboring blocks. Without the properties
+    // the world loads with "bare sticks", and only break+place recomputes them (a user remark).
+    // We write the connection bitmask into the fence id (blockProperties derives the palette properties from it).
+    {
+        auto connects = [](quint16 nid)
+        {   // a fence "absorbs": the same fence (already stamped), any gate and any full
+          // cube of the object palette (building walls). Plants, water, carpets, stone walls — no.
+            return (nid >= quint16(IdFence) && nid < quint16(IdFenceMax))
+                || (nid >= quint16(IdGateN) && nid <= quint16(IdGateW))
+                || (nid >= quint16(IdPaletteStart) && nid < quint16(IdPaletteStart) + kPaletteCount);
+        };
+        for (auto cit = store.chunks.begin(); cit != store.chunks.end(); ++cit)
+        {
+            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+            for (auto sit = cit->begin(); sit != cit->end(); ++sit)
+            {
+                const int by0 = sit.key() << 4;
+                QVector<quint16>& sec = sit.value();
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    if (sec[i] != quint16(IdFence)) continue;   // not a fence or already stamped
+                    const int x = bx0 + (i & 15), y = by0 + ((i >> 8) & 15), z = bz0 + ((i >> 4) & 15);
+                    int conn = 0;
+                    if (connects(store.get(x, y, z - 1))) conn |= 1;   // north = -Z
+                    if (connects(store.get(x + 1, y, z))) conn |= 2;   // east  = +X
+                    if (connects(store.get(x, y, z + 1))) conn |= 4;   // south = +Z
+                    if (connects(store.get(x - 1, y, z))) conn |= 8;   // west  = -X
+                    sec[i] = quint16(int(IdFence) + conn);
+                }
+            }
+        }
+    }
+
+    {   // 3.58b Connections of stone fences (parking lots): with the same ones, gates and full cubes of the object palette
+        auto connectsW = [](quint16 nid)
+        {
+            return (nid >= quint16(IdStoneFence) && nid < quint16(IdStoneFenceMax)) || nid == quint16(IdStoneBrickWall)
+                || (nid >= quint16(IdPaletteStart) && nid < quint16(IdPaletteStart) + kPaletteCount);
+        };
+        for (auto cit = store.chunks.begin(); cit != store.chunks.end(); ++cit)
+        {
+            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+            for (auto sit = cit->begin(); sit != cit->end(); ++sit)
+            {
+                const int by0 = sit.key() << 4;
+                QVector<quint16>& sec = sit.value();
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    if (sec[i] != quint16(IdStoneFence)) continue;
+                    const int x = bx0 + (i & 15), y = by0 + ((i >> 8) & 15), z = bz0 + ((i >> 4) & 15);
+                    int conn = 0;
+                    if (connectsW(store.get(x, y, z - 1))) conn |= 1;
+                    if (connectsW(store.get(x + 1, y, z))) conn |= 2;
+                    if (connectsW(store.get(x, y, z + 1))) conn |= 4;
+                    if (connectsW(store.get(x - 1, y, z))) conn |= 8;
+                    sec[i] = quint16(int(IdStoneFence) + conn);
+                }
+            }
+        }
+    }
+    lap("before 3.6");
+    beginStep(8);
+    // 3.6 "Just turf": on empty grass columns (without objects, water and plantings) deterministically
+    // (~1/8 by the column hash) we plant short grass — otherwise the exported terrain looks
+    // bald and "smooth", as if paved.
+    {
+        // We count the candidates in parallel by chunk blocks (read only: ground/colMin/colWater/store), and write into the store
+        // AFTER — in one thread. The main thing: the "every 8th column" hash is checked FIRST — earlier for each
+        // of the 256 columns of a chunk two accesses to the huge colMin/colWater hashes were made (hundreds of millions of accesses,
+        // ~5 minutes on a big project), although only every eighth reached the work.
+        const QVector<qint64> fl(fillChunks.constBegin(), fillChunks.constEnd());
+        const int nF = fl.size();
+        constexpr int kBlk = 128;
+        struct Plant { int x, y, z; };
+        const int nBlk = (nF + kBlk - 1) / kBlk;
+        QVector<QVector<Plant>> outs(nBlk);
+        QThreadPool sodPool;
+        sodPool.setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
+        QVector<QFuture<void>> sf;
+        sf.reserve(nBlk);
+        for (int b = 0; b < nBlk; ++b)
+            sf << QtConcurrent::run(&sodPool, [&, b]()
+            {
+                const int c1 = std::min(nF, (b + 1) * kBlk);
+                for (int ci = b * kBlk; ci < c1; ++ci)
+                {
+                    if (cancel && cancel->load()) return;
+                    const qint64 ckKey = fl[ci];
+                    const auto git = ground.constFind(ckKey);          // the fill guaranteed the metadata
+                    if (git == ground.constEnd()) continue;
+                    const GroundChunk& g = git.value();
+                    const int bx0 = keyFirst(ckKey) << 4, bz0 = keySecond(ckKey) << 4;
+                    for (int lz = 0; lz < 16; ++lz)
+                        for (int lx = 0; lx < 16; ++lx)
+                        {
+                            const int cx = bx0 + lx, cz = bz0 + lz;
+                            const qint64 ck = pairKey(cx, cz);
+                            if (colHash(ck) % 8u != 0u) continue;                       // 7/8 of the columns — immediately skipped
+                            const int top = g.top[lz * 16 + lx];
+                            if (top > 254) continue;
+                            if (g.surf[lz * 16 + lx] != IdGrass) continue;              // wool/stone/paint — skipped
+                            if (colMin.contains(ck) || colWater.contains(ck)) continue; // under an object/water
+                            if (store.get(cx, top, cz) != IdAir) continue;              // the top block is occupied by an object
+                            if (store.get(cx, top + 1, cz) != IdAir) continue;          // already occupied by something
+                            outs[b].append(Plant{ cx, top + 1, cz });
+                        }
+                }
+            });
+        for (int b = 0; b < nBlk; ++b)
+        {
+            sf[b].waitForFinished();
+            if (progress && (b & 0x7) == 0)
+                progress(std::min((b + 1) * kBlk, nF), nF, 8);                              // the "grass (turf)" stage
+            if (cancel && cancel->load())
+            {
+                for (QFuture<void>& f : sf) f.waitForFinished();
+                res.cancelled = true;
+                res.error = QObject::tr("Export cancelled.");
+                return res;
+            }
+        }
+        for (const QVector<Plant>& v : outs)
+            for (const Plant& pl : v)
+                store.set(pl.x, pl.y, pl.z, IdGrassPlant);
+    }
+
+    lap("before 3.59c");
+    beginStep(9);
+    // 3.59c "Flowing out" on the chamfer (a user request — a living junction; what it floods/burns — does not matter):
+    // at hash places of the chamfer we write a water source (6..10 blocks) or lava (2..4) into the cells of the new
+    // surface. Water/lava without Properties — a full source (IdWater/IdLava), and when a chunk
+    // loads the game spreads it beyond our area, into the generated world. The points are deterministic
+    // (colHash by the world coordinates) — a repeated export of the same scene reproduces them.
+    // DISABLED (request: waterfalls and lava falls at the world edge only break integrity — we leave just the chamfer); enabled by MCX_EDGE_FLUIDS=1.
+    if (qEnvironmentVariableIsSet("MCX_EDGE_FLUIDS"))
+    {
+        static const qint8 dX[4] = { -1, 1, 0, 0 }, dZ[4] = { 0, 0, -1, 1 };
+        for (auto tit = taperDrop.constBegin(); tit != taperDrop.constEnd(); ++tit)
+        {
+            const int cx = int(keyFirst(tit.key())), cz = int(keySecond(tit.key()));
+            const QVector<quint8>& drop = tit.value();
+            for (int d = 0; d < 4; ++d)
+            {
+                if (ground.contains(pairKey(cx + int(dX[d]), cz + int(dZ[d])))
+                    || inExportRect(cx + int(dX[d]), cz + int(dZ[d])))
+                    continue;                                   // the side is not a junction
+                const bool neg = (dX[d] < 0) || (dZ[d] < 0);
+                const int off = neg ? 0 : 15;                   // the edge row of the chamfer
+                const int inX = -int(dX[d]), inZ = -int(dZ[d]); // inward — into our ground
+                for (int k0 = 0; k0 <= 12; k0 += 4)             // 4 candidates per chunk side
+                {
+                    const int lx0 = (d < 2) ? off : k0, lz0 = (d < 2) ? k0 : off;
+                    if (drop[lz0 * 16 + lx0] < 2)
+                        continue;                               // the chamfer did not lie here (an object/pond)
+                    const qint64 spot = pairKey((cx << 4) + lx0, (cz << 4) + lz0);
+                    if (colHash(spot ^ 0xFACADEull) % 48u != 0u)
+                        continue;                               // ~1 point per 48 edge columns
+                    const quint32 t = colHash(spot ^ 0x1BEEDull);
+                    const bool lava = (t % 4u) == 0u;           // 25% lava, 75% water
+                    const int n = lava ? 30 + int(t >> 8) % 21 : 150 + int(t >> 8) % 101; // lava 30..50 (as the water was), water 150..250 (was 6..10: ×25)
+                    const quint16 fid = lava ? IdLava : IdWater;
+                    // cells: from the edge inward (d=0..2), then the next "row" along the junction
+                    int placed = 0;
+                    for (int idx = 0; idx < n; ++idx)
+                    {
+                        const int r = idx / 3, din = idx % 3;   // r — along the junction (the long line), din=0 — the edge cell
+                        const int lx = lx0 + inX * din + (d < 2 ? 0 : r);
+                        const int lz = lz0 + inZ * din + (d < 2 ? r : 0);
+                        // the line goes along the junction and beyond the chunk border — we look for the neighboring chunk by ground
+                        const int bx = (cx << 4) + lx, bz = (cz << 4) + lz;
+                        const auto git = ground.constFind(pairKey(bx >> 4, bz >> 4));
+                        if (git == ground.constEnd())
+                            break;
+                        const GroundChunk& g = git.value();
+                        const int col = (bz & 15) * 16 + (bx & 15);
+                        if (g.wd[col] > 0)
+                            break;                              // we do not climb into ponds
+                        const int y = g.top[col];
+                        if (store.get(bx, y, bz) || store.get(bx, y + 1, bz))
+                            continue;                           // the cell is occupied — the source will go further
+                        store.set(bx, y, bz, fid);
+                        fluidsByChunk[pairKey(bx >> 4, bz >> 4)].append(FluidSite{ bx, y, bz, lava });
+                        ++placed;
+                    }
+                    Q_UNUSED(placed);
+                }
+            }
+        }
+    }
+
+    lap("before 4.");
+    tmcStepLog("post: chunk assembly start");
+    // 4. chunks -> regions (r.<chunkX>>5>.<chunkZ>>5>.mca)
+    if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+    struct RegionData { QVector<QPair<int, int>> order; QHash<ColKey, QByteArray> payload; };
+    QHash<ColKey, RegionData> regions;
+    // We write the chunks: all that got ground metadata (fillChunks = touched by objects + the apron/
+    // finishing of the rectangle in noise), plus the chunks where plantings were added after the fill
+    // (store.set creates new keys itself).
+    QList<qint64> writeChunks = fillChunks;
+    {
+        const QSet<ColKey> inFill(fillChunks.constBegin(), fillChunks.constEnd());
+        for (auto it = store.chunks.constBegin(); it != store.chunks.constEnd(); ++it)
+            if (!inFill.contains(it.key())) writeChunks << it.key();   // e.g. a crown beyond the forest spot
+    }
+    // The polygon boundary: chunks that it does not touch are not written (neither blocks nor entities)
+    QPainterPath clipPath;
+    if (world.clipPolygon.size() >= 3)
+    {
+        QPolygonF poly;
+        for (const QPointF& p : world.clipPolygon) poly << QPointF(toBlockX(tf, p.x()), toBlockZ(tf, p.y()));
+        clipPath.addPolygon(poly);
+        clipPath.closeSubpath();
+        const int before = int(writeChunks.size());
+        const QSet<ColKey> allChunks(writeChunks.constBegin(), writeChunks.constEnd());
+        writeChunks.erase(std::remove_if(writeChunks.begin(), writeChunks.end(), [&](qint64 k)
+        { return !clipPath.intersects(QRectF(keyFirst(k) * 16.0, keySecond(k) * 16.0, 16.0, 16.0)); }), writeChunks.end());
+        {   // Buildings are filtered, not cut: a building that the boundary crosses stays whole, so all the chunks it occupies are written too (it would otherwise be sliced with no wall at the cut)
+            QSet<ColKey> have(writeChunks.constBegin(), writeChunks.constEnd());
+            int nWhole = 0;
+            for (const McObject& o : objects)
+            {
+                if (o.kind != McObject::Building || !o.closed || o.vertices.isEmpty()) continue;
+                double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+                for (const QVector3D& v : o.vertices)
+                {
+                    const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                    ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+                }
+                for (int cz = int(std::floor(az0)) >> 4; cz <= int(std::floor(az1)) >> 4; ++cz)
+                    for (int cx = int(std::floor(ax0)) >> 4; cx <= int(std::floor(ax1)) >> 4; ++cx)
+                    {
+                        const qint64 k = pairKey(cx, cz);
+                        if (allChunks.contains(k) && !have.contains(k)) { have.insert(k); writeChunks << k; ++nWhole; }
+                    }
+            }
+            // The same for lakes and ponds (not rivers and not big reservoirs): a water body cut by the boundary stays whole, otherwise half of it ends up without water
+            for (const McObject& o : objects)
+            {
+                if (o.kind != McObject::Water || o.linear || o.vertices.isEmpty()) continue;
+                double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+                for (const QVector3D& v : o.vertices)
+                {
+                    const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                    ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+                }
+                const int c0 = int(std::floor(ax0)) >> 4, c1 = int(std::floor(ax1)) >> 4, d0 = int(std::floor(az0)) >> 4, d1 = int(std::floor(az1)) >> 4;
+                if (qint64(c1 - c0 + 1) * (d1 - d0 + 1) > 10000) continue;           // a big reservoir (more than ~2.5 km² of the extent) is cut as before
+                for (int cz = d0; cz <= d1; ++cz)
+                    for (int cx = c0; cx <= c1; ++cx)
+                    {
+                        const qint64 k = pairKey(cx, cz);
+                        if (allChunks.contains(k) && !have.contains(k)) { have.insert(k); writeChunks << k; ++nWhole; }
+                    }
+            }
+            if (nWhole > 0) res.lairInfo += (res.lairInfo.isEmpty() ? QString() : QStringLiteral("; ")) + QObject::tr("chunks added so that the buildings and lakes on the boundary stay whole: %1").arg(nWhole);
+        }
+        res.lairInfo += (res.lairInfo.isEmpty() ? QString() : QStringLiteral("; "))
+            + QObject::tr("polygon boundary: %1 of %2 chunks written").arg(writeChunks.size()).arg(before);
+    }
+    // Smoothing the border with the unwritten world (only the noise surroundings): for chunks at the export edge we write blending_data. Disabled by MCX_NOBLEND=1 (for comparison).
+    const QSet<ColKey> writeSet(writeChunks.constBegin(), writeChunks.constEnd());
+    const bool blendBorder = world.normalSurroundings && !qEnvironmentVariableIsSet("MCX_NOBLEND");
+    QHash<ColKey, QVector<ChestSite>> chestsByChunk;   // chests by chunks (block_entities — at the chunk level)
+    for (const ChestSite& cs : chests)
+        chestsByChunk[pairKey(cs.x >> 4, cs.z >> 4)].append(cs);
+    QHash<ColKey, QVector<PaintingSite>> paintsByChunk;     // paintings — the same block_entities
+    for (const PaintingSite& pt : paints)
+        paintsByChunk[pairKey(pt.x >> 4, pt.z >> 4)].append(pt);
+    QHash<ColKey, QVector<FrameSite>> frameByChunk;         // frames with items — also entities/r.*.mca
+    for (const FrameSite& fr : frames)
+        frameByChunk[pairKey(fr.x >> 4, fr.z >> 4)].append(fr);
+    QHash<ColKey, QVector<NpcSite>> npcByChunk;             // villagers/traders/llamas — also entities/r.*.mca
+    for (const NpcSite& ns : npcs)
+        npcByChunk[pairKey(ns.x >> 4, ns.z >> 4)].append(ns);
+    QHash<ColKey, QVector<MannequinSite>> menByChunk;       // mannequins — entities/r.*.mca (step 4b)
+    for (const MannequinSite& ms : mannequins)
+        menByChunk[pairKey(ms.x >> 4, ms.z >> 4)].append(ms);
+    QHash<ColKey, QVector<SpawnerSite>> spawnByChunk;       // spawners — their own block_entities
+    for (const SpawnerSite& sp : spawners)
+        spawnByChunk[pairKey(sp.x >> 4, sp.z >> 4)].append(sp);
+    // The chunk assembly is completely independent (store/ground/chestsByChunk are only read), so it
+    // runs in several threads; the regions are then assembled sequentially in the SAME order —
+    // the archive stays deterministic.
+    const int chunkTotal = int(writeChunks.size());
+    std::atomic<int> chunkDone { 0 };
+    std::atomic_bool buildAbort { false };
+    const QHash<int, QVector<quint16>> noSections;      // ground-only chunks (the apron) — there are no object sections
+    struct ChunkBuild { QByteArray nbt; int blocks = 0; double sumX = 0.0, sumZ = 0.0;
+                        qint64 objBlocks = 0; int maxY = -64; };
+    auto buildOne = [&](qint64 k) -> ChunkBuild
+    {
+        ChunkBuild cb;
+        if (buildAbort.load() || (cancel && cancel->load()))
+        {
+            buildAbort.store(true);                     // cancel — cooperative, we finish the threads to the end
+            return cb;
+        }
+        const int cx = keyFirst(k), cz = keySecond(k);
+        const auto sit = store.chunks.constFind(k);
+        if (sit != store.chunks.constEnd())
+        {   // the center of mass of the object blocks + the maximal height — the spawn is put above this point
+            for (auto ssit = sit->constBegin(); ssit != sit->constEnd(); ++ssit)
+            {
+                const int secBaseY = ssit.key() << 4;   // an arithmetic shift — correct for y<0 too
+                const QVector<quint16>& sec = *ssit;
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    const quint16 id = sec[i];
+                    if (id == IdAir) continue;
+                    ++cb.blocks;
+                    if (id < IdPaletteStart || id == IdWater) continue;   // water is landscape, not an "object"
+                    cb.sumX += double(cx * 16 + (i & 15));
+                    cb.sumZ += double(cz * 16 + ((i >> 4) & 15));
+                    const int y = secBaseY + ((i >> 8) & 15);
+                    if (y > cb.maxY) cb.maxY = y;
+                    ++cb.objBlocks;
+                }
+            }
+        }
+        cb.nbt = zlibStream(buildChunkNbt(cx, cz, sit == store.chunks.constEnd() ? noSections : sit.value(),
+                               format, chestsByChunk.value(pairKey(cx, cz)), ground.value(k),
+                               caveSet.empty() ? nullptr : &caveSet,
+                               QVector<PaintingSite>(),                        // paintings — in entities/, not in BE
+                               spawnByChunk.value(pairKey(cx, cz)),
+                               fluidsByChunk.value(pairKey(cx, cz)),
+                               signsByChunk.value(pairKey(cx, cz)),
+                               bellsByChunk.value(pairKey(cx, cz)),
+                               bannersByChunk.value(pairKey(cx, cz)),
+                               zonesByChunk.value(pairKey(cx, cz)),
+                               lairSet.empty() ? nullptr : &lairSet,
+                               biomeCells.isEmpty() ? nullptr : &biomeCells,
+                               extraBesByChunk.value(pairKey(cx, cz)),
+                               heartsByChunk.value(pairKey(cx, cz)),
+                               blendBorder && ((!writeSet.contains(pairKey(cx - 1, cz))) + (!writeSet.contains(pairKey(cx + 1, cz)))
+                                   + (!writeSet.contains(pairKey(cx, cz - 1))) + (!writeSet.contains(pairKey(cx, cz + 1))) > 0),
+                               portalsByChunk.value(pairKey(cx, cz)),
+                               paleUnder.isEmpty() ? nullptr : &paleUnder));   // the compression here, in parallel: earlier it went sequentially in the "zip writing"
+        const int done = chunkDone.fetch_add(1) + 1;
+        if (progress && (done % 16 == 0 || done >= chunkTotal))
+            progress(done, chunkTotal, 2);              // the "chunk assembly" phase
+        return cb;
+    };
+    // We divide the work into blocks of ~16 chunks: there are not thousands of tasks, the distribution over cores is even.
+    // Our own QThreadPool — we do not compete with the global application pool (the export itself runs in it).
+    QThreadPool pool;
+    const int cores = std::max(1, QThread::idealThreadCount());
+    pool.setMaxThreadCount(cores);
+    const int nBlocks = std::max(1, std::min((chunkTotal + 15) / 16, cores * 4));
+    const int per = (chunkTotal + nBlocks - 1) / nBlocks;
+    QVector<QVector<ChunkBuild>> blockOut(nBlocks);
+    QVector<QFuture<void>> futs;
+    for (int b = 0; b < nBlocks; ++b)
+    {
+        const int lo = b * per, hi = std::min(chunkTotal, lo + per);
+        futs << QtConcurrent::run(&pool, [&, lo, hi, b]
+        {
+            QVector<ChunkBuild>& out = blockOut[b];
+            out.reserve(hi - lo);
+            for (int i = lo; i < hi; ++i) out << buildOne(writeChunks.at(i));
+        });
+    }
+    for (QFuture<void>& f : futs) f.waitForFinished();
+    if (buildAbort.load())
+    {
+        res.cancelled = true;
+        res.error = QObject::tr("Export cancelled.");
+        return res;
+    }
+    int blockTotal = 0;
+    // The center of mass of the object blocks (id >= IdPaletteStart — concrete/brick; the ground is metadata, it
+    // never entered the center) + the maximal height: the spawn above this point, in the middle of the scene.
+    double objCx = 0.0, objCz = 0.0;
+    qint64 objCount = 0, objMaxY = -64;
+    int idx = 0;
+    for (int b = 0; b < nBlocks; ++b)
+        for (const ChunkBuild& cb : blockOut[b])
+        {
+            blockTotal += cb.blocks;
+            objCx += cb.sumX; objCz += cb.sumZ; objCount += cb.objBlocks;
+            if (cb.maxY > objMaxY) objMaxY = cb.maxY;
+            const qint64 k = writeChunks.at(idx++);
+            const int cx = keyFirst(k), cz = keySecond(k);
+            const qint64 rk = pairKey(cx >> 5, cz >> 5);
+            RegionData& rd = regions[rk];
+            rd.order << qMakePair(cx & 31, cz & 31);
+            rd.payload.insert(pairKey(cx & 31, cz & 31), cb.nbt);
+        }
+    res.blockCount = blockTotal;
+
+    int spawnX = 0, spawnY = 258, spawnZ = 0;
+    // Spawn on the surface: the ground top of the column or the topmost block above it (the roof); if the column is occupied by a building — the nearest free one
+    // (a spiral up to 48 blocks), otherwise the player would appear on a roof or (with terrain) underground.
+    auto surfaceSpawn = [&](int x0, int z0, int& outX, int& outY, int& outZ) -> bool
+    {
+        for (int r = 0; r <= 48; ++r)
+            for (int dz = -r; dz <= r; ++dz)
+                for (int dx = -r; dx <= r; ++dx)
+                {
+                    if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                    const int x = x0 + dx, z = z0 + dz;
+                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                    if (git == ground.constEnd()) continue;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0) continue;                       // not into water
+                    const int top = git->top[col];
+                    bool free = true;
+                    for (int y = top + 1; y <= std::min(top + 12, 319) && free; ++y)
+                        if (store.get(x, y, z)) free = false;
+                    if (!free) continue;
+                    outX = x; outZ = z; outY = std::min(top + 2, 310);
+                    return true;
+                }
+        return false;
+    };
+    if (objCount > 0)
+    {
+        spawnX = int(std::llround(objCx / double(objCount)));
+        spawnZ = int(std::llround(objCz / double(objCount)));
+        spawnY = int(std::min<qint64>(objMaxY + 3, 310));   // a fallback: above the very top of the scene
+        surfaceSpawn(spawnX, spawnZ, spawnX, spawnY, spawnZ);
+    }
+    if (world.hasSpawnPoint)
+    {   // the spawn in the center of the view of the 3D window/map (if this column got into the export), not in the middle of the whole area
+        const int sx0 = int(std::floor(toBlockX(tf, world.spawnMapX))), sz0 = int(std::floor(toBlockZ(tf, world.spawnMapY)));
+        int nx = spawnX, ny = spawnY, nz = spawnZ;
+        if (surfaceSpawn(sx0, sz0, nx, ny, nz)) { spawnX = nx; spawnY = ny; spawnZ = nz; }
+    }
+
+    tmcStepLog("post: chunks assembled");
+    // 5. The save zip archive. The 26.x layout: level.dat (+ the old one),
+    // data/minecraft/world_gen_settings.dat, chunks in dimensions/minecraft/overworld/region/.
+    // The legacy 1.21.x layout (as in a world created by the 1.21.11 client): level.dat (+ the old one, with
+    // WorldGenSettings inside), chunks in region/ in the root. The other state files (game_rules, weather,
+    // raids, DIM-1/DIM1, ...) are created by the game itself at the first opening — checked with vanilla servers.
+    if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+    MiniZip zip;
+    const QByteArray levelDat = buildLevelDat(levelName, spawnX, spawnY, spawnZ, format, genGroundTop, world);
+    zip.add(QStringLiteral("level.dat"), levelDat);
+    zip.add(QStringLiteral("level.dat_old"), levelDat);
+    if (!legacy)
+        zip.add(QStringLiteral("data/minecraft/world_gen_settings.dat"), buildWorldGenSettings(genGroundTop, world));
+    // /locate and the Eye of Ender: our stronghold/city are written into chunks as "structure starts", but the game can find them by the placement grid
+    // only if the structure_set has a position exactly in this chunk. The datapack in the world ADDS (the vanilla ones are not touched) its own structure_set
+    // tmc:stronghold_here / tmc:ancient_city_here with the same structures: random_spread with a huge spacing (a 2048×2048 chunk cell) and a
+    // chosen salt so that the cell position coincides with the start chunk of our structure. /locate and the Eye of Ender collect the positions
+    // of all the structure sets, so they find both ours and the ordinary ones.
+    // real trial chambers and cities from the cave template: for /locate each instance gets its own structure_set (mineshafts are searched with the vanilla set: it checks every chunk)
+    struct TplInst { QString id; int cx, cz; };
+    QVector<TplInst> tplInst;
+    if (!caveSet.empty() && !caveSet.tplStarts.isEmpty())
+    {
+        QVector<CaveSet::WorldStart> tmpWs;
+        for (const qint64 wk : writeChunks)
+        {
+            caveSet.startsAt(keyFirst(wk), keySecond(wk), tmpWs);
+            for (const CaveSet::WorldStart& ws : tmpWs)
+                if (ws.here && (ws.id == QLatin1String("minecraft:trial_chambers") || ws.id == QLatin1String("minecraft:ancient_city")))
+                    tplInst.append(TplInst{ ws.id, keyFirst(wk), keySecond(wk) });
+            if (tplInst.size() >= 120) break;
+        }
+    }
+    if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()))
+    {
+        for (int ti = 0; ti < tplInst.size(); ++ti)
+        {
+            const int salt = findPlacementSalt(qint64(world.seed), tplInst[ti].cx, tplInst[ti].cz, 2048);
+            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
+                                                 "\"structures\":[{\"structure\":\"%2\",\"weight\":1}]}").arg(salt).arg(tplInst[ti].id).toUtf8();
+            zip.add(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/tpl_%1_%2.json").arg(tplInst[ti].id.section(QLatin1Char(':'), -1)).arg(ti), js);
+        }
+        zip.add(QStringLiteral("datapacks/tmc_lairs/pack.mcmeta"),
+                QByteArray("{\"pack\":{\"description\":\"tMC: strongholds, ancient cities and ruined portals located\",\"min_format\":82,\"max_format\":121}}"));
+        // ruined portals in forests: each gets its own structure_set with a salt at which the cell position coincides with the start chunk (/locate structure minecraft:ruined_portal)
+        for (int pi = 0; pi < portalStarts.size(); ++pi)
+        {
+            const int salt = findPlacementSalt(qint64(world.seed), portalStarts[pi].cx, portalStarts[pi].cz, 2048);
+            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
+                                                 "\"structures\":[{\"structure\":\"minecraft:ruined_portal\",\"weight\":1}]}").arg(salt).toUtf8();
+            zip.add(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/ruined_portal_here_%1.json").arg(pi), js);
+        }
+        for (const LairPlace& pl : lairSet.placed)
+        {
+            const LairStruct& s = lairSet.st[pl.s];
+            const int scx = ((s.room[0] + pl.tx + s.room[3] + pl.tx) / 2) >> 4, scz = ((s.room[2] + pl.tz + s.room[5] + pl.tz) / 2) >> 4;   // as in LairSet::startsTouching
+            const int salt = findPlacementSalt(qint64(world.seed), scx, scz, 2048);
+            const bool city = (s.id == QLatin1String("ancient_city"));
+            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
+                                                 "\"structures\":[{\"structure\":\"minecraft:%2\",\"weight\":1}]}").arg(salt).arg(s.id).toUtf8();
+            zip.add(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/%1.json")
+                        .arg(city ? QStringLiteral("ancient_city_here") : QStringLiteral("stronghold_here")), js);
+        }
+    }
+    const QString regionDir = legacy ? QStringLiteral("region/")
+                                     : QStringLiteral("dimensions/minecraft/overworld/region/");
+    // We assemble the entities (mannequins, villagers, paintings, frames) into regions IN ADVANCE, so that the "packing" phase counter is one
+    // for everything: block regions + entity regions.
+    QHash<ColKey, RegionData> eRegions;
+    {
+        QSet<ColKey> entChunks;                                   // chunks where there is any entity at all
+        for (auto it = menByChunk.constBegin(); it != menByChunk.constEnd(); ++it) entChunks.insert(it.key());
+        for (auto it = npcByChunk.constBegin(); it != npcByChunk.constEnd(); ++it) entChunks.insert(it.key());
+        for (auto it = paintsByChunk.constBegin(); it != paintsByChunk.constEnd(); ++it) entChunks.insert(it.key());
+        for (auto it = frameByChunk.constBegin(); it != frameByChunk.constEnd(); ++it) entChunks.insert(it.key());
+        for (qint64 key : entChunks)
+        {
+            const int cx = keyFirst(key), cz = keySecond(key);
+            if (!clipPath.isEmpty() && !writeSet.contains(key)) continue;       // the chunk is outside the polygon boundary
+            RegionData& rd = eRegions[pairKey(cx >> 5, cz >> 5)];
+            const qint64 ck = pairKey(cx & 31, cz & 31);
+            if (!rd.payload.contains(ck))
+                rd.order << qMakePair(cx & 31, cz & 31);
+            rd.payload.insert(ck, buildEntityChunkNbt(cx, cz, menByChunk.value(key),
+                                                      format == McWorldExporter::Format::Legacy121x,
+                                                      npcByChunk.value(key), paintsByChunk.value(key), frameByChunk.value(key)));
+        }
+    }
+    tmcStepLog("post: entities assembled into regions");
+    const int regTotal = int(regions.size());
+    const int packTotal = regTotal + int(eRegions.size());
+    int regDone = 0;
+    for (auto it = regions.constBegin(); it != regions.constEnd(); ++it)
+    {
+        if (progress && (regDone % 4 == 0 || regDone + 1 == regTotal))
+            progress(regDone, packTotal, 3);                      // the "packing regions into the zip" phase
+        ++regDone;
+        if (cancel && cancel->load())
+        {
+            res.cancelled = true;
+            res.error = QObject::tr("Export cancelled.");
+            return res;
+        }
+        const int rx = keyFirst(it.key()), rz = keySecond(it.key());
+        const QByteArray mca = buildRegionFile(it->order, it->payload, true);   // the chunks are already compressed
+        zip.add(regionDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz), mca);
+        ++res.regionCount;
+    }
+    tmcStepLog("post: block regions packed into the zip");
+    // 4b. entities/r.<rx>.<rz>.mca — display mannequins. Since 1.17 the server reads entities ONLY
+    // from here (the Entities tag in a region chunk is ignored — the smoke test showed it). The layout
+    // of both formats is the same, only the root differs: legacy — entities/ in the archive root,
+    // 26.x — dimensions/minecraft/overworld/entities/ (as in worlds created by servers).
+    {
+        const QString entDir = legacy ? QStringLiteral("entities/")
+                                      : QStringLiteral("dimensions/minecraft/overworld/entities/");
+        int eDone = 0;
+        for (auto it = eRegions.constBegin(); it != eRegions.constEnd(); ++it)
+        {
+            if (progress)
+                progress(regTotal + eDone, packTotal, 3);              // the same "packing" phase
+            ++eDone;
+            const int rx = keyFirst(it.key()), rz = keySecond(it.key());
+            zip.add(entDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz),
+                    buildRegionFile(it->order, it->payload));
+        }
+    }
+    tmcStepLog("post: entities packed");
+    // The limits of the classic zip (without zip64): offsets/sizes are uint32, the number of entries is uint16.
+    // For our format it is ~7000 region files — in reality there is never more, but an honest
+    // error is better than silently breaking the archive.
+    if (res.regionCount + 1 > 65534 || zip.totalBlob + 1024 * 1024 >= 0xFFFE0000ull)
+    {
+        res.error = QObject::tr("The scene is too big for a save zip archive (%1 region files, ~%2 MB). "
+                                "Export a smaller area.")
+                        .arg(res.regionCount)
+                        .arg(zip.totalBlob / (1024 * 1024));
+        return res;
+    }
+    if (progress) progress(0, 0, 11);                              // the "archive assembly" stage
+    const QByteArray zipData = zip.finish();
+
+    tmcStepLog("post: zip.finish() ready");
+    if (progress) progress(0, 0, 12);                              // the "writing the file to disk" stage
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        res.error = QObject::tr("Could not write the file %1: %2").arg(path, f.errorString());
+        return res;
+    }
+    if (f.write(zipData) != zipData.size())
+    {
+        res.error = QObject::tr("The file %1 was not written completely (quota/disk?).").arg(path);
+        f.close();
+        return res;
+    }
+    f.close();
+
+    tmcStepLog("post: file written");
+    res.ok = true;
+    res.zipBytes = zipData.size();
+    return res;
+}

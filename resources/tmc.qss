@@ -1,0 +1,70 @@
+/* The tMC window style. The color "tokens" @name are substituted from app/theme.cpp (light and dark themes). */
+
+* { font-family: "Segoe UI", "Noto Sans", "Helvetica Neue", sans-serif; font-size: 10pt; }
+
+QMainWindow, QWidget#centralwidget, QWidget#leftPanel, QWidget#rightPanel { background: @bg; }
+QLabel { color: @text; background: transparent; }
+QLabel#titleLabel { font-size: 19pt; font-weight: 600; color: @text; }
+QLabel#subtitleLabel, QLabel#previewStatusLabel, QLabel#spawnInfoLabel, QLabel#stageLabel { color: @muted; }
+QLabel#stageLabel, QLabel#previewStatusLabel { font-size: 9pt; }
+
+/* cards */
+QGroupBox {
+    background: @card; border: 1px solid @border; border-radius: 12px;
+    margin-top: 12px; padding: 10px 12px 8px 12px; color: @accent;
+}
+QCheckBox, QRadioButton { color: @text; background: transparent; spacing: 8px; }
+QCheckBox::indicator { width: 17px; height: 17px; }
+QRadioButton::indicator { width: 13px; height: 13px; }
+QRadioButton::indicator:checked { width: 6px; height: 6px; }
+QCheckBox::indicator { border: 1.5px solid @borderHover; border-radius: 5px; background: @input; }
+QCheckBox::indicator:hover, QRadioButton::indicator:hover { border-color: @accent; }
+QCheckBox::indicator:checked { background: @accent; border-color: @accent; image: url(:/style/check.svg); }
+QCheckBox::indicator:disabled { background: @bg; border-color: @border; }
+QRadioButton::indicator { border: 1.5px solid @borderHover; border-radius: 8px; background: @input; }
+QRadioButton::indicator:checked { border: 5px solid @accent; border-radius: 8px; background: #ffffff; }
+QRadioButton::indicator:disabled { background: @bg; border-color: @border; }
+QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 8px; padding: 0 6px; color: @accent; }
+
+/* input fields */
+QLineEdit, QPlainTextEdit {
+    background: @input; border: 1px solid @border; border-radius: 7px; padding: 6px 9px; color: @text;
+    selection-background-color: @accent; selection-color: #ffffff;
+}
+QLineEdit { min-height: 20px; }       /* the same control height (34 px with padding) as the buttons and combo boxes, see app/uimetrics.h */
+QLineEdit:hover, QPlainTextEdit:hover { border-color: @borderHover; }
+QLineEdit:focus, QPlainTextEdit:focus { border: 1px solid @accent; }
+QLineEdit:disabled { color: @muted; background: @bg; }
+QPlainTextEdit#logEdit { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; font-size: 9pt; padding: 8px 10px; }
+
+/* buttons */
+QPushButton {
+    background: @card; border: 1px solid @border; border-radius: 7px; padding: 6px 14px; color: @text; min-height: 20px;
+}
+QPushButton:hover { border-color: @accent; background: @hover; }
+QPushButton:pressed { background: @border; }
+QPushButton:checked { background: @accent; border-color: @accent; color: #ffffff; font-weight: 600; }
+QPushButton:checked:hover { background: @accentHover; border-color: @accentHover; }
+QPushButton:disabled { color: @muted; background: @bg; border-color: @border; }
+QPushButton:focus { border-color: @accent; }
+QPushButton#goButton {
+    background: @accent; border: 1px solid @accent; color: #ffffff; font-weight: 600; padding: 6px 30px;
+}
+QPushButton#goButton:hover { background: @accentHover; border-color: @accentHover; }
+QPushButton#goButton:pressed { background: @accentPressed; }
+QPushButton#goButton:disabled { background: @border; border-color: @border; color: @muted; }
+
+/* progress bar: a thin strip, the percent is shown by the stage caption */
+QProgressBar { background: @border; border: none; border-radius: 4px; min-height: 8px; max-height: 8px; color: transparent; }
+QProgressBar::chunk { background: @accent; border-radius: 4px; }
+
+QSplitter::handle { background: transparent; }
+QSplitter::handle:horizontal { width: 12px; }
+
+QToolTip { background: @card; color: @text; border: 1px solid @border; padding: 4px 6px; }
+
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: @border; border-radius: 4px; min-height: 28px; }
+QScrollBar::handle:vertical:hover { background: @borderHover; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }

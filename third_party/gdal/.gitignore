@@ -1,0 +1,3 @@
+# the GDAL runtime (DLLs, gdal-data, projlib) is put here by the developer (setup.bat) and is not stored in git
+bin/
+gdal-runtime-*.zip

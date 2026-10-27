@@ -1,0 +1,32 @@
+# build output and local IDE files
+build/
+*.user
+*.autosave
+.qmake.stash
+Makefile*
+ui_*.h
+moc_*
+*.obj
+*.pdb
+*.res
+__pycache__/
+*.pyc
+*.log
+
+# test worlds, Minecraft servers (jar files and worlds fall under the Mojang EULA), local test paths
+tests/worlds/
+tests/build/
+tests/servers/*/*
+!tests/servers/README.txt
+tests/local_config.json
+
+# the author's working notes
+docs/
+
+# a full copy of a GDAL installation (headers and libraries of all its dependencies, hundreds of MB): the project needs only third_party/gdal
+Gdal34vc/
+
+# private files of the author (a generator of the data files, publishing notes): never in the repository
+devtools/build_enhancer.py
+PUBLISHING.md
+_private/

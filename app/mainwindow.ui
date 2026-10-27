@@ -1,0 +1,616 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1380</width>
+    <height>800</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>tMC — export to Minecraft</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QHBoxLayout" name="centralLayout">
+    <property name="leftMargin">
+     <number>18</number>
+    </property>
+    <property name="topMargin">
+     <number>16</number>
+    </property>
+    <property name="rightMargin">
+     <number>18</number>
+    </property>
+    <property name="bottomMargin">
+     <number>16</number>
+    </property>
+    <item>
+     <widget class="QSplitter" name="splitter">
+      <property name="orientation">
+       <enum>Qt::Horizontal</enum>
+      </property>
+      <widget class="QWidget" name="leftPanel">
+       <layout class="QVBoxLayout" name="leftLayout">
+        <property name="spacing">
+         <number>12</number>
+        </property>
+        <property name="rightMargin">
+         <number>6</number>
+        </property>
+        <item>
+         <widget class="QLabel" name="titleLabel">
+          <property name="text">
+           <string>tMC</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="subtitleLabel">
+          <property name="text">
+           <string>Export a map to a Minecraft world: a tqt project, shapefiles or OpenStreetMap</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="groupData">
+          <property name="title">
+           <string>Data</string>
+          </property>
+          <layout class="QFormLayout" name="formData">
+           <item row="0" column="0">
+            <widget class="QLabel" name="labelSource">
+             <property name="text">
+              <string>Project / folder:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <layout class="QHBoxLayout" name="rowSource">
+             <item>
+              <widget class="QLineEdit" name="sourceEdit">
+               <property name="placeholderText">
+                <string>a .tqt file, an OSM extract (.osm/.pbf) or a folder with shapefiles (empty — the current folder)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnProject">
+               <property name="text">
+                <string>Project…</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnFolder">
+               <property name="text">
+                <string>Folder…</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="labelT3d">
+             <property name="text">
+              <string>3D settings (.t3d):</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <layout class="QHBoxLayout" name="rowT3d">
+             <item>
+              <widget class="QLineEdit" name="t3dEdit">
+               <property name="placeholderText">
+                <string>empty — the .t3d from the shapefile folder, otherwise the project settings, otherwise default.t3d</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnT3d">
+               <property name="text">
+                <string>Browse…</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item row="2" column="0">
+            <widget class="QLabel" name="labelOsmRules">
+             <property name="text">
+              <string>OSM rules (.json):</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <layout class="QHBoxLayout" name="rowOsmRules">
+             <item>
+              <widget class="QLineEdit" name="osmRulesEdit">
+               <property name="placeholderText">
+                <string>for an .osm/.pbf source; empty — osm_rules.json next to the file or the program</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnOsmRules">
+               <property name="text">
+                <string>Browse…</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item row="3" column="0">
+            <widget class="QLabel" name="labelEnhancer">
+             <property name="text">
+              <string>Enhancer (.dat):</string>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="1">
+            <layout class="QHBoxLayout" name="rowEnhancer">
+             <item>
+              <widget class="QLineEdit" name="enhancerEdit">
+               <property name="placeholderText">
+                <string>for OSM data; empty — tmc_buildings.dat next to the program (fallback building type and height)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnEnhancer">
+               <property name="text">
+                <string>Browse…</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item row="4" column="0">
+            <widget class="QLabel" name="labelOut">
+             <property name="text">
+              <string>World file (zip):</string>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="1">
+            <layout class="QHBoxLayout" name="rowOut">
+             <item>
+              <widget class="QLineEdit" name="outEdit">
+               <property name="placeholderText">
+                <string>empty — &lt;project name&gt;.zip in the current folder</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnOut">
+               <property name="text">
+                <string>Browse…</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="groupWorld">
+          <property name="title">
+           <string>World</string>
+          </property>
+          <layout class="QGridLayout" name="gridWorld">
+           <item row="0" column="0">
+            <widget class="QLabel" name="labelVersion">
+             <property name="text">
+              <string>World version:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QRadioButton" name="fmt26Radio">
+             <attribute name="buttonGroup">
+              <string notr="true">groupFormat</string>
+             </attribute>
+             <property name="text">
+              <string>26.x (current versions)</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="2">
+            <widget class="QRadioButton" name="fmt121Radio">
+             <attribute name="buttonGroup">
+              <string notr="true">groupFormat</string>
+             </attribute>
+             <property name="text">
+              <string>1.21.x (before the new version system)</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="labelEnv">
+             <property name="text">
+              <string>Outside the export area:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QRadioButton" name="noiseRadio">
+             <attribute name="buttonGroup">
+              <string notr="true">groupEnvironment</string>
+             </attribute>
+             <property name="text">
+              <string>A normal seed-based world outside the area</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="2">
+            <widget class="QRadioButton" name="flatRadio">
+             <attribute name="buttonGroup">
+              <string notr="true">groupEnvironment</string>
+             </attribute>
+             <property name="text">
+              <string>Superflat</string>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="1" colspan="2">
+            <widget class="QCheckBox" name="cavesCheck">
+             <property name="text">
+              <string>Caves underground (from game world templates)</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="0">
+            <widget class="QLabel" name="labelSeed">
+             <property name="text">
+              <string>World seed:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <widget class="QLineEdit" name="seedEdit">
+             <property name="maxLength">
+              <number>20</number>
+             </property>
+             <property name="placeholderText">
+              <string>empty — random</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="2">
+            <widget class="QPushButton" name="genSeedButton">
+             <property name="text">
+              <string>Generate</string>
+             </property>
+            </widget>
+           </item>
+           <item row="5" column="1" colspan="2">
+            <widget class="QCheckBox" name="realMetersCheck">
+             <property name="text">
+              <string>Real meters (account for projection distortion)</string>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="1" colspan="2">
+            <widget class="QCheckBox" name="datapackCheck">
+             <property name="toolTip">
+              <string>The datapack is needed only for searching (/locate, the eye of ender) for the stronghold, the Ancient City, trial chambers and ruined portals. The structures themselves are in the world without it. With the datapack the game warns about experimental features.</string>
+             </property>
+             <property name="text">
+              <string>Datapack for finding structures (/locate; the game will ask for experimental features)</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="stageLabel">
+          <property name="text">
+           <string/>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QProgressBar" name="progressBar">
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPlainTextEdit" name="logEdit">
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
+          <property name="maximumBlockCount">
+           <number>5000</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="rowButtons">
+          <item>
+           <spacer name="spacerButtons">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="goButton">
+            <property name="text">
+             <string>Export</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="cancelButton">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="text">
+             <string>Cancel</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="rightPanel">
+       <layout class="QVBoxLayout" name="rightLayout">
+        <property name="spacing">
+         <number>12</number>
+        </property>
+        <property name="leftMargin">
+         <number>6</number>
+        </property>
+        <item>
+         <layout class="QHBoxLayout" name="rowPreviewTop">
+          <item>
+           <widget class="QPushButton" name="loadPreviewButton">
+            <property name="text">
+             <string>Load the map</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="previewStatusLabel">
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="rowTools">
+          <item>
+           <widget class="QPushButton" name="toolSpawn">
+            <property name="toolTip">
+             <string>A click on the map — the point where the player appears</string>
+            </property>
+            <property name="text">
+             <string>Spawn</string>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="toolClip">
+            <property name="toolTip">
+             <string>Draw a polygon: only what is inside it is exported</string>
+            </property>
+            <property name="text">
+             <string>Boundary</string>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="toolStronghold">
+            <property name="toolTip">
+             <string>A click on the map — the church with the stronghold entrance is chosen nearby (without a choice — the largest one)</string>
+            </property>
+            <property name="text">
+             <string>Stronghold</string>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="toolCity">
+            <property name="toolTip">
+             <string>A click on the map — the church with the Ancient City entrance is chosen nearby (without a choice — the next by size)</string>
+            </property>
+            <property name="text">
+             <string>Ancient City</string>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="toolPale">
+            <property name="toolTip">
+             <string>A click on the map — the forest near this point becomes the Pale Garden (without a choice — the largest suitable one)</string>
+            </property>
+            <property name="text">
+             <string>Pale Garden</string>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="spacerTools">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="MapPreview" name="preview" native="true">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>1</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="spawnInfoLabel">
+          <property name="text">
+           <string/>
+          </property>
+          <property name="wordWrap">
+           <bool>true</bool>
+          </property>
+          <property name="textInteractionFlags">
+           <set>Qt::TextSelectableByMouse</set>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="rowSpawn">
+          <item>
+           <widget class="QPushButton" name="resetSpawnButton">
+            <property name="text">
+             <string>Spawn at the data center</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="copyTpButton">
+            <property name="text">
+             <string>Copy /tp</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="clipClearButton">
+            <property name="text">
+             <string>Remove the boundary</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="resetMarksButton">
+            <property name="text">
+             <string>Reset the entrances</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="spacerSpawn">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MapPreview</class>
+   <extends>QWidget</extends>
+   <header>app/mappreview.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <tabstops>
+  <tabstop>sourceEdit</tabstop>
+  <tabstop>btnProject</tabstop>
+  <tabstop>btnFolder</tabstop>
+  <tabstop>t3dEdit</tabstop>
+  <tabstop>btnT3d</tabstop>
+  <tabstop>osmRulesEdit</tabstop>
+  <tabstop>btnOsmRules</tabstop>
+  <tabstop>enhancerEdit</tabstop>
+  <tabstop>btnEnhancer</tabstop>
+  <tabstop>outEdit</tabstop>
+  <tabstop>btnOut</tabstop>
+  <tabstop>fmt26Radio</tabstop>
+  <tabstop>fmt121Radio</tabstop>
+  <tabstop>noiseRadio</tabstop>
+  <tabstop>flatRadio</tabstop>
+  <tabstop>cavesCheck</tabstop>
+  <tabstop>seedEdit</tabstop>
+  <tabstop>genSeedButton</tabstop>
+  <tabstop>realMetersCheck</tabstop>
+  <tabstop>datapackCheck</tabstop>
+  <tabstop>goButton</tabstop>
+  <tabstop>cancelButton</tabstop>
+  <tabstop>loadPreviewButton</tabstop>
+  <tabstop>toolSpawn</tabstop>
+  <tabstop>toolClip</tabstop>
+  <tabstop>toolStronghold</tabstop>
+  <tabstop>toolCity</tabstop>
+  <tabstop>toolPale</tabstop>
+  <tabstop>resetSpawnButton</tabstop>
+  <tabstop>copyTpButton</tabstop>
+ </tabstops>
+ <buttongroups>
+  <buttongroup name="groupFormat">
+   <property name="exclusive">
+    <bool>true</bool>
+   </property>
+  </buttongroup>
+  <buttongroup name="groupEnvironment">
+   <property name="exclusive">
+    <bool>true</bool>
+   </property>
+  </buttongroup>
+ </buttongroups>
+</ui>

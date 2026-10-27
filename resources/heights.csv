@@ -1,0 +1,100 @@
+﻿CODE;HIGH;OBJNAME50
+31120000;0;Lakes
+31131000;0;Reservoirs
+31132000;0;Ponds
+31133000;0;Swimming pools
+31410000;0;Rivers
+31432000;0;Ditches
+35000000;0;Islands in rivers and lakes
+44000000;3;Separate structures
+44300000;3;Ruins
+44310000;3;Non-residential structure
+44311000;14;Administrative building
+44312000;15;Educational institution
+44313000;10;Children's institution
+44314000;13;Healthcare institution
+44315000;14;Scientific institution
+44316000;15;Cultural events building
+44317000;15;Museum
+44318000;15;Shopping center
+44319000;18;Religious building
+44320000;4;Building under construction
+44340000;12;Industrial structure
+44350000;0;Courtyard
+44400000;29;Residential structure
+44400001;32;Multi-storey residential structure
+44400002;7;Rural structure
+44400100;5;Country house outbuildings
+44400110;15;Cottage
+45107000;14;Industrial blocks
+45107001;18;Non-residential blocks
+45110000;19;Residential blocks
+45120000;7;Rural development blocks
+45130000;7;Blocks of dacha-type settlements
+45210000;0;Main streets
+45220000;0;Major streets
+45230000;0;Other named streets
+45240000;0;Inter-block passages
+45250000;0;Non-motor street
+45260000;0;Footpaths
+45261000;0;Bike paths
+45262000;0;Pedestrian crossing (zebra), an internal tMC code
+45270000;0;Intra-block passages
+45300000;0;Squares
+51111000;0;Quarries
+51123000;21;Spoil heaps and dumps
+51130000;14;Industrial enterprises (plants, factories, combines)
+51133000;14;Production facilities
+51220000;4;Gas stations and fuel pumps
+51230000;5;Separate tanks, vats and gasholders
+51410000;28;Capital tower-type structures
+51460000;5;Electric substations
+51480000;0;Settling ponds
+52100000;5;Agricultural enterprises (farms, stations, workshops)
+52400000;0;Apiaries
+53110000;0;Airports
+53400000;23;Religious structures
+53510000;1.2;Cemeteries
+53530000;3;Other monuments, memorials, cairns, stone pillars
+53600000;17;Scientific, educational, medical and other institutions
+53700000;0;Sports facilities
+53710000;0;Sports and children's playgrounds
+61111000;0;Broad-gauge railways
+61112000;0;Narrow-gauge railways
+61113000;0;Monorail railways
+61122000;0;Dead ends and sidings
+61124000;0;Tram lines
+61210000;0;Motorways (highways)
+61220000;0;Roads with an improved surface (improved highways)
+61230000;0;Roads with a surface (highways)
+61231000;0;An element of a road interchange
+61232000;0;An element of the road network
+61310000;0;Roads without a surface (improved dirt roads)
+61320000;0;Dirt country roads
+61330000;0;Field and forest roads
+61420000;0;Footpaths and trails
+62134000;3;Platforms
+62230000;0;Vehicle parking on motorways and roads
+62231000;0;Asphalt sites
+62310000;5;Bridges
+62320000;5;Overpasses
+71111110;22;Dense tall forests (ordinary)
+71111120;10;Dense low-growing forests
+71113000;2;Forest undergrowth
+71122000;1;Plantations of woody industrial crops
+71123000;3;Fruit and citrus orchards
+71126000;17;Parks
+71126100;15;Woody vegetation in blocks
+71126300;10;Woody vegetation in rural blocks
+71126500;10;Woody vegetation in dacha blocks
+71211100;2;Thorny shrubs
+71211200;2;Ordinary shrubs
+71221000;1;Plantations of shrub industrial crops
+71222000;1;Vineyards
+71313000;0;Herbaceous vegetation, low-grass, moisture-loving
+71314000;0;Herbaceous meadow vegetation
+71321000;0;Plantations of herbaceous industrial crops
+71323000;4;Hotbeds, orangeries, greenhouses
+71324000;0;Arable land
+71328000;0;Vegetable gardens
+71329000;0;Lawns and flower beds

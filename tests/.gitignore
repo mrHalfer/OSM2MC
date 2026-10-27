@@ -1,0 +1,7 @@
+worlds/
+build/
+__pycache__/
+# server jars (50+ MB each) and the working files of the servers are not put into the repository
+servers/*/*
+!servers/README.txt
+# data/osm_buildings.osm and its expected.json are small and are kept: make_release.bat uses the .osm as a start check
