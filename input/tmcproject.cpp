@@ -342,7 +342,8 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
     {
         std::unique_ptr<OGRSpatialReference> def(new OGRSpatialReference);
         if (def->SetFromUserInput(defaultCrsText().toUtf8().constData()) != OGRERR_NONE)
-        { if (err) *err = QObject::tr("Invalid default projection: %1").arg(defaultCrsText()); return false; }
+        { if (err) *err = QObject::tr("Invalid default projection: %1").arg(defaultCrsText())
+                           + QObject::tr(" (the PROJ data is not found: the folder projlib with proj.db must lie next to the program; PROJ_LIB = %1)").arg(qEnvironmentVariable("PROJ_LIB")); return false; }
         def->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
         mSrs = std::move(def);
         char* w = nullptr;

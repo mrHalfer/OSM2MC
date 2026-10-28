@@ -11,6 +11,7 @@
 #include <QElapsedTimer>
 #include <QMouseEvent>
 #include <QThread>
+#include <ogr_srs_api.h>
 #include "app/httpclient.h"
 #include "app/i18n.h"
 #include "export/climate.h"
@@ -35,15 +36,24 @@ static void setupGdalEnvironment()
     qputenv("OGR_GEOJSON_MAX_OBJ_SIZE", "500MB");
     qputenv("OGR_ORGANIZE_POLYGONS", "EXPLON");
     const QString dir = QCoreApplication::applicationDirPath();
+    // The data bundled with the program ALWAYS wins over the environment: other programs (PostgreSQL/PostGIS, QGIS, Python …) put their own PROJ_LIB / GDAL_DATA into the system, and a
+    // proj.db of another PROJ version makes any projection "invalid".
     auto setIfExists = [&](const char* var, const QString& sub)
     {
         const QString p = dir + QLatin1Char('/') + sub;
-        if (QDir(p).exists() && qEnvironmentVariableIsEmpty(var)) qputenv(var, QDir::toNativeSeparators(p + QLatin1Char('/')).toLocal8Bit());
+        if (QDir(p).exists()) qputenv(var, QDir::toNativeSeparators(p + QLatin1Char('/')).toLocal8Bit());
     };
     setIfExists("GDAL_DATA", QStringLiteral("gdal-data"));
     setIfExists("GDAL_DRIVER_PATH", QStringLiteral("gdalplugins"));
     setIfExists("PROJ_DATA", QStringLiteral("projlib"));
     setIfExists("PROJ_LIB", QStringLiteral("projlib"));
+    const QString projDir = dir + QStringLiteral("/projlib");
+    if (QFileInfo::exists(projDir + QStringLiteral("/proj.db")))
+    {   // explicitly, not only through the variables: the search path of PROJ is set for the whole process
+        static const QByteArray projPath = QDir::toNativeSeparators(projDir).toLocal8Bit();
+        const char* paths[] = { projPath.constData(), nullptr };
+        OSRSetPROJSearchPaths(paths);
+    }
 }
 
 int main(int argc, char* argv[])
