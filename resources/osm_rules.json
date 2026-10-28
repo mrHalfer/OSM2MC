@@ -1869,6 +1869,98 @@
    }
   },
   {
+   "note": "A closed LINE with building:part (it ends up in the lines layer when the way is not taken for a polygon): Building parts (building:part) raised above the ground (min_height >= 1): a floating body, the base is lifted by MINH (see tmcproject.cpp, the \"BUILDING PARTS\" block)",
+   "from": "lines",
+   "as": "polygon",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "min_height": ">=1"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}",
+    "MINH": "{min_height,building:min_height}",
+    "MINL": "{building:min_level,min_level}"
+   }
+  },
+  {
+   "note": "A closed LINE with building:part (it ends up in the lines layer when the way is not taken for a polygon): Building parts (building:part) raised above the ground (building:min_height >= 1): a floating body, the base is lifted by MINH (see tmcproject.cpp, the \"BUILDING PARTS\" block)",
+   "from": "lines",
+   "as": "polygon",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "building:min_height": ">=1"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}",
+    "MINH": "{min_height,building:min_height}",
+    "MINL": "{building:min_level,min_level}"
+   }
+  },
+  {
+   "note": "A closed LINE with building:part (it ends up in the lines layer when the way is not taken for a polygon): Building parts (building:part) raised above the ground (building:min_level >= 1): a floating body, the base is lifted by MINH (see tmcproject.cpp, the \"BUILDING PARTS\" block)",
+   "from": "lines",
+   "as": "polygon",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "building:min_level": ">=1"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}",
+    "MINH": "{min_height,building:min_height}",
+    "MINL": "{building:min_level,min_level}"
+   }
+  },
+  {
+   "note": "A closed LINE with building:part (it ends up in the lines layer when the way is not taken for a polygon): Building parts (building:part) raised above the ground (min_level >= 1): a floating body, the base is lifted by MINH (see tmcproject.cpp, the \"BUILDING PARTS\" block)",
+   "from": "lines",
+   "as": "polygon",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "min_level": ">=1"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}",
+    "MINH": "{min_height,building:min_height}",
+    "MINL": "{building:min_level,min_level}"
+   }
+  },
+  {
+   "note": "A closed LINE with building:part (it ends up in the lines layer when the way is not taken for a polygon): Building parts (building:part): separate buildings with their own height; the type, material and address are inherited from the outline (see tmcproject.cpp, the \"BUILDING PARTS\" block). PART is a service mark, PH — whether the part has its own height or floor count",
+   "from": "lines",
+   "as": "polygon",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}"
+   }
+  },
+  {
    "note": "Structures without the building tag: tanks, silos, water towers, towers, chimneys — as industrial",
    "from": "multipolygons",
    "layer": "bldpol",

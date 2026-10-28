@@ -98,6 +98,7 @@ public:
         //! For Building — a monopitch roof (OSM roof:shape=skillion): a wedge on top of the flat body, the roof falls toward the compass bearing roofDir (degrees clockwise from the north).
         bool skillionRoof = false;
         double roofDir = 0.0;
+        QString roofColour, roofMaterial;   //!< OSM roof:colour / roof:material of a dome (the block, the spire, a glass hemisphere)
         //! For Building — the object is an OSM building:part (usually small next to the main building) / its walls are 1 block thick (small parts; set by the export).
         bool part = false;
         bool thin = false;

@@ -183,6 +183,10 @@ static const NamedColor kBlockPalette[] = {
     { "minecraft:acacia_log",           103,  96,  86 },
     { "minecraft:snow_block",           249, 254, 254 },
     { "minecraft:dead_bush",            107,  78,  40 },
+    // Domes: the spires by the colour of the dome
+    { "minecraft:lapis_block",           31,  67, 140 },
+    { "minecraft:diamond_block",        98, 237, 228 },
+    { "minecraft:redstone_block",       175,  24,   5 },
 };
 
 //! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
@@ -2828,12 +2832,16 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
     // stand vertically on all floors. We do not blind the corners — the strip wraps around the corner ("curved" windows
     // with an x/z offset of 1 block were allowed by the user).
     const bool panor = (obj.code == 44318000);
+    // The material "glass": the walls are concrete (the inside is concrete too), and the windows are the PANORAMIC ones, as in the malls (only the windows, the rest of the mall logic is not touched).
+    const bool glassMat = (id == quint16(IdGlass));
+    if (glassMat) id = structId ? structId : nearestBlockId(obj.color);
+    const bool panoWin = panor || glassMat;
     // "Non-residential" buildings (a user request): WINDOWS 2×3 — a panel of 2 panes (4 blocks of width with
     // mullions), the strip height is 3 rows (an inset of 1 from the floor, the top flush with the slab). The codes: 44310000,
     // 44340000 and the series 44311000..44317000. SHOPPING MALLS (44318000) are NOT among them: the user
     // clarified that malls keep the FORMER panorama (strips of 5..8 with glazing around the corners).
     // For the 2×3 strip we fix the floor at 3+1 (shaft >= 4).
-    const bool bigWin = (obj.code == 44310000 || obj.code == 44340000
+    const bool bigWin = !glassMat && (obj.code == 44310000 || obj.code == 44340000
                          || (obj.code >= 44311000 && obj.code <= 44317000 && obj.code % 1000 == 0));
     // Sheds and utility structures (CODE 44000000, a user request) — no windows at all.
     const bool noWin = (obj.code == 44000000);
@@ -2928,7 +2936,7 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
         {
             if (inStory < 1 || inStory > 3) return 0;           // an inset of 1 from the floor, the top flush with the slab
         }
-        else if (panor)                                         // the mall panorama: the strip height depends on the floor height
+        else if (panoWin)                                       // the mall panorama: the strip height depends on the floor height
         {   // an inset of 1 from the floor; the strip height is at least 2 rows, and if the floor allows more than 2, exactly 2 blocks of wall
             // remain between the top of the strip and the ceiling (a floor has storyP-1 rows of air: the window occupies rows 1 .. storyP-4)
             if (inStory < 1 || inStory > std::max(2, storyP - 4)) return 0;
@@ -2957,7 +2965,7 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
             if (m >= 2) return 0;
             return xw ? (xn ? 1 : -1) : (zn ? sxy : -sxy);
         }
-        if (panor)
+        if (panoWin)
         {
             const bool useX = xw || !zw;                        // a mall corner is glass too, X has priority
             const int along = useX ? lz : lx;
@@ -8575,9 +8583,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (mid)
             {
                 id = mid;                                     // "Material from a column" is more important than the color
-                if (mid != IdDirt && mid != IdGlass && mid != IdOakPlanks)   // all except earth and wood: the foundation,
+                if (mid != IdDirt && mid != IdOakPlanks)      // all except earth and wood: the foundation,
                     structId = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
-            }                                                 // floors and roof — gray concrete
+            }                                                 // floors and roof — gray concrete (glass: only the outer walls are glass, the inside is concrete)
         }
         // The structures of research institutes (44315000) — walls of stone bricks (they stand out among the buildings), the structural part is gray concrete.
         if (o.kind == McObject::Building && o.code == 44315000)
@@ -9038,7 +9046,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (best.d < 0) continue;
             const int px = best.x + ddx[best.d], pz = best.z + ddz[best.d];
             const quint16 pillar = store.get(px, best.s0, pz);
-            for (int y = best.s0; y < best.yu; ++y) store.set(best.x, y, best.z, IdAir);       // the shaft through the slab
+            for (int y = best.s0; y < best.yu; ++y) store.erase(best.x, y, best.z);       // the shaft through the slab
             for (int y = best.yf; y <= best.yu; ++y) store.set(best.x, y, best.z, ladderFor[best.d]);
             for (int y = best.yf; y <= best.yu + 1; ++y)
                 if (store.get(px, y, pz) == IdAir) store.set(px, y, pz, pillar);
@@ -9086,11 +9094,47 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             }
         }
     }
-    // Domes of churches (OSM roof:shape=onion/dome): an onion dome of yellow concrete and a small golden spire on the top. It is built after all the buildings by the finished roof:
-    // the top of the roof is looked for in the store above the center of the plan (so the changes of the heights by the export — growth, gluing complexes — do not matter).
+    // Domes of churches (OSM roof:shape=onion/dome): an onion dome on the top. It is built after all the buildings by the finished roof: the top of the roof is looked for in the store above the center of the plan (so the
+    // changes of the heights by the export — growth, gluing complexes — do not matter). The look is chosen by roof:colour / roof:material: the colour gives the concrete of the dome, and a spire is put only on
+    // the domes of yellow (gold), blue (lapis), light blue (diamond), red (redstone) and black (coal); a glass dome is a transparent hemisphere, the ceiling under it is cut out (the upper floor is seen through it).
     {
-        const quint16 domeId = quint16(IdPaletteStart + paletteIndexOf("minecraft:yellow_concrete"));
-        const quint16 spireId = quint16(IdPaletteStart + paletteIndexOf("minecraft:gold_block"));
+        auto blk = [](const char* name) { return quint16(IdPaletteStart + paletteIndexOf(name)); };
+        struct DomeLook { quint16 block; quint16 spire; bool glass; };
+        auto lookOf = [&](const McObject& o) -> DomeLook
+        {
+            const QString mat = o.roofMaterial.trimmed().toLower(), col = o.roofColour.trimmed().toLower();
+            if (mat.contains(QLatin1String("glass")) || mat.contains(QStringLiteral("\u0441\u0442\u0435\u043a\u043b")))
+                return { quint16(IdGlass), 0, true };
+            const DomeLook yellow{ blk("minecraft:yellow_concrete"), blk("minecraft:gold_block"), false };
+            auto fromConcrete = [&](quint16 id) -> DomeLook
+            {   // the spire — by the nearest concrete
+                if (id == blk("minecraft:yellow_concrete"))     return { id, blk("minecraft:gold_block"), false };
+                if (id == blk("minecraft:blue_concrete"))       return { id, blk("minecraft:lapis_block"), false };
+                if (id == blk("minecraft:light_blue_concrete")) return { id, blk("minecraft:diamond_block"), false };
+                if (id == blk("minecraft:red_concrete"))        return { id, blk("minecraft:redstone_block"), false };
+                if (id == blk("minecraft:black_concrete"))      return { id, blk("minecraft:coal_block"), false };
+                return { id, 0, false };
+            };
+            if (!col.isEmpty())
+            {
+                static const QHash<QString, const char*> names = {
+                    { QStringLiteral("gold"), "minecraft:yellow_concrete" }, { QStringLiteral("golden"), "minecraft:yellow_concrete" }, { QStringLiteral("yellow"), "minecraft:yellow_concrete" },
+                    { QStringLiteral("blue"), "minecraft:blue_concrete" }, { QStringLiteral("darkblue"), "minecraft:blue_concrete" }, { QStringLiteral("navy"), "minecraft:blue_concrete" },
+                    { QStringLiteral("lightblue"), "minecraft:light_blue_concrete" }, { QStringLiteral("light_blue"), "minecraft:light_blue_concrete" }, { QStringLiteral("azure"), "minecraft:light_blue_concrete" },
+                    { QStringLiteral("cyan"), "minecraft:light_blue_concrete" }, { QStringLiteral("turquoise"), "minecraft:light_blue_concrete" }, { QStringLiteral("skyblue"), "minecraft:light_blue_concrete" },
+                    { QStringLiteral("red"), "minecraft:red_concrete" }, { QStringLiteral("darkred"), "minecraft:red_concrete" }, { QStringLiteral("maroon"), "minecraft:red_concrete" },
+                    { QStringLiteral("black"), "minecraft:black_concrete" } };
+                const auto it = names.constFind(col);
+                if (it != names.constEnd()) return fromConcrete(blk(it.value()));
+                const QColor qc(col);                                              // other names and #rrggbb — by the nearest concrete
+                if (qc.isValid()) return fromConcrete(nearestBlockId(qc));
+            }
+            if (mat.contains(QLatin1String("copper"))) return { blk("minecraft:orange_concrete"), 0, false };
+            if (mat.contains(QLatin1String("steel")) || mat.contains(QLatin1String("zinc")) || mat.contains(QLatin1String("tin")) || mat.contains(QLatin1String("lead"))
+                || mat.contains(QLatin1String("alumin")) || mat == QLatin1String("metal") || mat.contains(QLatin1String("iron")))
+                return { blk("minecraft:light_gray_concrete"), 0, false };
+            return yellow;                                                         // neither the colour nor the known material: yellow with a golden spire
+        };
         for (const McObject& o : objectsRaised)
         {
             if (!o.onionRoof || o.kind != McObject::Building || !o.closed || o.vertices.size() < 3) continue;
@@ -9102,13 +9146,32 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 ay1 = std::max(ay1, toBlockY(tf, v.z()));
             }
             if (ax1 <= ax0 || az1 <= az0) continue;
+            const DomeLook look = lookOf(o);
             const int cx = int(std::floor((ax0 + ax1) * 0.5)), cz = int(std::floor((az0 + az1) * 0.5));
-            const int R = std::max(2, std::min(9, int(std::lround(std::min(ax1 - ax0, az1 - az0) * 0.5))));
+            const int R = std::max(2, std::min(look.glass ? 10 : 9, int(std::lround(std::min(ax1 - ax0, az1 - az0) * 0.5))));
             const int yTop = int(std::floor(ay1));
             int roofY = std::numeric_limits<int>::min();
             for (int y = yTop + 8; y >= yTop - 8; --y)
                 if (store.get(cx, y, cz) != IdAir) { roofY = y; break; }
             if (roofY == std::numeric_limits<int>::min()) continue;
+            if (look.glass)
+            {   // a hemisphere: a shell of one block; the roof under it (the two upper rows inside the circle) is removed
+                const double Rr = R + 0.5;
+                for (int dz = -R; dz <= R; ++dz)
+                    for (int dx = -R; dx <= R; ++dx)
+                        if (dx * dx + dz * dz <= (Rr - 1.0) * (Rr - 1.0))
+                            for (int y = roofY; y > roofY - 2; --y)
+                                store.erase(cx + dx, y, cz + dz);
+                for (int k = 0; k < R; ++k)
+                    for (int dz = -R; dz <= R; ++dz)
+                        for (int dx = -R; dx <= R; ++dx)
+                        {
+                            const double d = std::sqrt(double(dx * dx + dz * dz) + (k + 0.5) * (k + 0.5));
+                            if (d <= Rr && d > Rr - 1.2 && store.get(cx + dx, roofY + 1 + k, cz + dz) == IdAir)
+                                store.set(cx + dx, roofY + 1 + k, cz + dz, look.block);
+                        }
+                continue;
+            }
             const int H = o.roofH >= 2.0 ? std::min(16, int(std::lround(o.roofH * tf.zScale))) : std::max(5, int(std::lround(R * 1.7)));
             for (int k = 0; k < H; ++k)
             {   // the profile of an onion: a narrow neck, a bulge at ~30% of the height, a taper to a point
@@ -9119,10 +9182,11 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 for (int dz = -ri; dz <= ri; ++dz)
                     for (int dx = -ri; dx <= ri; ++dx)
                         if (dx * dx + dz * dz <= rk * rk + 0.25 && store.get(cx + dx, roofY + 1 + k, cz + dz) == IdAir)
-                            store.set(cx + dx, roofY + 1 + k, cz + dz, domeId);
+                            store.set(cx + dx, roofY + 1 + k, cz + dz, look.block);
             }
-            for (int k = 0; k < 3; ++k)
-                store.set(cx, roofY + 1 + H + k, cz, spireId);
+            if (look.spire)
+                for (int k = 0; k < 3; ++k)
+                    store.set(cx, roofY + 1 + H + k, cz, look.spire);
         }
     }
     for (const LiftJob& lj : liftJobs)

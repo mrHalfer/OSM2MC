@@ -37,6 +37,7 @@ struct ExportItem
     bool skillion = false;
     double roofDir = 0.0;
     bool part = false;
+    QString roofColour, roofMaterial;
     QString streetType, street, number;
     bool intraBlock = false;
 };
@@ -258,6 +259,12 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                 const int hno = layer->fieldIndex(QStringLiteral("ROOFH")), dno = layer->fieldIndex(QStringLiteral("ROOFD"));
                 if ((e.onion || e.skillion) && hno >= 0) e.roofH = obj->fields.value(hno).toDouble();
                 if (e.skillion && dno >= 0) e.roofDir = obj->fields.value(dno).toDouble();
+                if (e.onion)
+                {
+                    const int cno2 = layer->fieldIndex(QStringLiteral("ROOFC")), mno2 = layer->fieldIndex(QStringLiteral("ROOFM"));
+                    if (cno2 >= 0) e.roofColour = obj->fields.value(cno2).trimmed();
+                    if (mno2 >= 0) e.roofMaterial = obj->fields.value(mno2).trimmed();
+                }
             }
             // road width by the CODE class
             if (kind == Kind::Road)
@@ -512,6 +519,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             mo.skillionRoof = e.skillion && e.roofH > 0.0;
             mo.roofDir = e.roofDir;
             mo.part = e.part;
+            mo.roofColour = e.roofColour; mo.roofMaterial = e.roofMaterial;
             if (e.kind == Kind::Generic || e.kind == Kind::Building)
             {   // a part raised above the ground (min_height): the base lift from the layer's lift field
                 double lf = vs.liftAdd;

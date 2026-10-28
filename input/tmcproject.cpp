@@ -748,6 +748,14 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                         if (!okD && compass.contains(d)) { deg = compass.value(d); okD = true; }
                         if (okD) c.fields << qMakePair(QStringLiteral("ROOFD"), QString::number(deg, 'f', 1));
                     }
+                    // the colour and the material of the dome (roof:colour / roof:color, roof:material): the exporter chooses the block, the spire or the glass hemisphere by them
+                    {
+                        QString rc = objTags.value(QStringLiteral("roof:colour"));
+                        if (rc.isEmpty()) rc = objTags.value(QStringLiteral("roof:color"));
+                        if (!rc.trimmed().isEmpty()) c.fields << qMakePair(QStringLiteral("ROOFC"), rc.trimmed());
+                        const QString rm = objTags.value(QStringLiteral("roof:material")).trimmed();
+                        if (!rm.isEmpty()) c.fields << qMakePair(QStringLiteral("ROOFM"), rm);
+                    }
                     // roof:height — the height of the dome itself: in OSM `height` includes it, so the body below the dome is lower by that much (see the REL fix-up below)
                     const auto mh = QRegularExpression(QStringLiteral("-?\\d+(?:[.,]\\d+)?")).match(objTags.value(QStringLiteral("roof:height")));
                     if (mh.hasMatch())
@@ -835,7 +843,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                 L->name = QStringLiteral("osm.") + c.layer;
                 L->fieldNames = rules.fieldNames(c.layer);
                 if (c.layer == QLatin1String("bldpol") || c.layer == QLatin1String("rdslin"))
-                    for (const char* f : { "TYSTR", "STREET", "NUMBR", "ROOF", "ROOFH", "ROOFD" })
+                    for (const char* f : { "TYSTR", "STREET", "NUMBR", "ROOF", "ROOFH", "ROOFD", "ROOFC", "ROOFM" })
                         if (!L->fieldNames.contains(QLatin1String(f), Qt::CaseInsensitive)) L->fieldNames << QString::fromLatin1(f);
                 L->geom = ot;
             }
