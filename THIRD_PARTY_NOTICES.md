@@ -1,6 +1,6 @@
 # Third-party components
 
-tMC itself is under the MIT license (`LICENSE`, Copyright (c) 2026 EL-MODS MEDIA). A release package also contains the components below; each keeps its own license.
+tMC itself is under the MIT license (`LICENSE`, Copyright (c) 2026 Denis Rakhmatullin (mrHalfer)). A release package also contains the components below; each keeps its own license.
 This list is made in good faith from what the package contains; the license texts of the libraries are those of their projects, check them before redistributing a modified package.
 
 ## Qt 5.15 (LGPL v3)

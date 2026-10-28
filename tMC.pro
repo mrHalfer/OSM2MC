@@ -34,10 +34,10 @@ QMAKE_CFLAGS += /utf-8
 
 win32:{
     VERSION = 1.0.26.1028
-    QMAKE_TARGET_COMPANY = "EL-MODS MEDIA"
+    QMAKE_TARGET_COMPANY = "Denis Rakhmatullin (mrHalfer)"
     QMAKE_TARGET_PRODUCT = "tMC"
     QMAKE_TARGET_DESCRIPTION = "Minecraft world exporter"
-    QMAKE_TARGET_COPYRIGHT = "EL-MODS MEDIA"
+    QMAKE_TARGET_COPYRIGHT = "Copyright (c) 2026 Denis Rakhmatullin (mrHalfer)"
 }
 
 HEADERS += \
