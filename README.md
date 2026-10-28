@@ -2,48 +2,48 @@
 
 **English** · [Русский](README.ru.md)
 
-In a couple of clicks tMC turns a map into a **Minecraft Java Edition** world: you will be able to walk through your hometown, block by block. The program is fully ready to use. No extra dependencies.
+With just a few clicks, tMC turns a real map into a **Minecraft Java Edition** world, so you can walk through your own hometown, block by block. It works right out of the box: no extra dependencies, nothing to install.
 
 ![The online map and the export boundary](images/online_en.png)
 
 ## Quick start
 
-1. Download the release and run `tMC.exe`. On the right there is the online OpenStreetMap map with a search field for any place in any language.
-2. Press **Boundary** and click out the polygon of the area you want, up to **25 km²** (the area is shown in the corner of the map).
-3. Optionally mark the **Spawn** point and the entrances of the **Stronghold**, the **Ancient City** and the **Pale Garden**.
-4. Press **Download the area** - the data is loaded from the OpenStreetMap servers and opens in the window.
-5. Choose the world options on the left and press **Export**. The result is `<name>.zip` next to the OSM file; when it is done, the *Show the file in the folder* checkbox opens it in Explorer.
+1. Download the release and run `tMC.exe`. On the right you will find the online OpenStreetMap map with a search box that understands any place name in any language.
+2. Press **Boundary** and outline the area you want with a polygon, up to **25 km²** (its size is shown in the corner of the map).
+3. Optionally, mark the **Spawn** point and the entrances to the **Stronghold**, the **Ancient City** and the **Pale Garden**.
+4. Press **Download the area**: the data is fetched from the OpenStreetMap servers and opens right in the window.
+5. Pick the world options on the left and press **Export**. The result is `<name>.zip` next to the OSM file; once the export is done, the *Show the file in the folder* checkbox opens it in Explorer.
 
-Instead of the online map you can use a file: type the path to an OpenStreetMap extract (`.osm`, `.pbf`) or choose it in the *OSM file* field. Clearing the field brings the online map back.
+Instead of the online map you can use a file: type the path to an OpenStreetMap extract (`.osm`, `.pbf`) or pick it in the *OSM file* field. Clear the field to get the online map back.
 
 ![The window with loaded data](images/data_en.png)
 
 ## What you get
 
-- **Buildings** with floors, windows, doors, interiors (rooms, stairs, furniture) and roofs; the height, the number of floors and the material come from the map data. Schools, kindergartens, research institutes and churches have their own look and unique interiors.
+- **Buildings** with floors, windows, doors, furnished interiors (rooms, stairs, furniture) and roofs; the height, the number of floors and the material are taken from the map data. Schools, kindergartens, research institutes and churches get their own look and unique interiors.
 - **Roads** with marking and crosswalks, bridges over water, railways, street lamps, signs with street names and house numbers.
-- **Nature**: water, forests, climate zones, parks, yards, fields, relief - everything as in real life, only better.
-- **Underground and hidden things**: caves, church and laboratory dungeons, a stronghold and an Ancient City with secret passages, a Pale Garden with a mansion, bandit outposts and camps, shipwrecks in big lakes, ruined portals, floating islands above parks, villages made from clusters of private houses.
+- **Nature**: water, forests, climate zones, parks, yards, fields and terrain relief - just like real life, only better.
+- **Underground and hidden places**: caves, church and laboratory dungeons, a stronghold and an Ancient City with secret passages, a Pale Garden with a mansion, bandit outposts and camps, shipwrecks in big lakes, ruined portals, floating islands above the parks, and villages grown from clusters of private houses.
 - Villagers, mannequins, furniture and chests with ordinary game loot.
-- The result is a normal save (a `.zip`): put it into `.minecraft/saves`, with or without unpacking. Versions **26.x** and **1.21.x** are supported; outside the exported area you get either a normal seed-based world or a superflat one.
+- The result is an ordinary save (a `.zip`): drop it into `.minecraft/saves`, no need to unpack it. Versions **26.x** and **1.21.x** are supported; outside the exported area you get either a regular seed-based world or a superflat one.
 
 ## The window
 
 | Element | What it does |
 |---|---|
 | **OSM file** | An OpenStreetMap extract on your disk; empty - the online map. |
-| **World file (zip)** | Where to write the result; empty - next to the OSM file. |
+| **World file (zip)** | Where to save the result; empty - next to the OSM file. |
 | **World version** | 26.x (current) or 1.21.x. |
 | **Outside the export area** | A normal seed-based world around the area, or a superflat one. |
-| **World seed** | Empty - random; *Generate* picks one. |
-| **Caves underground** | Caves from templates of a real game world. |
+| **World seed** | Empty - random; *Generate* picks one for you. |
+| **Caves underground** | Caves cut from templates of a real game world. |
 | **Datapack for finding structures** | Lets `/locate` and the Eye of Ender find the stronghold, the Ancient City, trial chambers and ruined portals. The game asks about experimental features when it opens such a world; without the datapack the structures are still there, but they cannot be found with a command. |
-| **Climate** | Biomes, ground and trees by climate zone; *Auto* detects it from the coordinates. |
-| **Boundary, Spawn, Stronghold, Ancient City, Pale Garden** | Tools on the map: draw the area, place the player's spawn, set the secret entrances. *Remove the boundary* and *Reset the marks* undo them; *Copy /tp* copies the teleport command to the marked point. |
+| **Climate** | Biomes, ground and trees according to the climate zone; *Auto* works it out from the coordinates. |
+| **Boundary, Spawn, Stronghold, Ancient City, Pale Garden** | Map tools: outline the area, place the player's spawn, mark the secret entrances. *Remove the boundary* and *Reset the marks* undo them; *Copy /tp* copies the teleport command to the marked point. |
 | **Open project… / Save project…** | Save and restore your work (the map view, the boundary, the marks, the options) in a `.tmc` file. |
 | **Language** | English or Russian, switches at once; by default the system language is used. |
 
-While the export runs, the log shows the progress; **Cancel** stops it. Only what is inside the boundary is exported (a building or a lake at the edge is kept whole).
+While the export runs, the log shows its progress; **Cancel** stops it. Only what lies inside the boundary is exported (a building or a lake on the edge is kept whole).
 
 ## Gallery
 
@@ -60,7 +60,7 @@ Pictures of a world made by tMC (click a preview to open the full size).
 
 ## Tips
 
-- Start with a small area (1–2 km²): the export takes minutes, a big one takes much longer and needs more memory.
+- Start with a small area (1–2 km²): an export takes minutes, while a big area takes much longer and needs more memory.
 - The result depends on how well the area is mapped in OpenStreetMap: heights, floors and building types appear only where mappers entered them; where they are missing, tMC estimates them.
 - If you publish a world made from OpenStreetMap data (a server, a download), keep the attribution - see *License and data*.
 
