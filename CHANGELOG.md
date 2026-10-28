@@ -9,7 +9,7 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ### Added
 - The look of a dome follows `roof:colour` / `roof:material`: the concrete of the nearest colour; a spire only on yellow/gold (gold block), blue (lapis block), light blue (diamond block), red (redstone block) and black (coal block) domes. A glass dome (`roof:material=glass`) is a transparent hemisphere with the ceiling under it cut out, so the upper floor is seen through it.
-- A gallery of screenshots in the READMEs (`images/shots/`, 15 pictures 1600×800 with 400×200 previews).
+- A gallery of screenshots in the READMEs (`images/shots/`, 18 pictures 1600×800 with 400×200 previews).
 
 ### Changed
 - Buildings with the glass material: the walls are concrete (the floors, the roof, the foundation and the inner partitions too), and the windows are the panoramic ones, as in the shopping malls.
