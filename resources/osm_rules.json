@@ -1782,23 +1782,75 @@
    }
   },
   {
-   "note": "Building parts (building:part): overhanging the ground (min_height / min_level) — not taken: there is no volume under them",
+   "note": "Building parts (building:part) raised above the ground (min_height >= 1): a floating body, the base is lifted by MINH (see tmcproject.cpp, the \"BUILDING PARTS\" block)",
    "from": "multipolygons",
-   "layer": "-",
-   "when": {
-    "building": "-",
-    "building:part": "*",
-    "building:min_level": ">=1"
-   }
-  },
-  {
-   "note": "Building parts (building:part): overhanging the ground (building:min_height / min_height >= 1 m)",
-   "from": "multipolygons",
-   "layer": "-",
+   "layer": "bldpol",
    "when": {
     "building": "-",
     "building:part": "*",
     "min_height": ">=1"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}",
+    "MINH": "{min_height,building:min_height}",
+    "MINL": "{building:min_level,min_level}"
+   }
+  },
+  {
+   "note": "Building parts (building:part) raised above the ground (building:min_height >= 1): a floating body, the base is lifted by MINH (see tmcproject.cpp, the \"BUILDING PARTS\" block)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "building:min_height": ">=1"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}",
+    "MINH": "{min_height,building:min_height}",
+    "MINL": "{building:min_level,min_level}"
+   }
+  },
+  {
+   "note": "Building parts (building:part) raised above the ground (building:min_level >= 1): a floating body, the base is lifted by MINH (see tmcproject.cpp, the \"BUILDING PARTS\" block)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "building:min_level": ">=1"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}",
+    "MINH": "{min_height,building:min_height}",
+    "MINL": "{building:min_level,min_level}"
+   }
+  },
+  {
+   "note": "Building parts (building:part) raised above the ground (min_level >= 1): a floating body, the base is lifted by MINH (see tmcproject.cpp, the \"BUILDING PARTS\" block)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "-",
+    "building:part": "*",
+    "min_level": ">=1"
+   },
+   "fields": {
+    "CODE": "44310000",
+    "REL": "auto",
+    "PART": "1",
+    "PH": "{height}||{building:levels}",
+    "MINH": "{min_height,building:min_height}",
+    "MINL": "{building:min_level,min_level}"
    }
   },
   {

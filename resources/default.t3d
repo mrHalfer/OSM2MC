@@ -117,7 +117,7 @@
             "isGround": false,
             "layer": "bldpol",
             "liftAdd": 0,
-            "liftField": "",
+            "liftField": "MINH",
             "liftMultiplier": 1,
             "lineWidth": 3,
             "multiplier": 1,

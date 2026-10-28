@@ -76,7 +76,7 @@ These files lie next to `tMC.exe` and can be edited with any text editor:
 
 ## License and data
 
-tMC is free software under the **MIT license** (`LICENSE`); the third-party components shipped with it are listed in `THIRD_PARTY_NOTICES.md`.
+tMC is free software under the **MIT license** (`LICENSE`); the third-party components shipped with it are listed in `THIRD_PARTY_NOTICES.md`. The program icon is made from the Minecraft Wiki logo by Oakar567 and is under **CC BY-SA 3.0** (details are in the same file).
 
 Map data © **OpenStreetMap contributors**, under the Open Database License (ODbL) — https://www.openstreetmap.org/copyright.
 **A world made from OSM data is a derived database: when you publish it (a server, a download), keep the attribution "Map data © OpenStreetMap contributors (ODbL)" and follow the ODbL.** The exported zip contains the file `ATTRIBUTION.txt` with this line.

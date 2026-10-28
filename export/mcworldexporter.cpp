@@ -29,6 +29,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <limits>
@@ -2598,6 +2600,10 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
     const int nv = obj.vertices.size();
     if (nv < 3 || obj.indices.size() < 3)
         return 0;
+    // A part raised above the ground (min_height): a floating body — no foundation into the ground, the ground under it is not touched and not raised
+    // (colMin/colAnchor stay without it), no basement and no dungeon below it
+    const bool raisedObj = obj.kind == McWorldExporter::McObject::Building && obj.raised > 0.0;
+    if (raisedObj) { sink = 0; colAnchor = nullptr; basements = nullptr; deepRole = 0; }
 
     // Into block coordinates + the extent
     QVector<QVector3D> bc;
@@ -2744,14 +2750,15 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
             {
                 if (grid[c] != char(1)) continue;
                 const int lx = c % sx, lz = c / sxyL;
-                for (int axis = 0; axis < 2; ++axis)
-                {
-                    const int step = axis == 0 ? 1 : sxyL;
-                    const bool inb1 = axis == 0 ? (lx > 0 && lx + 1 < sx) : (lz > 0 && lz + 1 < sz);
+                const int ly = (c / sx) % sy;
+                for (int axis = 0; axis < 3; ++axis)
+                {   // 0 — X, 1 — Z, 2 — Y: a slab between two bodies one above the other (a raised part over its base building)
+                    const int step = axis == 0 ? 1 : (axis == 1 ? sxyL : sx);
+                    const bool inb1 = axis == 0 ? (lx > 0 && lx + 1 < sx) : (axis == 1 ? (lz > 0 && lz + 1 < sz) : (ly > 0 && ly + 1 < sy));
                     if (!inb1) continue;
                     if (grid[c - step] == char(3) && grid[c + step] == char(3)) { kill.append(c); break; }
                     // a double wall: 3,1,1,3
-                    const bool inb2 = axis == 0 ? (lx > 0 && lx + 2 < sx) : (lz > 0 && lz + 2 < sz);
+                    const bool inb2 = axis == 0 ? (lx > 0 && lx + 2 < sx) : (axis == 1 ? (lz > 0 && lz + 2 < sz) : (ly > 0 && ly + 2 < sy));
                     if (inb2 && grid[c - step] == char(3) && grid[c + step] == char(1) && grid[c + 2 * step] == char(3))
                     { kill.append(c); kill.append(c + step); break; }
                 }
@@ -2785,7 +2792,9 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
     auto addVoxel = [&](int bx, int by, int bz, quint16 vid = 0)
     {
         store.set(bx, by - sink, bz, vid ? vid : id);         // sink — the foundation: the lower courses go into the ground
+        if (raisedObj) return;                                // a floating part: it does not mark the column as a structure column
         const qint64 ck = pairKey(bx, bz);
+        if (!obj.floatCols.isEmpty() && obj.floatCols.contains(ck)) return;       // a glued complex: under a raised part the ground does not rise
         const int sy2 = by - sink;
         auto it = colMin.find(ck);
         if (it == colMin.end() || sy2 < it.value())
@@ -2846,6 +2855,7 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
     // as for the private sector, is one row lower (lowF): the walking row is lyLow+1.
     const bool shedThin = obj.kind == McWorldExporter::McObject::Building && obj.closed && obj.code == 44000000;
     const bool lowF = priv || shedThin;
+    const bool thinW = obj.lift || obj.thin;                     // small building parts: walls 1 block thick, like the elevator shafts (the floors and the roof stay)
     // "Residential" (CODE 44400000, a user request): SQUARE 2×2 windows — two neighboring columns
     // of glass for the same 2 rows of height (rows 1..2 above the slab). The PRIVATE SECTOR is also 2×2
     // (a request: "windows 1×2 on the first floor and 1×1 in the attic — that is just ugly"): under a slope
@@ -2926,6 +2936,11 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
         else if (inStory != 1 && inStory != 2) return 0;        // a residential strip — two rows from the floor
         if (dy / storyP >= nStories) return 0;                  // above the last strip — it is already an attic
         const int c = lz * sxy + ly * sx + lx;
+        {   // the two upper rows of a column are a roof (also the roof of a lower part of a stepped complex): never glass
+            const bool up1 = (ly + 1 >= sy) || grid[c + sx] == char(0) || grid[c + sx] == char(2);
+            const bool up2 = (ly + 2 >= sy) || grid[c + 2 * sx] == char(0) || grid[c + 2 * sx] == char(2);
+            if (up1 || up2) return 0;
+        }
         const bool xn = (lx == 0 || grid[c - 1] == char(0) || grid[c - 1] == char(2));
         const bool xp = (lx == sx - 1 || grid[c + 1] == char(0) || grid[c + 1] == char(2));
         const bool zn = (lz == 0 || grid[c - sxy] == char(0) || grid[c - sxy] == char(2));
@@ -2998,7 +3013,7 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
     // doors there are stone pressure plates. The entrance cells go into doorCells: furniture does not grow in the passage.
     QVector<qint64> entranceKeys;
     QSet<int> forcedWall;                                     // the cells of the outer layer where a window is forbidden
-    if (floors && obj.closed && storyP > 0 && !obj.lift && !noWin
+    if (floors && obj.closed && storyP > 0 && !obj.lift && !noWin && !raisedObj
         && obj.kind == McWorldExporter::McObject::Building && lyHigh >= lyLow + 4)
     {
         const int lyF0 = lowF ? lyLow + 1 : lyLow + 2;               // the walking row of the 1st floor
@@ -3249,7 +3264,7 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
             // everything that consumes the grid (slopes/cavity/stairs/partitions) lives as before.
             // Cells with "1" above/below — the FLOOR/ROOF lining, requested "do not touch" —
             // stay: the walls are thin, while the floor/ceiling are closed over the whole patch (without gaps at the walls).
-            if (obj.lift || shedThin)
+            if (thinW || shedThin)
             {
                 const bool side1 = (lx > 0 && grid[c - 1] == char(1))
                     || (lx + 1 < sx && grid[c + 1] == char(1))
@@ -3592,7 +3607,7 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
                 for (int lx = 0; lx < sx; ++lx)
                 {
                     const int c = lz * sxy + lyS * sx + lx;
-                    if (grid[c] != char(3) && !((lowF || obj.lift) && grid[c] == char(4))) continue;
+                    if (grid[c] != char(3) && !((lowF || thinW) && grid[c] == char(4))) continue;
                                                                 // the deep body = the slab itself; in the private
                                                                 // sector the slab may lie in the row of the removed
                                                                 // lining (the store is empty there — a skip above);
@@ -3784,7 +3799,7 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
             // "does not reach" the facade by a block (a see-through gap, the same disease as with
             // slabs). We complete the char4 rows at the ends into the line — the writing loop below
             // will accept them itself (the store check protects against a double write).
-            if (obj.lift || shedThin)
+            if (thinW || shedThin)
                 for (Wall& w : walls)
                 {
                     QSet<ColKey> have;
@@ -3829,7 +3844,7 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
                             }
                             const int c = lz * sxy + ly * sx + lx;
                             if (grid[c] != char(3)
-                                && !(((lowF && ly == lyLow + 1) || obj.lift || shedThin) && grid[c] == char(4))) continue;
+                                && !(((lowF && ly == lyLow + 1) || thinW || shedThin) && grid[c] == char(4))) continue;
                                                                 // private: the bottom row of the partition stands
                                                                 // on the row of the removed floor lining (the store is empty);
                                                                 // lift: the ends of the line — an empty wall lining
@@ -7767,19 +7782,48 @@ static QVector<McWorldExporter::McObject> mergeIndustrial(const QVector<McWorldE
                                                             const std::atomic_bool* cancel)
 {
     using O = McWorldExporter::McObject;
+    // Raised building parts (min_height) are glued with the building under them: the slab between them is removed and the interior is one (the floors and the stairs
+    // are then laid by the ordinary pass over the whole stack). Not only the "complex" codes take part: a residential part over a residential building too, but only
+    // when their plans overlap (the buildings that merely touch are not glued).
+    struct Box { double x0, x1, z0, z1; };
+    auto boxOf = [&](const O& o)
+    {
+        Box b{ 1e18, -1e18, 1e18, -1e18 };
+        for (const QVector3D& v : o.vertices)
+        {
+            const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+            b.x0 = std::min(b.x0, bx); b.x1 = std::max(b.x1, bx); b.z0 = std::min(b.z0, bz); b.z1 = std::max(b.z1, bz);
+        }
+        return b;
+    };
+    QVector<Box> raisedBoxes;
+    for (const O& o : in)
+        if (o.kind == O::Building && o.closed && o.raised > 0.0 && !o.lift && o.vertices.size() >= 3) raisedBoxes << boxOf(o);
+    auto underRaised = [&](const O& o)
+    {
+        if (raisedBoxes.isEmpty()) return false;
+        const Box b = boxOf(o);
+        for (const Box& r : raisedBoxes)
+            if (b.x0 <= r.x1 && b.x1 >= r.x0 && b.z0 <= r.z1 && b.z1 >= r.z0) return true;
+        return false;
+    };
     QVector<int> cand;
     for (int i = 0; i < in.size(); ++i)
-        if (in[i].kind == O::Building && in[i].closed && mergeableCode(in[i].code) && !in[i].lift
-            && in[i].vertices.size() >= 3)
+        if (in[i].kind == O::Building && in[i].closed && !in[i].lift && in[i].vertices.size() >= 3
+            && (mergeableCode(in[i].code) || in[i].raised > 0.0 || (in[i].code == 44400000 && underRaised(in[i]))))
             cand << i;
     if (cand.size() < 2) return in;
     const int n = cand.size();
     QVector<QList<qint64>> cols(n);
     QHash<ColKey, int> owner;
     QSet<quint64> edges;
-    auto addEdge = [&](int a, int b)
+    auto addEdge = [&](int a, int b, bool overlap)
     {   // we glue only parts of one code (a church with a church, a workshop with a workshop)
-        if (a != b && in[cand[a]].code == in[cand[b]].code) edges.insert((quint64(std::min(a, b)) << 32) | quint32(std::max(a, b)));
+        if (a == b) return;
+        const O& A = in[cand[a]]; const O& B = in[cand[b]];
+        if (A.code != B.code) return;
+        if (!mergeableCode(A.code) && (!overlap || (A.raised <= 0.0 && B.raised <= 0.0))) return;       // a residential one — only a raised part over its building
+        edges.insert((quint64(std::min(a, b)) << 32) | quint32(std::max(a, b)));
     };
     QVector<int> bx0(n, std::numeric_limits<int>::max()), bx1(n, std::numeric_limits<int>::min());
     QVector<int> bz0(n, std::numeric_limits<int>::max()), bz1(n, std::numeric_limits<int>::min());
@@ -7793,7 +7837,7 @@ static QVector<McWorldExporter::McObject> mergeIndustrial(const QVector<McWorldE
             bx0[k] = std::min(bx0[k], x); bx1[k] = std::max(bx1[k], x);
             bz0[k] = std::min(bz0[k], z); bz1[k] = std::max(bz1[k], z);
             auto it = owner.find(ck);
-            if (it != owner.end()) addEdge(it.value(), k); else owner.insert(ck, k);
+            if (it != owner.end()) addEdge(it.value(), k, true); else owner.insert(ck, k);
         }
     }
     static const int ddx[4] = { 1, -1, 0, 0 }, ddz[4] = { 0, 0, 1, -1 };
@@ -7804,7 +7848,7 @@ static QVector<McWorldExporter::McObject> mergeIndustrial(const QVector<McWorldE
             for (int d = 0; d < 4; ++d)
             {
                 const auto it = owner.constFind(pairKey(x + ddx[d], z + ddz[d]));
-                if (it != owner.constEnd()) addEdge(it.value(), k);
+                if (it != owner.constEnd()) addEdge(it.value(), k, false);
             }
         }
     if (edges.isEmpty()) return in;
@@ -7842,10 +7886,29 @@ static QVector<McWorldExporter::McObject> mergeIndustrial(const QVector<McWorldE
             m.vertices += p.vertices;
             for (quint32 ix : p.indices) m.indices.append(ix + off);
             m.extrudeH = std::max(m.extrudeH, p.extrudeH);
+            m.raised = std::min(m.raised, p.raised);                                 // the complex floats only if all its parts do
             if (m.street.isEmpty() && !p.street.isEmpty()) { m.streetType = p.streetType; m.street = p.street; m.number = p.number; }
             drop[cand[ord[q]]] = 1;
         }
         m.merged = true;
+        m.thin = false; m.part = false;
+        if (m.raised <= 0.0)
+        {   // the columns under the raised parts only (not over a grounded member): the ground under them must not be raised to the body
+            QSet<qint64> grounded;
+            for (int k : ord)
+                if (in[cand[k]].raised <= 0.0) for (qint64 ck : cols[k]) grounded.insert(ck);
+            for (int k : ord)
+                if (in[cand[k]].raised > 0.0) for (qint64 ck : cols[k]) if (!grounded.contains(ck)) m.floatCols.insert(ck);
+            // the footprint columns do not include the edge columns of the walls: widen the set by 2 blocks (but not over the grounded members)
+            const QList<qint64> core = m.floatCols.values();
+            for (qint64 ck : core)
+                for (int dz = -2; dz <= 2; ++dz)
+                    for (int dx = -2; dx <= 2; ++dx)
+                    {
+                        const qint64 nk = pairKey(keyFirst(ck) + dx, keySecond(ck) + dz);
+                        if (!grounded.contains(nk)) m.floatCols.insert(nk);
+                    }
+        }
         mergedAt.insert(cand[ord.first()], m);
     }
     if (mergedAt.isEmpty()) return in;
@@ -8164,6 +8227,18 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     // Industrial zone and churches: touching buildings of one code (44340000 / 44319000) are glued into complexes (a common outline, floors and partitions)
     QVector<McObject> objectsRaised = objectsIn;                        // implicit data sharing: only the raised buildings are copied
     raiseLowBuildingParts(objectsRaised, tf, 7.6);
+    for (McObject& o : objectsRaised)
+    {   // small building parts (the area of the plan up to ~400 m² or a narrow one): the walls are 1 block thick
+        if (!o.part || o.kind != McObject::Building || !o.closed || o.lift || o.code == 44000000) continue;
+        double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+        for (const QVector3D& v : o.vertices)
+        {
+            const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+            ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+        }
+        const double w = ax1 - ax0, d = az1 - az0;
+        o.thin = std::min(w, d) <= 9.0 || w * d <= 400.0;
+    }
     const QVector<McObject> objects = mergeIndustrial(objectsRaised, tf, cancel);
     // The points of the stronghold / the Ancient City set by the user (a chunk "x z" or "x y z" as in F3): the dungeon is built under the NEAREST building
     // whatever its code (a few nearest suitable ones are marked, because a small or cramped building may not fit it; the nearest one that worked is used later).
@@ -8188,7 +8263,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             for (int i = 0; i < objects.size(); ++i)
             {
                 const McObject& q = objects[i];
-                if (q.kind != McObject::Building || !q.closed || q.lift || q.extrudeH < 5.0 || i == skip) continue;
+                if (q.kind != McObject::Building || !q.closed || q.lift || q.raised > 0.0 || q.extrudeH < 5.0 || i == skip) continue;
                 double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
                 for (const QVector3D& v : q.vertices)
                 {
@@ -8825,7 +8900,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             }
         }
         const bool shedSec = o.kind == McObject::Building && o.closed && o.code == 44000000;   // shed: foundation 1 block, walls/roof 1 block
-        const int sink = o.closed ? ((privSec || shedSec) ? 1 : 2) : 0;
+        const int sink = (o.closed && o.raised <= 0.0) ? ((privSec || shedSec) ? 1 : 2) : 0;
         // Growth (user request): a private-sector house grows exactly to the minimal frame
         // grid of 7 rows: foundation (1) + 1st floor room (4) + ceiling slab (1) + the row of the
         // 2nd floor/attic (1), i.e. the span lyHigh-lyLow >= 6. Other buildings: base +2,
@@ -8868,6 +8943,188 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         tmcStepLog(buf);
     }
     flushJobs();
+    // The bottom row of the walls of a raised part (the tier border, for example of a church): concrete instead of the wall material.
+    {
+        const quint16 baseId = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+        for (const McObject& o : objectsRaised)
+        {
+            if (o.kind != McObject::Building || !o.closed || o.raised <= 0.0 || o.vertices.size() < 3) continue;
+            QList<qint64> cols;
+            footprintColumns(o, tf, cols, cancel);
+            double ay0 = 1e18;
+            for (const QVector3D& v : o.vertices) ay0 = std::min(ay0, toBlockY(tf, v.z()));
+            const int y0 = int(std::floor(ay0));
+            // the footprint columns do not include the outermost columns of the walls: look at the ring of 1 block around them too
+            QSet<qint64> ring;
+            for (qint64 ck : cols)
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        ring.insert(pairKey(keyFirst(ck) + dx, keySecond(ck) + dz));
+            for (qint64 ck : ring)
+            {
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const quint16 bid = store.get(x, y0, z);
+                if (bid == IdAir) continue;                                               // everything but air (glass and windows too): the ring is solid
+                if (store.get(x - 1, y0, z) != IdAir && store.get(x + 1, y0, z) != IdAir && store.get(x, y0, z - 1) != IdAir
+                    && store.get(x, y0, z + 1) != IdAir && store.get(x, y0 - 1, z) != IdAir) continue;     // an inner block, not the facade
+                store.set(x, y0, z, baseId);
+            }
+        }
+    }
+    // Access to the raised building parts: a part hanging over another building (a tower on a podium) has no stairs from its base building. Where the floor of the part
+    // lies right over the room of the lower building, a shaft with a ladder is cut through the slab (a ladder on a pillar inside the plan): from the floor of the lower room
+    // to the floor of the part. The rooms are looked for in the store, so it does not matter how the floors of each part were laid out.
+    {
+        static const int ddx[4] = { 0, 1, 0, -1 }, ddz[4] = { -1, 0, 1, 0 };           // N, E, S, W (z grows to the south)
+        const quint16 ladderFor[4] = { quint16(IdLadderS), quint16(IdLadderW), quint16(IdLadderN), quint16(IdLadderE) };   // the facing is AWAY from the pillar on the side d
+        int nLadders = 0;
+        for (const McObject& o : objects)
+        {
+            if (o.kind != McObject::Building || !o.closed || o.raised <= 0.0 || o.merged || o.vertices.size() < 3) continue;
+            QList<qint64> cols;
+            footprintColumns(o, tf, cols, cancel);
+            if (cols.size() < 6) continue;
+            QSet<qint64> colSet;
+            double sx = 0, sz = 0, ay0 = 1e18;
+            for (qint64 ck : cols) { colSet.insert(ck); sx += keyFirst(ck); sz += keySecond(ck); }
+            for (const QVector3D& v : o.vertices) ay0 = std::min(ay0, toBlockY(tf, v.z()));
+            sx /= cols.size(); sz /= cols.size();
+            const int by0 = int(std::floor(ay0));
+            // the cell is inside a building: in all four directions a wall is met (an open terrace on the roof of the lower building is not a room)
+            auto enclosed = [&](int x, int y, int z)
+            {
+                static const int dxs[4] = { 0, 1, 0, -1 }, dzs[4] = { -1, 0, 1, 0 };
+                for (int d = 0; d < 4; ++d)
+                {
+                    bool hit = false;
+                    for (int t = 1; t <= 30 && !hit; ++t) hit = store.get(x + dxs[d] * t, y, z + dzs[d] * t) != IdAir;
+                    if (!hit) return false;
+                }
+                return true;
+            };
+            struct Cand { int x, z, d, yf, yu, s0; double dist; };
+            Cand best{ 0, 0, -1, 0, 0, 0, 1e18 };
+            for (qint64 ck : cols)
+            {
+                const int x = keyFirst(ck), z = keySecond(ck);
+                int yu = std::numeric_limits<int>::min();                               // the standing level of the first floor of the part
+                for (int y = by0; y <= by0 + 4; ++y)
+                    if (store.get(x, y, z) == IdAir && store.get(x, y + 1, z) == IdAir) { yu = y; break; }
+                if (yu == std::numeric_limits<int>::min() || store.get(x, yu - 1, z) == IdAir) continue;
+                int j = yu - 1;                                                         // the slab: the solid rows under the floor of the part
+                while (j > yu - 8 && store.get(x, j, z) != IdAir) --j;
+                if (store.get(x, j, z) != IdAir) continue;
+                const int s0 = j + 1;
+                int k = j;                                                              // the room of the lower building: air down to its floor
+                while (k > j - 9 && store.get(x, k, z) == IdAir) --k;
+                if (store.get(x, k, z) == IdAir || j - k < 2) continue;
+                const int yf = k + 1;
+                const double dist = std::hypot(x - sx, z - sz);
+                if (dist >= best.dist) continue;
+                bool inner = true;                                                      // not at the edge of the plan: all 8 neighbors are the plan of the part too
+                for (int dz = -1; dz <= 1 && inner; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        if (!colSet.contains(pairKey(x + dx, z + dz))) { inner = false; break; }
+                if (!inner || !enclosed(x, yf, z) || !enclosed(x, yf + 1, z) || !enclosed(x, yu, z)) continue;       // outside — no ladder at all
+                for (int d = 0; d < 4; ++d)
+                {
+                    const int px = x + ddx[d], pz = z + ddz[d];
+                    if (!colSet.contains(pairKey(px, pz))) continue;                    // the pillar stands inside the plan of the part
+                    if (store.get(px, s0, pz) == IdAir) continue;                       // under the pillar there must be the slab
+                    best = Cand{ x, z, d, yf, yu, s0, dist };
+                    break;
+                }
+            }
+            if (best.d < 0) continue;
+            const int px = best.x + ddx[best.d], pz = best.z + ddz[best.d];
+            const quint16 pillar = store.get(px, best.s0, pz);
+            for (int y = best.s0; y < best.yu; ++y) store.set(best.x, y, best.z, IdAir);       // the shaft through the slab
+            for (int y = best.yf; y <= best.yu; ++y) store.set(best.x, y, best.z, ladderFor[best.d]);
+            for (int y = best.yf; y <= best.yu + 1; ++y)
+                if (store.get(px, y, pz) == IdAir) store.set(px, y, pz, pillar);
+            ++nLadders;
+        }
+        if (nLadders > 0) tmcStepLog(("vox: ladders to the raised parts: " + std::to_string(nLadders)).c_str());
+    }
+    // Monopitch roofs (OSM roof:shape=skillion): a wedge over the flat top of the body - the rise from the low edge to the high edge is roof:height, the roof falls toward roof:direction.
+    {
+        for (const McObject& o : objectsRaised)
+        {
+            if (!o.skillionRoof || o.kind != McObject::Building || !o.closed || o.vertices.size() < 3) continue;
+            QList<qint64> cols;
+            footprintColumns(o, tf, cols, cancel);
+            if (cols.isEmpty()) continue;
+            double ay1 = -1e18;
+            for (const QVector3D& v : o.vertices) ay1 = std::max(ay1, toBlockY(tf, v.z()));
+            const int yTop = int(std::floor(ay1));
+            const double b = o.roofDir * 3.14159265358979 / 180.0;
+            const double dx = std::sin(b), dz = -std::cos(b);                    // the block axes: x - east, z - south; the bearing is clockwise from the north
+            double uMin = 1e18, uMax = -1e18;
+            for (qint64 ck : cols)
+            {
+                const double u = keyFirst(ck) * dx + keySecond(ck) * dz;
+                uMin = std::min(uMin, u); uMax = std::max(uMax, u);
+            }
+            const double span = uMax - uMin;
+            if (span < 1.0) continue;
+            const double rise = std::min(24.0, o.roofH * tf.zScale);
+            for (qint64 ck : cols)
+            {
+                const int x = keyFirst(ck), z = keySecond(ck);
+                int roofY = std::numeric_limits<int>::min();
+                quint16 rid = 0;
+                for (int y = yTop + 4; y >= yTop - 6; --y)
+                {
+                    const quint16 bid = store.get(x, y, z);
+                    if (bid != IdAir) { roofY = y; rid = bid; break; }
+                }
+                if (roofY == std::numeric_limits<int>::min()) continue;
+                const double t = (uMax - (x * dx + z * dz)) / span;              // 0 at the low edge, 1 at the high one
+                const int h = int(std::lround(t * rise));
+                for (int k = 1; k <= h; ++k)
+                    if (store.get(x, roofY + k, z) == IdAir) store.set(x, roofY + k, z, rid);
+            }
+        }
+    }
+    // Domes of churches (OSM roof:shape=onion/dome): an onion dome of yellow concrete and a small golden spire on the top. It is built after all the buildings by the finished roof:
+    // the top of the roof is looked for in the store above the center of the plan (so the changes of the heights by the export — growth, gluing complexes — do not matter).
+    {
+        const quint16 domeId = quint16(IdPaletteStart + paletteIndexOf("minecraft:yellow_concrete"));
+        const quint16 spireId = quint16(IdPaletteStart + paletteIndexOf("minecraft:gold_block"));
+        for (const McObject& o : objectsRaised)
+        {
+            if (!o.onionRoof || o.kind != McObject::Building || !o.closed || o.vertices.size() < 3) continue;
+            double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18, ay1 = -1e18;
+            for (const QVector3D& v : o.vertices)
+            {
+                const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+                ay1 = std::max(ay1, toBlockY(tf, v.z()));
+            }
+            if (ax1 <= ax0 || az1 <= az0) continue;
+            const int cx = int(std::floor((ax0 + ax1) * 0.5)), cz = int(std::floor((az0 + az1) * 0.5));
+            const int R = std::max(2, std::min(9, int(std::lround(std::min(ax1 - ax0, az1 - az0) * 0.5))));
+            const int yTop = int(std::floor(ay1));
+            int roofY = std::numeric_limits<int>::min();
+            for (int y = yTop + 8; y >= yTop - 8; --y)
+                if (store.get(cx, y, cz) != IdAir) { roofY = y; break; }
+            if (roofY == std::numeric_limits<int>::min()) continue;
+            const int H = o.roofH >= 2.0 ? std::min(16, int(std::lround(o.roofH * tf.zScale))) : std::max(5, int(std::lround(R * 1.7)));
+            for (int k = 0; k < H; ++k)
+            {   // the profile of an onion: a narrow neck, a bulge at ~30% of the height, a taper to a point
+                const double t = (k + 0.5) / H;
+                const double f = t < 0.3 ? 0.8 + 0.2 * std::sin(t / 0.3 * 1.5707963) : std::pow(std::cos((t - 0.3) / 0.7 * 1.5707963), 0.75);
+                const double rk = R * f;
+                const int ri = int(std::ceil(rk));
+                for (int dz = -ri; dz <= ri; ++dz)
+                    for (int dx = -ri; dx <= ri; ++dx)
+                        if (dx * dx + dz * dz <= rk * rk + 0.25 && store.get(cx + dx, roofY + 1 + k, cz + dz) == IdAir)
+                            store.set(cx + dx, roofY + 1 + k, cz + dz, domeId);
+            }
+            for (int k = 0; k < 3; ++k)
+                store.set(cx, roofY + 1 + H + k, cz, spireId);
+        }
+    }
     for (const LiftJob& lj : liftJobs)
     {
         if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
@@ -10591,7 +10848,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 if (hasMin)
                 {
                     const auto oit = colMin.constFind(ck);
-                    if (oit != colMin.constEnd())
+                    if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)       // a body hanging higher than 3 blocks over the ground does not raise it
                         top = std::max(top, oit.value() - 1);
                 }
                 if (top > 255) top = 255;
@@ -11022,7 +11279,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     {
         int top = groundTopCol(keyFirst(ck), keySecond(ck));
         const auto oit = colMin.constFind(ck);
-        if (oit != colMin.constEnd())
+        if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)
             top = std::max(top, oit.value() - 1);
         return std::min(top, 255);
     };

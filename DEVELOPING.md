@@ -31,6 +31,10 @@ The Russian translation of the interface is `translations/tmc_ru.ts` (embedded i
 
 `VERSION` in `tMC.pro` has the form `1.0.YY.MMDDN`: `YY` — the year, `MMDD` — the month and day, `N` — the number of the build of the day (1–9; a same-day hotfix takes the next digit), for example `1.0.26.10281`, `1.0.26.10282`. The last number must stay ≤ 65535 (a Windows limit). Change only that line.
 
+## Changelog
+
+`CHANGELOG.md` lists the changes for users (Keep a Changelog style: Added / Changed / Fixed). Add an entry under `[Unreleased]` with every user-visible change; when a release is made, rename that section to the version and the date and start a new empty `[Unreleased]`. Commit messages are in English.
+
 ## Making a release
 
 `make_release.bat` makes a ready-to-run package in one step: it builds the program, runs `windeployqt` (the Qt DLLs and plugins), adds the Visual C++ runtime (app-local), the GDAL runtime from `third_party/gdal/bin`, the structure templates `*.bin`, `default.t3d`, `osm_rules.json`, `heights.csv`, `tmc_buildings.dat`, the README files with their `images/`, `THIRD_PARTY_NOTICES.md` and `LICENSE`,

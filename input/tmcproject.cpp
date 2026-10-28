@@ -724,6 +724,64 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                 if (bld) fill("NUMBR", a.number);
                 if (debugOsm && !a.isEmpty()) log(QStringLiteral("  [addr %1] %2|%3|%4").arg(objTags.value(QStringLiteral("osm_id")), a.type, a.name, a.number));
             }
+            // a building part raised above the ground (building:part with min_height / building:min_level): MINH — the height of its base in meters
+            // roof:shape=onion / dome — the dome of a church: the ROOF mark, the exporter puts a yellow dome with a golden spire on such a building
+            if (c.layer == QLatin1String("bldpol"))
+            {
+                const QString rs = objTags.value(QStringLiteral("roof:shape")).trimmed().toLower();
+                if (rs == QLatin1String("onion") || rs == QLatin1String("dome") || rs == QLatin1String("skillion"))
+                {
+                    const QString kind = rs == QLatin1String("skillion") ? QStringLiteral("skillion") : QStringLiteral("onion");
+                    bool have = false;
+                    for (auto& fv : c.fields) if (fv.first == QLatin1String("ROOF")) { fv.second = kind; have = true; }
+                    if (!have) c.fields << qMakePair(QStringLiteral("ROOF"), kind);
+                    // roof:direction — the compass bearing (degrees clockwise from the north) the roof slopes DOWN toward; a letter form (N, NE, ...) too
+                    if (kind == QLatin1String("skillion"))
+                    {
+                        const QString d = objTags.value(QStringLiteral("roof:direction")).trimmed().toUpper();
+                        static const QHash<QString, double> compass = { { QStringLiteral("N"), 0 }, { QStringLiteral("NNE"), 22.5 }, { QStringLiteral("NE"), 45 }, { QStringLiteral("ENE"), 67.5 },
+                            { QStringLiteral("E"), 90 }, { QStringLiteral("ESE"), 112.5 }, { QStringLiteral("SE"), 135 }, { QStringLiteral("SSE"), 157.5 }, { QStringLiteral("S"), 180 },
+                            { QStringLiteral("SSW"), 202.5 }, { QStringLiteral("SW"), 225 }, { QStringLiteral("WSW"), 247.5 }, { QStringLiteral("W"), 270 }, { QStringLiteral("WNW"), 292.5 },
+                            { QStringLiteral("NW"), 315 }, { QStringLiteral("NNW"), 337.5 } };
+                        bool okD = false;
+                        double deg = QString(d).replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&okD);
+                        if (!okD && compass.contains(d)) { deg = compass.value(d); okD = true; }
+                        if (okD) c.fields << qMakePair(QStringLiteral("ROOFD"), QString::number(deg, 'f', 1));
+                    }
+                    // roof:height — the height of the dome itself: in OSM `height` includes it, so the body below the dome is lower by that much (see the REL fix-up below)
+                    const auto mh = QRegularExpression(QStringLiteral("-?\\d+(?:[.,]\\d+)?")).match(objTags.value(QStringLiteral("roof:height")));
+                    if (mh.hasMatch())
+                        c.fields << qMakePair(QStringLiteral("ROOFH"), QString(mh.captured(0)).replace(QLatin1Char(','), QLatin1Char('.')));
+                }
+            }
+            if (c.layer == QLatin1String("bldpol"))
+            {
+                QString partMark, rawH, rawL;
+                for (const auto& fv : c.fields)
+                {
+                    if (fv.first == QLatin1String("PART")) partMark = fv.second;
+                    else if (fv.first == QLatin1String("MINH")) rawH = fv.second;
+                    else if (fv.first == QLatin1String("MINL")) rawL = fv.second;
+                }
+                if (partMark == QLatin1String("1") && (!rawH.trimmed().isEmpty() || !rawL.trimmed().isEmpty()))
+                {
+                    static const QRegularExpression numRe(QStringLiteral("-?\\d+(?:[.,]\\d+)?"));
+                    auto num = [&](const QString& s) -> double
+                    {
+                        const auto m = numRe.match(s);
+                        return m.hasMatch() ? QString(m.captured(0)).replace(QLatin1Char(','), QLatin1Char('.')).toDouble() : 0.0;
+                    };
+                    double m = num(rawH);
+                    if (m <= 0)
+                    {   // by floors: the floor height — from the height/floors tags of the part itself, otherwise 3.3 m
+                        const double hh = num(objTags.value(QStringLiteral("height"))), lv = num(objTags.value(QStringLiteral("building:levels")));
+                        const double floorH = (hh > 0 && lv > 0) ? std::min(5.0, std::max(2.5, hh / lv)) : 3.3;
+                        m = num(rawL) * floorH;
+                    }
+                    for (auto& fv : c.fields)
+                        if (fv.first == QLatin1String("MINH")) fv.second = m >= 1.0 ? QString::number(m, 'f', 1) : QString();
+                }
+            }
             if (!mWanted.isEmpty() && !mWanted.contains(c.layer)) continue;
             OGRGeometry* g = g0->clone();
             bool projected = false;                                 // the geometry is already in the project projection (crosswalk)
@@ -777,7 +835,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                 L->name = QStringLiteral("osm.") + c.layer;
                 L->fieldNames = rules.fieldNames(c.layer);
                 if (c.layer == QLatin1String("bldpol") || c.layer == QLatin1String("rdslin"))
-                    for (const char* f : { "TYSTR", "STREET", "NUMBR" })
+                    for (const char* f : { "TYSTR", "STREET", "NUMBR", "ROOF", "ROOFH", "ROOFD" })
                         if (!L->fieldNames.contains(QLatin1String(f), Qt::CaseInsensitive)) L->fieldNames << QString::fromLatin1(f);
                 L->geom = ot;
             }
@@ -1088,7 +1146,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                 }
                 ++nHosts;
             }
-            for (MapFeature* f : bl->features) if (f->fields.value(pi) == QLatin1String("1")) f->fields[pi] = QString();     // the service marks are no longer needed
+            for (MapFeature* f : bl->features) if (f->fields.value(pi) == QLatin1String("1")) f->fields[pi] = QStringLiteral("part");     // the mark stays: a part gets thin walls and merges with the building under it
             if (!removeSet.isEmpty())
             {
                 QVector<MapFeature*> keep;
@@ -1099,6 +1157,32 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
             if (nParts > 0 || orphans > 0)
                 log(QObject::tr("Building parts (building:part): %1 parts attached to %2 buildings (the outline was replaced by parts for %3), standalone parts without a building: %4")
                         .arg(nParts).arg(nHosts).arg(removeSet.size()).arg(orphans));
+        }
+    }
+
+    // Raised parts (MINH, meters): REL holds the height of the TOP above the ground (as in OSM), the object itself is built from its base up, so REL becomes
+    // the thickness of the part (the base is lifted by the layer's lift field MINH, see default.t3d). A part is not thinner than 3 m.
+    {
+        MapLayer* bl = out.value(QStringLiteral("bldpol"));
+        const int mi = bl ? bl->fieldIndex(QStringLiteral("MINH")) : -1, ri = bl ? bl->fieldIndex(QStringLiteral("REL")) : -1;
+        const int oi = bl ? bl->fieldIndex(QStringLiteral("ROOF")) : -1, hi = bl ? bl->fieldIndex(QStringLiteral("ROOFH")) : -1;
+        if (bl && ri >= 0 && (mi >= 0 || (oi >= 0 && hi >= 0)))
+        {
+            int nRaised = 0;
+            for (MapFeature* f : bl->features)
+            {
+                bool ok = false;
+                double m = mi >= 0 ? f->fields.value(mi).toDouble(&ok) : 0.0;
+                if (!ok || m < 1.0) m = 0.0;
+                // the height of the dome is taken out of the body under it (the dome itself is built by the exporter)
+                const double rh = (oi >= 0 && hi >= 0 && !f->fields.value(oi).isEmpty()) ? f->fields.value(hi).toDouble() : 0.0;
+                if (m <= 0.0 && rh <= 0.0) continue;
+                const double top = f->fields.value(ri).toDouble() - (rh > 0.0 ? rh : 0.0);
+                f->fields[ri] = QString::number(std::max(3.0, top - m), 'f', 1);
+                if (m > 0.0) ++nRaised;
+            }
+            if (nRaised > 0)
+                log(QObject::tr("Building parts raised above the ground (min_height): %1").arg(nRaised));
         }
     }
 

@@ -5,6 +5,7 @@
 #include <functional>
 #include <QColor>
 #include <QPointF>
+#include <QSet>
 #include <QString>
 #include <QVector>
 #include <QVector3D>
@@ -87,6 +88,21 @@ public:
         //! For Building — the LIFT column == 1: walls 1 block thick instead of 2 (a request
         //! of the user; NOT the roof and NOT the foundation — only the walls, see the lining pass).
         bool lift = false;
+        //! For Building — the base of the object is raised above the ground by this many meters (OSM building:part with min_height / building:min_level:
+        //! a part hanging over a passage or standing on a lower part). 0 — an ordinary building from the ground. Such a part is built as a floating body: no foundation
+        //! in the ground, no entrance, no basement, and the ground under it is not raised to it.
+        double raised = 0.0;
+        //! For Building — the dome of a church (OSM roof:shape=onion/dome): the export puts a yellow concrete onion dome with a golden spire on the roof.
+        bool onionRoof = false;
+        double roofH = 0.0;             //!< the height of the roof shape in meters (OSM roof:height): the dome, the rise of a skillion roof; 0 — by the radius / no slope
+        //! For Building — a monopitch roof (OSM roof:shape=skillion): a wedge on top of the flat body, the roof falls toward the compass bearing roofDir (degrees clockwise from the north).
+        bool skillionRoof = false;
+        double roofDir = 0.0;
+        //! For Building — the object is an OSM building:part (usually small next to the main building) / its walls are 1 block thick (small parts; set by the export).
+        bool part = false;
+        bool thin = false;
+        //! For a glued complex (merged) — the columns (pairKey of the block x, z) that only raised parts cover: the ground under them is not raised to the body.
+        QSet<qint64> floatCols;
         //! true — the object was assembled by the export from several touching industrial buildings (44340000): the inner walls between
         //! the parts are removed, the floors and partitions are shared by the whole complex.
         bool merged = false;

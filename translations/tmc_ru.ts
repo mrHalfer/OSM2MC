@@ -1255,19 +1255,19 @@ to choose the spawn point.</source>
     </message>
     <message>
         <location filename="../app/tmcrun.cpp" line="171"/>
-        <location filename="../app/tmcrun.cpp" line="253"/>
-        <location filename="../export/mcworldexporter.cpp" line="8211"/>
-        <location filename="../export/mcworldexporter.cpp" line="8224"/>
-        <location filename="../export/mcworldexporter.cpp" line="8798"/>
-        <location filename="../export/mcworldexporter.cpp" line="8817"/>
-        <location filename="../export/mcworldexporter.cpp" line="10648"/>
-        <location filename="../export/mcworldexporter.cpp" line="11144"/>
-        <location filename="../export/mcworldexporter.cpp" line="11890"/>
-        <location filename="../export/mcworldexporter.cpp" line="15048"/>
-        <location filename="../export/mcworldexporter.cpp" line="15124"/>
-        <location filename="../export/mcworldexporter.cpp" line="15297"/>
-        <location filename="../export/mcworldexporter.cpp" line="15366"/>
-        <location filename="../export/mcworldexporter.cpp" line="15460"/>
+        <location filename="../app/tmcrun.cpp" line="256"/>
+        <location filename="../export/mcworldexporter.cpp" line="8272"/>
+        <location filename="../export/mcworldexporter.cpp" line="8285"/>
+        <location filename="../export/mcworldexporter.cpp" line="8859"/>
+        <location filename="../export/mcworldexporter.cpp" line="8878"/>
+        <location filename="../export/mcworldexporter.cpp" line="10709"/>
+        <location filename="../export/mcworldexporter.cpp" line="11205"/>
+        <location filename="../export/mcworldexporter.cpp" line="11964"/>
+        <location filename="../export/mcworldexporter.cpp" line="15122"/>
+        <location filename="../export/mcworldexporter.cpp" line="15198"/>
+        <location filename="../export/mcworldexporter.cpp" line="15371"/>
+        <location filename="../export/mcworldexporter.cpp" line="15440"/>
+        <location filename="../export/mcworldexporter.cpp" line="15536"/>
         <source>Export cancelled.</source>
         <translation>Экспорт отменён.</translation>
     </message>
@@ -1282,37 +1282,37 @@ to choose the spawn point.</source>
         <translation>Центр сцены (проекция проекта): x=%1 y=%2 — это блок (0, 0) мира; масштаб ×%3 по X, ×%4 по Y</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="192"/>
+        <location filename="../app/tmcrun.cpp" line="195"/>
         <source>Climate zone: %1 (chosen manually)</source>
         <translation>Климатическая зона: %1 (выбрана вручную)</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="199"/>
+        <location filename="../app/tmcrun.cpp" line="202"/>
         <source>Climate zone: %1 (automatic: longitude %2, latitude %3)</source>
         <translation>Климатическая зона: %1 (автоматически: долгота %2, широта %3)</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="211"/>
+        <location filename="../app/tmcrun.cpp" line="214"/>
         <source>The spawn longitude/latitude could not be converted to the project projection — spawn at the data center.</source>
         <translation>Точка спавна по долготе/широте не переведена в проекцию проекта — спавн в центре данных.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="215"/>
+        <location filename="../app/tmcrun.cpp" line="218"/>
         <source>Spawn point: x=%1 y=%2 (project coordinates)</source>
         <translation>Точка спавна: x=%1 y=%2 (координаты проекта)</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="246"/>
+        <location filename="../app/tmcrun.cpp" line="249"/>
         <source>Writing the world: %1</source>
         <translation>Запись мира: %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="254"/>
+        <location filename="../app/tmcrun.cpp" line="257"/>
         <source>Export failed: %1</source>
         <translation>Экспорт не удался: %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="258"/>
+        <location filename="../app/tmcrun.cpp" line="261"/>
         <source>The Minecraft save was created:
 %1
 
@@ -1329,7 +1329,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
 %8</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="261"/>
+        <location filename="../app/tmcrun.cpp" line="264"/>
         <source> (seed %1)</source>
         <translation> (сид %1)</translation>
     </message>
@@ -1344,252 +1344,252 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
         <translation>Пещерные шаблоны: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="7854"/>
+        <location filename="../export/mcworldexporter.cpp" line="7915"/>
         <source>lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)</source>
         <translation>не найден lair_structures.bin (положите рядом с cave_templates.bin; искал в: %1)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="7858"/>
+        <location filename="../export/mcworldexporter.cpp" line="7919"/>
         <source>lair_structures.bin is damaged</source>
         <translation>lair_structures.bin повреждён</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="7862"/>
+        <location filename="../export/mcworldexporter.cpp" line="7923"/>
         <source>caves must be enabled together with the normal surroundings (a noise world)</source>
         <translation>нужны включённые пещеры и обычное окружение (noise-мир)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="7906"/>
+        <location filename="../export/mcworldexporter.cpp" line="7967"/>
         <source>Nothing to export: all meshes are empty.</source>
         <translation>Нечего экспортировать: все меши пусты.</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="8960"/>
+        <location filename="../export/mcworldexporter.cpp" line="9021"/>
         <source>; road width trimmed near buildings: %1 sections, cells under buildings removed: %2</source>
         <translation>; ширина дорог урезана у зданий: %1 участков, убрано клеток под зданиями: %2</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9105"/>
+        <location filename="../export/mcworldexporter.cpp" line="9166"/>
         <source>; zebra on the roads: crossings %1 of %2 (cells %3)</source>
         <translation>; зебра на дорогах: переходов %1 из %2 (клеток %3)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9183"/>
+        <location filename="../export/mcworldexporter.cpp" line="9244"/>
         <source>Could not voxelize a single object (empty or too huge meshes).</source>
         <translation>Не удалось вокселизировать ни один объект (пустые или слишком огромные меши).</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9313"/>
+        <location filename="../export/mcworldexporter.cpp" line="9374"/>
         <source>%1Pale Garden: there is no suitable vegetation in the data — an empty site of %2×%2 chunks was allocated (chunks %3…%4 along X, %5…%6 along Z, gap to the data %7 chunks)</source>
         <translation>%1лес скрипунов: в данных нет подходящей растительности — выделена пустая площадка %2×%2 чанков (чанки %3…%4 по X, %5…%6 по Z, зазор до данных %7 чанк.)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9502"/>
+        <location filename="../export/mcworldexporter.cpp" line="9563"/>
         <source>; fields and grass extended to the chunk edge on the export border: %1 chunks</source>
         <translation>; поля и трава продлены до края чанка на границе экспорта: %1 чанков</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9504"/>
+        <location filename="../export/mcworldexporter.cpp" line="9565"/>
         <source>; forest extended to the chunk edge on the export border: %1 chunks</source>
         <translation>; лес продлён до края чанка на границе экспорта: %1 чанков</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9631"/>
+        <location filename="../export/mcworldexporter.cpp" line="9692"/>
         <source>%1Pale Garden: there is no forest near the given chunk</source>
         <translation>%1лес скрипунов: рядом с заданным чанком леса нет</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9657"/>
+        <location filename="../export/mcworldexporter.cpp" line="9718"/>
         <source>%1Pale Garden: meadow vegetation was chosen (%2 m², more than twice the best forest with height — %3 m²)</source>
         <translation>%1лес скрипунов: выбрана луговая растительность (%2 м², более чем вдвое больше лучшего леса с высотой — %3 м²)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9676"/>
+        <location filename="../export/mcworldexporter.cpp" line="9737"/>
         <source>%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10</source>
         <translation>%1лес скрипунов: %2 м², центр x=%3 z=%4 (чанк %5 %6), границы x %7…%8, z %9…%10</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9684"/>
+        <location filename="../export/mcworldexporter.cpp" line="9745"/>
         <source>%1Pale Garden: no suitable forest</source>
         <translation>%1лес скрипунов: подходящего леса нет</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9887"/>
+        <location filename="../export/mcworldexporter.cpp" line="9948"/>
         <source>; forest mansion: 1 of %1 kept</source>
         <translation>; лесной особняк: оставлен 1 из %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9921"/>
+        <location filename="../export/mcworldexporter.cpp" line="9982"/>
         <source>; Pale Garden: pale_garden.bin was not found next to cave_templates.bin — a procedural forest without the donor terrain</source>
         <translation>; лес скрипунов: pale_garden.bin не найден рядом с cave_templates.bin — процедурный лес без донорного рельефа</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9993"/>
+        <location filename="../export/mcworldexporter.cpp" line="10054"/>
         <source>; terrain in forests: %1 columns</source>
         <translation>; рельеф в лесах: %1 колонок</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10164"/>
+        <location filename="../export/mcworldexporter.cpp" line="10225"/>
         <source>; forest mansion (cut out of the game world) placed: center x=%1 z=%2 (chunk %3 %4)</source>
         <translation>; лесной особняк (вырезан из мира игры) поставлен: центр x=%1 z=%2 (чанк %3 %4)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10167"/>
+        <location filename="../export/mcworldexporter.cpp" line="10228"/>
         <source>; forest mansion: no place was found in the Pale Garden</source>
         <translation>; лесной особняк: в лесу скрипунов не нашлось места</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10190"/>
+        <location filename="../export/mcworldexporter.cpp" line="10251"/>
         <source>; bandit outposts: %1, abandoned camps: %2</source>
         <translation>; аванпостов разбойников: %1, заброшенных лагерей: %2</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10263"/>
+        <location filename="../export/mcworldexporter.cpp" line="10324"/>
         <source>; quarries: %1 columns of the stepped excavation</source>
         <translation>; карьеры: %1 колонок ступенчатой выемки</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10264"/>
+        <location filename="../export/mcworldexporter.cpp" line="10325"/>
         <source>; spoil heaps: %1 columns of the mound</source>
         <translation>; терриконы: %1 колонок насыпи</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10329"/>
+        <location filename="../export/mcworldexporter.cpp" line="10390"/>
         <source>; terrain of the empty lands: %1 columns</source>
         <translation>; рельеф пустых земель: %1 колонок</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10354"/>
+        <location filename="../export/mcworldexporter.cpp" line="10415"/>
         <source>; climate zone: %1</source>
         <translation>; климатическая зона: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10609"/>
+        <location filename="../export/mcworldexporter.cpp" line="10670"/>
         <source>; road columns moved onto the relief: %1</source>
         <translation>; колонок дорог перенесено на рельеф: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10681"/>
+        <location filename="../export/mcworldexporter.cpp" line="10742"/>
         <source>; bridge columns over water (roads and railways): %1</source>
         <translation>; колонок мостов над водой (дороги и железные дороги): %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10754"/>
+        <location filename="../export/mcworldexporter.cpp" line="10815"/>
         <source>; mansion inhabitants: %1</source>
         <translation>; обитателей особняка: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10769"/>
+        <location filename="../export/mcworldexporter.cpp" line="10830"/>
         <source>; outpost and camp blocks: %1</source>
         <translation>; блоков аванпостов и лагерей: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10861"/>
+        <location filename="../export/mcworldexporter.cpp" line="10922"/>
         <source>; shipwrecks in big water bodies: %1 (on the bottom %2, on the water %3)</source>
         <translation>; кораблекрушения в больших водоёмах: %1 (на дне %2, на воде %3)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10890"/>
+        <location filename="../export/mcworldexporter.cpp" line="10951"/>
         <source>; seaweed: kelp %1, seagrass %2 columns</source>
         <translation>; водоросли: ламинария %1, морская трава %2 колонок</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10958"/>
+        <location filename="../export/mcworldexporter.cpp" line="11019"/>
         <source>; terrain and trees of the real Pale Garden: %1 blocks</source>
         <translation>; рельеф и деревья настоящего бледного сада: %1 блоков</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11299"/>
+        <location filename="../export/mcworldexporter.cpp" line="11361"/>
         <source>; creaking hearts: %1 (extra removed %2, added %3)</source>
         <translation>; сердец скрипунов: %1 (убрано лишних %2, добавлено %3)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11823"/>
+        <location filename="../export/mcworldexporter.cpp" line="11885"/>
         <source>; animals in forests: %1</source>
         <translation>; зверей в лесах: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="12896"/>
+        <location filename="../export/mcworldexporter.cpp" line="12970"/>
         <source>; equipment on sports grounds: %1 items</source>
         <translation>; снаряжение на спортивных площадках: %1 предметов</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14481"/>
+        <location filename="../export/mcworldexporter.cpp" line="14555"/>
         <source>churches: %1, with a maze: %2</source>
         <translation>церквей: %1, с лабиринтом: %2</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14557"/>
+        <location filename="../export/mcworldexporter.cpp" line="14631"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (здание, ближайшее к точке на карте)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14559"/>
+        <location filename="../export/mcworldexporter.cpp" line="14633"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (лаборатория под научным зданием или школой, запасной вход)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14561"/>
+        <location filename="../export/mcworldexporter.cpp" line="14635"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (церковь №%4 из %5 по размеру)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14597"/>
+        <location filename="../export/mcworldexporter.cpp" line="14671"/>
         <source>; no church with a maze in chunk (%1, %2)</source>
         <translation>; в чанке (%1, %2) нет церкви с лабиринтом</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14624"/>
+        <location filename="../export/mcworldexporter.cpp" line="14698"/>
         <source>; %1: no church with a maze in chunk (%2, %3)</source>
         <translation>; %1: в чанке (%2, %3) нет церкви с лабиринтом</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14651"/>
+        <location filename="../export/mcworldexporter.cpp" line="14725"/>
         <source>; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other&apos;s way</source>
         <translation>; ancient_city — точка на карте слишком близко к стронгхолду: входы мешали бы друг другу</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14670"/>
+        <location filename="../export/mcworldexporter.cpp" line="14744"/>
         <source>; the entrances cannot be placed in the given buildings — choosing automatically</source>
         <translation>; входы не удаётся разместить в заданных зданиях — выбираю автоматически</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14678"/>
+        <location filename="../export/mcworldexporter.cpp" line="14752"/>
         <source>; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically</source>
         <translation>; в заданных церквях оба входа не разместить (мало чанков вокруг или шахты мешают друг другу) — выбираю автоматически</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14696"/>
+        <location filename="../export/mcworldexporter.cpp" line="14770"/>
         <source>; stronghold — no suitable church was found</source>
         <translation>; стронгхолд — не нашлось подходящей церкви</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14726"/>
+        <location filename="../export/mcworldexporter.cpp" line="14800"/>
         <source>; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)</source>
         <translation>; ancient_city — не нашлось ни подходящей церкви, ни научного здания, ни школы с лабораторией (край экспорта или шахты мешают друг другу)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="15186"/>
+        <location filename="../export/mcworldexporter.cpp" line="15260"/>
         <source>chunks added so that the buildings and lakes on the boundary stay whole: %1</source>
         <translation>чанков добавлено, чтобы здания и озёра на границе остались целыми: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="15189"/>
+        <location filename="../export/mcworldexporter.cpp" line="15263"/>
         <source>polygon boundary: %1 of %2 chunks written</source>
         <translation>граница-многоугольник: записано %1 из %2 чанков</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="15493"/>
+        <location filename="../export/mcworldexporter.cpp" line="15569"/>
         <source>The scene is too big for a save zip archive (%1 region files, ~%2 MB). Export a smaller area.</source>
         <translation>Сцена слишком велика для zip-архива сохранений (%1 region-файлов, ~%2 МБ). Экспортируйте меньшую область.</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="15507"/>
+        <location filename="../export/mcworldexporter.cpp" line="15583"/>
         <source>Could not write the file %1: %2</source>
         <translation>Не удалось записать файл %1: %2</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="15512"/>
+        <location filename="../export/mcworldexporter.cpp" line="15588"/>
         <source>The file %1 was not written completely (quota/disk?).</source>
         <translation>Файл %1 записан не полностью (квота/диск?).</translation>
     </message>
@@ -1630,7 +1630,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
     </message>
     <message>
         <location filename="../input/tmcproject.cpp" line="257"/>
-        <location filename="../input/tmcproject.cpp" line="1141"/>
+        <location filename="../input/tmcproject.cpp" line="1192"/>
         <source>Layer %1: %2 objects</source>
         <translation>Слой %1: %2 объектов</translation>
     </message>
@@ -1740,77 +1740,82 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
         <translation>Улучшайзер: %1 (%2 зданий)</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="813"/>
+        <location filename="../input/tmcproject.cpp" line="842"/>
         <source>The OSM file has no layer %1</source>
         <translation>В файле OSM нет слоя %1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="816"/>
+        <location filename="../input/tmcproject.cpp" line="845"/>
         <source>Reading OSM layer %1 …</source>
         <translation>Чтение слоя OSM %1 …</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="979"/>
+        <location filename="../input/tmcproject.cpp" line="1008"/>
         <source>Buildings without signs: %1, of which recognized by neighbors and area: %2 (recognized neighbors: %3)</source>
         <translation>Здания без признаков: %1, из них опознано по соседям и площади: %2 (опознанных соседей: %3)</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="986"/>
+        <location filename="../input/tmcproject.cpp" line="1015"/>
         <source>Enhancer: OSM buildings %1, matched with points %2 (used only when the type or height could not be determined from OSM)</source>
         <translation>Улучшайзер: зданий OSM %1, сопоставлено с точками %2 (используются, только если тип или высота по OSM не определены)</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1100"/>
+        <location filename="../input/tmcproject.cpp" line="1129"/>
         <source>Building parts (building:part): %1 parts attached to %2 buildings (the outline was replaced by parts for %3), standalone parts without a building: %4</source>
         <translation>Части зданий (building:part): присоединено %1 частей к %2 зданиям (контур заменён частями у %3), самостоятельных частей без здания: %4</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1135"/>
+        <location filename="../input/tmcproject.cpp" line="1152"/>
+        <source>Building parts raised above the ground (min_height): %1</source>
+        <translation>Части зданий, поднятые над землёй (min_height): %1</translation>
+    </message>
+    <message>
+        <location filename="../input/tmcproject.cpp" line="1186"/>
         <source>Addresses: the street was taken from the nearest road for %1 buildings (in OSM they have a house number but no street)</source>
         <translation>Адреса: улица взята у ближайшей дороги для %1 зданий (в OSM у них есть номер дома, но нет улицы)</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1149"/>
+        <location filename="../input/tmcproject.cpp" line="1200"/>
         <source>  codes: %1</source>
         <translation>  коды: %1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1152"/>
+        <location filename="../input/tmcproject.cpp" line="1203"/>
         <source>Layer %1: %2 objects skipped — the geometry type did not match the first rule of the layer (use &quot;as&quot;)</source>
         <translation>Слой %1: %2 объектов пропущено — тип геометрии не совпал с первым правилом слоя (используйте "as")</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1155"/>
+        <location filename="../input/tmcproject.cpp" line="1206"/>
         <source>The OSM rules found no objects</source>
         <translation>По правилам OSM не найдено ни одного объекта</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1163"/>
+        <location filename="../input/tmcproject.cpp" line="1214"/>
         <source>Could not read the project file: %1</source>
         <translation>Не удалось прочитать файл проекта: %1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1205"/>
+        <location filename="../input/tmcproject.cpp" line="1256"/>
         <source>The project has no layers (the Layers= line)</source>
         <translation>В проекте нет слоёв (строка Layers=)</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1251"/>
+        <location filename="../input/tmcproject.cpp" line="1302"/>
         <source>Could not determine the project coordinate system</source>
         <translation>Не удалось определить систему координат проекта</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1274"/>
+        <location filename="../input/tmcproject.cpp" line="1325"/>
         <source>The project spatial filter was applied</source>
         <translation>Пространственный фильтр проекта применён</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1282"/>
+        <location filename="../input/tmcproject.cpp" line="1333"/>
         <source>Layer %1 is switched off in the project — skipped (as in the tqt 3D window)</source>
         <translation>Слой %1 выключен в проекте — пропущен (как в окне 3D tqt)</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1286"/>
+        <location filename="../input/tmcproject.cpp" line="1337"/>
         <source>No needed project layer was read</source>
         <translation>Не прочитан ни один нужный слой проекта</translation>
     </message>
@@ -1915,7 +1920,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
         <translation>Нет объектов с геометрией</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="528"/>
+        <location filename="../scene/mcscene.cpp" line="538"/>
         <source>No object gave any geometry (check the height field in the 3D settings)</source>
         <translation>Ни один объект не дал геометрии (проверьте поле высоты в настройках 3D)</translation>
     </message>

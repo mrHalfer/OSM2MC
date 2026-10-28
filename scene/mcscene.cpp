@@ -32,6 +32,11 @@ struct ExportItem
     double roadScale = 1.0;
     int code = 0;
     bool lift = false;
+    bool onion = false;
+    double roofH = 0.0;
+    bool skillion = false;
+    double roofDir = 0.0;
+    bool part = false;
     QString streetType, street, number;
     bool intraBlock = false;
 };
@@ -241,6 +246,18 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             {
                 const int lno = layer->fieldIndex(QStringLiteral("LIFT"));
                 if (lno >= 0) e.lift = (qRound(obj->fields.value(lno).trimmed().toDouble()) == 1);
+                const int rno = layer->fieldIndex(QStringLiteral("ROOF"));
+                if (rno >= 0)
+                {
+                    const QString rv = obj->fields.value(rno).trimmed();
+                    e.onion = (rv == QLatin1String("onion"));
+                    e.skillion = (rv == QLatin1String("skillion"));
+                }
+                const int pno = layer->fieldIndex(QStringLiteral("PART"));
+                if (pno >= 0) e.part = (obj->fields.value(pno).trimmed() == QLatin1String("part"));
+                const int hno = layer->fieldIndex(QStringLiteral("ROOFH")), dno = layer->fieldIndex(QStringLiteral("ROOFD"));
+                if ((e.onion || e.skillion) && hno >= 0) e.roofH = obj->fields.value(hno).toDouble();
+                if (e.skillion && dno >= 0) e.roofDir = obj->fields.value(dno).toDouble();
             }
             // road width by the CODE class
             if (kind == Kind::Road)
@@ -490,6 +507,21 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             if (e.kind == Kind::Railway || e.kind == Kind::Road)
                 ModelBuilder::ExtractLinePaths(e.obj, mo.paths);
             mo.lift = e.lift;
+            mo.onionRoof = e.onion;
+            mo.roofH = e.roofH * invZ;
+            mo.skillionRoof = e.skillion && e.roofH > 0.0;
+            mo.roofDir = e.roofDir;
+            mo.part = e.part;
+            if (e.kind == Kind::Generic || e.kind == Kind::Building)
+            {   // a part raised above the ground (min_height): the base lift from the layer's lift field
+                double lf = vs.liftAdd;
+                if (!vs.liftField.isEmpty() && e.obj && vs.layer)
+                {
+                    const int fno = vs.layer->fieldIndex(vs.liftField);
+                    if (fno >= 0) lf += e.obj->fields.value(fno).toDouble() * vs.liftMultiplier;
+                }
+                if (e.kind == Kind::Building && mo.closed && lf >= 1.0) mo.raised = lf * invZ;
+            }
             mo.streetType = e.streetType; mo.street = e.street; mo.number = e.number;
             built[i] = std::move(mo);
             okFlag[i] = 1;

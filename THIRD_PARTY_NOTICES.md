@@ -36,6 +36,12 @@ Qt is used under the **GNU LGPL v3** (https://www.qt.io/licensing, https://www.g
 
 `vcruntime140*.dll`, `msvcp140*.dll`, `concrt140.dll`, `vccorlib140.dll` are the redistributable files of Microsoft Visual C++, placed next to the exe (app-local deployment) under the Microsoft license terms for redistributable code.
 
+## The program icon
+
+`resources/tMC.ico` is made from the file "Minecraft Wiki 2023 textless.png" (https://commons.wikimedia.org/wiki/File:Minecraft_Wiki_2023_textless.png) by Oakar567 (Minecraft Wiki), licensed under **Creative Commons Attribution-Share Alike 3.0 Unported** (https://creativecommons.org/licenses/by-sa/3.0/).
+Changes: the image was converted to the `.ico` format and scaled to several sizes (16–256 px). The icon (not the source code of tMC, which stays under the MIT license) remains under CC BY-SA 3.0: if you reuse or adapt the icon, keep this attribution and license it under the same or a compatible license.
+The picture is the logo of the Minecraft Wiki; tMC is not affiliated with the Minecraft Wiki, Mojang or Microsoft, and the license does not imply their endorsement.
+
 ## Data
 
 - **OpenStreetMap** data (downloaded online or taken from an extract): **Open Database License (ODbL) 1.0**, © OpenStreetMap contributors (https://www.openstreetmap.org/copyright). A world exported from OSM data is a derived database: when you publish it (a server, a download), keep the attribution "Map data © OpenStreetMap contributors (ODbL)" and the share-alike conditions of the ODbL. The exported zip contains the file `ATTRIBUTION.txt` with this line.
