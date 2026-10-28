@@ -5,6 +5,9 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+### Added
+- A gallery of screenshots in the READMEs (`images/shots/`, 15 pictures 1600×800 with 400×200 previews).
+
 ## [1.1.26.10281] — 2026-10-28
 
 ### Added

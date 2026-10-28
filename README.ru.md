@@ -28,6 +28,18 @@ tMC берёт кусок настоящей карты и строит из н�
 
 ![Окно с загруженными данными](images/data_ru.png)
 
+## Галерея
+
+Кадры из мира, сделанного tMC (нажмите на превью, чтобы открыть в полном размере).
+
+<table>
+<tr><td align="center" width="33%"><a href="images/shots/01_library.jpg"><img src="images/shots/thumbs/01_library.jpg" width="100%" alt="Библиотека со стеллажами и читальными столами"></a><br><sub>Библиотека со стеллажами и читальными столами</sub></td><td align="center" width="33%"><a href="images/shots/02_classroom.jpg"><img src="images/shots/thumbs/02_classroom.jpg" width="100%" alt="Класс: парты и доска"></a><br><sub>Класс: парты и доска</sub></td><td align="center" width="33%"><a href="images/shots/03_park.jpg"><img src="images/shots/thumbs/03_park.jpg" width="100%" alt="Парк с озером и аллея"></a><br><sub>Парк с озером и аллея</sub></td></tr>
+<tr><td align="center" width="33%"><a href="images/shots/04_hall.jpg"><img src="images/shots/thumbs/04_hall.jpg" width="100%" alt="Зал с фонарями и ковровой дорожкой"></a><br><sub>Зал с фонарями и ковровой дорожкой</sub></td><td align="center" width="33%"><a href="images/shots/05_desert.jpg"><img src="images/shots/thumbs/05_desert.jpg" width="100%" alt="Город в пустынной климатической зоне"></a><br><sub>Город в пустынной климатической зоне</sub></td><td align="center" width="33%"><a href="images/shots/06_church.jpg"><img src="images/shots/thumbs/06_church.jpg" width="100%" alt="Кирпичный храмовый комплекс с золотыми куполами"></a><br><sub>Кирпичный храмовый комплекс с золотыми куполами</sub></td></tr>
+<tr><td align="center" width="33%"><a href="images/shots/07_playroom.jpg"><img src="images/shots/thumbs/07_playroom.jpg" width="100%" alt="Игровая комната детского сада с жителями"></a><br><sub>Игровая комната детского сада с жителями</sub></td><td align="center" width="33%"><a href="images/shots/08_school.jpg"><img src="images/shots/thumbs/08_school.jpg" width="100%" alt="Школа среди пёстрого леса"></a><br><sub>Школа среди пёстрого леса</sub></td><td align="center" width="33%"><a href="images/shots/09_avenue.jpg"><img src="images/shots/thumbs/09_avenue.jpg" width="100%" alt="Проспект и парящий остров над парком"></a><br><sub>Проспект и парящий остров над парком</sub></td></tr>
+<tr><td align="center" width="33%"><a href="images/shots/10_blocks.jpg"><img src="images/shots/thumbs/10_blocks.jpg" width="100%" alt="Жилые кварталы и дворы"></a><br><sub>Жилые кварталы и дворы</sub></td><td align="center" width="33%"><a href="images/shots/11_towers.jpg"><img src="images/shots/thumbs/11_towers.jpg" width="100%" alt="Башни и храмы (Москва)"></a><br><sub>Башни и храмы (Москва)</sub></td><td align="center" width="33%"><a href="images/shots/12_caves.jpg"><img src="images/shots/thumbs/12_caves.jpg" width="100%" alt="Настоящие игровые подземелья под городом"></a><br><sub>Настоящие игровые подземелья под городом</sub></td></tr>
+<tr><td align="center" width="33%"><a href="images/shots/13_dungeon.jpg"><img src="images/shots/thumbs/13_dungeon.jpg" width="100%" alt="Полноценные структуры в подземельях (Древний город)"></a><br><sub>Полноценные структуры в подземельях (Древний город)</sub></td><td align="center" width="33%"><a href="images/shots/14_night.jpg"><img src="images/shots/thumbs/14_night.jpg" width="100%" alt="Ночной город"></a><br><sub>Ночной город</sub></td><td align="center" width="33%"><a href="images/shots/15_seamless.jpg"><img src="images/shots/thumbs/15_seamless.jpg" width="100%" alt="Бесшовная генерация мира: настоящий рельеф продолжается вокруг области экспорта"></a><br><sub>Бесшовная генерация мира: настоящий рельеф продолжается вокруг области экспорта</sub></td></tr>
+</table>
+
 ## Окно программы
 
 | Элемент | Что делает |

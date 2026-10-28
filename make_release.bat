@@ -40,7 +40,7 @@ for %%f in (default.t3d osm_rules.json heights.csv tmc_buildings.dat) do if exis
 copy /y "%ROOT%resources\templates\*.bin" "%DST%\" >nul
 xcopy /E /Y /Q /I "%ROOT%third_party\gdal\bin" "%DST%" >nul
 for %%f in (README.md README.ru.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md) do if exist "%ROOT%%%f" copy /y "%ROOT%%%f" "%DST%\" >nul
-if exist "%ROOT%images" (mkdir "%DST%\images" & copy /y "%ROOT%images\*.png" "%DST%\images\" >nul)
+if exist "%ROOT%images" (mkdir "%DST%\images" & copy /y "%ROOT%images\*.png" "%DST%\images\" >nul & xcopy /e /i /y /q "%ROOT%images\shots" "%DST%\images\shots" >nul)
 
 echo === 3/5 Qt libraries (windeployqt) ===
 "%QTDIR%\bin\windeployqt.exe" --release --no-translations --no-opengl-sw --no-system-d3d-compiler --compiler-runtime "%DST%\tMC.exe" >nul
