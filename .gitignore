@@ -30,4 +30,7 @@ Gdal34vc/
 devtools/build_enhancer.py
 PUBLISHING.md
 _private/
+private/
 images/screen/
+# a local pointer file for the Qwen assistant (AGENTS.md is in the repository)
+QWEN.md
