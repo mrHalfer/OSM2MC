@@ -5,7 +5,7 @@
 #include <windows.h>
 #include <winhttp.h>
 
-const char* const kTmcUserAgent = "tMC/1.0 (+https://github.com/mrHalfer/tMC; half.shine@gmail.com)";
+const char* const kTmcUserAgent = "tMC/1.0 (+https://github.com/mrHalfer/OSM2MC; half.shine@gmail.com)";
 
 namespace
 {

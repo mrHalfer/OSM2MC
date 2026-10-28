@@ -96,4 +96,4 @@ tMC - свободная программа под лицензией **MIT** (`
 
 Minecraft - товарный знак Mojang AB; tMC не связан с Mojang и Microsoft. Шаблоны структур вырезаны из игрового мира.
 
-Исходный код, ошибки и релизы: https://github.com/mrHalfer/tMC. Как собрать программу: [DEVELOPING.md](DEVELOPING.md).
+Исходный код, ошибки и релизы: https://github.com/mrHalfer/OSM2MC. Как собрать программу: [DEVELOPING.md](DEVELOPING.md).

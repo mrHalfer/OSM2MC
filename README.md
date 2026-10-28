@@ -96,4 +96,4 @@ The online mode follows the OpenStreetMap usage policies: tiles are cached, sear
 
 Minecraft is a trademark of Mojang AB; tMC is not affiliated with Mojang or Microsoft. The structure templates were cut out of a game world.
 
-Source code, issues and releases: https://github.com/mrHalfer/tMC. How to build the program: [DEVELOPING.md](DEVELOPING.md).
+Source code, issues and releases: https://github.com/mrHalfer/OSM2MC. How to build the program: [DEVELOPING.md](DEVELOPING.md).

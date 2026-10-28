@@ -5,6 +5,9 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+### Changed
+- The repository is renamed: https://github.com/mrHalfer/OSM2MC (the links in the READMEs, in `setup.bat` and in the `User-Agent` of the program).
+
 ## [1.1.26.10283] — 2026-10-28
 
 ### Fixed

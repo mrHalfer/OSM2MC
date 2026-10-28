@@ -6,7 +6,7 @@ rem   2) downloads the GDAL 3.4 runtime (about 83 MB) into third_party\gdal\bin 
 rem Then open tMC.pro in Qt Creator (or run build.bat). The runtime is copied next to tMC.exe after every build.
 rem The download address can be changed with the variable GDAL_RUNTIME_URL.
 cd /d "%~dp0"
-if not defined GDAL_RUNTIME_URL set "GDAL_RUNTIME_URL=https://github.com/mrHalfer/tMC/releases/download/gdal-runtime-3.4/gdal-runtime-3.4.zip"
+if not defined GDAL_RUNTIME_URL set "GDAL_RUNTIME_URL=https://github.com/mrHalfer/OSM2MC/releases/download/gdal-runtime-3.4/gdal-runtime-3.4.zip"
 
 echo === tMC: checking the environment ===
 set "VSOK="
