@@ -187,6 +187,8 @@ static const NamedColor kBlockPalette[] = {
     { "minecraft:lapis_block",           31,  67, 140 },
     { "minecraft:diamond_block",        98, 237, 228 },
     { "minecraft:redstone_block",       175,  24,   5 },
+    // Desert open lands: cacti (age=0 — the default, saved without properties)
+    { "minecraft:cactus",                20, 122,  32 },
 };
 
 //! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
@@ -12064,6 +12066,14 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (y0 + h + 3 > 255) return false;
             for (int dy = 0; dy < h; ++dy)
                 if (store.get(bx, y0 + dy, bz) != IdAir) return false;    // not a single foreign stump in the trunk
+            if (g_zone == Climate::Desert && colHash(ck ^ 0x7C31ull) % 100u < 45u)   // cacti dot the desert open lands (the trees there stay rare)
+            {
+                const int hc = 1 + int(colHash(ck ^ 0x40A5ull) % 3u);               // 1..3 blocks tall (as in the game)
+                if (y0 + hc <= 254)
+                    for (int dy = 0; dy < hc; ++dy)
+                        store.set(bx, y0 + dy, bz, quint16(IdPaletteStart + paletteIndexOf("minecraft:cactus")));
+                return true;
+            }
             if (zoneSkip(bx, bz)) return true;
             if (zt.jungle)
             {   // big jungle trees grow on the empty lands too: every fifth tree (busyNear already

@@ -5,8 +5,11 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.1.26.10292] — 2026-10-29
+
 ### Added
 - The export report (the finish dialog and the log) now says how long the export took: "Exported in N min M s" after the statistics line.
+- Cacti (1–3 blocks tall) dot the open lands of the desert climate zone alongside the rare trees.
 
 ## [1.1.26.10291] — 2026-10-29
 
