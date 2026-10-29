@@ -33,7 +33,7 @@ QMAKE_CXXFLAGS += /utf-8
 QMAKE_CFLAGS += /utf-8
 
 win32:{
-    VERSION = 1.1.26.10292
+    VERSION = 1.1.26.10301
     QMAKE_TARGET_COMPANY = "Denis Rakhmatullin (mrHalfer)"
     QMAKE_TARGET_PRODUCT = "tMC"
     QMAKE_TARGET_DESCRIPTION = "Minecraft world exporter"

@@ -10728,10 +10728,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         case Climate::Desert:        b[0] = b[2] = b[3] = b[4] = b[5] = b[6] = b[7] = "minecraft:desert"; break;
         case Climate::Savanna:       b[0] = b[2] = b[3] = b[4] = b[5] = b[6] = b[7] = "minecraft:savanna"; break;
         case Climate::Tropical:      b[0] = b[7] = "minecraft:jungle"; b[2] = b[3] = b[4] = b[5] = b[6] = "minecraft:jungle"; break;
+        case Climate::Monsoon:       b[4] = kPlains; break;   // oaks and palms around the schools — not a birch forest
+        case Climate::SemiArid:      b[0] = b[2] = b[3] = b[4] = b[5] = b[6] = b[7] = "minecraft:savanna"; break;   // sand surface, the savanna's green tint of the leaves
         default: break;
         }
         for (int i = 0; i < 8; ++i) g_biomeName[i] = b[i];
-        g_zoneSurface = g_zone == Climate::Desert ? g_sandId : (g_zone == Climate::Tundra ? quint16(IdPaletteStart + paletteIndexOf("minecraft:snow_block")) : quint16(IdGrass));
+        g_zoneSurface = (g_zone == Climate::Desert || g_zone == Climate::SemiArid) ? g_sandId : (g_zone == Climate::Tundra ? quint16(IdPaletteStart + paletteIndexOf("minecraft:snow_block")) : quint16(IdGrass));
         res.lairInfo += QObject::tr("; climate zone: %1").arg(Climate::name(g_zone));
     }
     // SMOOTH SLOPE OF THE BOTTOM: the depth of a water body column grows from the shore to the center by 1 block every ~2.5 blocks (the distance to the shore by 8 neighbors), but not more than the depth of the water body;
@@ -11356,7 +11358,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     const QSet<ColKey> sprFill(fillChunks.constBegin(), fillChunks.constEnd());
     // Tree species by the climate zone: "oak" and "birch" in the planting code are replaced with the trunk+leaves pairs of the zone, the spruce cone — with a big broadleaf tree
     // where there are no conifers; density — the share of plantings that remain (in the desert and tundra trees are rare)
-    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; bool jungle; };
+    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; bool jungle; int palmShare; };   // palmShare — the percent of palms among the planted trees (0 — none)
     const quint16 birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
     ZoneTrees zt{ IdOakLog, IdOakLeaves, birchLogRaw, IdBirchLeaves, 100, true };
     {
@@ -11371,6 +11373,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         case Climate::Desert:        zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 8, false }; break;
         case Climate::Savanna:       zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 35, false }; break;
         case Climate::Tropical:      zt = ZoneTrees{ jng, IdJungleLeaves, jng, IdJungleLeaves, 100, false, true }; break;
+        case Climate::Monsoon:       zt.birchLog = IdOakLog; zt.birchLeaf = IdOakLeaves; zt.density = 60; zt.cone = false; zt.palmShare = 80; break;   // oaks and palms, no conifers
+        case Climate::SemiArid:      zt = ZoneTrees{ IdOakLog, IdOakLeaves, IdOakLog, IdOakLeaves, 30, false, false, 50 }; break;   // the Gulf coast: sparse oaks and palms on sand, cacti on the open lands
         default: break;
         }
     }
@@ -11572,6 +11576,35 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         }
         return true;
     };
+    // A palm (monsoon zones): a slim bare trunk of jungle logs, a crown of arching diagonal
+    // "arms" with hanging tips and a small cap on the top (like adventure-map palms in the game)
+    auto plantPalm = [&](int bx, int bz, int y0, quint32 hh) -> bool
+    {
+        const int h = 7 + int(hh % 10u);                                  // trunk 7..16 (the tallest ones are 1.5 times taller than the shortest)
+        if (y0 + h + 2 > 255) return false;
+        for (int sx = -4; sx <= 4; sx += 8)                               // the crown reach (±4) entirely inside the fill
+            for (int sz = -4; sz <= 4; sz += 8)
+                if (!sprFill.contains(pairKey((bx + sx) >> 4, (bz + sz) >> 4))) return false;
+        const quint16 pLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
+        for (int dy = 0; dy < h; ++dy)                                    // the trunk over decorative grass too
+            store.set(bx, y0 + dy, bz, pLog);
+        auto leaf = [&](int x, int y, int z)
+        { if (store.get(x, y, z) == IdAir) store.set(x, y, z, IdJungleLeaves); };
+        const int topY = y0 + h - 1;
+        const int kLen = 2 + int((hh >> 8) % 2u);                         // the arms 2..3 blocks long
+        static const int kAx[4] = { 1, 1, -1, -1 }, kAz[4] = { 1, -1, 1, -1 };
+        for (int a = 0; a < 4; ++a)
+        {
+            for (int k = 1; k <= kLen; ++k)
+                leaf(bx + kAx[a] * k, topY, bz + kAz[a] * k);
+            leaf(bx + kAx[a] * (kLen + 1), topY - 1, bz + kAz[a] * (kLen + 1));   // the tip hangs down
+        }
+        static const int kSx[4] = { 1, -1, 0, 0 }, kSz[4] = { 0, 0, 1, -1 };
+        for (int a = 0; a < 4; ++a)                                       // short side leafs along the axes
+            leaf(bx + kSx[a], topY, bz + kSz[a]);
+        leaf(bx, topY + 1, bz);                                           // a small cap over the trunk top
+        return true;
+    };
     // Pale oak: a 2×2 trunk of height h, a "cap" crown of radius 3, moss hanging under the crown edge, a "creaking heart" in the trunk
     auto plantPaleTree = [&](int bx, int bz, int y0, int h, quint32 hh)
     {
@@ -11667,6 +11700,14 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             {   // a park: mixed trees (oak 40%, birch 35%, spruce 25%) and not frequent — about 24% of the cells of the 6×6 grid (≈ 1 tree per 135 m²)
                 const quint32 hr = colHash(ck ^ 0x9A4Bull);
                 if (hr % 100u >= 24u) continue;                                    // 24% of the cells (was 16%): in parks there are 1.5 times more trees
+                if (zt.palmShare)
+                {   // a palm park (monsoon and semi-arid): the zone's share is palms, the rest are oaks (no birches and no spruces)
+                    if (colHash(ck ^ 0x3C77ull) % 100u < quint32(zt.palmShare) && plantPalm(bx, bz, y0, colHash(ck ^ 0x5F13ull))) continue;
+                    const int h = 5 + int((hr >> 16) % 3u);
+                    if (y0 + h + 4 > 255) continue;
+                    plantBroad(bx, bz, y0, h, IdOakLog, IdOakLeaves);
+                    continue;
+                }
                 const quint32 cls = (hr >> 8) % 100u;
                 if (cls < 40)
                 {   // oak — as in ordinary forests
@@ -11700,7 +11741,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 plantSized(bx, bz, y0, h, R, birch ? quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")) : quint16(IdOakLog), birch ? quint16(IdBirchLeaves) : quint16(IdOakLeaves));
                 continue;
             }
-            if (site.spruce && !zt.jungle)
+            if (zt.palmShare)                                                 // a palm forest (monsoon and semi-arid): the zone's share is palms, the rest are oaks (no spruces and no birches there)
+            {
+                if (zoneSkip(bx, bz)) continue;
+                if (colHash(ck ^ 0x8D27ull) % 100u < quint32(zt.palmShare) && plantPalm(bx, bz, y0, colHash(ck ^ 0x60C5ull))) continue;
+            }
+            if (site.spruce && !zt.jungle && !zt.palmShare)
             {   // spruces of different sizes, MUCH rarer than oaks: some cells of the grid are empty, big and giant ones are a rarity
                 // (a tropical forest is a jungle: dense, every fifth tree big — it must not be thinned as a spruce one)
                 const quint32 hr = colHash(ck ^ 0x5B0Eull);
@@ -12066,12 +12112,17 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (y0 + h + 3 > 255) return false;
             for (int dy = 0; dy < h; ++dy)
                 if (store.get(bx, y0 + dy, bz) != IdAir) return false;    // not a single foreign stump in the trunk
-            if (g_zone == Climate::Desert && colHash(ck ^ 0x7C31ull) % 100u < 45u)   // cacti dot the desert open lands (the trees there stay rare)
+            if ((g_zone == Climate::Desert || g_zone == Climate::SemiArid) && colHash(ck ^ 0x7C31ull) % 100u < (g_zone == Climate::Desert ? 45u : 30u))   // cacti dot the desert and semi-arid open lands (the trees there stay rare)
             {
                 const int hc = 1 + int(colHash(ck ^ 0x40A5ull) % 3u);               // 1..3 blocks tall (as in the game)
                 if (y0 + hc <= 254)
                     for (int dy = 0; dy < hc; ++dy)
                         store.set(bx, y0 + dy, bz, quint16(IdPaletteStart + paletteIndexOf("minecraft:cactus")));
+                return true;
+            }
+            if ((g_zone == Climate::Desert || g_zone == Climate::SemiArid) && colHash(ck ^ 0x9E77ull) % 100u < 20u)   // dry bushes speckle the same open lands between the cacti
+            {
+                store.set(bx, y0, bz, quint16(IdPaletteStart + paletteIndexOf("minecraft:dead_bush")));
                 return true;
             }
             if (zoneSkip(bx, bz)) return true;
@@ -12085,6 +12136,10 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             {
                 const int hs = 6 + int(colHash(ck ^ 0x2B19ull) % 6u);                // 6..11 — hardy short firs
                 if (plantSpruce(bx, bz, y0, hs, hs >= 8 ? 3 : 2)) return true;       // no room for the cone — a birch grows then
+            }
+            if (zt.palmShare && colHash(ck ^ 0x49F1ull) % 100u < quint32(zt.palmShare))   // palm open lands (monsoon and semi-arid): the zone's share is palms, the rest are oaks
+            {
+                if (plantPalm(bx, bz, y0, colHash(ck ^ 0x27A9ull))) return true;
             }
             const quint16 tLog = birch ? zt.birchLog : zt.oakLog, tLeaf = birch ? zt.birchLeaf : zt.oakLeaf;
             for (int dy = 0; dy < h; ++dy)
@@ -12205,7 +12260,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 }
             return false;
         };
-        const quint16 birchLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
+        const quint16 birchLog = zt.birchLog, birchLeaf = zt.birchLeaf;   // the monsoon zone remaps the school birches into oaks
         const quint16 poplarLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:poplar_log"));
         for (const IslandSite& is : islandSites)
         {
@@ -12235,7 +12290,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     for (int dy = 0; dy < h && free; ++dy) if (store.get(bx, y0 + dy, bz) != IdAir) free = false;
                     if (!free) continue;
                     const quint16 log = is.kind == 1 ? birchLog : poplarLog;
-                    quint16 leaf = IdBirchLeaves;
+                    quint16 leaf = birchLeaf;
                     if (is.kind == 0)
                     {
                         static const quint16 kPop[3] = { IdRedPoplarLeaves, IdOrangePoplarLeaves, IdYellowPoplarLeaves };
@@ -12276,7 +12331,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         cellKeys.reserve(biomeCells.size());
         for (auto bit = biomeCells.constBegin(); bit != biomeCells.constEnd(); ++bit)
             if (bit.value() != 1 && bit.value() != 7) cellKeys.append(bit.key());   // the Pale Garden (1) is already carried over from the donor; the meadow (7) — without animals
-        if (g_zone == Climate::Steppe || g_zone == Climate::Mediterranean || g_zone == Climate::Desert || g_zone == Climate::Savanna || g_zone == Climate::Tundra)
+        if (g_zone == Climate::Steppe || g_zone == Climate::Mediterranean || g_zone == Climate::Desert || g_zone == Climate::Savanna || g_zone == Climate::SemiArid || g_zone == Climate::Tundra)
             cellKeys.clear();                                                       // ferns, berry bushes and "forest" animals — not for dry and cold zones
         std::sort(cellKeys.begin(), cellKeys.end());
         for (qint64 ckc : cellKeys)

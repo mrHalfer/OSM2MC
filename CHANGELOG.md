@@ -5,6 +5,13 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.1.26.10301] — 2026-10-30
+
+### Added
+- A new climate zone — monsoon (palms and oaks, about four palms per oak): south-eastern USA (Florida, Georgia, South Carolina), southern China with Taiwan, and southern Japan (Kyushu, Okinawa) are recognized as such automatically.
+- A new climate zone — semi-arid (palms and cacti): the Gulf coast of the USA (southern Texas, coastal Louisiana); sand underfoot, cacti on the open lands, palms and oaks in the sparse forests.
+- Cacti and dry bushes also speckle the open lands of the desert zone (dry bushes are new there too).
+
 ## [1.1.26.10292] — 2026-10-29
 
 ### Added

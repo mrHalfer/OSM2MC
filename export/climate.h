@@ -8,18 +8,18 @@
 
 namespace Climate
 {
-enum Zone { Temperate = 0, Boreal, Tundra, Steppe, Mediterranean, Desert, Savanna, Tropical, Count };
+enum Zone { Temperate = 0, Boreal, Tundra, Steppe, Mediterranean, Desert, Savanna, Tropical, Monsoon, SemiArid, Count };
 
 inline QString name(int z)
 {
-    static const char* const kNames[Count] = { QT_TRANSLATE_NOOP("Climate", "temperate (mixed forests)"), QT_TRANSLATE_NOOP("Climate", "boreal (taiga)"), QT_TRANSLATE_NOOP("Climate", "tundra (arctic)"), QT_TRANSLATE_NOOP("Climate", "steppe"), QT_TRANSLATE_NOOP("Climate", "Mediterranean"), QT_TRANSLATE_NOOP("Climate", "desert"), QT_TRANSLATE_NOOP("Climate", "savanna"), QT_TRANSLATE_NOOP("Climate", "tropical (jungle)") };
+    static const char* const kNames[Count] = { QT_TRANSLATE_NOOP("Climate", "temperate (mixed forests)"), QT_TRANSLATE_NOOP("Climate", "boreal (taiga)"), QT_TRANSLATE_NOOP("Climate", "tundra (arctic)"), QT_TRANSLATE_NOOP("Climate", "steppe"), QT_TRANSLATE_NOOP("Climate", "Mediterranean"), QT_TRANSLATE_NOOP("Climate", "desert"), QT_TRANSLATE_NOOP("Climate", "savanna"), QT_TRANSLATE_NOOP("Climate", "tropical (jungle)"), QT_TRANSLATE_NOOP("Climate", "monsoon (palms and oaks)"), QT_TRANSLATE_NOOP("Climate", "semi-arid (palms and cacti)") };
     return QCoreApplication::translate("Climate", kNames[z >= 0 && z < Count ? z : 0]);
 }
 
-//! Short keys for the command line: temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical; -1 — not recognized
+//! Short keys for the command line: temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid; -1 — not recognized
 inline int fromKey(const QString& key)
 {
-    static const char* const kKeys[Count] = { "temperate", "boreal", "tundra", "steppe", "mediterranean", "desert", "savanna", "tropical" };
+    static const char* const kKeys[Count] = { "temperate", "boreal", "tundra", "steppe", "mediterranean", "desert", "savanna", "tropical", "monsoon", "semi-arid" };
     for (int i = 0; i < Count; ++i) if (key.compare(QLatin1String(kKeys[i]), Qt::CaseInsensitive) == 0) return i;
     return -1;
 }
@@ -75,6 +75,17 @@ inline Zone fromLonLat(double lon, double lat)
         { -72, -50, -65, -38 }, // Patagonia
         { 32, 36, 50, 40 }      // the Anatolian and Iranian plateaus
     };
+    static const Rect kMonsoon[] = {
+        { -82.8, 24.2, -79.9, 27.6 },  // southern Florida (Miami): humid subtropics — palmettos and oaks
+        { -85.2, 30.0, -78.5, 35.3 },  // Georgia and South Carolina (the US Atlantic coast south of ~35N)
+        { 105, 18, 122.5, 27 },        // southern China (Hainan, Guangdong, Guangxi, Fujian) and Taiwan
+        { 127.5, 24, 132.0, 34.2 }     // southern Japan: Okinawa and Kyushu
+    };
+    static const Rect kSemiArid[] = {
+        { -98.0, 25.8, -89.0, 31.2 }   // the Gulf coast: southern Texas and coastal Louisiana — sand, cacti, palms and oaks
+    };
+    for (const Rect& r : kMonsoon) if (in(r, lon, lat)) return Monsoon;
+    for (const Rect& r : kSemiArid) if (in(r, lon, lat)) return SemiArid;
     for (const Rect& r : kDesert) if (in(r, lon, lat)) return Desert;
     for (const Rect& r : kTropical) if (in(r, lon, lat)) return Tropical;
     for (const Rect& r : kSavanna) if (in(r, lon, lat)) return Savanna;
