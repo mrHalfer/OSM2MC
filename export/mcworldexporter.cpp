@@ -424,6 +424,7 @@ enum : quint16
     IdBeetroots,                          // 'minecraft:beetroots' age=3
     IdStoneFence,                         // 'minecraft:stone_brick_wall' — the BASE of a stone fence: id = IdStoneFence + conn (north=1, east=2, south=4, west=8), pass 3.58
     IdStoneFenceMax = int(IdStoneFence) + 16,
+    IdVine,                               // 'minecraft:vine' without properties (the game connects the faces itself) — jungle trees
     IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
                                           //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
 };
@@ -554,6 +555,7 @@ static QString blockName(quint16 id)
     if (id == IdOrangePoplarLeaves) return QLatin1String("minecraft:orange_poplar_leaves");
     if (id == IdYellowPoplarLeaves) return QLatin1String("minecraft:yellow_poplar_leaves");
     if (id == IdLeafLitter) return QLatin1String("minecraft:leaf_litter");
+    if (id == IdVine) return QLatin1String("minecraft:vine");
     if (id >= IdCandleBase && id < IdCandleMax) return QLatin1String("minecraft:candle");
     if (id >= IdLecternBase && id < IdLecternMax) return QLatin1String("minecraft:lectern");
     if (id == IdPodzol) return QLatin1String("minecraft:podzol");
@@ -907,7 +909,7 @@ static bool isVegBlockId(quint16 bid)
 {
     if (bid == IdAir) return false;
     return bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdAcaciaLeaves || bid == IdJungleLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves
-        || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter || bid == IdPaleHangingMoss
+        || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter || bid == IdPaleHangingMoss || bid == IdVine
         || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass || bid == IdTallGrassUpper || bid == IdWheat
         || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
 }
@@ -11352,7 +11354,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     const QSet<ColKey> sprFill(fillChunks.constBegin(), fillChunks.constEnd());
     // Tree species by the climate zone: "oak" and "birch" in the planting code are replaced with the trunk+leaves pairs of the zone, the spruce cone — with a big broadleaf tree
     // where there are no conifers; density — the share of plantings that remain (in the desert and tundra trees are rare)
-    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; };
+    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; bool jungle; };
     const quint16 birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
     ZoneTrees zt{ IdOakLog, IdOakLeaves, birchLogRaw, IdBirchLeaves, 100, true };
     {
@@ -11366,7 +11368,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         case Climate::Mediterranean: zt.birchLog = IdOakLog; zt.birchLeaf = IdOakLeaves; zt.density = 60; zt.cone = false; break;
         case Climate::Desert:        zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 8, false }; break;
         case Climate::Savanna:       zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 35, false }; break;
-        case Climate::Tropical:      zt = ZoneTrees{ jng, IdJungleLeaves, jng, IdJungleLeaves, 100, false }; break;
+        case Climate::Tropical:      zt = ZoneTrees{ jng, IdJungleLeaves, jng, IdJungleLeaves, 100, false, true }; break;
         default: break;
         }
     }
@@ -11409,6 +11411,44 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         }
         return true;
     };
+    // Vines (like the game's jungle ones): a vine can stand in the crown itself (replacing a leaf),
+    // hang a thread of 1..5 blocks under a crown column, poke above the crown and grow along the trunk.
+    // The block is saved WITHOUT properties (as in a real world: the game connects the faces itself)
+    auto vineColumn = [&](int x, int z, int yBottom, int win)
+    {   // one crown column: the crown fills [yBottom, yBottom+win], decorate the column by its hash
+        const quint32 hr = colHash(pairKey(x, z) ^ 0x2ADEull);
+        int yTopC = -9999;
+        for (int y = yBottom + win; y >= yBottom; --y)
+            if (store.get(x, y, z) == IdJungleLeaves) { yTopC = y; break; }
+        if (yTopC < yBottom) return;                                   // the column has no crown (a trunk, an air gap)
+        const int roll = int(hr % 100u);
+        if (roll < 62) return;                                         // ~3 of 5 columns stay plain leaves
+        if (roll >= 84 && yTopC > yBottom && store.get(x, yTopC + 1, z) == IdAir)
+            store.set(x, yTopC + 1, z, IdVine);                        // a vine pokes above the crown
+        if (roll >= 76 && store.get(x, yBottom, z) == IdJungleLeaves)
+            store.set(x, yBottom, z, IdVine);                          // the vine stands IN the crown (a replaced leaf)
+        const int len = roll < 70 ? 1 + int((hr >> 8) % 2u) : 1 + int((hr >> 8) % 5u);
+        for (int k = 0; k < len; ++k)
+        {
+            const int y = yBottom - 1 - k;
+            if (store.get(x, y, z) != IdAir || store.get(x, y + 1, z) == IdAir) break;
+            store.set(x, y, z, IdVine);                                // the hanging thread under the column
+        }
+    };
+    auto jungleCrownVines = [&](int bx, int bz, int yBottom, int R)
+    {   // the crown of a 1×1 trunk (the far corners cut): every column of the lower layer is a candidate
+        for (int dx = -R; dx <= R; ++dx)
+            for (int dz = -R; dz <= R; ++dz)
+            {
+                if (std::abs(dx) == R && std::abs(dz) == R) continue;
+                if (!dx && !dz) continue;                              // the trunk column (vines near it — below)
+                vineColumn(bx + dx, bz + dz, yBottom, R + 2);
+            }
+        static const int kT[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+        for (const auto& t : kT)                                       // a vine against the trunk, inside the crown
+            if (colHash(pairKey(bx + t[0], bz + t[1]) ^ 0x51DEull) % 100u < 18u && store.get(bx + t[0], yBottom, bz + t[1]) == IdJungleLeaves)
+                store.set(bx + t[0], yBottom, bz + t[1], IdVine);
+    };
     // A broadleaf tree (birch etc.): a 1×1 trunk of the given block, a "diamond" crown of radius 2 of the given leaves; the crown does not go beyond the chunks with ground
     auto plantBroad = [&](int bx, int bz, int y0, int h, quint16 logId, quint16 leafId) -> bool
     {
@@ -11431,6 +11471,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir) store.set(bx + dx, topTree + dy, bz + dz, leafId);
                 }
         }
+        if (zt.jungle) jungleCrownVines(bx, bz, topTree - 2, 2);       // a jungle tree — a small one with vines (the game's look)
         return true;
     };
     // A tree of arbitrary size: a trunk of height h, a spherical crown of radius R (1..3) with cut corners — for intra-block greenery of different sizes
@@ -11455,6 +11496,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir) store.set(bx + dx, topTree + dy, bz + dz, leafId);
                 }
         }
+        if (zt.jungle && R >= 2) jungleCrownVines(bx, bz, topTree - R, R);
         return true;
     };
     // Spruce: in zones with conifers — a cone, in the others (steppe, desert, tropics…) — a big broadleaf tree of the zone instead of it
@@ -11462,6 +11504,71 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     {
         if (zt.cone) return zoneSkip(bx, bz) ? true : plantSpruceCone(bx, bz, y0, h, R);
         return plantSized(bx, bz, y0, std::max(4, std::min(h / 2 + 2, 9)), R >= 5 ? 3 : 2, IdOakLog, IdOakLeaves);
+    };
+    // A big jungle tree (like the game's one): a 2×2 trunk 10..16, a wide crown over the trunk top
+    // and 2..3 side branches with leaf caps at 60% of the height; vines hang under the crown rims
+    auto plantJungleBig = [&](int bx, int bz, int y0, quint32 hh) -> bool
+    {
+        const int h = 10 + int(hh % 17u);                               // the trunk 10..26 — the tree up to ~32 blocks tall (as in the game)
+        if (y0 + h + 6 > 255) return false;
+        for (int cxk = (bx - 5) >> 4; cxk <= ((bx + 6) >> 4); ++cxk)   // the crown and the branches entirely inside the fill
+            for (int czk = (bz - 5) >> 4; czk <= ((bz + 6) >> 4); ++czk)
+                if (!sprFill.contains(pairKey(cxk, czk))) return false;
+        const quint16 jng = zt.oakLog, leaf = zt.oakLeaf;
+        for (int dy = 0; dy < h; ++dy)                                 // the trunk is written over decorative grass too
+            for (int dx = 0; dx <= 1; ++dx)
+                for (int dz = 0; dz <= 1; ++dz)
+                    store.set(bx + dx, y0 + dy, bz + dz, jng);
+        const int topY = y0 + h;                                       // the crown around/over the trunk top (the trunk ends at topY - 1)
+        static const int kR[3] = { 5, 4, 3 };                          // a flat crown: 12 wide below, every layer 2 narrower (as in the game)
+        for (int li = 0; li < 3; ++li)
+        {
+            const int r = kR[li], lim = 4 * r - 4, y = topY - 1 + li;
+            for (int dx = -r; dx <= r + 1; ++dx)
+                for (int dz = -r; dz <= r + 1; ++dz)
+                {
+                    if (std::abs(2 * dx - 1) + std::abs(2 * dz - 1) > lim) continue;   // rounding the corners (from the 2×2 center)
+                    if (store.get(bx + dx, y, bz + dz) == IdAir)
+                        store.set(bx + dx, y, bz + dz, leaf);
+                }
+        }
+        for (int dx = -5; dx <= 6; ++dx)                               // vines along the whole skirt (as in the game)
+            for (int dz = -5; dz <= 6; ++dz)
+            {
+                if (std::abs(2 * dx - 1) + std::abs(2 * dz - 1) > 16) continue;
+                vineColumn(bx + dx, bz + dz, topY - 1, 3);
+            }
+        const int nBr = 2 + int((hh >> 8) % 2u);                       // 2..3 branches at ~60% of the height
+        static const int kDir[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
+        for (int b = 0; b < nBr; ++b)
+        {
+            const int d = (int(hh >> 12) + b * 2 + (b == 2 ? 1 : 0)) % 4;
+            const int ax = kDir[d][0], az = kDir[d][1];
+            const int pb = int((hh >> (16 + b * 3)) % 2u);             // which of the two trunk columns the branch grows from
+            const int yB = y0 + int(h * 3 / 5) + int((hh >> (22 + b * 2)) % 3u) - 1;
+            int sxp, szp;                                              // the first branch block next to the trunk
+            if (ax) { sxp = ax > 0 ? bx + 2 : bx - 1; szp = bz + pb; }
+            else    { szp = az > 0 ? bz + 2 : bz - 1; sxp = bx + pb; }
+            for (int i = 0; i < 2; ++i)                                // the branch's own trunk (2 blocks)
+            {
+                const int x = sxp + ax * i, z = szp + az * i;
+                if (store.get(x, yB, z) == IdAir) store.set(x, yB, z, jng);
+            }
+            const int tx = sxp + ax, tz = szp + az;                    // the tip: a 3×3 cap and its dome
+            for (int ex = -1; ex <= 1; ++ex)
+                for (int ez = -1; ez <= 1; ++ez)
+                {
+                    if (store.get(tx + ex, yB, tz + ez) == IdAir)
+                        store.set(tx + ex, yB, tz + ez, leaf);
+                    if ((ex == 1 || ex == -1) && (ez == 1 || ez == -1)) continue;
+                    if (store.get(tx + ex, yB + 1, tz + ez) == IdAir)
+                        store.set(tx + ex, yB + 1, tz + ez, leaf);
+                }
+            for (int ex = -1; ex <= 1; ++ex)                            // vines on the cap columns
+                for (int ez = -1; ez <= 1; ++ez)
+                    if (ex || ez) vineColumn(tx + ex, tz + ez, yB, 1);
+        }
+        return true;
     };
     // Pale oak: a 2×2 trunk of height h, a "cap" crown of radius 3, moss hanging under the crown edge, a "creaking heart" in the trunk
     auto plantPaleTree = [&](int bx, int bz, int y0, int h, quint32 hh)
@@ -11591,8 +11698,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 plantSized(bx, bz, y0, h, R, birch ? quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")) : quint16(IdOakLog), birch ? quint16(IdBirchLeaves) : quint16(IdOakLeaves));
                 continue;
             }
-            if (site.spruce)
+            if (site.spruce && !zt.jungle)
             {   // spruces of different sizes, MUCH rarer than oaks: some cells of the grid are empty, big and giant ones are a rarity
+                // (a tropical forest is a jungle: dense, every fifth tree big — it must not be thinned as a spruce one)
                 const quint32 hr = colHash(ck ^ 0x5B0Eull);
                 if (hr % 100u >= 38u) continue;                                      // ~38% of the cells of the 6×6 grid
                 const quint32 cls = (hr >> 8) % 100u;
@@ -11608,6 +11716,20 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 continue;
             }
             if (zoneSkip(bx, bz)) continue;
+            if (zt.jungle)
+            {   // a jungle forest (like the game's one): one in five — a big 2×2 tree with branches
+                // (where the 2×2 is free), the rest are thin trunks taller than the ordinary oak
+                const quint32 hj = colHash(ck ^ 0x3ADE11ull);
+                if (hj % 5u == 0u
+                    && !colMin.contains(pairKey(bx + 1, bz)) && !colMin.contains(pairKey(bx, bz + 1)) && !colMin.contains(pairKey(bx + 1, bz + 1))
+                    && !colWater.contains(pairKey(bx + 1, bz)) && !colWater.contains(pairKey(bx, bz + 1)) && !colWater.contains(pairKey(bx + 1, bz + 1))
+                    && spansContain(site.spans, bx + 1, bz) && spansContain(site.spans, bx, bz + 1) && spansContain(site.spans, bx + 1, bz + 1)
+                    && plantJungleBig(bx, bz, y0, hj))
+                    continue;
+                if (y0 + site.treeH + 6 > 255) continue;
+                plantBroad(bx, bz, y0, site.treeH + int(hj % 4u), IdOakLog, IdOakLeaves);   // the zone remap turns it into a jungle one with vines
+                continue;
+            }
             const int h = site.treeH - int(colHash(ck ^ 0x5EEDull) % 2u);   // trunks of different heights
             for (int dy = 0; dy < h; ++dy)
                 if (store.get(bx, y0 + dy, bz) == IdAir)
@@ -11814,6 +11936,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                             store.set(c.x() + ex, top + h + dy, c.y() + ez, IdJungleLeaves);
                     }
             }
+            jungleCrownVines(c.x(), c.y(), top + h - 2, 3);             // vines over the whole crown (the game's jungle look)
         }
         for (int g = 0; g < 7 && !land.isEmpty(); ++g)
         {   // bamboo groves
@@ -11942,6 +12065,17 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             for (int dy = 0; dy < h; ++dy)
                 if (store.get(bx, y0 + dy, bz) != IdAir) return false;    // not a single foreign stump in the trunk
             if (zoneSkip(bx, bz)) return true;
+            if (zt.jungle)
+            {   // big jungle trees grow on the empty lands too: every fifth tree (busyNear already
+                // cleared a 7×7 buffer around the trunk, plantJungleBig checks the crown chunks itself)
+                const quint32 hj = colHash(ck ^ 0x3ADE11ull);
+                if (hj % 5u == 0u && plantJungleBig(bx, bz, y0, hj)) return true;
+            }
+            if (g_zone == Climate::Tundra && colHash(ck ^ 0x51A7ull) % 100u < 50u)   // the tundra: half of the empty-land trees are spruces, the rest are birches
+            {
+                const int hs = 6 + int(colHash(ck ^ 0x2B19ull) % 6u);                // 6..11 — hardy short firs
+                if (plantSpruce(bx, bz, y0, hs, hs >= 8 ? 3 : 2)) return true;       // no room for the cone — a birch grows then
+            }
             const quint16 tLog = birch ? zt.birchLog : zt.oakLog, tLeaf = birch ? zt.birchLeaf : zt.oakLeaf;
             for (int dy = 0; dy < h; ++dy)
                 store.set(bx, y0 + dy, bz, tLog);
@@ -11958,6 +12092,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                             store.set(bx + dx, topTree + dy, bz + dz, tLeaf);
                     }
             }
+            if (zt.jungle) jungleCrownVines(bx, bz, topTree - 2, 2);   // the jungle trees of the fields/meadows — with vines too
             return true;
         };
         QVector<ColSpan> allForest;                                      // the whole forest — merged segments
