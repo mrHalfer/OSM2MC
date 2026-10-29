@@ -5,6 +5,9 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+### Added
+- The export report (the finish dialog and the log) now says how long the export took: "Exported in N min M s" after the statistics line.
+
 ## [1.1.26.10291] — 2026-10-29
 
 ### Changed

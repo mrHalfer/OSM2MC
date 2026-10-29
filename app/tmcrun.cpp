@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QCoreApplication>
 #include <QRandomGenerator>
+#include <QElapsedTimer>
 #include <QSet>
 #include "ogr_spatialref.h"
 #include <memory>
@@ -134,6 +135,7 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
 
     const TmcRunOptions opt = optIn;
     tmcStepLog("run: start");
+    QElapsedTimer tAll; tAll.start();                                      // the whole export: loading, scene building, world writing
     progress(0, 0, 0);
     TmcProject project;
     T3dSettings settings;
@@ -257,10 +259,14 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     if (!res.ok) return fail(QObject::tr("Export failed: %1").arg(res.error));
 
     const QString fmtName = opt.format == McWorldExporter::Format::Legacy121x ? QStringLiteral("1.21.x") : QStringLiteral("26.x");
+    const qint64 secAll = tAll.elapsed() / 1000;
+    const QString dur = secAll >= 3600 ? QObject::tr("%1 h %2 min").arg(secAll / 3600).arg((secAll % 3600) / 60)
+                          : secAll >= 60 ? QObject::tr("%1 min %2 s").arg(secAll / 60).arg(secAll % 60)
+                                         : QObject::tr("%1 s").arg(secAll);       // "Экспортировано за ..." in the report
     R.ok = true;
-    R.summary = QObject::tr("The Minecraft save was created:\n%1\n\nObjects: %2 (skipped: %3), blocks: %4, region files: %5.\n"
-                            "Unpack the archive into the saves folder and open the world in Minecraft %6%7.\n\n%8")
-                    .arg(R.outPath).arg(res.objectCount).arg(res.skippedCount).arg(res.blockCount).arg(res.regionCount).arg(fmtName)
+    R.summary = QObject::tr("The Minecraft save was created:\n%1\n\nObjects: %2 (skipped: %3), blocks: %4, region files: %5. Exported in %6.\n"
+                            "Unpack the archive into the saves folder and open the world in Minecraft %7%8.\n\n%9")
+                    .arg(R.outPath).arg(res.objectCount).arg(res.skippedCount).arg(res.blockCount).arg(res.regionCount).arg(dur).arg(fmtName)
                     .arg(opt.noiseWorld ? QObject::tr(" (seed %1)").arg(seed) : QString())
                     .arg(formatMcExportInfo(res.lairInfo));
     log(R.summary);
