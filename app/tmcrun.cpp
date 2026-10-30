@@ -1,4 +1,5 @@
 #include "app/tmcrun.h"
+#include "app/polygoneditor.h"                       // PolygonGeom::pointOnSurface for the default spawn
 #include "core/steplog.h"
 #include "export/climate.h"
 #include "input/tmcproject.h"
@@ -10,8 +11,10 @@
 #include <QCoreApplication>
 #include <QRandomGenerator>
 #include <QElapsedTimer>
+#include <QDateTime>
 #include <QSet>
 #include "ogr_spatialref.h"
+#include <algorithm>
 #include <memory>
 
 const char* const kTmcDefaultT3dName = "default.t3d";
@@ -209,6 +212,18 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     w.hasSpawnPoint = true;
     w.spawnMapX = scene.centerX;
     w.spawnMapY = scene.centerY;
+    if (!w.clipPolygon.isEmpty())
+    {   // default spawn — a point INSIDE the drawn boundary, like ST_PointOnSurface in PostGIS (the centroid when it
+        // falls inside, otherwise the middle of the longest inside span): a very long object sticking out of the
+        // boundary can drag the data center (block 0, 0) outside the generated area, and the bounding-box center of
+        // an irregular boundary lies outside its outline.
+        QPointF sp;
+        if (PolygonGeom::pointOnSurface(w.clipPolygon, sp))
+        {
+            w.spawnMapX = sp.x();
+            w.spawnMapY = sp.y();
+        }
+    }
     {   // the spawn point chosen by the user (a click in the preview or --spawn-lonlat); otherwise the data center
         double sx = opt.spawnX, sy = opt.spawnY;
         bool have = opt.hasSpawn;
@@ -236,7 +251,17 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     R.seed = seed;
 
     QString out = opt.outPath;
-    if (out.isEmpty())
+    if (!opt.savesDir.isEmpty())
+    {   // export setting: the world goes UNPACKED into the chosen saves folder (launcher, Modrinth/CurseForge instance), no zip
+        QString base = project.projectBaseName();
+        if (base.isEmpty()) base = QStringLiteral("tmc_export");
+        if (opt.format == McWorldExporter::Format::Legacy121x) base += QStringLiteral("_legacy");
+        out = QDir(opt.savesDir).filePath(base);
+        if (QFileInfo::exists(out))       // the same rule as for the zip: an existing save is not replaced, the new one gets the export date and time
+            out += QLatin1Char('_') + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+        w.unpackedFolder = true;
+    }
+    else if (out.isEmpty())
     {
         QString base = project.projectBaseName();
         if (base.isEmpty()) base = QStringLiteral("tmc_export");
@@ -245,6 +270,12 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
         const QFileInfo si(opt.source);
         const QString dir = opt.source.isEmpty() ? QDir::currentPath() : (si.isDir() ? si.absoluteFilePath() : si.absolutePath());
         out = QDir(dir).filePath(base + QStringLiteral(".zip"));
+        if (QFileInfo::exists(out))       // re-export of the same data: the previous world stays, the new one gets the export date and time
+        {
+            const QFileInfo oi(out);
+            out = QDir(oi.absolutePath()).filePath(oi.completeBaseName() + QLatin1Char('_')
+                  + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")) + QStringLiteral(".zip"));
+        }
     }
     R.outPath = QDir::toNativeSeparators(QFileInfo(out).absoluteFilePath());
     QDir().mkpath(QFileInfo(out).absolutePath());                       // the folder of the world file is created if it does not exist
@@ -253,7 +284,9 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     tmcStepLog("run: scene built");
     if (qEnvironmentVariableIsSet("MCX_STOP_AFTER_SCENE")) { R.ok = true; R.summary = QStringLiteral("MCX_STOP_AFTER_SCENE: world export skipped"); return R; }   // debugging: time the loading and the scene without exporting
     const McWorldExporter::Result res = McWorldExporter::Export(
-        scene.objects, scene.sampler, R.outPath, QFileInfo(out).completeBaseName(), cancel, opt.format,
+        scene.objects, scene.sampler, R.outPath,
+        w.unpackedFolder ? QFileInfo(out).fileName() : QFileInfo(out).completeBaseName(),      // a save folder name may contain dots
+        cancel, opt.format,
         [&](int done, int total, int stage) { progress(2 + stage, done, total); }, w);
     if (res.cancelled) { R.cancelled = true; R.error = QObject::tr("Export cancelled."); return R; }
     if (!res.ok) return fail(QObject::tr("Export failed: %1").arg(res.error));
@@ -264,11 +297,19 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
                           : secAll >= 60 ? QObject::tr("%1 min %2 s").arg(secAll / 60).arg(secAll % 60)
                                          : QObject::tr("%1 s").arg(secAll);       // "Экспортировано за ..." in the report
     R.ok = true;
-    R.summary = QObject::tr("The Minecraft save was created:\n%1\n\nObjects: %2 (skipped: %3), blocks: %4, region files: %5. Exported in %6.\n"
-                            "Unpack the archive into the saves folder and open the world in Minecraft %7%8.\n\n%9")
-                    .arg(R.outPath).arg(res.objectCount).arg(res.skippedCount).arg(res.blockCount).arg(res.regionCount).arg(dur).arg(fmtName)
-                    .arg(opt.noiseWorld ? QObject::tr(" (seed %1)").arg(seed) : QString())
-                    .arg(formatMcExportInfo(res.lairInfo));
+    if (w.unpackedFolder)
+        R.summary = QObject::tr("The Minecraft world was saved unpacked:\n%1\n\nObjects: %2 (skipped: %3), blocks: %4, region files: %5. Exported in %6.\n"
+                                "Open the world \"%7\" in Minecraft %8%9 from your saves.\n\n%10")
+                        .arg(R.outPath).arg(res.objectCount).arg(res.skippedCount).arg(res.blockCount).arg(res.regionCount).arg(dur)
+                        .arg(QFileInfo(out).fileName(), fmtName)
+                        .arg(opt.noiseWorld ? QObject::tr(" (seed %1)").arg(seed) : QString())
+                        .arg(formatMcExportInfo(res.lairInfo));
+    else
+        R.summary = QObject::tr("The Minecraft save was created:\n%1\n\nObjects: %2 (skipped: %3), blocks: %4, region files: %5. Exported in %6.\n"
+                                "Unpack the archive into the saves folder and open the world in Minecraft %7%8.\n\n%9")
+                        .arg(R.outPath).arg(res.objectCount).arg(res.skippedCount).arg(res.blockCount).arg(res.regionCount).arg(dur).arg(fmtName)
+                        .arg(opt.noiseWorld ? QObject::tr(" (seed %1)").arg(seed) : QString())
+                        .arg(formatMcExportInfo(res.lairInfo));
     log(R.summary);
     return R;
 }

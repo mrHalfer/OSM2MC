@@ -1,7 +1,11 @@
 #pragma once
 // A minimal zip writer (deflate with a fallback to store): local headers + the central directory + EOCD, everything is assembled in memory.
+// MiniDir is the same add() interface writing each entry as a file under a root folder (a world saved unpacked, as Minecraft keeps it).
 #include <QByteArray>
 #include <QDate>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QString>
 #include <QTime>
 #include <QVector>
@@ -121,4 +125,37 @@ private:
         quint16 method = 8;
     };
     QVector<Item> items;
+};
+
+//! Writes every add() entry to <root>/<name> right away (folders have no zip size limits and no need to keep the world in RAM).
+class MiniDir
+{
+public:
+    explicit MiniDir(const QString& root) : mRoot(root) {}
+    quint64 totalRaw = 0;
+    QString badFile, badWhy;                                    // the first failed entry (empty badWhy — everything written)
+
+    void add(const QString& name, const QByteArray& data)
+    {
+        if (!badWhy.isEmpty()) return;
+        const QString full = QDir::cleanPath(mRoot + QLatin1Char('/') + name);
+        QDir().mkpath(QFileInfo(full).absolutePath());
+        QFile f(full);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        {
+            badFile = full;
+            badWhy = f.errorString();
+            return;
+        }
+        if (f.write(data) != data.size())
+        {
+            badFile = full;
+            badWhy = QStringLiteral("incomplete write");
+            return;
+        }
+        totalRaw += quint64(data.size());
+    }
+
+private:
+    QString mRoot;
 };

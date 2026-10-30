@@ -31,6 +31,11 @@ OsmTileMap::OsmTileMap(QWidget* parent) : QWidget(parent), mAlive(std::make_shar
     mPool.setMaxThreadCount(2);
     mCacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/tiles");
     mEditor.setConverters([this](const QPointF& p) { return toWidget(p); }, [this](const QPointF& p) { return fromWidget(p); });
+    mEditor.setRestartDistance(PolygonGeom::kNewBoundaryMeters, [this](const QPointF& ll)   // a click >500 m from the drawn boundary starts a new one
+    {
+        const double sx = 111320.0 * std::cos(ll.y() * kPi / 180.0), sy = 110540.0;
+        return PolygonGeom::distToPolygonMeters(mEditor.points(), ll, sx, sy);
+    });
 }
 
 OsmTileMap::~OsmTileMap()

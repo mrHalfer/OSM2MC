@@ -15955,11 +15955,14 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     // raids, DIM-1/DIM1, ...) are created by the game itself at the first opening — checked with vanilla servers.
     if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
     MiniZip zip;
+    MiniDir dir(path);                          // unpackedFolder: the same entries become files under the world folder
+    auto addEntry = [&](const QString& name, const QByteArray& data)
+    { if (world.unpackedFolder) dir.add(name, data); else zip.add(name, data); };
     const QByteArray levelDat = buildLevelDat(levelName, spawnX, spawnY, spawnZ, format, genGroundTop, world);
-    zip.add(QStringLiteral("level.dat"), levelDat);
-    zip.add(QStringLiteral("level.dat_old"), levelDat);
+    addEntry(QStringLiteral("level.dat"), levelDat);
+    addEntry(QStringLiteral("level.dat_old"), levelDat);
     if (!legacy)
-        zip.add(QStringLiteral("data/minecraft/world_gen_settings.dat"), buildWorldGenSettings(genGroundTop, world));
+        addEntry(QStringLiteral("data/minecraft/world_gen_settings.dat"), buildWorldGenSettings(genGroundTop, world));
     // /locate and the Eye of Ender: our stronghold/city are written into chunks as "structure starts", but the game can find them by the placement grid
     // only if the structure_set has a position exactly in this chunk. The datapack in the world ADDS (the vanilla ones are not touched) its own structure_set
     // tmc:stronghold_here / tmc:ancient_city_here with the same structures: random_spread with a huge spacing (a 2048×2048 chunk cell) and a
@@ -15981,7 +15984,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         }
     }
     if (!world.attribution.isEmpty())
-        zip.add(QStringLiteral("ATTRIBUTION.txt"), world.attribution.toUtf8());       // Minecraft ignores unknown files in the save folder
+        addEntry(QStringLiteral("ATTRIBUTION.txt"), world.attribution.toUtf8());       // Minecraft ignores unknown files in the save folder
     if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()))
     {
         for (int ti = 0; ti < tplInst.size(); ++ti)
@@ -15989,9 +15992,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             const int salt = findPlacementSalt(qint64(world.seed), tplInst[ti].cx, tplInst[ti].cz, 2048);
             const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
                                                  "\"structures\":[{\"structure\":\"%2\",\"weight\":1}]}").arg(salt).arg(tplInst[ti].id).toUtf8();
-            zip.add(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/tpl_%1_%2.json").arg(tplInst[ti].id.section(QLatin1Char(':'), -1)).arg(ti), js);
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/tpl_%1_%2.json").arg(tplInst[ti].id.section(QLatin1Char(':'), -1)).arg(ti), js);
         }
-        zip.add(QStringLiteral("datapacks/tmc_lairs/pack.mcmeta"),
+        addEntry(QStringLiteral("datapacks/tmc_lairs/pack.mcmeta"),
                 QByteArray("{\"pack\":{\"description\":\"tMC: strongholds, ancient cities and ruined portals located\",\"min_format\":82,\"max_format\":121}}"));
         // ruined portals in forests: each gets its own structure_set with a salt at which the cell position coincides with the start chunk (/locate structure minecraft:ruined_portal)
         for (int pi = 0; pi < portalStarts.size(); ++pi)
@@ -15999,7 +16002,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             const int salt = findPlacementSalt(qint64(world.seed), portalStarts[pi].cx, portalStarts[pi].cz, 2048);
             const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
                                                  "\"structures\":[{\"structure\":\"minecraft:ruined_portal\",\"weight\":1}]}").arg(salt).toUtf8();
-            zip.add(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/ruined_portal_here_%1.json").arg(pi), js);
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/ruined_portal_here_%1.json").arg(pi), js);
         }
         for (const LairPlace& pl : lairSet.placed)
         {
@@ -16009,7 +16012,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             const bool city = (s.id == QLatin1String("ancient_city"));
             const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
                                                  "\"structures\":[{\"structure\":\"minecraft:%2\",\"weight\":1}]}").arg(salt).arg(s.id).toUtf8();
-            zip.add(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/%1.json")
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/%1.json")
                         .arg(city ? QStringLiteral("ancient_city_here") : QStringLiteral("stronghold_here")), js);
         }
     }
@@ -16054,7 +16057,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         }
         const int rx = keyFirst(it.key()), rz = keySecond(it.key());
         const QByteArray mca = buildRegionFile(it->order, it->payload, true);   // the chunks are already compressed
-        zip.add(regionDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz), mca);
+        addEntry(regionDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz), mca);
         ++res.regionCount;
     }
     tmcStepLog("post: block regions packed into the zip");
@@ -16072,11 +16075,25 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 progress(regTotal + eDone, packTotal, 3);              // the same "packing" phase
             ++eDone;
             const int rx = keyFirst(it.key()), rz = keySecond(it.key());
-            zip.add(entDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz),
+            addEntry(entDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz),
                     buildRegionFile(it->order, it->payload));
         }
     }
     tmcStepLog("post: entities packed");
+    if (world.unpackedFolder)
+    {   // files under the world folder — no archive, no zip limits
+        if (!dir.badWhy.isEmpty())
+        {
+            res.error = QObject::tr("Could not write the file %1: %2").arg(QDir::toNativeSeparators(dir.badFile), dir.badWhy);
+            return res;
+        }
+        if (progress) progress(0, 0, 11);
+        if (progress) progress(0, 0, 12);
+        tmcStepLog("post: world folder written");
+        res.ok = true;
+        res.zipBytes = qint64(dir.totalRaw);
+        return res;
+    }
     // The limits of the classic zip (without zip64): offsets/sizes are uint32, the number of entries is uint16.
     // For our format it is ~7000 region files — in reality there is never more, but an honest
     // error is better than silently breaking the archive.

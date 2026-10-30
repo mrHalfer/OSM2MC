@@ -11,6 +11,7 @@ struct TmcRunOptions
     QString source;                       //!< a .tqt project file, an OSM extract (.osm/.pbf) or a folder with shapefiles; empty — the current folder
     QString t3dPath;                      //!< .t3d settings file; empty — look for default.t3d (current folder, next to the exe, source folder), otherwise Wdf3D= from the project
     QString outPath;                      //!< world zip; empty — <project name>.zip in the current folder
+    QString savesDir;                     //!< GUI export setting: save the world UNPACKED into this "saves" folder (launcher/Modrinth/CurseForge); empty — the zip of outPath
     QString osmRulesPath;                 //!< JSON with the "OSM tags -> layer/code" rules (for an .osm/.pbf source); empty — osm_rules.json next to the file, the exe or in the current folder
     QString enhancerPath;                 //!< enhancer file tmc_buildings.dat; empty — look next to the exe / in the current folder
     bool noEnhancer = false;              //!< do not use the enhancer

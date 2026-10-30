@@ -92,6 +92,7 @@ int main(int argc, char* argv[])
     p.addOption({ QStringLiteral("osm-rules"), QObject::tr("JSON with the \"OSM tags -> layer and codes\" rules for an .osm/.pbf source (default: osm_rules.json next to the file/program)"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("osm-ini"), QObject::tr("a custom osmconf.ini for the OSM driver (by default generated from the tags used by the rules)"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("clip"), QObject::tr("export boundary — a polygon of WGS84 longitudes and latitudes: \"lon lat; lon lat; lon lat …\" (in the window — \"Boundary\")"), QStringLiteral("vertices") });
+    p.addOption({ QStringLiteral("saves-dir"), QObject::tr("save the world UNPACKED into this saves folder (a launcher or an instance folder), no zip — the world folder <name> is created inside it (in the window — \"Export settings\")"), QStringLiteral("folder") });
     p.addOption({ QStringLiteral("log"), QObject::tr("copy the log to a text file (UTF-8), handy with --nogui"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("enhancer"), QObject::tr("enhancer .dat file (fallback building type/height for OSM data); by default tmc_buildings.dat next to the program"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("no-enhancer"), QObject::tr("do not use the enhancer") });
@@ -106,7 +107,7 @@ int main(int argc, char* argv[])
     p.addOption({ QStringLiteral("debug"), QObject::tr("show the service fields in the window: paths to .t3d, the OSM rules and the enhancer, \"real meters\" (without the key the default files are always used)") });
     p.addOption({ QStringLiteral("gui-online"), QObject::tr("(for testing, with --gui-screenshot) online mode: \"lon lat zoom; lon lat; lon lat; …\" — map view and boundary vertices"), QStringLiteral("view") });
     p.addOption({ QStringLiteral("download-osm"), QObject::tr("download OSM data for the polygon \"lon lat; lon lat; …\" (up to 25 km²) into the --out file and exit; the result goes to the --log file"), QStringLiteral("vertices") });
-    p.addOption({ QStringLiteral("climate"), QObject::tr("climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical"), QStringLiteral("zone") });
+    p.addOption({ QStringLiteral("climate"), QObject::tr("climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid"), QStringLiteral("zone") });
     p.addOption({ QStringLiteral("net-test"), QObject::tr("(for testing) download a test OSM tile and a Nominatim reply, write the response codes to a file and exit"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("gui-switch-lang"), QObject::tr("(for testing, with --gui-screenshot) switch the interface language at run time (en or ru) before the screenshot; the saved choice is not changed"), QStringLiteral("en|ru") });
     p.addOption({ QStringLiteral("gui-project"), QObject::tr("(for testing, with --gui-screenshot) \"open:file\" or \"save:file\" — open or save a project file around the screenshot"), QStringLiteral("action:file") });
@@ -118,6 +119,7 @@ int main(int argc, char* argv[])
     if (!p.positionalArguments().isEmpty()) o.source = p.positionalArguments().first();
     o.t3dPath = p.value(QStringLiteral("t3d"));
     o.outPath = p.value(QStringLiteral("out"));
+    o.savesDir = p.value(QStringLiteral("saves-dir"));
     o.osmRulesPath = p.value(QStringLiteral("osm-rules"));
     o.dryRun = p.isSet(QStringLiteral("dry-run"));
     o.enhancerPath = p.value(QStringLiteral("enhancer"));

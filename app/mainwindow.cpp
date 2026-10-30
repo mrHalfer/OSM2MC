@@ -1,5 +1,6 @@
 ﻿#include "app/mainwindow.h"
 #include "ui_mainwindow.h"
+#include "app/exportsettingsdialog.h"
 #include "app/mappreview.h"
 #include "app/i18n.h"
 #include "app/osmonlinepanel.h"
@@ -130,6 +131,7 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
     connect(ui->btnOut, &QPushButton::clicked, this, &MainWindow::browseOut);
     connect(ui->genSeedButton, &QPushButton::clicked, this, &MainWindow::generateSeed);
     connect(ui->goButton, &QPushButton::clicked, this, &MainWindow::startExport);
+    connect(ui->exportDirButton, &QPushButton::clicked, this, &MainWindow::openExportSettings);
     connect(ui->cancelButton, &QPushButton::clicked, this, &MainWindow::cancelExport);
     connect(ui->flatRadio, &QRadioButton::toggled, this, [this](bool flat)
     {
@@ -207,6 +209,11 @@ void MainWindow::loadSettings(const TmcRunOptions& init)
     (noise ? ui->noiseRadio : ui->flatRadio)->setChecked(true);
     ui->cavesCheck->setChecked(init.caves);
     ui->realMetersCheck->setChecked(mDebug ? init.realMeters : true);
+    mExportDest = s.value(QStringLiteral("exportDest"), 0).toInt();
+    mSavesLauncher = s.value(QStringLiteral("savesLauncher")).toString();
+    mSavesModrinth = s.value(QStringLiteral("savesModrinth")).toString();
+    mSavesCurse = s.value(QStringLiteral("savesCurse")).toString();
+    updateExportDestUi();
     ui->datapackCheck->setChecked(s.value(QStringLiteral("locateDatapack"), init.locateDatapack).toBool() && init.locateDatapack);
     ui->seedEdit->setText(init.seed ? QString::number(init.seed) : QString());
     ui->cavesCheck->setEnabled(noise); ui->seedEdit->setEnabled(noise); ui->genSeedButton->setEnabled(noise);
@@ -226,6 +233,60 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("format"), ui->fmt121Radio->isChecked() ? 1 : 0);
 }
 
+QString MainWindow::resolvedSavesDir() const
+{
+    switch (mExportDest)
+    {
+    case 1:                                       // the launcher folder picked by the user; .minecraft itself means "saves" inside it
+        {
+            if (mSavesLauncher.isEmpty() || !QFileInfo::exists(mSavesLauncher)) return QString();
+            QString d = QDir::cleanPath(mSavesLauncher);
+            if (QFileInfo(d).fileName().compare(QStringLiteral(".minecraft"), Qt::CaseInsensitive) == 0)
+                d = QDir(d).filePath(QStringLiteral("saves"));
+            return d;
+        }
+    case 2:                                       // a Modrinth profile / CurseForge instance keeps its own saves folder
+    case 3:
+        {
+            const QString inst = mExportDest == 2 ? mSavesModrinth : mSavesCurse;
+            if (inst.isEmpty() || !QFileInfo::exists(inst)) return QString();
+            return QDir(inst).filePath(QStringLiteral("saves"));
+        }
+    default:
+        return QString();
+    }
+}
+
+void MainWindow::openExportSettings()
+{
+    ExportSettingsDialog dlg(this, mExportDest, mSavesLauncher, mSavesModrinth, mSavesCurse);
+    if (dlg.exec() != QDialog::Accepted) return;
+    mExportDest = dlg.dest();
+    mSavesLauncher = dlg.launcherDir();
+    mSavesModrinth = dlg.modrinthProfile();
+    mSavesCurse = dlg.curseInstance();
+    QSettings s;
+    s.setValue(QStringLiteral("exportDest"), mExportDest);
+    s.setValue(QStringLiteral("savesLauncher"), mSavesLauncher);
+    s.setValue(QStringLiteral("savesModrinth"), mSavesModrinth);
+    s.setValue(QStringLiteral("savesCurse"), mSavesCurse);
+    updateExportDestUi();
+}
+
+void MainWindow::updateExportDestUi()
+{
+    const QString dest = resolvedSavesDir();
+    const bool zipMode = dest.isEmpty();
+    ui->labelOut->setEnabled(zipMode);
+    ui->outEdit->setEnabled(zipMode);
+    ui->btnOut->setEnabled(zipMode);
+    const QString tip = zipMode ? QString()
+        : tr("The export destination chosen in \"Export settings\" overrides this field: %1").arg(QDir::toNativeSeparators(dest));
+    ui->labelOut->setToolTip(tip);
+    ui->outEdit->setToolTip(tip);
+    ui->btnOut->setToolTip(tip);
+}
+
 TmcRunOptions MainWindow::collect() const
 {
     TmcRunOptions o;
@@ -234,6 +295,7 @@ TmcRunOptions MainWindow::collect() const
     o.osmRulesPath = ui->osmRulesEdit->text().trimmed();
     o.enhancerPath = ui->enhancerEdit->text().trimmed();
     o.outPath = ui->outEdit->text().trimmed();
+    o.savesDir = resolvedSavesDir();          // the "Export settings" destination; empty — the zip as before
     o.format = ui->fmt121Radio->isChecked() ? McWorldExporter::Format::Legacy121x : McWorldExporter::Format::Native26x;
     o.noiseWorld = ui->noiseRadio->isChecked();
     o.caves = ui->cavesCheck->isChecked() && o.noiseWorld;

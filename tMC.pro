@@ -33,7 +33,7 @@ QMAKE_CXXFLAGS += /utf-8
 QMAKE_CFLAGS += /utf-8
 
 win32:{
-    VERSION = 1.1.26.10301
+    VERSION = 1.1.26.10302
     QMAKE_TARGET_COMPANY = "Denis Rakhmatullin (mrHalfer)"
     QMAKE_TARGET_PRODUCT = "tMC"
     QMAKE_TARGET_DESCRIPTION = "Minecraft world exporter"
@@ -42,6 +42,7 @@ win32:{
 
 HEADERS += \
     app/mainwindow.h \
+    app/exportsettingsdialog.h \
     app/tmcrun.h \
     app/mappreview.h \
     app/theme.h \
@@ -86,6 +87,7 @@ RESOURCES += \
 SOURCES += \
     app/main.cpp \
     app/mainwindow.cpp \
+    app/exportsettingsdialog.cpp \
     app/tmcrun.cpp \
     app/mappreview.cpp \
     app/theme.cpp \

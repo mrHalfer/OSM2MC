@@ -1,4 +1,5 @@
 #include "app/mappreview.h"
+#include "app/polygoneditor.h"
 #include "app/theme.h"
 #include "input/tmcproject.h"
 #include "input/t3dsettings.h"
@@ -257,6 +258,19 @@ int MapPreview::edgeAt(const QPoint& pos, QPointF* onEdge) const
     }
     return best;
 }
+QPointF MapPreview::defaultSpawn() const
+{
+    if (!mClipClosed || mClip.isEmpty()) return QPointF(mPrev.centerX, mPrev.centerY);
+    QPointF sp;                                       // the same rule as the exporter: a point inside the boundary, not its bbox center
+    if (PolygonGeom::pointOnSurface(mClip, sp)) return sp;
+    return QPointF(mPrev.centerX, mPrev.centerY);
+}
+
+double MapPreview::distToClipMeters(const QPointF& pt) const
+{
+    return PolygonGeom::distToPolygonMeters(mClip, pt, mPrev.unitsToMetersX, mPrev.unitsToMetersY);
+}
+
 void MapPreview::setSpawn(double x, double y) { mHasSpawn = true; mSpawnX = x; mSpawnY = y; update(); }
 void MapPreview::clearSpawn() { mHasSpawn = false; update(); }
 
@@ -386,11 +400,13 @@ void MapPreview::mouseReleaseEvent(QMouseEvent* e)
     }
     if (mTool == Tool::Clip)
     {
+        const QPointF pt = toProject(e->pos());
         QPointF q;
         const int edge = edgeAt(e->pos(), &q);
         if (edge >= 0) mClip.insert(edge + 1, toProject(q.toPoint()));
-        else if (!mClipClosed) mClip.push_back(toProject(e->pos()));
-        else return;
+        else if (!mClipClosed) mClip.push_back(pt);
+        else if (distToClipMeters(pt) <= PolygonGeom::kNewBoundaryMeters) return;    // near the finished boundary — keep it, the click is not ours
+        else { mClip.clear(); mClipClosed = false; mClip.push_back(pt); }            // far from it — start a new boundary from this click
         update();
         emit clipChanged();
         return;
@@ -497,9 +513,10 @@ void MapPreview::paintEvent(QPaintEvent*)
             p.drawText(tr, Qt::AlignCenter, t);
         }
     }
-    // spawn marker: the chosen one is a pin in the theme color with a white rim; the default (data center) is a pale ring
+    // spawn marker: the chosen one is a pin in the theme color with a white rim; the default (boundary center, else data center) is a pale ring
     const bool chosen = mHasSpawn;
-    const QPointF c = chosen ? toWidget(mSpawnX, mSpawnY) : toWidget(mPrev.centerX, mPrev.centerY);
+    const QPointF def = defaultSpawn();
+    const QPointF c = chosen ? toWidget(mSpawnX, mSpawnY) : toWidget(def.x(), def.y());
     if (chosen)
     {
         p.setPen(QPen(Qt::white, 3.5));

@@ -36,6 +36,7 @@ private slots:
     void browseOsmRules();
     void browseEnhancer();
     void browseOut();
+    void openExportSettings();                          //!< "Export settings": the destination of the exported world (zip / launcher / instance)
     void generateSeed();
     void startExport();
     void cancelExport();
@@ -65,6 +66,8 @@ private:
     //! file — the finished archive: then the window has the checkbox "Show the file in the folder"
     void showTextDialog(const QString& title, const QString& text, const QString& file = QString());
     void saveProjectFile();                                //!< "Save project…": the map view, the boundary, the marks and the world options into a .tmc file
+    QString resolvedSavesDir() const;                      //!< saves folder for the chosen export destination; empty — the zip (the saved path is gone)
+    void updateExportDestUi();                             //!< greys out the zip file row when the world goes to a launcher/instance
     void openProjectFile();                                //!< "Open project…"
     bool writeProject(const QString& path);
     bool readProject(const QString& path, QString* error);
@@ -81,6 +84,8 @@ private:
     QPushButton* mOpenProjBtn = nullptr;
     QPushButton* mSaveProjBtn = nullptr;
     QLabel* mClimateLabel = nullptr;
+    int mExportDest = 0;              //!< export destination setting: 0 — zip, 1 — launcher saves, 2 — Modrinth, 3 — CurseForge
+    QString mSavesLauncher, mSavesModrinth, mSavesCurse;   //!< saved choices of the "Export settings" dialog
     int mClimateAutoZone = -1;          //!< the climate zone detected for the data (-1 — not known yet)
     int mPreviewObjects = -1;           //!< the object count of the loaded preview (-1 — no preview)
     int mStageIdx = -1, mStageDone = 0, mStageTotal = 0;   //!< the current export stage (for the caption)

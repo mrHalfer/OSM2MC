@@ -355,6 +355,16 @@
            </spacer>
           </item>
           <item>
+           <widget class="QPushButton" name="exportDirButton">
+            <property name="toolTip">
+             <string>Where to save the exported world: zip, launcher or an instance</string>
+            </property>
+            <property name="text">
+             <string>Export settings</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QPushButton" name="goButton">
             <property name="text">
              <string>Export</string>

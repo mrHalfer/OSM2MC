@@ -31,6 +31,7 @@ public:
 
     //! Export boundary — a polygon. In edit mode: a click adds a vertex (a click on the first one closes it), dragging a vertex moves it,
     //! a click on an edge of a closed polygon inserts a vertex, the right button on a vertex deletes it. Coordinates are the data project coordinates.
+    //! A click farther than 500 m from a finished polygon clears it and starts a new one from that click.
     //! What a click on the map does: sets the spawn, edits the boundary or marks an entrance place (stronghold, Ancient City, Pale Garden)
     enum class Tool { Spawn, Clip, Stronghold, City, Pale };
     void setTool(Tool t);
@@ -83,4 +84,6 @@ private:
     int mDragVertex = -1;
     int vertexAt(const QPoint& pos) const;      //!< index of the vertex under the cursor or -1
     int edgeAt(const QPoint& pos, QPointF* onEdge = nullptr) const;   //!< index of the edge (from vertex i to i+1) under the cursor or -1
+    QPointF defaultSpawn() const;               //!< the data center, or the center of the drawn boundary (as the exporter does)
+    double distToClipMeters(const QPointF& pt) const;                 //!< distance to the closed boundary in meters; 0 — inside it
 };
