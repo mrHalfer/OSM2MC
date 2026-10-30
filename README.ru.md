@@ -72,7 +72,7 @@ tMC в пару кликов превратит карту в мир **Minecraft
 tMC источник.osm -o мир.zip --nogui --log run.log
 ```
 
-Основные ключи: `--format 26|1.21`, `--flat`, `--seed N`, `--caves 0|1`, `--climate auto|temperate|boreal|tundra|steppe|mediterranean|desert|savanna|tropical`,
+Основные ключи: `--format 26|1.21`, `--flat`, `--seed N`, `--caves 0|1`, `--climate auto|temperate|boreal|tundra|steppe|mediterranean|desert|savanna|tropical|monsoon|semi-arid|rainforest|dark-forest`,
 `--clip "lon lat; lon lat; ..."` (экспортировать только этот многоугольник), `--spawn-lonlat "lon lat"`, `--lang auto|en|ru`, `--theme auto|light|dark`,
 `--download-osm "lon lat; ..." -o область.osm` (скачать область до 25 км² и выйти), `--dry-run` (только загрузить и классифицировать данные). Полный список - `tMC --help`.
 Файл проекта `.tmc`, переданный аргументом, открывается в окне.

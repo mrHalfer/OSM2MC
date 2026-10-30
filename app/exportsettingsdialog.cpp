@@ -1,4 +1,5 @@
 #include "app/exportsettingsdialog.h"
+#include "app/theme.h"
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
@@ -11,51 +12,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLibrary>
-#include <QListView>
-#include <QScrollBar>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QVBoxLayout>
 
 namespace
 {
-// Max rows of an instance dropdown; with a stylesheet active QComboBox silently ignores maxVisibleItems,
-// so the popup view reports a capped sizeHint instead — the popup is sized and placed by that hint
-constexpr int kPopupRows = 10;
-
-class RowsCappedListView : public QListView
-{
-public:
-    using QListView::QListView;
-    QSize sizeHint() const override
-    {
-        const QSize base = QListView::sizeHint();
-        const int rh = qMax(sizeHintForRow(0), fontMetrics().height() + 6);
-        const int h = kPopupRows * rh + 2 * frameWidth() + 2;
-        return base.height() > h ? QSize(base.width(), h) : base;
-    }
-};
-
-// Sets up the capped dropdown of a combo (call before the items are added)
-void cappedPopup(QComboBox* box)
-{
-    box->setMaxVisibleItems(kPopupRows);
-    // a styled combo aligns its popup by the selected item, so with the last instance chosen the list opened
-    // UPWARD; the flag makes AlwaysDownComboStyle (theme.cpp) switch that hint off for this combo only
-    box->setProperty("tmcAlwaysDownPopup", true);
-    auto* lv = new RowsCappedListView;
-    box->setView(lv);
-    lv->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    // the theme's scrollbar handle (@border) is barely visible on the popup background — style the two
-    // dropdown scrollers right on the widget, that rule always reaches them
-    lv->verticalScrollBar()->setStyleSheet(QStringLiteral(
-        "QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }"
-        " QScrollBar::handle:vertical { background: #8a94a0; border-radius: 5px; min-height: 32px; }"
-        " QScrollBar::handle:vertical:hover { background: #6b7683; }"
-        " QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
-        " QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"));
-}
-
 QString appData() { return qEnvironmentVariable("APPDATA"); }
 QString userHome() { return QDir::homePath(); }
 
@@ -246,7 +208,7 @@ ExportSettingsDialog::ExportSettingsDialog(QWidget* parent, int dest, const QStr
 
     mRadio[2]->setText(tr("A Modrinth instance"));
     mModrinth = new QComboBox;
-    cappedPopup(mModrinth);                               // capped, opens below the combo
+    TmcTheme::setupCappedDropdown(mModrinth);               // capped, opens below the combo
     {
         auto* p = new QWidget;
         auto* l = new QHBoxLayout(p);
@@ -258,7 +220,7 @@ ExportSettingsDialog::ExportSettingsDialog(QWidget* parent, int dest, const QStr
 
     mRadio[3]->setText(tr("A CurseForge instance"));
     mCurse = new QComboBox;
-    cappedPopup(mCurse);
+    TmcTheme::setupCappedDropdown(mCurse);
     {
         auto* p = new QWidget;
         auto* l = new QHBoxLayout(p);

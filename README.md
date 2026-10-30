@@ -72,7 +72,7 @@ For scripts there is a mode without a window:
 tMC source.osm -o world.zip --nogui --log run.log
 ```
 
-Main options: `--format 26|1.21`, `--flat`, `--seed N`, `--caves 0|1`, `--climate auto|temperate|boreal|tundra|steppe|mediterranean|desert|savanna|tropical`,
+Main options: `--format 26|1.21`, `--flat`, `--seed N`, `--caves 0|1`, `--climate auto|temperate|boreal|tundra|steppe|mediterranean|desert|savanna|tropical|monsoon|semi-arid|rainforest|dark-forest`,
 `--clip "lon lat; lon lat; ..."` (export only this polygon), `--spawn-lonlat "lon lat"`, `--lang auto|en|ru`, `--theme auto|light|dark`,
 `--download-osm "lon lat; ..." -o area.osm` (download an area of up to 25 km² and exit), `--dry-run` (only load and classify the data). `tMC --help` lists everything.
 A `.tmc` project file passed as the argument opens in the window.

@@ -8,18 +8,18 @@
 
 namespace Climate
 {
-enum Zone { Temperate = 0, Boreal, Tundra, Steppe, Mediterranean, Desert, Savanna, Tropical, Monsoon, SemiArid, Count };
+enum Zone { Temperate = 0, Boreal, Tundra, Steppe, Mediterranean, Desert, Savanna, Tropical, Monsoon, SemiArid, Rainforest, DarkForest, Count };
 
 inline QString name(int z)
 {
-    static const char* const kNames[Count] = { QT_TRANSLATE_NOOP("Climate", "temperate (mixed forests)"), QT_TRANSLATE_NOOP("Climate", "boreal (taiga)"), QT_TRANSLATE_NOOP("Climate", "tundra (arctic)"), QT_TRANSLATE_NOOP("Climate", "steppe"), QT_TRANSLATE_NOOP("Climate", "Mediterranean"), QT_TRANSLATE_NOOP("Climate", "desert"), QT_TRANSLATE_NOOP("Climate", "savanna"), QT_TRANSLATE_NOOP("Climate", "tropical (jungle)"), QT_TRANSLATE_NOOP("Climate", "monsoon (palms and oaks)"), QT_TRANSLATE_NOOP("Climate", "semi-arid (palms and cacti)") };
+    static const char* const kNames[Count] = { QT_TRANSLATE_NOOP("Climate", "temperate (mixed forests)"), QT_TRANSLATE_NOOP("Climate", "boreal (taiga)"), QT_TRANSLATE_NOOP("Climate", "tundra (arctic)"), QT_TRANSLATE_NOOP("Climate", "steppe"), QT_TRANSLATE_NOOP("Climate", "Mediterranean"), QT_TRANSLATE_NOOP("Climate", "desert"), QT_TRANSLATE_NOOP("Climate", "savanna"), QT_TRANSLATE_NOOP("Climate", "tropical (jungle)"), QT_TRANSLATE_NOOP("Climate", "monsoon (palms and oaks)"), QT_TRANSLATE_NOOP("Climate", "semi-arid (palms and cacti)"), QT_TRANSLATE_NOOP("Climate", "temperate rainforest (big oaks)"), QT_TRANSLATE_NOOP("Climate", "dark forest (dark oaks)") };
     return QCoreApplication::translate("Climate", kNames[z >= 0 && z < Count ? z : 0]);
 }
 
-//! Short keys for the command line: temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid; -1 — not recognized
+//! Short keys for the command line: temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid, rainforest, dark-forest; -1 — not recognized
 inline int fromKey(const QString& key)
 {
-    static const char* const kKeys[Count] = { "temperate", "boreal", "tundra", "steppe", "mediterranean", "desert", "savanna", "tropical", "monsoon", "semi-arid" };
+    static const char* const kKeys[Count] = { "temperate", "boreal", "tundra", "steppe", "mediterranean", "desert", "savanna", "tropical", "monsoon", "semi-arid", "rainforest", "dark-forest" };
     for (int i = 0; i < Count; ++i) if (key.compare(QLatin1String(kKeys[i]), Qt::CaseInsensitive) == 0) return i;
     return -1;
 }
@@ -30,11 +30,21 @@ struct Rect { double lon0, lat0, lon1, lat1; };
 inline bool in(const Rect& r, double lon, double lat) { return lon >= r.lon0 && lon <= r.lon1 && lat >= r.lat0 && lat <= r.lat1; }
 }
 
-//! The zone by coordinates (degrees). Order of checks: deserts, tropical forests, savannas, the Mediterranean, steppes, then latitude belts.
+//! The zone by coordinates (degrees). Order of checks: the two "rectangle" forest zones, then deserts, tropical forests, savannas, the Mediterranean, steppes, then latitude belts.
 inline Zone fromLonLat(double lon, double lat)
 {
     using detail::Rect;
     using detail::in;
+    static const Rect kRainforest[] = {
+        { -124.7, 42.0, -117.0, 49.5 },   // Oregon and Washington — the big-oak and conifer rainforests of the Pacific Northwest
+        { -139.0, 48.3, -120.0, 58.5 },   // the coast of British Columbia and south-east Alaska (the Great Bear Rainforest)
+        { -76.5, -56.0, -70.3, -37.8 }    // south Chile and the foothills east of the Andes (Valdivian and Magellanic rainforests)
+    };
+    static const Rect kDarkForest[] = {
+        { 139.7, 41.4, 145.9, 45.8 },     // Hokkaido
+        { 145.9, 43.0, 153.5, 48.0 },     // the southern Kurils
+        { 37.2, 40.9, 41.2, 43.6 }        // the western Caucasus: the Colchic forests about Sochi and Abkhazia
+    };
     static const Rect kDesert[] = {
         { -17, 15, 35, 31 },    // Sahara
         { 35, 16, 60, 31 },     // Arabia
@@ -84,6 +94,8 @@ inline Zone fromLonLat(double lon, double lat)
     static const Rect kSemiArid[] = {
         { -98.0, 25.8, -89.0, 31.2 }   // the Gulf coast: southern Texas and coastal Louisiana — sand, cacti, palms and oaks
     };
+    for (const Rect& r : kRainforest) if (in(r, lon, lat)) return Rainforest;   // before the Mediterranean and the steppes: the Chilean rainforest is west of their rectangles
+    for (const Rect& r : kDarkForest) if (in(r, lon, lat)) return DarkForest;    // before them too: the Colchic forests sit inside the Mediterranean rectangle
     for (const Rect& r : kMonsoon) if (in(r, lon, lat)) return Monsoon;
     for (const Rect& r : kSemiArid) if (in(r, lon, lat)) return SemiArid;
     for (const Rect& r : kDesert) if (in(r, lon, lat)) return Desert;

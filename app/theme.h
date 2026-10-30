@@ -3,6 +3,7 @@
 #include <QColor>
 
 class QApplication;
+class QComboBox;
 
 namespace TmcTheme
 {
@@ -19,4 +20,6 @@ struct Colors
 void apply(QApplication& app, Mode mode = Mode::Auto);
 //! Colors of the current theme (after apply)
 const Colors& colors();
+//! Dropdown of an instance/zone combo: at most 10 visible rows, always opens below the field, visible scrollbar (call before the items are added)
+void setupCappedDropdown(QComboBox* box);
 }

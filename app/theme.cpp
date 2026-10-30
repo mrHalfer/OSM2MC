@@ -1,8 +1,11 @@
 #include "app/theme.h"
 #include <QApplication>
+#include <QComboBox>
 #include <QFile>
+#include <QListView>
 #include <QPalette>
 #include <QProxyStyle>
+#include <QScrollBar>
 #include <QSettings>
 #include <QStyleFactory>
 #include <QWidget>
@@ -45,6 +48,23 @@ public:
         if (hint == SH_ComboBox_Popup && w && w->property("tmcAlwaysDownPopup").toBool())
             return 0;
         return QProxyStyle::styleHint(hint, opt, w, ret);
+    }
+};
+
+// Max rows of a capped dropdown; with a stylesheet active QComboBox silently ignores maxVisibleItems,
+// so the popup view reports a capped sizeHint instead — the popup is sized and placed by that hint
+constexpr int kPopupRows = 10;
+
+class RowsCappedListView : public QListView
+{
+public:
+    using QListView::QListView;
+    QSize sizeHint() const override
+    {
+        const QSize base = QListView::sizeHint();
+        const int rh = qMax(sizeHintForRow(0), fontMetrics().height() + 6);
+        const int h = kPopupRows * rh + 2 * frameWidth() + 2;
+        return base.height() > h ? QSize(base.width(), h) : base;
     }
 };
 }
@@ -94,4 +114,23 @@ void apply(QApplication& app, Mode mode)
 }
 
 const Colors& colors() { return g_colors; }
+
+void setupCappedDropdown(QComboBox* box)
+{
+    box->setMaxVisibleItems(kPopupRows);
+    // the flag makes AlwaysDownComboStyle (above) switch the "align the popup by the selected item" hint
+    // off for this combo, so the dropdown always opens below the field
+    box->setProperty("tmcAlwaysDownPopup", true);
+    auto* lv = new RowsCappedListView;
+    box->setView(lv);
+    lv->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    // the theme's scrollbar handle (@border) is barely visible on the popup background — style the scroller
+    // right on the widget, that rule always reaches it (the popup is a separate window)
+    lv->verticalScrollBar()->setStyleSheet(QStringLiteral(
+        "QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }"
+        " QScrollBar::handle:vertical { background: #8a94a0; border-radius: 5px; min-height: 32px; }"
+        " QScrollBar::handle:vertical:hover { background: #6b7683; }"
+        " QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        " QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"));
+}
 }

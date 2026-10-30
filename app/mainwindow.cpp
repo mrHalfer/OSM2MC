@@ -5,6 +5,7 @@
 #include "app/i18n.h"
 #include "app/osmonlinepanel.h"
 #include "app/osmtilemap.h"
+#include "app/theme.h"
 #include "app/uimetrics.h"
 #include "export/climate.h"
 #include <QtWidgets>
@@ -111,6 +112,7 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
         mClimateLabel = new QLabel(tr("Climate:"));
         auto* lbl = mClimateLabel;
         mClimate = new QComboBox;
+        TmcTheme::setupCappedDropdown(mClimate);          // same dropdown as the export settings combos (call before the items)
         mClimate->addItem(tr("Auto (by data coordinates)"), -1);
         for (int z = 0; z < Climate::Count; ++z) mClimate->addItem(Climate::name(z), z);
         mClimate->setToolTip(tr("Tree species, surface and biome inside the export area; the world around the area is not changed by this."));

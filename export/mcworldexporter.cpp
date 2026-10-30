@@ -189,6 +189,8 @@ static const NamedColor kBlockPalette[] = {
     { "minecraft:redstone_block",       175,  24,   5 },
     // Desert open lands: cacti (age=0 — the default, saved without properties)
     { "minecraft:cactus",                20, 122,  32 },
+    // Dark forests (climate zones): the trunk of the dark oak (the leaves are a special id, see IdDarkOakLeaves)
+    { "minecraft:dark_oak_log",          66,  43,  20 },
 };
 
 //! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
@@ -416,6 +418,7 @@ enum : quint16
     IdAcaciaLeaves,                       // 'minecraft:acacia_leaves' distance=2 persistent=true — trees of savannas and deserts (climate zones)
     IdSpruceLeaves,                       // 'minecraft:spruce_leaves' distance=2 persistent=true — spruces of the 71111110 forests
     IdBirchLeaves,                        // 'minecraft:birch_leaves' — birches around schools
+    IdDarkOakLeaves,                      // 'minecraft:dark_oak_leaves' distance=2 persistent=true — dark forests (climate zones)
     IdRedPoplarLeaves,                    // 'minecraft:red_poplar_leaves' (26.x) — the "motley forest" around kindergartens
     IdOrangePoplarLeaves,
     IdYellowPoplarLeaves,
@@ -553,6 +556,7 @@ static QString blockName(quint16 id)
     if (id == IdAcaciaLeaves) return QLatin1String("minecraft:acacia_leaves");
     if (id == IdSpruceLeaves) return QLatin1String("minecraft:spruce_leaves");
     if (id == IdBirchLeaves) return QLatin1String("minecraft:birch_leaves");
+    if (id == IdDarkOakLeaves) return QLatin1String("minecraft:dark_oak_leaves");
     if (id == IdRedPoplarLeaves) return QLatin1String("minecraft:red_poplar_leaves");
     if (id == IdOrangePoplarLeaves) return QLatin1String("minecraft:orange_poplar_leaves");
     if (id == IdYellowPoplarLeaves) return QLatin1String("minecraft:yellow_poplar_leaves");
@@ -773,6 +777,7 @@ static void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
     case IdAcaciaLeaves:
     case IdSpruceLeaves:
     case IdBirchLeaves:
+    case IdDarkOakLeaves:
     case IdRedPoplarLeaves:
     case IdOrangePoplarLeaves:
     case IdYellowPoplarLeaves:
@@ -898,7 +903,7 @@ static bool isPaleForestCode(int code)
 static bool isForestExtraVeg(quint16 bid)
 {
     if (bid < IdPaletteStart || bid >= IdPaletteStart + kPaletteCount) return false;
-    static const char* const kNames[] = { "minecraft:birch_log", "minecraft:spruce_log", "minecraft:jungle_log", "minecraft:jungle_leaves", "minecraft:acacia_log", "minecraft:dead_bush", "minecraft:fern", "minecraft:sweet_berry_bush",
+    static const char* const kNames[] = { "minecraft:birch_log", "minecraft:spruce_log", "minecraft:jungle_log", "minecraft:jungle_leaves", "minecraft:acacia_log", "minecraft:dark_oak_log", "minecraft:dead_bush", "minecraft:fern", "minecraft:sweet_berry_bush",
                                            "minecraft:brown_mushroom", "minecraft:red_mushroom", "minecraft:lily_pad", "minecraft:bamboo", "minecraft:sugar_cane", "minecraft:pale_moss_block" };
     static QSet<quint16> ids;
     if (ids.isEmpty())
@@ -910,7 +915,7 @@ static bool isForestExtraVeg(quint16 bid)
 static bool isVegBlockId(quint16 bid)
 {
     if (bid == IdAir) return false;
-    return bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdAcaciaLeaves || bid == IdJungleLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves
+    return bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdDarkOakLeaves || bid == IdAcaciaLeaves || bid == IdJungleLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves
         || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter || bid == IdPaleHangingMoss || bid == IdVine
         || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass || bid == IdTallGrassUpper || bid == IdWheat
         || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
@@ -10730,6 +10735,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         case Climate::Tropical:      b[0] = b[7] = "minecraft:jungle"; b[2] = b[3] = b[4] = b[5] = b[6] = "minecraft:jungle"; break;
         case Climate::Monsoon:       b[4] = kPlains; break;   // oaks and palms around the schools — not a birch forest
         case Climate::SemiArid:      b[0] = b[2] = b[3] = b[4] = b[5] = b[6] = b[7] = "minecraft:savanna"; break;   // sand surface, the savanna's green tint of the leaves
+        case Climate::Rainforest:    b[0] = "minecraft:forest"; break;   // the open lands of a temperate rainforest are forest too
+        case Climate::DarkForest:    b[0] = b[2] = b[3] = b[4] = b[5] = b[6] = b[7] = "minecraft:dark_forest"; break;
         default: break;
         }
         for (int i = 0; i < 8; ++i) g_biomeName[i] = b[i];
@@ -11358,7 +11365,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     const QSet<ColKey> sprFill(fillChunks.constBegin(), fillChunks.constEnd());
     // Tree species by the climate zone: "oak" and "birch" in the planting code are replaced with the trunk+leaves pairs of the zone, the spruce cone — with a big broadleaf tree
     // where there are no conifers; density — the share of plantings that remain (in the desert and tundra trees are rare)
-    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; bool jungle; int palmShare; };   // palmShare — the percent of palms among the planted trees (0 — none)
+    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; bool jungle; int palmShare; int bigOakShare; };   // palmShare — the percent of palms among the planted trees (0 — none); bigOakShare — the percent of big oaks in broadleaf forests (0 — none)
     const quint16 birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
     ZoneTrees zt{ IdOakLog, IdOakLeaves, birchLogRaw, IdBirchLeaves, 100, true };
     {
@@ -11375,6 +11382,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         case Climate::Tropical:      zt = ZoneTrees{ jng, IdJungleLeaves, jng, IdJungleLeaves, 100, false, true }; break;
         case Climate::Monsoon:       zt.birchLog = IdOakLog; zt.birchLeaf = IdOakLeaves; zt.density = 60; zt.cone = false; zt.palmShare = 80; break;   // oaks and palms, no conifers
         case Climate::SemiArid:      zt = ZoneTrees{ IdOakLog, IdOakLeaves, IdOakLog, IdOakLeaves, 30, false, false, 50 }; break;   // the Gulf coast: sparse oaks and palms on sand, cacti on the open lands
+        case Climate::Rainforest:    zt.bigOakShare = 35; break;   // the Pacific Northwest: every third tree in broadleaf forests is a big oak with branches
+        case Climate::DarkForest:    { const quint16 dko = quint16(IdPaletteStart + paletteIndexOf("minecraft:dark_oak_log"));
+                                       zt = ZoneTrees{ dko, IdDarkOakLeaves, dko, IdDarkOakLeaves, 100, false }; } break;   // Hokkaido and Colchis: every tree is a dark oak, the spruce sites grow big broadleaf ones instead of cones
         default: break;
         }
     }
@@ -11509,7 +11519,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     auto plantSpruce = [&](int bx, int bz, int y0, int h, int R) -> bool
     {
         if (zt.cone) return zoneSkip(bx, bz) ? true : plantSpruceCone(bx, bz, y0, h, R);
-        return plantSized(bx, bz, y0, std::max(4, std::min(h / 2 + 2, 9)), R >= 5 ? 3 : 2, IdOakLog, IdOakLeaves);
+        return plantSized(bx, bz, y0, std::max(4, std::min(h / 2 + 2, 9)), R >= 5 ? 3 : 2, zt.oakLog, zt.oakLeaf);   // the zone's own broadleaf (a dark forest grows dark oaks here)
     };
     // A big jungle tree (like the game's one): a 2×2 trunk 10..16, a wide crown over the trunk top
     // and 2..3 side branches with leaf caps at 60% of the height; vines hang under the crown rims
@@ -11573,6 +11583,58 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             for (int ex = -1; ex <= 1; ++ex)                            // vines on the cap columns
                 for (int ez = -1; ez <= 1; ++ez)
                     if (ex || ez) vineColumn(tx + ex, tz + ez, yB, 1);
+        }
+        return true;
+    };
+    // A big oak (temperate rainforest): a 2×2 trunk 8..12 tall, a wide round crown (the ordinary oak's
+    // "diamond" scaled up) and 2..3 bare branches under its edge — an ordinary oak is shorter and has none
+    auto plantBigOak = [&](int bx, int bz, int y0, quint32 hh) -> bool
+    {
+        const int h = 8 + int(hh % 5u);                                        // trunk 8..12 (an ordinary oak is 5..7)
+        if (y0 + h + 4 > 255) return false;
+        for (int cxk = (bx - 4) >> 4; cxk <= ((bx + 5) >> 4); ++cxk)           // the crown and the branches entirely inside the fill
+            for (int czk = (bz - 4) >> 4; czk <= ((bz + 5) >> 4); ++czk)
+                if (!sprFill.contains(pairKey(cxk, czk))) return false;
+        const quint16 log = zt.oakLog, leaf = zt.oakLeaf;
+        for (int dy = 0; dy < h; ++dy)
+            for (int dx = 0; dx <= 1; ++dx)
+                for (int dz = 0; dz <= 1; ++dz)
+                    store.set(bx + dx, y0 + dy, bz + dz, log);
+        const int topTree = y0 + h - 1;
+        static const int kR[4] = { 4, 4, 3, 1 };                               // the crown layers from the bottom skirt up
+        for (int li = 0; li < 4; ++li)
+        {
+            const int r = kR[li], y = topTree + li - 2;
+            for (int dx = -r; dx <= r + 1; ++dx)
+                for (int dz = -r; dz <= r + 1; ++dz)
+                {
+                    const double fx = dx - 0.5, fz = dz - 0.5;
+                    if (fx * fx + fz * fz > (r + 0.6) * (r + 0.6)) continue;   // rounding the corners (from the 2×2 center)
+                    if (store.get(bx + dx, y, bz + dz) == IdAir)
+                        store.set(bx + dx, y, bz + dz, leaf);
+                }
+        }
+        const int nBr = 2 + int((hh >> 8) % 2u);                               // 2..3 bare branches under the crown skirt
+        static const int kDir[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
+        for (int b = 0; b < nBr; ++b)
+        {
+            const int d = (int(hh >> 12) + b * 2 + (b == 2 ? 1 : 0)) % 4;
+            const int ax = kDir[d][0], az = kDir[d][1];
+            const int pb = int((hh >> (16 + b * 3)) % 2u);                     // which of the two trunk columns the branch grows from
+            const int yB = y0 + h - 5 + int((hh >> (22 + b * 2)) % 2u);
+            int sxp, szp;
+            if (ax) { sxp = ax > 0 ? bx + 2 : bx - 1; szp = bz + pb; }
+            else    { szp = az > 0 ? bz + 2 : bz - 1; sxp = bx + pb; }
+            for (int i = 0; i < 2; ++i)                                        // the branch itself (2 blocks)
+            {
+                const int x = sxp + ax * i, z = szp + az * i;
+                if (store.get(x, yB, z) == IdAir) store.set(x, yB, z, log);
+            }
+            const int tx = sxp + ax * 2, tz = szp + az * 2;                    // the tip: a leaf cap tucked under the crown
+            for (int ex = -1; ex <= 1; ++ex)
+                for (int ez = -1; ez <= 1; ++ez)
+                    if ((ex || ez) && store.get(tx + ex, yB + 1, tz + ez) == IdAir)
+                        store.set(tx + ex, yB + 1, tz + ez, leaf);
         }
         return true;
     };
@@ -11778,6 +11840,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 plantBroad(bx, bz, y0, site.treeH + int(hj % 4u), IdOakLog, IdOakLeaves);   // the zone remap turns it into a jungle one with vines
                 continue;
             }
+            if (zt.bigOakShare && colHash(ck ^ 0x2A17Cull) % 100u < quint32(zt.bigOakShare)
+                && !colMin.contains(pairKey(bx + 1, bz)) && !colMin.contains(pairKey(bx, bz + 1)) && !colMin.contains(pairKey(bx + 1, bz + 1))
+                && !colWater.contains(pairKey(bx + 1, bz)) && !colWater.contains(pairKey(bx, bz + 1)) && !colWater.contains(pairKey(bx + 1, bz + 1))
+                && spansContain(site.spans, bx + 1, bz) && spansContain(site.spans, bx, bz + 1) && spansContain(site.spans, bx + 1, bz + 1)
+                && plantBigOak(bx, bz, y0, colHash(ck ^ 0x73F91ull)))
+                continue;                                                     // a temperate rainforest: every third broadleaf tree is a big oak (where the 2×2 is free)
             const int h = site.treeH - int(colHash(ck ^ 0x5EEDull) % 2u);   // trunks of different heights
             for (int dy = 0; dy < h; ++dy)
                 if (store.get(bx, y0 + dy, bz) == IdAir)
