@@ -1,6 +1,7 @@
 ﻿#include "app/mainwindow.h"
 #include "ui_mainwindow.h"
 #include "app/exportsettingsdialog.h"
+#include "app/exportmeta.h"                             // the "export" section of the .tmc project file
 #include "app/mappreview.h"
 #include "app/i18n.h"
 #include "app/osmonlinepanel.h"
@@ -146,7 +147,7 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
     connect(ui->preview, &MapPreview::spawnPicked, this, &MainWindow::onSpawnPicked);
     connect(ui->clipClearButton, &QPushButton::clicked, this, [this]() { ui->preview->clearClip(); });
     connect(ui->resetMarksButton, &QPushButton::clicked, this, [this]() { ui->preview->clearMarks(); });
-    connect(ui->preview, &MapPreview::clipChanged, this, &MainWindow::updateClipInfo);
+    connect(ui->preview, &MapPreview::clipChanged, this, [this]() { updateClipInfo(); updateClimateAutoZone(); });
     connect(ui->preview, &MapPreview::marksChanged, this, &MainWindow::updateClipInfo);
     connect(ui->sourceEdit, &QLineEdit::textChanged, this, &MainWindow::onSourceChanged);
     // the path was typed by hand — load the preview when the input is finished
@@ -488,14 +489,7 @@ void MainWindow::onPreviewReady()
         return;
     }
     ui->preview->setPreview(p);
-    {   // in the climate list "auto" shows which zone was detected for the data center
-        double lon = 0, lat = 0;
-        if (tmcProjectToLonLat(p.wkt, p.centerX, p.centerY, lon, lat))
-        {
-            mClimateAutoZone = Climate::fromLonLat(lon, lat);
-            updateClimateItems();
-        }
-    }
+    updateClimateAutoZone();                                 // the zone for the "Auto:" label (the boundary's center when drawn)
     if (!mPendingClip.isEmpty())
     {   // the boundary of the downloaded area (longitude/latitude) -> the data projection
         QVector<QPointF> pts;
@@ -587,6 +581,34 @@ bool MainWindow::writeProject(const QString& path)
     opt.insert(QStringLiteral("climate"), mClimate->currentData().toInt());
     opt.insert(QStringLiteral("out"), ui->outEdit->text().trimmed());
     root.insert(QStringLiteral("options"), opt);
+    {   // the same export info as the world archive gets in its root (app/exportmeta.h); the machine paths live in the usual keys above
+        const TmcRunOptions o = collect();
+        const TmcPreview& pv = ui->preview->preview();
+        TmcExportMeta::Params p;
+        p.format = o.format == McWorldExporter::Format::Legacy121x ? QStringLiteral("1.21.x") : QStringLiteral("26.x");
+        p.noiseWorld = o.noiseWorld;
+        p.caves = o.caves;
+        p.datapack = o.locateDatapack;
+        p.realMeters = o.realMeters;
+        p.greenery = !o.noGreenery;
+        p.enhancer = !o.noEnhancer;
+        p.seed = o.seed;                                       // as the user typed it; 0 — random at export time
+        p.climate = o.climate < 0 ? QStringLiteral("auto") : QString::fromLatin1(Climate::key(o.climate));
+        p.climateResolved = mClimateAutoZone;                  // -1 — unknown until the preview is loaded
+        if (pv.ok) p.dataBbox = TmcExportMeta::bboxLonLat(pv.wkt, pv.x0, pv.y0, pv.x1, pv.y1);
+        for (const QPointF& v : clip) p.clip.append(QJsonArray{ v.x(), v.y() });
+        static const char* const kMarkNames[4] = { "spawn", "stronghold", "city", "paleForest" };
+        for (int i = 0; i < 4; ++i)
+        {
+            if (!markSet[i]) continue;
+            if (i == 0) { p.spawn = QJsonArray{ marks[i].x(), marks[i].y() }; continue; }
+            QJsonObject mo; mo.insert(QStringLiteral("lonLat"), QJsonArray{ marks[i].x(), marks[i].y() });
+            const QString chunk = i == 1 ? mInit.strongholdChunk : (i == 2 ? mInit.cityChunk : mInit.paleForestChunk);
+            if (!chunk.isEmpty()) mo.insert(QStringLiteral("chunk"), chunk);
+            p.marks.insert(QLatin1String(kMarkNames[i]), mo);
+        }
+        root.insert(QStringLiteral("export"), TmcExportMeta::build(p));
+    }
     QDir().mkpath(QFileInfo(path).absolutePath());
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly)) return false;
@@ -694,6 +716,32 @@ void MainWindow::updateDefaultHints()
     hint(ui->t3dEdit, "default.t3d");
     hint(ui->osmRulesEdit, "osm_rules.json");
     hint(ui->enhancerEdit, "tmc_buildings.dat");
+}
+
+void MainWindow::updateClimateAutoZone()
+{
+    const TmcPreview p = ui->preview->preview();
+    if (!p.ok)
+    {   // no preview (file not loaded): the auto zone is unknown again
+        if (mClimateAutoZone != -1) { mClimateAutoZone = -1; updateClimateItems(); }
+        return;
+    }
+    double cx = p.centerX, cy = p.centerY;                   // fallback: the center of the loaded data
+    const QVector<QPointF> clip = ui->preview->clipPolygon();
+    if (!clip.isEmpty())
+    {   // the export boundary is drawn — the climate is of its bounding box center, not of the whole loaded file
+        double minX = clip.first().x(), maxX = minX, minY = clip.first().y(), maxY = minY;
+        for (const QPointF& v : clip)
+        {
+            minX = qMin(minX, v.x()); maxX = qMax(maxX, v.x());
+            minY = qMin(minY, v.y()); maxY = qMax(maxY, v.y());
+        }
+        cx = 0.5 * (minX + maxX); cy = 0.5 * (minY + maxY);
+    }
+    double lon = 0, lat = 0;
+    if (!tmcProjectToLonLat(p.wkt, cx, cy, lon, lat)) return;
+    const int z = Climate::fromLonLat(lon, lat);
+    if (z != mClimateAutoZone) { mClimateAutoZone = z; updateClimateItems(); }
 }
 
 void MainWindow::updateClimateItems()

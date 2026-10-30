@@ -16053,6 +16053,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     }
     if (!world.attribution.isEmpty())
         addEntry(QStringLiteral("ATTRIBUTION.txt"), world.attribution.toUtf8());       // Minecraft ignores unknown files in the save folder
+    if (!world.exportInfo.isEmpty())
+        addEntry(QStringLiteral("export_info.json"), world.exportInfo.toUtf8());       // the info about this export (app/exportmeta.h)
     if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()))
     {
         for (int ti = 0; ti < tplInst.size(); ++ti)

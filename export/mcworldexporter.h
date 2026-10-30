@@ -171,6 +171,8 @@ public:
         int climateZone = 0;
         //! The attribution of the source data (for OpenStreetMap — the ODbL line): if not empty, it is written into the root of the zip as ATTRIBUTION.txt
         QString attribution;
+        //! The JSON info about this export (app/exportmeta.h): if not empty, it is written into the root of the zip (or of the unpacked saves folder) as export_info.json
+        QString exportInfo;
         //! true — the world is written UNPACKED into the folder given as the output path (a saves folder of the launcher/an instance), no zip archive
         bool unpackedFolder = false;
     };

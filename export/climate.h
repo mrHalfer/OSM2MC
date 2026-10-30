@@ -16,19 +16,26 @@ inline QString name(int z)
     return QCoreApplication::translate("Climate", kNames[z >= 0 && z < Count ? z : 0]);
 }
 
-//! Short keys for the command line: temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid, rainforest, dark-forest; -1 — not recognized
-inline int fromKey(const QString& key)
-{
-    static const char* const kKeys[Count] = { "temperate", "boreal", "tundra", "steppe", "mediterranean", "desert", "savanna", "tropical", "monsoon", "semi-arid", "rainforest", "dark-forest" };
-    for (int i = 0; i < Count; ++i) if (key.compare(QLatin1String(kKeys[i]), Qt::CaseInsensitive) == 0) return i;
-    return -1;
-}
-
 namespace detail
 {
+inline const char* const* zoneKeys()
+{
+    static const char* const kKeys[Count] = { "temperate", "boreal", "tundra", "steppe", "mediterranean", "desert", "savanna", "tropical", "monsoon", "semi-arid", "rainforest", "dark-forest" };
+    return kKeys;
+}
 struct Rect { double lon0, lat0, lon1, lat1; };
 inline bool in(const Rect& r, double lon, double lat) { return lon >= r.lon0 && lon <= r.lon1 && lat >= r.lat0 && lat <= r.lat1; }
 }
+
+//! Short keys for the command line: temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid, rainforest, dark-forest; -1 — not recognized
+inline int fromKey(const QString& key)
+{
+    for (int i = 0; i < Count; ++i) if (key.compare(QLatin1String(detail::zoneKeys()[i]), Qt::CaseInsensitive) == 0) return i;
+    return -1;
+}
+
+//! The command-line key of a zone (also written into the export info, see app/exportmeta.cpp)
+inline const char* key(int z) { return detail::zoneKeys()[z >= 0 && z < Count ? z : 0]; }
 
 //! The zone by coordinates (degrees). Order of checks: the two "rectangle" forest zones, then deserts, tropical forests, savannas, the Mediterranean, steppes, then latitude belts.
 inline Zone fromLonLat(double lon, double lat)
@@ -36,12 +43,13 @@ inline Zone fromLonLat(double lon, double lat)
     using detail::Rect;
     using detail::in;
     static const Rect kRainforest[] = {
-        { -124.7, 42.0, -117.0, 49.5 },   // Oregon and Washington — the big-oak and conifer rainforests of the Pacific Northwest
+        { -124.7, 42.0, -121.0, 49.5 },   // Oregon and Washington — WEST of the Cascades (the dry interior stays in the belts)
         { -139.0, 48.3, -120.0, 58.5 },   // the coast of British Columbia and south-east Alaska (the Great Bear Rainforest)
-        { -76.5, -56.0, -70.3, -37.8 }    // south Chile and the foothills east of the Andes (Valdivian and Magellanic rainforests)
+        { -76.5, -47.0, -72.0, -37.8 },   // the Valdivian forests — the western slope of the Andes, not the Argentinian foothills
+        { -75.5, -56.0, -69.5, -47.0 }    // the Magellanic rainforests: the fjord coast and the Chilean side of Tierra del Fuego
     };
     static const Rect kDarkForest[] = {
-        { 139.7, 41.4, 145.9, 45.8 },     // Hokkaido
+        { 139.7, 41.6, 145.9, 44.2 },     // Hokkaido south of the Okhotsk taiga coast (41.6 keeps the tip of Honshu out); the north stays a spruce mix of the belts
         { 145.9, 43.0, 153.5, 48.0 },     // the southern Kurils
         { 37.2, 40.9, 41.2, 43.6 }        // the western Caucasus: the Colchic forests about Sochi and Abkhazia
     };

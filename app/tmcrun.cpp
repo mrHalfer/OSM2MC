@@ -1,4 +1,5 @@
 #include "app/tmcrun.h"
+#include "app/exportmeta.h"                           // the export_info.json written into the world archive
 #include "app/polygoneditor.h"                       // PolygonGeom::pointOnSurface for the default spawn
 #include "core/steplog.h"
 #include "export/climate.h"
@@ -199,9 +200,21 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
         }
     if (opt.climate >= 0) { w.climateZone = opt.climate; log(QObject::tr("Climate zone: %1 (chosen manually)").arg(Climate::name(opt.climate))); }
     else
-    {   // automatic: by the latitude/longitude of the data center
+    {   // automatic: the center of the EXPORT boundary when one is drawn (the user chose exactly that piece of the
+        // loaded file), otherwise the center of the loaded data; the same rule as the "Auto:" label in the window
+        double cx = scene.centerX, cy = scene.centerY;
+        if (w.clipPolygon.size() >= 3)
+        {   // the center of the boundary's bounding box
+            double minX = w.clipPolygon.first().x(), maxX = minX, minY = w.clipPolygon.first().y(), maxY = minY;
+            for (const QPointF& v : w.clipPolygon)
+            {
+                minX = qMin(minX, v.x()); maxX = qMax(maxX, v.x());
+                minY = qMin(minY, v.y()); maxY = qMax(maxY, v.y());
+            }
+            cx = 0.5 * (minX + maxX); cy = 0.5 * (minY + maxY);
+        }
         double lon = 0, lat = 0;
-        if (tmcProjectToLonLat(project.wkt(), scene.centerX, scene.centerY, lon, lat))
+        if (tmcProjectToLonLat(project.wkt(), cx, cy, lon, lat))
         {
             w.climateZone = Climate::fromLonLat(lon, lat);
             log(QObject::tr("Climate zone: %1 (automatic: longitude %2, latitude %3)").arg(Climate::name(w.climateZone)).arg(lon, 0, 'f', 2).arg(lat, 0, 'f', 2));
@@ -249,6 +262,14 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     if (opt.noiseWorld && seed == 0) seed = (QRandomGenerator::global()->generate64() >> 2) + 1;
     w.seed = seed;
     R.seed = seed;
+    {   // the info about this export for the root of the archive / the saves folder; machine paths are never written (app/exportmeta.h)
+        double bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+        project.bounds(bx0, by0, bx1, by1);
+        TmcRunOptions mo = opt;                                   // a metadata view of the options: the boundary as resolved (--clip arrives into w, not opt)
+        mo.clipPolygon = w.clipPolygon;
+        w.exportInfo = QString::fromUtf8(TmcExportMeta::toJson(
+            TmcExportMeta::fromRun(mo, project.wkt(), bx0, by0, bx1, by1, seed, w.climateZone, w.hasSpawnPoint, w.spawnMapX, w.spawnMapY)));
+    }
 
     QString out = opt.outPath;
     if (!opt.savesDir.isEmpty())

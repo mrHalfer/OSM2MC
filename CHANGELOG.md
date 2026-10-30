@@ -5,12 +5,14 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
-## [1.1.26.10304] — 2026-10-30
+## [1.2.26.10305] — 2026-10-30
 
 ### Added
 - Two new climate zones. "Temperate rainforest (big oaks)" — Oregon and Washington, the coast of British Columbia and south-east Alaska, and the Valdivian and Magellanic forests of south Chile and the Argentinian foothills: broadleaf forests where every third tree is a big branched oak. "Dark forest (dark oaks)" — Hokkaido with the southern Kurils and the Colchic forests of the western Caucasus: every tree there is a dark oak. Also on the command line: `--climate rainforest` and `--climate dark-forest`.
+- Every exported world carries an `export_info.json` in the root of the archive (or of the saves folder): the exporter version, the bounding box of the loaded data, the export boundary, the chosen spawn point and structure marks (stronghold, ancient city, pale oak forest), and all export settings including the climate zone actually used. The same info goes into the "export" section of a `.tmc` project file saved with "Save project". Paths to the source file or folder are never written, so the archive stays safe to share.
 
 ### Changed
+- The automatic climate zone is now detected from the center of the drawn export boundary, not from the center of all loaded data (without a boundary it works as before); the "auto" item in the "Climate" dropdown updates while the boundary is drawn or cleared.
 - The "Climate" dropdown in the main window behaves like the ones in the export settings: it always opens below the field, shows at most 10 zones and scrolls with a visible scrollbar.
 
 ## [1.1.26.10303] — 2026-10-30

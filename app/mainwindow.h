@@ -75,6 +75,7 @@ private:
     void applyEditionTexts();                              //!< the texts of the simple (non-debug) window
     void updateDefaultHints();                             //!< "default: path" placeholders of the service fields
     void updateClimateItems();                             //!< the names in the climate list
+    void updateClimateAutoZone();                          //!< re-detects the "auto" zone: the export boundary's center, else the loaded data's center
     void updateStageLabel();                               //!< the stage caption under the progress bar
 
     QComboBox* mClimate = nullptr;

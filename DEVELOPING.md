@@ -29,7 +29,7 @@ The Russian translation of the interface is `translations/tmc_ru.ts` (embedded i
 
 ### Version
 
-`VERSION` in `tMC.pro` has the form `1.0.YY.MMDDN`: `YY` — the year, `MMDD` — the month and day, `N` — the number of the build of the day (1–9; a same-day hotfix takes the next digit), for example `1.0.26.10281`, `1.0.26.10282`. The last number must stay ≤ 65535 (a Windows limit). Change only that line.
+`VERSION` in `tMC.pro` has the form `1.2.YY.MMDDN`: `YY` — the year, `MMDD` — the month and day, `N` — the number of the build of the day (1–9; a same-day hotfix takes the next digit), for example `1.2.26.10281`, `1.2.26.10282`. The last number must stay ≤ 65535 (a Windows limit). Change only that line. After a version change touch `app/exportmeta.cpp` (its timestamp, not its content) before building: the version reaches the code as a `-D` define and nmake does not recompile sources when only defines change.
 
 ## Changelog
 

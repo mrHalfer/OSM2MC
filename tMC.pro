@@ -32,8 +32,10 @@ RC_LANG = 0x0419
 QMAKE_CXXFLAGS += /utf-8
 QMAKE_CFLAGS += /utf-8
 
+    VERSION = 1.2.26.10305
+# The version string in the code (export info, app/exportmeta.cpp)
+DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
-    VERSION = 1.1.26.10304
     QMAKE_TARGET_COMPANY = "Denis Rakhmatullin (mrHalfer)"
     QMAKE_TARGET_PRODUCT = "tMC"
     QMAKE_TARGET_DESCRIPTION = "Minecraft world exporter"
@@ -42,6 +44,7 @@ win32:{
 
 HEADERS += \
     app/mainwindow.h \
+    app/exportmeta.h \
     app/exportsettingsdialog.h \
     app/tmcrun.h \
     app/mappreview.h \
@@ -87,6 +90,7 @@ RESOURCES += \
 SOURCES += \
     app/main.cpp \
     app/mainwindow.cpp \
+    app/exportmeta.cpp \
     app/exportsettingsdialog.cpp \
     app/tmcrun.cpp \
     app/mappreview.cpp \
