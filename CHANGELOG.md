@@ -5,6 +5,18 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.1.26.10303] — 2026-10-30
+
+### Added
+- In the "Export settings" lists of Modrinth and CurseForge instances each name also tells the game version and the mod loader of the instance, e.g. "My Pack (26.3, Forge 66.1.0)" or "My Pack (26.3, Vanilla)"; when that cannot be found out the plain instance name is shown.
+
+### Changed
+- The instance lists show at most 10 instances at a time and scroll further; the "Export settings" window uses a larger font.
+
+### Fixed
+- The instance dropdown always opens below the field: with the last instance selected the list used to grow upward.
+- The dropdown scrollbar is clearly visible in both the light and the dark theme (it was there but nearly invisible).
+
 ## [1.1.26.10302] — 2026-10-30
 
 ### Added

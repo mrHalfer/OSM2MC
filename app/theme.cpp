@@ -2,8 +2,10 @@
 #include <QApplication>
 #include <QFile>
 #include <QPalette>
+#include <QProxyStyle>
 #include <QSettings>
 #include <QStyleFactory>
+#include <QWidget>
 
 namespace
 {
@@ -30,6 +32,21 @@ Tokens darkTokens()
 {
     return { "#15171c", "#1e2128", "#171a20", "#2d323c", "#4a5262", "#e7e9ee", "#8d95a5", "#262b33", "#3fb877", "#4cc886", "#35a068" };
 }
+
+//! The combos carrying the property "tmcAlwaysDownPopup" always open their dropdown below the combo:
+//! a styled combo aligns the popup by the selected item, so with the last entry chosen the list opened upward
+class AlwaysDownComboStyle : public QProxyStyle
+{
+public:
+    explicit AlwaysDownComboStyle(QStyle* base) : QProxyStyle(base) {}
+    int styleHint(StyleHint hint, const QStyleOption* opt = nullptr, const QWidget* w = nullptr,
+                  QStyleHintReturn* ret = nullptr) const override
+    {
+        if (hint == SH_ComboBox_Popup && w && w->property("tmcAlwaysDownPopup").toBool())
+            return 0;
+        return QProxyStyle::styleHint(hint, opt, w, ret);
+    }
+};
 }
 
 namespace TmcTheme
@@ -39,7 +56,7 @@ void apply(QApplication& app, Mode mode)
     const bool dark = mode == Mode::Dark || (mode == Mode::Auto && systemIsDark());
     const Tokens t = dark ? darkTokens() : lightTokens();
 
-    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    app.setStyle(new AlwaysDownComboStyle(QStyleFactory::create(QStringLiteral("Fusion"))));
     QPalette pal;
     pal.setColor(QPalette::Window, t.bg);
     pal.setColor(QPalette::WindowText, t.text);

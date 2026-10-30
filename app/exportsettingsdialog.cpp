@@ -5,18 +5,160 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLibrary>
+#include <QListView>
+#include <QScrollBar>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QVBoxLayout>
 
 namespace
 {
+// Max rows of an instance dropdown; with a stylesheet active QComboBox silently ignores maxVisibleItems,
+// so the popup view reports a capped sizeHint instead — the popup is sized and placed by that hint
+constexpr int kPopupRows = 10;
+
+class RowsCappedListView : public QListView
+{
+public:
+    using QListView::QListView;
+    QSize sizeHint() const override
+    {
+        const QSize base = QListView::sizeHint();
+        const int rh = qMax(sizeHintForRow(0), fontMetrics().height() + 6);
+        const int h = kPopupRows * rh + 2 * frameWidth() + 2;
+        return base.height() > h ? QSize(base.width(), h) : base;
+    }
+};
+
+// Sets up the capped dropdown of a combo (call before the items are added)
+void cappedPopup(QComboBox* box)
+{
+    box->setMaxVisibleItems(kPopupRows);
+    // a styled combo aligns its popup by the selected item, so with the last instance chosen the list opened
+    // UPWARD; the flag makes AlwaysDownComboStyle (theme.cpp) switch that hint off for this combo only
+    box->setProperty("tmcAlwaysDownPopup", true);
+    auto* lv = new RowsCappedListView;
+    box->setView(lv);
+    lv->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    // the theme's scrollbar handle (@border) is barely visible on the popup background — style the two
+    // dropdown scrollers right on the widget, that rule always reaches them
+    lv->verticalScrollBar()->setStyleSheet(QStringLiteral(
+        "QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }"
+        " QScrollBar::handle:vertical { background: #8a94a0; border-radius: 5px; min-height: 32px; }"
+        " QScrollBar::handle:vertical:hover { background: #6b7683; }"
+        " QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        " QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"));
+}
+
 QString appData() { return qEnvironmentVariable("APPDATA"); }
 QString userHome() { return QDir::homePath(); }
+
+QString loaderName(const QString& raw)             // "neoforge" -> "NeoForge", "forge" -> "Forge", ...
+{
+    if (raw.compare(QLatin1String("neoforge"), Qt::CaseInsensitive) == 0) return QStringLiteral("NeoForge");
+    if (raw.isEmpty()) return QString();
+    QString s = raw;
+    s[0] = s.at(0).toUpper();
+    return s;
+}
+
+// "26.3, Forge 66.1.0" — the game version and the mod loader of a CurseForge instance, as told by its manifest
+QString curseNote(const QJsonObject& o)
+{
+    if (o.isEmpty()) return QString();             // unreadable manifest — the plain name will do
+    QString loader;
+    const QJsonObject b = o.value(QStringLiteral("baseModLoader")).toObject();
+    const QString bn = b.value(QStringLiteral("name")).toString();       // "forge-66.1.0", "fabric-0.20.1-26.3", "neoforge-26.3.0.99"
+    if (bn.startsWith(QStringLiteral("neoforge-")))
+        loader = QStringLiteral("NeoForge");
+    else if (bn.startsWith(QStringLiteral("forge-")))
+        loader = QStringLiteral("Forge");
+    else if (bn.startsWith(QStringLiteral("fabric-")))
+        loader = QStringLiteral("Fabric");
+    else if (bn.startsWith(QStringLiteral("quilt-")))
+        loader = QStringLiteral("Quilt");
+    else if (!bn.isEmpty())
+        loader = bn;                                                     // an unusual manifest: show the loader's own name
+    else switch (b.value(QStringLiteral("type")).toInt())                // the name is missing — the numeric type is the stable field
+    {
+        case 1: loader = QStringLiteral("Forge"); break;
+        case 2: loader = QStringLiteral("Rift"); break;
+        case 3: loader = QStringLiteral("LiteLoader"); break;
+        case 4: loader = QStringLiteral("Fabric"); break;
+        case 5: loader = QStringLiteral("Quilt"); break;
+        case 6: loader = QStringLiteral("NeoForge"); break;
+        default: break;
+    }
+    if (loader.isEmpty())
+        loader = QStringLiteral("Vanilla");                              // no baseModLoader at all
+    else
+    {
+        QString lver = b.value(QStringLiteral("forgeVersion")).toString();   // CurseForge keeps the loader version in this field for every loader
+        if (lver.isEmpty() && !bn.isEmpty())                            // last resort: the version sits in the loader name after "loader-"
+            lver = bn.mid(bn.indexOf(QLatin1Char('-')) + 1);
+        if (!lver.isEmpty()) loader += QLatin1Char(' ') + lver;
+    }
+    const QString gv = o.value(QStringLiteral("gameVersion")).toString();
+    return gv.isEmpty() ? loader : gv + QStringLiteral(", ") + loader;
+}
+
+// Modrinth keeps the instances in a SQLite file ModrinthApp/app.db (instances.path = the profile folder name);
+// sqlite3.dll is always available — it comes next to the exe as a GDAL dependency. Folder -> "26.3, Fabric 0.20.1".
+// An empty hash when the version cannot be read for any reason — the plain instance names are shown then.
+QHash<QString, QString> modrinthNotes(const QString& profilesRoot)
+{
+    QHash<QString, QString> notes;
+    const QString dbFile = QDir(profilesRoot).filePath(QStringLiteral("../app.db"));
+    if (!QFileInfo::exists(dbFile)) return notes;
+    QLibrary sqlite(QStringLiteral("sqlite3"));
+    if (!sqlite.load()) return notes;
+    typedef int (*OpenFn)(const char*, void**, int, const char*);
+    typedef int (*PrepareFn)(void*, const char*, int, void**, const char**);
+    typedef int (*StepFn)(void*);
+    typedef const unsigned char* (*TextFn)(void*, int);
+    typedef int (*FinishFn)(void*);
+    const OpenFn open = reinterpret_cast<OpenFn>(sqlite.resolve("sqlite3_open_v2"));
+    const PrepareFn prepare = reinterpret_cast<PrepareFn>(sqlite.resolve("sqlite3_prepare_v2"));
+    const StepFn step = reinterpret_cast<StepFn>(sqlite.resolve("sqlite3_step"));
+    const TextFn text = reinterpret_cast<TextFn>(sqlite.resolve("sqlite3_column_text"));
+    const FinishFn finish = reinterpret_cast<FinishFn>(sqlite.resolve("sqlite3_finalize"));
+    const FinishFn closev2 = reinterpret_cast<FinishFn>(sqlite.resolve("sqlite3_close_v2"));
+    if (!open || !prepare || !step || !text || !finish || !closev2) return notes;
+
+    void* db = nullptr;
+    if (open(dbFile.toUtf8().constData(), &db, 0x00000001 /*SQLITE_OPEN_READONLY*/, nullptr) != 0)
+    {
+        if (db) closev2(db);
+        return notes;                                                    // locked or broken — the plain names will do
+    }
+    void* st = nullptr;
+    const char* q = "SELECT i.path, s.game_version, s.loader, s.loader_version"
+                    " FROM instances AS i LEFT JOIN instance_content_sets AS s ON s.id = i.applied_content_set_id";
+    if (prepare(db, q, -1, &st, nullptr) == 0 && st)
+    {
+        while (step(st) == 100 /*SQLITE_ROW*/)
+        {
+            const QString folder = QString::fromUtf8(reinterpret_cast<const char*>(text(st, 0)));
+            const QString gv = QString::fromUtf8(reinterpret_cast<const char*>(text(st, 1)));
+            QString loader = loaderName(QString::fromUtf8(reinterpret_cast<const char*>(text(st, 2))));
+            const QString lv = QString::fromUtf8(reinterpret_cast<const char*>(text(st, 3)));
+            if (folder.isEmpty()) continue;
+            if (!loader.isEmpty() && !lv.isEmpty()) loader += QLatin1Char(' ') + lv;
+            QString note = gv;
+            if (!loader.isEmpty()) note += note.isEmpty() ? loader : QStringLiteral(", ") + loader;
+            if (!note.isEmpty()) notes.insert(folder, note);
+        }
+    }
+    finish(st);
+    closev2(db);
+    return notes;
+}
 }
 
 QString ExportSettingsDialog::modrinthRoot()
@@ -37,17 +179,24 @@ QVector<QPair<QString, QString>> ExportSettingsDialog::scanInstances(const QStri
     const QDir rd(root);
     if (!rd.exists()) return out;
     const QStringList dirs = rd.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);   // the newest instances first
+    const bool modrinth = qstrcmp(manifestFile, "mcinstance.json") == 0;
+    const QHash<QString, QString> mrNotes = modrinth ? modrinthNotes(root) : QHash<QString, QString>();
     for (const QString& d : dirs)
     {
         const QString full = rd.filePath(d);
         QFile mf(QDir(full).filePath(QString::fromLatin1(manifestFile)));
-        QString name = d;
+        QString name = d, note;
         if (mf.open(QIODevice::ReadOnly))
         {                                   // the instance's own name from its manifest, the folder name is the fallback
             const QJsonObject o = QJsonDocument::fromJson(mf.readAll()).object();
             const QString n = o.value(QStringLiteral("name")).toString();
             if (!n.isEmpty()) name = n;
+            if (qstrcmp(manifestFile, "minecraftinstance.json") == 0)
+                note = curseNote(o);        // the CurseForge manifest also tells the game version and the mod loader
         }
+        if (note.isEmpty() && modrinth)
+            note = mrNotes.value(d);        // Modrinth: the app.db knows the version and the loader of this folder
+        if (!note.isEmpty()) name += QStringLiteral(" (%1)").arg(note);
         out.append(qMakePair(name, QDir::toNativeSeparators(full)));
     }
     return out;
@@ -58,6 +207,8 @@ ExportSettingsDialog::ExportSettingsDialog(QWidget* parent, int dest, const QStr
     : QDialog(parent)
 {
     setWindowTitle(tr("Where to save the exported world?"));
+    // the app-wide qss pins 10pt on every widget ("* { font-size }"); this closer rule with a more specific selector wins
+    setStyleSheet(QStringLiteral("QWidget { font-size: 12pt; }"));
     auto* v = new QVBoxLayout(this);
 
     for (int i = 0; i < 4; ++i)
@@ -95,6 +246,7 @@ ExportSettingsDialog::ExportSettingsDialog(QWidget* parent, int dest, const QStr
 
     mRadio[2]->setText(tr("A Modrinth instance"));
     mModrinth = new QComboBox;
+    cappedPopup(mModrinth);                               // capped, opens below the combo
     {
         auto* p = new QWidget;
         auto* l = new QHBoxLayout(p);
@@ -106,6 +258,7 @@ ExportSettingsDialog::ExportSettingsDialog(QWidget* parent, int dest, const QStr
 
     mRadio[3]->setText(tr("A CurseForge instance"));
     mCurse = new QComboBox;
+    cappedPopup(mCurse);
     {
         auto* p = new QWidget;
         auto* l = new QHBoxLayout(p);

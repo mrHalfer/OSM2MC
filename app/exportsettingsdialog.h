@@ -29,7 +29,9 @@ public:
     //! Standard roots of instances (empty — the app is not installed there)
     static QString modrinthRoot();
     static QString curseRoot();
-    //! Instance folders inside root: (name from the manifest or folder name, full path)
+    //! Instance folders inside root: (name from the manifest or folder name, full path); the name also carries
+    //! the game version and the mod loader, e.g. "pack (1.20.1, Forge 47.2.0)" (CurseForge: from the manifest,
+    //! Modrinth: from its app.db; when unreadable — the plain name)
     static QVector<QPair<QString, QString>> scanInstances(const QString& root, const char* manifestFile);
 
 private:
