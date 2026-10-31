@@ -5,6 +5,17 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.3.26.11011] — 2026-11-01
+
+### Added
+- Lakes and areal rivers are alive: fish live in the water as real creatures (like the animals in the forest), not spawned from spawners. Cod (salmon in cold climates, tropical fish and pufferfish in warm ones) swim in every lake and river polygon that really has spots deeper than three blocks — a puddle stays empty; quite large reservoirs (from ~0.3 km²) also get squid, and reservoirs next to a park also get axolotls. About one fish per 2000 m², at least two and at most twelve per reservoir. Swimming pools, canals and ditches stay clean.
+
+### Changed
+- New program icon: an original picture drawn for tMC, replacing the former one made from the Minecraft Wiki logo (CC BY-SA 3.0 by Oakar567). The third-party attribution for the old icon is removed from `THIRD_PARTY_NOTICES.md` and the READMEs, since the new icon carries no third-party license.
+
+### Fixed
+- Wetlands (`natural=wetland`) now really set the chunk biome to a swamp, not only their trees and flora: before, the exported chunks kept the plain biome, so the game did not tint the grass, leaves and water of the swamp green. The biome cells under a wetland now carry `minecraft:swamp` (both in the modern and in the 1.21.x export format).
+
 ## [1.2.26.10311] — 2026-10-31
 
 ### Changed

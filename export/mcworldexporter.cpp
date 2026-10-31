@@ -1111,10 +1111,11 @@ struct GroundChunk
 //! The ground block in a column (top/surf/wd — metadata) at height y; IdAir above the surface.
 //! It repeats the former rules of the fill loop: water up to top, surface exactly at top, 2 ground blocks under it,
 //! deeper — stone (with wd>3 the water also reaches below top-3 — hence the stone threshold max(3, wd)).
-//! The climate zone of the current export (Climate::Zone) and the chunk biome names for the cell values 0..7 (see biomeCells); set in Export before the chunk assembly.
+//! The climate zone of the current export (Climate::Zone) and the chunk biome names for the cell values 0..8 (see biomeCells); set in Export before the chunk assembly.
 static int g_zone = 0;
-static const char* g_biomeName[8] = { "minecraft:plains", "minecraft:pale_garden", "minecraft:taiga", "minecraft:forest",
-                                      "minecraft:birch_forest", "minecraft:dappled_forest", "minecraft:flower_forest", "minecraft:meadow" };
+static const char* g_biomeName[9] = { "minecraft:plains", "minecraft:pale_garden", "minecraft:taiga", "minecraft:forest",
+                                      "minecraft:birch_forest", "minecraft:dappled_forest", "minecraft:flower_forest", "minecraft:meadow",
+                                      "minecraft:swamp" };        // 8 — a swamp in the game (the OSM "natural=wetland" on mrspol, value 8; the same in every zone)
 static quint16 g_zoneSurface = 1;                                   // the top block of natural ground (1 = IdGrass; desert — sand, tundra — a snow block)
 static quint16 g_sandId = 0, g_clayId = 0;                      // the sand and clay ids (palette ones; set in Export before the chunk assembly)
 static inline quint16 groundBlockAt(int top, quint16 surf, int wd, int y, int wx = 0, int wz = 0, bool artificial = false)
@@ -2504,6 +2505,15 @@ struct NpcSite
     double yoff = 0.0;                    // an addition to y in blocks (a patient lies/stands on a bed: 0.5625)
     bool captain = false;                 // the lair standard-bearer: a pillager captain with an ominous banner on the head
     QString petVariant;                   // kind=5: the cat coat (minecraft:tabby, black...) — written into the variant field
+};
+
+struct WaterBodyRec                       // a water body for the aquatic fauna (recorded by the Water branch of the dispatcher)
+{
+    int code = 0;                         // the layer code (lakes 31120000/31131000/31132000, rivers 31410000)
+    int d = 0;                            // the depth by the contour (blocks, before the smoothing)
+    qint64 nCols = 0;                     // the number of the columns of the water body
+    qint64 seed = 0;                      // a stable seed for the species and the positions
+    QVector<qint64> samples;              // column keys ~each 128th column (to find the deep places and the neighbours)
 };
 
 //! The facade marking of kindergartens (44313000), schools (44312000) and research institutes (44315000): the blocks of the wall material of ONE building are repainted by position,
@@ -6959,18 +6969,23 @@ static QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector
         w.beginCompound("biomes");          // uniform plains — a unary palette without data
         if ((anyOther || zoneBiome) && !(lairDeep && si <= -1))
         {
-            int pidx[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };               // value -> index in the palette
+            int pidx[9] = { -1, -1, -1, -1, -1, -1, -1, -1, -1 };            // value -> index in the palette
             QVector<int> usedVals;
-            for (int vv = 0; vv < 8; ++vv)
+            for (int vv = 0; vv < 9; ++vv)
                 for (int ci = 0; ci < 16; ++ci)
                     if (cellBiome[ci] == vv) { pidx[vv] = usedVals.size(); usedVals.append(vv); break; }
             w.beginList("palette", Nbt::String, usedVals.size());
             for (int vv : usedVals)
-                w.writeStringElem(legacy && vv == 5 ? QStringLiteral("minecraft:flower_forest") : QLatin1String(kBiomeNames[vv]));
+            {
+                // legacy (1.21.x): no dappled_forest (it is flower_forest there); the swamp name is the same in both formats
+                QString nm = QLatin1String(kBiomeNames[vv]);
+                if (legacy && vv == 5) nm = QStringLiteral("minecraft:flower_forest");
+                w.writeStringElem(nm);
+            }
             if (usedVals.size() > 1)
             {
                 int bits = 1;
-                while ((1 << bits) < usedVals.size()) ++bits;               // the palette <= 6 -> 1..3 bits; the values do not cross a long boundary
+                while ((1 << bits) < usedVals.size()) ++bits;               // the palette <= 9 -> 1..4 bits; the values do not cross a long boundary
                 const int per = 64 / bits, nLongs = (64 + per - 1) / per;
                 QVector<qint64> longs(nLongs, 0);
                 for (int y4 = 0; y4 < 4; ++y4)
@@ -7325,6 +7340,9 @@ static QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
             else if (n.kind == 5)
             {   // an animal: without extra fields (it does not despawn — PersistenceRequired above); for a cat we set the coat explicitly
                 if (!n.petVariant.isEmpty()) w.writeString("variant", n.petVariant);
+                else if (n.animal == QLatin1String("minecraft:tropical_fish")) w.writeInt("BucketVariantTag", n.variant & 0xffffff);  // the fish colour pattern
+                else if (n.animal == QLatin1String("minecraft:pufferfish")) w.writeInt("PufferFishSize", n.variant ? 2 : 1);          // a half-grown pufferfish
+                else if (n.animal == QLatin1String("minecraft:axolotl")) w.writeInt("Variant", n.variant % 5);                        // 0 wild,1 leucistic,2 albino,3 melanoid,4 golden
             }
             else if (n.kind != 4)
             {
@@ -8127,6 +8145,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     QVector<NpcSite> npcs;            // villagers/traders/llamas (entities)
     QVector<FrameSite> frames;        // item frames on mall stands (entities)
     QVector<SpawnerSite> spawners;    // monster spawners (the monster type is in block_entities)
+    QVector<WaterBodyRec> waterBodies;    // water bodies for the aquatic fauna (lakes and areal rivers, filled by the Water branch)
     // Road priority (a user request): dark gray roadways and their markings are MORE IMPORTANT than the light gray
     // pedestrian and bike paths, so drawing is moved out of the common loop into passes after it:
     // 1) all bodies of "the rest"/highways, 2) their markings, 3) only then pedestrian/bike paths
@@ -8626,6 +8645,14 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 else if (d > wit.value()) wit.value() = d;     // intersecting reservoirs — we take the deeper one
                 if (artWater) { if (!colWaterNat.contains(ck)) colWaterArt.insert(ck); }
                 else { colWaterNat.insert(ck); if (!artEmpty) colWaterArt.remove(ck); }
+            }
+            if (!o.linear && (o.code == 31120000 || o.code == 31131000 || o.code == 31132000 || o.code == 31410000))
+            {   // aquatic fauna: the water body parameters for step 3.586 (swimming pools, canals and ditches are not here; linear rivers too)
+                WaterBodyRec wb; wb.code = o.code; wb.d = d; wb.nCols = cols.size();
+                wb.seed = pairKey(keyFirst(cols.first()), keySecond(cols.first())) ^ (qint64(unsigned(o.code)) << 32);
+                const int sStep = std::max(128, int(cols.size() / 256) + 1);
+                for (int si = 0; si < cols.size(); si += sStep) wb.samples.append(cols[si]);
+                waterBodies.append(std::move(wb));
             }
             {
                 char buf[200];
@@ -10167,6 +10194,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             }
     for (const qint64 k : taigaCells) biomeCells.insert(k, quint8(2));
     for (const qint64 k : paleCells) biomeCells.insert(k, quint8(1));
+    // Swamps (mrspol, natural=wetland): the minecraft:swamp biome cells — the game tints the grass, leaves and water there (value 8; wins over a forest under the swamp: the trees there are already swamp oaks).
+    for (const qint64 ck : swampCols)
+        biomeCells.insert(pairKey(keyFirst(ck) >> 2, keySecond(ck) >> 2), quint8(8));
     // Donor: the terrain of the real Pale Garden instead of the forest terrain (smoothly at the border), trees are carried over together with it.
     struct PaleCol { int top; qint16 dy; quint8 w; quint16 surf; qint32 di = 0; qint16 pid = -1; };   // pid >= 0 — a patch (outpost/camp), otherwise the Pale Garden donor
     QVector<PaleDonor>& patches = patchesLoaded;                   // terrain patches with structures (patch_*.bin)
@@ -12637,6 +12667,96 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             }
         }
         if (nAnimals > 0) res.lairInfo += QObject::tr("; animals in forests: %1").arg(nAnimals);
+    }
+
+    // 3.586 AQUATIC FAUNA: fish live in the water as REAL entities (like the animals in the forest), they are not spawner-born.
+    // Lakes and areal rivers (hdrlin lines, pools, canals and ditches are not collected) hold fish only where the body really
+    // has spots deeper than 3 blocks after the smoothing — a puddle stays empty. Species by the climate zone; squid add to the
+    // largest bodies (from ~0.3 km²), axolotls add to bodies next to parks. The count grows with the area, capped per body.
+    if (!waterBodies.isEmpty())
+    {
+        // the park columns with a 64-block margin (chunk cells) — a lake near a park gets axolotls
+        QSet<ColKey> parkCells;
+        for (const auto& fs : forests)
+            if (fs.park)
+                for (int zc = (fs.minZ >> 4) - 4; zc <= ((fs.maxZ >> 4) + 4); ++zc)
+                    for (int xc = (fs.minX >> 4) - 4; xc <= ((fs.maxX >> 4) + 4); ++xc)
+                        parkCells.insert(pairKey(xc, zc));
+        const bool coldZone = (g_zone == Climate::Tundra || g_zone == Climate::Boreal);
+        const bool warmZone = (g_zone == Climate::Desert || g_zone == Climate::Savanna || g_zone == Climate::Tropical
+                               || g_zone == Climate::Monsoon || g_zone == Climate::SemiArid);
+        int nFauna = 0;
+        for (const WaterBodyRec& wb : waterBodies)
+        {
+            if (wb.d <= 3 || nFauna >= 600) continue;                     // shallower than 3 blocks by the contour — a puddle
+            // the samples that stayed deeper than 3 blocks after the smoothing, and the park proximity
+            QVector<qint64> deep; deep.reserve(64);
+            bool parkNear = false;
+            for (const qint64 ck : wb.samples)
+            {
+                const int x = keyFirst(ck), z = keySecond(ck);
+                if (!parkNear && parkCells.contains(pairKey(x >> 4, z >> 4))) parkNear = true;
+                if (deep.size() >= 64) continue;
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git != ground.constEnd() && git->wd[(z & 15) * 16 + (x & 15)] > 3) deep.append(ck);
+            }
+            if (deep.isEmpty()) continue;                                 // the smoothing made the whole body shallow — a puddle after all
+            const quint32 h0 = colHash(wb.seed);
+            const char* sp; int fishVariant = 0;
+            if (coldZone) sp = "minecraft:salmon";                                            // cold waters — salmon
+            else if (warmZone && (h0 % 100u) >= 15u) { sp = "minecraft:tropical_fish"; fishVariant = int(h0 & 0xffff); }
+            else if (warmZone) sp = "minecraft:pufferfish";                                   // warm waters — a tropical fish school, a pufferfish is rare
+            else sp = "minecraft:cod";                                                        // the rest — cod
+            // ~1 fish per 2000 m², at least two in a body, at most 12 (a cap so that a reservoir does not explode the entities file)
+            const int nFish = std::min(12, std::max(2, int(wb.nCols / 2000) + 1));
+            for (int k = 0; k < nFish && nFauna < 600; ++k)
+            {
+                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(k) * 0x9E3779B97F4A7C15ull)));
+                const qint64 ck = deep[h % quint32(deep.size())];
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd()) continue;
+                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
+                if (wd <= 3) continue;
+                NpcSite f; f.kind = 5; f.animal = QLatin1String(sp); f.variant = fishVariant;
+                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;              // the bottom of the water body
+                f.yoff = std::min(3.0, double(wd) - 1.0);                                     // in the water, closer to the bottom
+                f.yaw = int((h >> 20) % 4u) * 90;
+                npcs.append(f); ++nFauna;
+            }
+            // squid — only in quite large lakes and big rivers
+            const int nSquid = wb.nCols >= 1500000 ? 4 : (wb.nCols >= 300000 ? 2 : 0);
+            for (int k = 0; k < nSquid && nFauna < 600; ++k)
+            {
+                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(1000 + k) * 0x9E3779B97F4A7C15ull)));
+                const qint64 ck = deep[h % quint32(deep.size())];
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd()) continue;
+                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
+                if (wd <= 3) continue;
+                NpcSite f; f.kind = 5; f.animal = QLatin1String("minecraft:squid");
+                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;
+                f.yoff = std::min(3.0, double(wd) - 1.0);
+                npcs.append(f); ++nFauna;
+            }
+            // axolotls — a lake near a park (they fight with fish in the game — the balance is the game's own business)
+            if (parkNear) for (int k = 0; k < 2 && nFauna < 600; ++k)
+            {
+                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(2000 + k) * 0x9E3779B97F4A7C15ull)));
+                const qint64 ck = deep[h % quint32(deep.size())];
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd()) continue;
+                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
+                if (wd <= 3) continue;
+                NpcSite f; f.kind = 5; f.animal = QLatin1String("minecraft:axolotl"); f.variant = int(h >> 8);
+                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;
+                f.yoff = std::min(3.0, double(wd) - 1.0);
+                npcs.append(f); ++nFauna;
+            }
+        }
+        if (nFauna > 0) res.lairInfo += QObject::tr("; aquatic fauna: %1").arg(nFauna);
     }
 
     for (auto pit = colPlant.constBegin(); pit != colPlant.constEnd(); ++pit)
