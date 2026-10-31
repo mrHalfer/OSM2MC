@@ -3,7 +3,7 @@
   "Rules that turn OpenStreetMap tags into tqt layers (the working file of tMC). Edited by hand; the program does not read the \"examples\" array.",
   "The rules are checked from top to bottom; an object goes into the layer of the FIRST matching rule (unless \"continue\": true is set).",
   "from  : the OSM driver layer — multipolygons (buildings, plots, sites), lines (roads, rails), points (points).",
-  "layer : the tqt layer suffix: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin; \"-\" — drop the object (no further rules are checked).",
+  "layer : the tqt layer suffix: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin, csrpnt (point cultural/industrial objects), hdtpnt (point hydrography objects), mrspol (wetlands and salt flats); \"-\" — drop the object (no further rules are checked).",
   "as    : polygon (a closed line -> a polygon), line (a polygon boundary -> a line), square:N (a point -> a square with a side of N meters), crosswalk:N (a crossing node -> a line of N meters across the nearest motor road).",
   "pass  : 1 (default) — by tags; 2 — a \"guess\" for buildings not recognized on the 1st pass: they see the nb:* tags about the neighbors.",
   "when  : conditions on tags (all at once). \"v\" — equals; \"*\" — the tag exists; \"-\" or null — no tag; \"!v\" — the tag exists and is not equal to v;",
@@ -1468,16 +1468,14 @@
    }
   },
   {
-   "note": "PRELIMINARY: swamp — moisture-loving grass",
+   "note": "Wetlands (natural=wetland) → mrspol 72310000: the 3D settings source of this layer carries the 'swamp' effect — the ground under the contour becomes a swamp biome (forest trees under it turn into swamp oaks with vines, open ground gets rare oaks and mushrooms); open water is not drawn",
    "from": "multipolygons",
-   "layer": "vegpol",
+   "layer": "mrspol",
    "when": {
     "natural": "wetland"
    },
    "fields": {
-    "CODE": "71313000",
-    "REL": "auto",
-    "MAT": "{building:material,building:facade:material}"
+    "CODE": "72310000"
    }
   },
   {
@@ -1763,6 +1761,78 @@
     "REL": "0"
    },
    "as": "square:12"
+  },
+  {
+   "note": "A memorial marked by a point (historic=memorial) — a 5 m square; the exporter builds a small statue in its center (several variants, see 3.575)",
+   "from": "points",
+   "layer": "csrpnt",
+   "when": {
+    "historic": "memorial"
+   },
+   "fields": {
+    "CODE": "53520900"
+   },
+   "as": "square:5"
+  },
+  {
+   "note": "A monument marked by a point (historic=monument) — a 7 m square; the exporter builds a stele-monument in several materials (see 3.575)",
+   "from": "points",
+   "layer": "csrpnt",
+   "when": {
+    "historic": "monument"
+   },
+   "fields": {
+    "CODE": "53520000"
+   },
+   "as": "square:7"
+  },
+  {
+   "note": "A fountain marked by a point (amenity=fountain) — a 7 m square; the exporter builds a classic fountain: a stone ring, water and a post with water running down it (see 3.575)",
+   "from": "points",
+   "layer": "hdtpnt",
+   "when": {
+    "amenity": "fountain"
+   },
+   "fields": {
+    "CODE": "31650000"
+   },
+   "as": "square:7"
+  },
+  {
+   "note": "A communication tower on a point (tower:type=communication) — a 3 m square; the exporter builds a ~32-block spire, on a building — from its roof (see 3.575)",
+   "from": "points",
+   "layer": "csrpnt",
+   "when": {
+    "tower:type": "communication"
+   },
+   "fields": {
+    "CODE": "53340900"
+   },
+   "as": "square:3"
+  },
+  {
+   "note": "A mobile-phone tower without the tower type (communication:mobile_phone=yes) — the same spire as tower:type=communication",
+   "from": "points",
+   "layer": "csrpnt",
+   "when": {
+    "communication:mobile_phone": "yes"
+   },
+   "fields": {
+    "CODE": "53340900"
+   },
+   "as": "square:3"
+  },
+  {
+   "note": "Waste disposal marked by a point (amenity=waste_disposal) — the exporter places a composter (see 3.575)",
+   "from": "points",
+   "layer": "csrpnt",
+   "when": {
+    "amenity": "waste_disposal"
+   },
+   "fields": {
+    "CODE": "51000101"
+   },
+   "as": "square:1"
   },
   {
    "note": "A sports ground marked only by the tag sport=* on a plot (without leisure=pitch), from 100 m²",

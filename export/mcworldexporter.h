@@ -57,10 +57,18 @@ public:
         //!  Water      (hdrpol/hdrlin)   — hydrography: a pit with water over the polygon/ribbon patch,
         //!                               the depth is proportional to the area (1/6), but 3..15 blocks;
         //!                               for ribbons (hdrlin, linear) — three times shallower (1/18, 1..15);
+        //!  Spot       (a source with a modelField) — an object from a point on the map (a memorial, a monument,
+        //!                               a fountain, a communication tower, a waste bin): the square polygon of the
+        //!                               point is only the anchor, the structure is built in step 3.575 by the model
+        //!                               number from point_models.csv (the code from the modelField column);
+        //!  Biome      (a source with the "swamp" effect) — a biome overlay: the rasterized columns are collected
+        //!                               into the swamp map (vegetation step), nothing is built from the polygon;
         //!  Generic    (other layers)    — as before: a solid for closed ones, otherwise a surface.
         enum Kind { Generic = 0, Building = 1, Vegetation = 2, Road = 3, Railway = 4, Plate = 5, Water = 6,
                     ParkingLot = 7,
-                    BlockCover = 8 };   //!< BlockCover (blkpol, only CODE 62231000 asphalt without markings and 45300000 square): a surface instead of turf — gray concrete / stone bricks
+                    BlockCover = 8,   //!< BlockCover (blkpol, only CODE 62231000 asphalt without markings and 45300000 square): a surface instead of turf — gray concrete / stone bricks
+                    Spot = 9,         //!< Spot (a source with a modelField) — see above
+                    Biome = 10 };     //!< Biome (a source with ModelEffect::Swamp) — a wetland overlay, see above
         //! ParkingLot (rdcpol) — a surface: dark gray concrete instead of turf + parking place markings; the outlines are in paths
 
         QVector<QVector3D> vertices;
@@ -85,6 +93,8 @@ public:
         //! For Building — the numeric value of the CODE column from the attribute (0 — no column/not a number).
         //! Some codes (44400002/44400100/44400110) ask for a GABLED roof made of stairs.
         int code = 0;
+        //! For Spot — the model number from point_models.csv (1 statue, 2 stele, 3 fountain, 4 tower, 5 composter).
+        int model = 0;
         //! For Building — the LIFT column == 1: walls 1 block thick instead of 2 (a request
         //! of the user; NOT the roof and NOT the foundation — only the walls, see the lining pass).
         bool lift = false;

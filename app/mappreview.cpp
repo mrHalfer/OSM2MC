@@ -44,6 +44,9 @@ Style styleFor(const QString& sfx, int code)
     if (sfx == QLatin1String("hdrpol")) return { QColor(0x6b, 0xb0, 0xe8), QColor(0x3a, 0x7c, 0xb8), 0.5, false };
     if (sfx == QLatin1String("hdrlin")) return { QColor(), QColor(0x4a, 0x9c, 0xe0), 1.5, false };
     if (sfx == QLatin1String("csrpol")) return { QColor(0xd6, 0xd6, 0xd0), QColor(0x9a, 0x9a, 0x94), 0.5, false };
+    if (sfx == QLatin1String("mrspol")) return { QColor(0x6a, 0x8f, 0x5a), QColor(0x3f, 0x59, 0x36), 0.5, false };                      // wetlands — a swamp oak grove
+    if (sfx == QLatin1String("csrpnt")) return { QColor(0x9a, 0x92, 0xa8), QColor(), 0, false };                                      // anchor squares of point objects
+    if (sfx == QLatin1String("hdtpnt")) return { QColor(0x6b, 0xb0, 0xe8), QColor(), 0, false };                                      // fountains
     if (sfx == QLatin1String("rdcpol")) return { QColor(0xb8, 0xb8, 0xc0), QColor(), 0, false };
     if (sfx == QLatin1String("blkpol")) return { QColor(0xe6, 0xdc, 0xc4), QColor(), 0, false };
     if (sfx == QLatin1String("rrslin")) return { QColor(), QColor(0x35, 0x35, 0x35), 1.6, true };
@@ -129,7 +132,7 @@ TmcPreview tmcBuildPreview(const TmcRunOptions& optIn, const std::function<void(
     // Paths are built once in projection units (from the top-left corner), and the pictures of different resolutions are obtained by scaling the painter
     struct Group { Style st; QPainterPath path; };
     QVector<Group> draw;                                            // in drawing order, bottom to top
-    static const char* order[] = { "vgbpol", "vegpol", "hdrpol", "blkpol", "csrpol", "rdcpol", "hdrlin", "rdslin", "rrslin", "bldpol" };
+    static const char* order[] = { "vgbpol", "vegpol", "mrspol", "hdrpol", "blkpol", "csrpol", "csrpnt", "hdtpnt", "rdcpol", "hdrlin", "rdslin", "rrslin", "bldpol" };
     for (const char* sfx : order)
     {
         // group the layer objects by style: one QPainterPath per style is an order of magnitude faster than drawing every object separately

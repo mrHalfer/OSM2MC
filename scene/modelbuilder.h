@@ -90,6 +90,10 @@ enum class ModelEffect
     Supports   = 1 << 6,  //!< Supports — pillars from the ground to a raised object (road ribbons/polygons with a lift) at
                            //!< every actual point, with a body for collision in "Explore", see
                            //!< ModelBuilder::AppendSupportPillar()
+    Swamp      = 1 << 7,  //!< Swamp biome — an exporter mark (tMC): the whole layer's outline turns the ground under it
+                           //!< into a swamp biome (the trees of any forest under the contour become swamp oaks with
+                           //!< vines; open swamp ground gets rare oaks, mushrooms and dead branches). The 3D window
+                           //!< does not draw the effect — the layer is shown by its ordinary color
     Rounded    = 1 << 3   //!< Smoothing — the top edge of polygon walls is rounded with a static chamfer
                            //!< (several quarter-circle sub-rings in section, see
                            //!< ModelBuilder::BuildObjectMesh()) instead of a sharp wall/roof corner —
@@ -216,6 +220,12 @@ struct ModelSettings
         //! height" group: the final lift = the liftField value * liftMultiplier + liftAdd. It also works when
         //! liftField is not chosen (then the lift is simply the constant liftAdd for the whole layer).
         double liftAdd = 0.0;
+
+        //! The "model field" of a point layer (an exporter mark, tMC): the name of the column with the object code
+        //! (for example "CODE"). The code is looked up in the "code -> model" table (point_models.csv next to the
+        //! program), and the exporter builds that model of structure on the point. Empty — the layer's objects are
+        //! not point structures.
+        QString modelField;
 
         //! The degree of radio signal absorption by the buildings of this layer when computing the radio coverage (see
         //! RadioModel) — used only if the layer is added as a building (a polygon with a height field)

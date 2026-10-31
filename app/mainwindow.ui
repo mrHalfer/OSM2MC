@@ -355,6 +355,13 @@
            </spacer>
           </item>
           <item>
+           <widget class="QLabel" name="labelExportDest">
+            <property name="text">
+             <string>Export: local zip</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QPushButton" name="exportDirButton">
             <property name="toolTip">
              <string>Where to save the exported world: zip, launcher or an instance</string>

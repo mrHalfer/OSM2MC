@@ -10,6 +10,8 @@
 #include <QSharedPointer>
 #include <QThreadPool>
 #include <QHash>
+#include <QFile>
+#include <QDir>
 #include <cmath>
 #include <algorithm>
 #include <memory>
@@ -40,6 +42,7 @@ struct ExportItem
     QString roofColour, roofMaterial;
     QString streetType, street, number;
     bool intraBlock = false;
+    int model = 0;                                    // point structures (kind Spot): the model number from point_models.csv
 };
 
 MapFeature* cloneObject(const MapFeature* src)
@@ -49,6 +52,33 @@ MapFeature* cloneObject(const MapFeature* src)
     c->fields = src->fields;
     c->xmin = src->xmin; c->xmax = src->xmax; c->ymin = src->ymin; c->ymax = src->ymax;
     return c;
+}
+
+// The "code -> model" table for point sources with a modelField — point_models.csv next to the program
+// ("code;model" lines, comments with '#'), by the same pattern as the height table (heights.csv).
+QHash<qlonglong, int> loadSpotModels(QString* err)
+{
+    for (const QString& d : { QCoreApplication::applicationDirPath(), QDir::currentPath() })
+    {
+        QFile f(QDir(d).filePath(QStringLiteral("point_models.csv")));
+        if (!f.open(QIODevice::ReadOnly)) continue;
+        QHash<qlonglong, int> map;
+        const QList<QByteArray> lines = f.readAll().split('\n');
+        for (const QByteArray& raw : lines)
+        {
+            const QByteArray ln = raw.trimmed();
+            if (ln.isEmpty() || ln.startsWith('#')) continue;
+            const QList<QByteArray> kv = ln.split(';');
+            if (kv.size() < 2) continue;
+            bool ok1 = false, ok2 = false;
+            const qlonglong code = kv[0].trimmed().toLongLong(&ok1);
+            const int model = kv[1].trimmed().toInt(&ok2);
+            if (ok1 && ok2 && model > 0) map.insert(code, model);
+        }
+        if (!map.isEmpty()) return map;
+    }
+    if (err) *err = QObject::tr("point_models.csv not found next to the program — point objects with a modelField will not be built");
+    return QHash<qlonglong, int>();
 }
 
 }   // namespace
@@ -191,12 +221,20 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
 
     // --- collecting objects (order: layers as in the settings, objects as in the layer) ---
     QVector<ExportItem> items;
+    QHash<qlonglong, int> spotModels;                 // the "code -> model" table for point sources (loaded on demand)
+    bool spotModelsLoaded = false;
     for (const Bound& b : bound)
     {
         MapLayer* layer = b.layer;
         const QString sfx = layer->name.section(QLatin1Char('.'), -1).toLower();
+        // The role of the layer is set by the SOURCE, not by its name suffix: a source with the "swamp" effect
+        // is a wetland biome overlay, a source with a modelField is a point-structure source (the model is
+        // looked up per object by the code from that column). An old .t3d without such marks simply has no
+        // new objects — the usual dependence on the 3D settings.
         Kind kind = Kind::Generic;
-        if (sfx == QLatin1String("bldpol")) kind = Kind::Building;
+        if (b.src.vs.effect.testFlag(ModelEffect::Swamp)) kind = Kind::Biome;
+        else if (!b.src.vs.modelField.isEmpty()) kind = Kind::Spot;
+        else if (sfx == QLatin1String("bldpol")) kind = Kind::Building;
         else if (sfx == QLatin1String("vegpol") || sfx == QLatin1String("vgbpol")) kind = Kind::Vegetation;
         else if (sfx == QLatin1String("rdslin")) kind = Kind::Road;
         else if (sfx == QLatin1String("rrslin")) kind = Kind::Railway;
@@ -205,6 +243,14 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
         else if (sfx == QLatin1String("blkpol")) kind = Kind::BlockCover;
         else if (sfx == QLatin1String("hdrpol") || sfx == QLatin1String("hdrlin")) kind = Kind::Water;
         const bool polygonLayer = layer->geom == GeomKind::Polygon;
+        if (kind == Kind::Spot && !spotModelsLoaded)
+        {
+            spotModelsLoaded = true;
+            QString me;
+            spotModels = loadSpotModels(&me);
+            if (!me.isEmpty()) out.warnings << me;
+        }
+        int modelsMissing = 0;                        // objects with a code that has no model in the table
 
         for (MapFeature* obj : qAsConst(layer->features))
         {
@@ -239,6 +285,20 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                 qlonglong c = cv.toLongLong(&num);
                 if (!num) c = qRound64(cv.toDouble(&num));
                 if (num) e.code = int(c);
+            }
+            if (kind == Kind::Spot)
+            {   // a point structure: its model is looked up by the object code from the source's modelField column
+                const int fno = layer->fieldIndex(b.src.vs.modelField);
+                bool num = false;
+                qlonglong cv = 0;
+                if (fno >= 0)
+                {
+                    const QString fv = obj->fields.value(fno).trimmed();
+                    cv = fv.toLongLong(&num);
+                    if (!num) cv = qRound64(fv.toDouble(&num));
+                }
+                e.model = num ? spotModels.value(cv, 0) : 0;
+                if (e.model <= 0) { ++modelsMissing; continue; }    // no model for the code — not an object
             }
             // blkpol: only asphalt without markings (62231000) and squares (45300000)
             if (kind == Kind::BlockCover && e.code != 62231000 && e.code != 45300000) continue;
@@ -297,6 +357,9 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             }
             items << e;
         }
+        if (modelsMissing > 0)
+            out.warnings << QObject::tr("%1 objects on layer '%2' were skipped: no model for their codes in point_models.csv")
+                            .arg(modelsMissing).arg(layer->name);
     }
     tmcStepLog("scene: objects collected");
     if (items.isEmpty())
@@ -477,6 +540,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             mo.material = e.material;
             mo.extrudeH = std::abs(rel) * invZ;
             mo.code = e.code;
+            mo.model = e.model;
             if (e.kind == Kind::Plate && mo.extrudeH < 1.0 && (e.code == 51230000 || e.code == 51133000 || e.code == 51410000))
             {   // csrpol 51230000/51133000/51410000 with zero height — a 15 m tower
                 float zmin = std::numeric_limits<float>::max(), zmax = -zmin;

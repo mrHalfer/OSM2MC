@@ -36,7 +36,7 @@ mkdir "%DST%"
 
 echo === 2/5 collecting the files ===
 copy /y "%TMC_BUILD%\release\tMC.exe" "%DST%\" >nul
-for %%f in (default.t3d osm_rules.json heights.csv tmc_buildings.dat) do if exist "%ROOT%resources\%%f" copy /y "%ROOT%resources\%%f" "%DST%\" >nul
+for %%f in (default.t3d osm_rules.json heights.csv point_models.csv tmc_buildings.dat) do if exist "%ROOT%resources\%%f" copy /y "%ROOT%resources\%%f" "%DST%\" >nul
 copy /y "%ROOT%resources\templates\*.bin" "%DST%\" >nul
 xcopy /E /Y /Q /I "%ROOT%third_party\gdal\bin" "%DST%" >nul
 for %%f in (README.md README.ru.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md) do if exist "%ROOT%%%f" copy /y "%ROOT%%%f" "%DST%\" >nul

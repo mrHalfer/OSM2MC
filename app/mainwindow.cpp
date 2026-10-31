@@ -288,6 +288,14 @@ void MainWindow::updateExportDestUi()
     ui->labelOut->setToolTip(tip);
     ui->outEdit->setToolTip(tip);
     ui->btnOut->setToolTip(tip);
+    QString where;                                          // the short "where does it go now" label next to the settings button
+    if (zipMode) where = tr("Export: local zip");
+    else if (mExportDest == 1) where = tr("Export: launcher");
+    else if (mExportDest == 2) where = tr("Export: Modrinth");
+    else where = tr("Export: CurseForge");
+    ui->labelExportDest->setText(where);
+    ui->labelExportDest->setToolTip(zipMode ? tr("A zip file next to the source data (or the chosen output file)")
+                                            : QDir::toNativeSeparators(dest));
 }
 
 TmcRunOptions MainWindow::collect() const

@@ -191,6 +191,11 @@ static const NamedColor kBlockPalette[] = {
     { "minecraft:cactus",                20, 122,  32 },
     // Dark forests (climate zones): the trunk of the dark oak (the leaves are a special id, see IdDarkOakLeaves)
     { "minecraft:dark_oak_log",          66,  43,  20 },
+    // Point objects (3.575): the antenna of a communication tower and the weathered stone of memorials
+    { "minecraft:quartz_block",         236, 231, 217 },
+    { "minecraft:mossy_cobblestone",    112, 120,  88 },
+    // White church domes (roof:colour=white — see the dome pass): polished quartz, whiter than any concrete
+    { "minecraft:smooth_quartz",         240, 238, 228 },
 };
 
 //! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
@@ -430,6 +435,7 @@ enum : quint16
     IdStoneFence,                         // 'minecraft:stone_brick_wall' — the BASE of a stone fence: id = IdStoneFence + conn (north=1, east=2, south=4, west=8), pass 3.58
     IdStoneFenceMax = int(IdStoneFence) + 16,
     IdVine,                               // 'minecraft:vine' without properties (the game connects the faces itself) — jungle trees
+    IdWaterFalling,                       // 'minecraft:water' level=8 (falling) — the streams running down a fountain post (3.575)
     IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
                                           //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
 };
@@ -471,6 +477,7 @@ static QString blockName(quint16 id)
     case IdIronBlock: return QLatin1String("minecraft:iron_block");
     case IdGlass:     return QLatin1String("minecraft:glass");
     case IdWater:     return QLatin1String("minecraft:water");
+    case IdWaterFalling: return QLatin1String("minecraft:water");   // level=8 — see blockProperties
     case IdLava:      return QLatin1String("minecraft:lava");
     case IdSpawner:        return QLatin1String("minecraft:spawner");
     case IdTallGrass:
@@ -613,6 +620,11 @@ static const char* const kRailShapes[10] = { "north_south", "east_west", "ascend
 static void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
 {
     out.clear();
+    if (id == IdWaterFalling)
+    {   // falling water (the fountain streams in 3.575): level=8 is the "falling straight down" state
+        out << qMakePair(QStringLiteral("level"), QStringLiteral("8"));
+        return;
+    }
     if (id >= IdWallSignBase && id < IdWallSignMax)
     {
         out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdWallSignBase)) & 3]))
@@ -8087,6 +8099,17 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     QVector<char> padIsLake;          // 1 — this is a lake (csrpol 51480000: water + a fence), 0 — an ordinary plate
     QSet<ColKey> noTreePadCols;       // the columns of apiaries and farms (csrpol 52400000/52100000): we do not plant trees there
     QVector<int> padCode;             // the CODE of the plate object (53700000/53710000 — sports/children's: we place equipment)
+    // Objects from points on the map (sources with a modelField, e.g. csrpnt/hdtpnt): a memorial, a monument,
+    // a fountain, a communication tower, a waste bin. The anchor is the center of the point's square; the structure
+    // is built in 3.575 on the ready ground; the model number comes from point_models.csv (the code -> model table).
+    // 1 — a memorial statue, 2 — a monument stele, 3 — a fountain, 4 — a communication tower, 5 — a composter.
+    enum SpotModel : int { kStatue = 1, kStele = 2, kFountain = 3, kTower = 4, kComposter = 5 };
+    struct SpotSite { int x, z, model; };
+    QVector<SpotSite> spots;
+    // The swamp biome (sources with ModelEffect::Swamp, e.g. mrspol): every column under the layer's polygons.
+    // An OVERLAY, not an object: the vegetation step turns the trees of any forest under the contour into swamp
+    // oaks with vines, plants rare oaks and mushrooms on the open swamp ground, and skips water/roads/structures.
+    QSet<ColKey> swampCols;
     // Forests under portals to the Nether (vegpol, CODE 71111110/71126000): the patch columns + the area in REAL m².
     // The frame is placed in 3.57 (the ground and the trees are ready).
     struct PortalForest { QVector<ColSpan> spans; double areaM2; quint32 h; };
@@ -8335,7 +8358,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         {
             const McObject& q = objects[i];
             if (q.kind == McObject::Vegetation || q.kind == McObject::Water
-                || (q.kind == McObject::Plate && (q.extrudeH < 1.0 || q.code == 71323000)) || q.kind == McObject::ParkingLot || q.kind == McObject::BlockCover)
+                || (q.kind == McObject::Plate && (q.extrudeH < 1.0 || q.code == 71323000)) || q.kind == McObject::ParkingLot || q.kind == McObject::BlockCover
+                || q.kind == McObject::Spot || q.kind == McObject::Biome)
                 todo.append(i);
         }
         std::atomic<int> next { 0 };
@@ -8360,12 +8384,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     }
     int objDone = 0;
     const int objTotal = objects.size();
-    qint64 nsByKind[10] = {}, cntByKind[10] = {};                  // debugging (MCX_LOG_STEPS): the time of sequential object preparation by kind
+    qint64 nsByKind[11] = {}, cntByKind[11] = {};                  // debugging (MCX_LOG_STEPS): the time of sequential object preparation by kind
     struct KindTimer { qint64& ns; QElapsedTimer t; KindTimer(qint64& s) : ns(s) { t.start(); } ~KindTimer() { ns += t.nsecsElapsed(); } };
     for (const McObject& o : objects)
     {
-        KindTimer kindTimer(nsByKind[std::min(9, int(o.kind))]);
-        ++cntByKind[std::min(9, int(o.kind))];
+        KindTimer kindTimer(nsByKind[std::min(10, int(o.kind))]);
+        ++cntByKind[std::min(10, int(o.kind))];
         if (progress && (objDone % 16 == 0 || objDone + 1 == objTotal))
             progress(objDone, objTotal, 0);                       // the "objects" phase
         ++objDone;
@@ -8403,6 +8427,38 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 if (square) colWool.insert(ck, cover);                     // the square over the asphalt
                 else if (!colWool.contains(ck)) colWool.insert(ck, cover);
             }
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::Biome)
+        {   // a wetland source (the "swamp" effect on it): only mark the columns — the biome changes what GROWS
+            // on them in the vegetation step, the polygon itself builds nothing. It is an overlay: it may lie on
+            // top of forests, water and other objects, those stay and only get the swamp treatment.
+            QList<qint64> cols = std::move(pre[objDone - 1]);
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            for (qint64 ck : cols) swampCols.insert(ck);
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::Spot)
+        {   // a point object (a source with a modelField): the rasterized square of the point gives the ANCHOR only
+            // (the rule's "as: square:N" centers it on the point). The model was resolved in mcscene by the code
+            // from the modelField column (point_models.csv). The structure is built in 3.575 on the ready ground;
+            // the neighborhood is reserved against trees already here.
+            if (o.model < kStatue || o.model > kComposter) { ++res.skippedCount; continue; }
+            QList<qint64> cols = std::move(pre[objDone - 1]);
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            int x0 = std::numeric_limits<int>::max(), x1 = std::numeric_limits<int>::min();
+            int z0 = x0, z1 = x1;
+            for (qint64 ck : cols)
+            {
+                x0 = std::min(x0, keyFirst(ck)); x1 = std::max(x1, keyFirst(ck));
+                z0 = std::min(z0, keySecond(ck)); z1 = std::max(z1, keySecond(ck));
+            }
+            spots.append(SpotSite{ int(std::lround((x0 + x1) / 2.0)), int(std::lround((z0 + z1) / 2.0)), o.model });
+            for (int x = x0 - 3; x <= x1 + 3; ++x)
+                for (int z = z0 - 3; z <= z1 + 3; ++z)
+                    noTreePadCols.insert(pairKey(x, z));   // +3: the crowns (even the wide swamp oak ones) do not overhang a statue
             ++res.objectCount;
             continue;
         }
@@ -9104,8 +9160,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         }
     }
     // Domes of churches (OSM roof:shape=onion/dome): an onion dome on the top. It is built after all the buildings by the finished roof: the top of the roof is looked for in the store above the center of the plan (so the
-    // changes of the heights by the export — growth, gluing complexes — do not matter). The look is chosen by roof:colour / roof:material: the colour gives the concrete of the dome, and a spire is put only on
-    // the domes of yellow (gold), blue (lapis), light blue (diamond), red (redstone) and black (coal); a glass dome is a transparent hemisphere, the ceiling under it is cut out (the upper floor is seen through it).
+    // changes of the heights by the export — growth, gluing complexes — do not matter). The look is chosen by roof:colour / roof:material: the colour gives the concrete of the dome (white — polished quartz),
+    // and a spire is put only on the domes of yellow (gold), blue (lapis), light blue (diamond), red (redstone) and black (coal); without both a colour and a known material the dome is of plain gray concrete;
+    // a glass dome is a transparent hemisphere, the ceiling under it is cut out (the upper floor is seen through it).
     {
         auto blk = [](const char* name) { return quint16(IdPaletteStart + paletteIndexOf(name)); };
         struct DomeLook { quint16 block; quint16 spire; bool glass; };
@@ -9114,7 +9171,6 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             const QString mat = o.roofMaterial.trimmed().toLower(), col = o.roofColour.trimmed().toLower();
             if (mat.contains(QLatin1String("glass")) || mat.contains(QStringLiteral("\u0441\u0442\u0435\u043a\u043b")))
                 return { quint16(IdGlass), 0, true };
-            const DomeLook yellow{ blk("minecraft:yellow_concrete"), blk("minecraft:gold_block"), false };
             auto fromConcrete = [&](quint16 id) -> DomeLook
             {   // the spire — by the nearest concrete
                 if (id == blk("minecraft:yellow_concrete"))     return { id, blk("minecraft:gold_block"), false };
@@ -9132,17 +9188,25 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     { QStringLiteral("lightblue"), "minecraft:light_blue_concrete" }, { QStringLiteral("light_blue"), "minecraft:light_blue_concrete" }, { QStringLiteral("azure"), "minecraft:light_blue_concrete" },
                     { QStringLiteral("cyan"), "minecraft:light_blue_concrete" }, { QStringLiteral("turquoise"), "minecraft:light_blue_concrete" }, { QStringLiteral("skyblue"), "minecraft:light_blue_concrete" },
                     { QStringLiteral("red"), "minecraft:red_concrete" }, { QStringLiteral("darkred"), "minecraft:red_concrete" }, { QStringLiteral("maroon"), "minecraft:red_concrete" },
-                    { QStringLiteral("black"), "minecraft:black_concrete" } };
+                    { QStringLiteral("black"), "minecraft:black_concrete" },
+                    // white (and its OSM synonyms) — polished quartz, not white concrete: whiter and cleaner than any dye color
+                    { QStringLiteral("white"), "minecraft:smooth_quartz" }, { QStringLiteral("snow"), "minecraft:smooth_quartz" },
+                    { QStringLiteral("ivory"), "minecraft:smooth_quartz" }, { QStringLiteral("pearl"), "minecraft:smooth_quartz" } };
                 const auto it = names.constFind(col);
                 if (it != names.constEnd()) return fromConcrete(blk(it.value()));
                 const QColor qc(col);                                              // other names and #rrggbb — by the nearest concrete
-                if (qc.isValid()) return fromConcrete(nearestBlockId(qc));
+                if (qc.isValid())
+                {   // what comes out white by the nearest match is polished quartz too (e.g. #ffffff, #f8f8ff)
+                    const quint16 near = nearestBlockId(qc);
+                    if (near == blk("minecraft:white_concrete")) return { blk("minecraft:smooth_quartz"), 0, false };
+                    return fromConcrete(near);
+                }
             }
             if (mat.contains(QLatin1String("copper"))) return { blk("minecraft:orange_concrete"), 0, false };
             if (mat.contains(QLatin1String("steel")) || mat.contains(QLatin1String("zinc")) || mat.contains(QLatin1String("tin")) || mat.contains(QLatin1String("lead"))
                 || mat.contains(QLatin1String("alumin")) || mat == QLatin1String("metal") || mat.contains(QLatin1String("iron")))
                 return { blk("minecraft:light_gray_concrete"), 0, false };
-            return yellow;                                                         // neither the colour nor the known material: yellow with a golden spire
+            return { blk("minecraft:light_gray_concrete"), 0, false };             // neither the colour nor a known material: plain concrete
         };
         for (const McObject& o : objectsRaised)
         {
@@ -10215,6 +10279,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     dv = quint8(std::min<int>(dv, std::min(r, dn) + 1));
                 }
             constexpr double kBlendL = 28.0;                                // the width of the smooth transition at the forest border, blocks
+            constexpr int kBlendB = 12;                                     // the ramp width at the seam of a replaced mansion box, blocks
             auto donorIndex = [&](int x, int z) -> int
             {
                 int ux = (x - pbx0) % (2 * paleDonor.W), uz = (z - pbz0) % (2 * paleDonor.H);
@@ -10288,16 +10353,31 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     const qint64 ck = pairKey(c.x, z);
                     if (reliefBlocked(ck)) continue;   // buildings and water are not touched (roads follow the terrain)
                     int di = donorIndex(c.x, z);
+                    int seamDi = -1, seamD = 0;                            // a replaced mansion box: the donor column just outside its nearest edge + the distance to that edge
                     if (paleDonor.mansion[di] && !keepMansion.contains(ck))
                     {   // an extra mansion: we take the reflected free column (or the bare terrain, if there is none)
-                        const int alt = paleDonor.reflectFree(di % paleDonor.W, di / paleDonor.W);
+                        const int uxT = di % paleDonor.W, uzT = di / paleDonor.W;
+                        const int dl = uxT - paleDonor.mx0, dr = paleDonor.mx1 - uxT, du = uzT - paleDonor.mz0, dd = paleDonor.mz1 - uzT;
+                        seamD = std::min(std::min(dl, dr), std::min(du, dd));
+                        if (seamD == dl && paleDonor.mx0 > 0)                    seamDi = uzT * paleDonor.W + paleDonor.mx0 - 1;
+                        else if (seamD == dr && paleDonor.mx1 + 1 < paleDonor.W) seamDi = uzT * paleDonor.W + paleDonor.mx1 + 1;
+                        else if (seamD == du && paleDonor.mz0 > 0)               seamDi = (paleDonor.mz0 - 1) * paleDonor.W + uxT;
+                        else if (seamD == dd && paleDonor.mz1 + 1 < paleDonor.H) seamDi = (paleDonor.mz1 + 1) * paleDonor.W + uxT;
+                        const int alt = paleDonor.reflectFree(uxT, uzT);
                         if (alt >= 0) di = alt;
                     }
                     double wv = std::min(1.0, double(dist[(z - pbz0) * PW + (c.x - pbx0)]) / kBlendL);
                     wv = wv * wv * (3.0 - 2.0 * wv);
                     wv *= edgeFade(c.x, z);
+                    int hdHere = paleDonor.hd[di];
+                    if (seamDi >= 0 && seamD < kBlendB)
+                    {   // the seam of the replaced box: the terrain ramps from the donor neighbor OUTSIDE the box to the replaced
+                        // terrain within kBlendB columns — otherwise the box edge is a wall where the mirror seam crosses a mountain slope
+                        const double u = seamD / double(kBlendB), su = u * u * (3.0 - 2.0 * u);
+                        hdHere = int(std::lround(paleDonor.hd[seamDi] * (1.0 - su) + double(hdHere) * su));
+                    }
                     const int t0 = groundTopCol(c.x, z);
-                    const int tn = std::max(1, std::min(250, int(std::lround(double(t0) * (1.0 - wv) + double(paleDonor.hd[di] + shiftC) * wv))));
+                    const int tn = std::max(1, std::min(250, int(std::lround(double(t0) * (1.0 - wv) + double(hdHere + shiftC) * wv))));
                     paleCol.insert(ck, PaleCol{ tn, qint16(tn - paleDonor.hd[di]), quint8(std::lround(wv * 255.0)), wv >= 0.5 ? paleDonor.surf[di] : quint16(0), qint32(di) });
                 }
             paleDonorUsed = !paleCol.isEmpty();
@@ -11430,18 +11510,18 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     // Vines (like the game's jungle ones): a vine can stand in the crown itself (replacing a leaf),
     // hang a thread of 1..5 blocks under a crown column, poke above the crown and grow along the trunk.
     // The block is saved WITHOUT properties (as in a real world: the game connects the faces itself)
-    auto vineColumn = [&](int x, int z, int yBottom, int win)
+    auto vineColumn = [&](int x, int z, int yBottom, int win, quint16 leafId = quint16(IdJungleLeaves))
     {   // one crown column: the crown fills [yBottom, yBottom+win], decorate the column by its hash
         const quint32 hr = colHash(pairKey(x, z) ^ 0x2ADEull);
         int yTopC = -9999;
         for (int y = yBottom + win; y >= yBottom; --y)
-            if (store.get(x, y, z) == IdJungleLeaves) { yTopC = y; break; }
+            if (store.get(x, y, z) == leafId) { yTopC = y; break; }
         if (yTopC < yBottom) return;                                   // the column has no crown (a trunk, an air gap)
         const int roll = int(hr % 100u);
         if (roll < 62) return;                                         // ~3 of 5 columns stay plain leaves
         if (roll >= 84 && yTopC > yBottom && store.get(x, yTopC + 1, z) == IdAir)
             store.set(x, yTopC + 1, z, IdVine);                        // a vine pokes above the crown
-        if (roll >= 76 && store.get(x, yBottom, z) == IdJungleLeaves)
+        if (roll >= 76 && store.get(x, yBottom, z) == leafId)
             store.set(x, yBottom, z, IdVine);                          // the vine stands IN the crown (a replaced leaf)
         const int len = roll < 70 ? 1 + int((hr >> 8) % 2u) : 1 + int((hr >> 8) % 5u);
         for (int k = 0; k < len; ++k)
@@ -11451,19 +11531,52 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             store.set(x, y, z, IdVine);                                // the hanging thread under the column
         }
     };
-    auto jungleCrownVines = [&](int bx, int bz, int yBottom, int R)
+    auto jungleCrownVines = [&](int bx, int bz, int yBottom, int R, quint16 leafId = quint16(IdJungleLeaves))
     {   // the crown of a 1×1 trunk (the far corners cut): every column of the lower layer is a candidate
         for (int dx = -R; dx <= R; ++dx)
             for (int dz = -R; dz <= R; ++dz)
             {
                 if (std::abs(dx) == R && std::abs(dz) == R) continue;
                 if (!dx && !dz) continue;                              // the trunk column (vines near it — below)
-                vineColumn(bx + dx, bz + dz, yBottom, R + 2);
+                vineColumn(bx + dx, bz + dz, yBottom, R + 2, leafId);
             }
         static const int kT[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
         for (const auto& t : kT)                                       // a vine against the trunk, inside the crown
-            if (colHash(pairKey(bx + t[0], bz + t[1]) ^ 0x51DEull) % 100u < 18u && store.get(bx + t[0], yBottom, bz + t[1]) == IdJungleLeaves)
+            if (colHash(pairKey(bx + t[0], bz + t[1]) ^ 0x51DEull) % 100u < 18u && store.get(bx + t[0], yBottom, bz + t[1]) == leafId)
                 store.set(bx + t[0], yBottom, bz + t[1], IdVine);
+    };
+    // Swamp oak (ground under a source with the "swamp" effect, e.g. mrspol wetland): a 1×1 oak trunk of 5..8, a wide flat crown of oak leaves with VINES
+    // hanging from it, a couple of gnarled branches. The species is independent of the climate zone — a swamp is a swamp.
+    auto plantSwampOak = [&](int bx, int bz, int y0, int h, quint32 hh) -> bool
+    {
+        for (int sx2 = -3; sx2 <= 3; sx2 += 6)
+            for (int sz2 = -3; sz2 <= 3; sz2 += 6)
+                if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
+        for (int dy = 0; dy < h; ++dy)
+            if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, IdOakLog);
+        const int topTree = y0 + h - 1;
+        static const int kR[4] = { 1, 2, 3, 2 };                       // crown layers topTree+1 .. topTree-2: a flat bottom
+        for (int li = 0; li < 4; ++li)
+        {
+            const int dy = 1 - li, r = kR[li];
+            for (int dx = -r; dx <= r; ++dx)
+                for (int dz = -r; dz <= r; ++dz)
+                {
+                    if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                    if (dy == -1 && std::abs(dx) == 3 && std::abs(dz) == 3) continue;   // no far corners at the bottom
+                    if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
+                        store.set(bx + dx, topTree + dy, bz + dz, IdOakLeaves);
+                }
+        }
+        if (hh % 3u == 0u)
+        {   // a gnarled branch — a stump sticking out sideways
+            static const int kA[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+            const auto& a = kA[(hh >> 8) % 4u];
+            const int by = y0 + h - 3 + int((hh >> 10) % 2u);
+            if (store.get(bx + a[0], by, bz + a[1]) == IdAir) store.set(bx + a[0], by, bz + a[1], IdOakLog);
+        }
+        jungleCrownVines(bx, bz, topTree - 2, 2, IdOakLeaves);         // the vines hang from the lowest layer of the crown
+        return true;
     };
     // A broadleaf tree (birch etc.): a 1×1 trunk of the given block, a "diamond" crown of radius 2 of the given leaves; the crown does not go beyond the chunks with ground
     auto plantBroad = [&](int bx, int bz, int y0, int h, quint16 logId, quint16 leafId) -> bool
@@ -11734,6 +11847,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (!spansContain(site.spans, tx, tz)) continue;
             const qint64 ck = pairKey(tx, tz);
             if (colWater.contains(ck)) continue;               // we do not grow on water
+            if (noTreePadCols.contains(ck)) continue;          // the reserved spots (apiaries, farms, objects from points)
             if (colMin.contains(ck)) continue;                 // a structure column — the forest does not climb into the house
                                                                // (after the floor was sunk by 1 block the slab
                                                                // stopped being an obstacle for y0)
@@ -11754,8 +11868,21 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 const int hh = 6 + int(hp % 4u);
                 if (y0 + hh + 4 > 255) continue;
                 if (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))) continue;
+                // the 2x2 trunk must not stand half in a drawn pond (the anchor was checked above)
+                if (colWater.contains(pairKey(bx + 1, bz)) || colWater.contains(pairKey(bx, bz + 1)) || colWater.contains(pairKey(bx + 1, bz + 1))) continue;
                 if (!spansContain(site.spans, bx + 1, bz + 1)) continue;
                 plantPaleTree(bx, bz, y0, hh, hp >> 4);
+                continue;
+            }
+            if (swampCols.contains(ck))
+            {   // the swamp biome (a layer with the "swamp" effect lies over this spot): whatever forest grows
+                // here — a park, a yard or an ordinary one — becomes a grove of swamp oaks with vines, independent
+                // of the climate zone; rarer than an ordinary forest, with clearings between the trees
+                const quint32 hs = colHash(ck ^ 0x2F8C3ull);
+                if (hs % 100u >= 50u) continue;                                // ~50% of the grid cells are planted
+                const int h = 5 + int(hs % 4u);                                // trunks 5..8
+                if (y0 + h + 4 > 255) continue;
+                plantSwampOak(bx, bz, y0, h, hs);
                 continue;
             }
             if (site.park)
@@ -12138,6 +12265,49 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 lampPost(is.cx, is.cz, topC, 5);                                                              // the central tall stand
             }
         }
+    }
+    // Swamp biome (sources with the "swamp" effect, e.g. mrspol): what the biome does BY ITSELF. Forests under
+    // the contour already became swamp-oak groves in the forest loop; here the OPEN swamp ground gets rare oaks
+    // (sparser than forest), and mushrooms/ferns/dead branches as the ground flora. Water, roads and built-up
+    // columns under the contour are left alone — the biome is an overlay, not an owner of the land.
+    if (!swampCols.isEmpty())
+    {
+        const quint16 qFern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern")),
+                    qDb = quint16(IdPaletteStart + paletteIndexOf("minecraft:dead_bush")),
+                    qMushB = quint16(IdPaletteStart + paletteIndexOf("minecraft:brown_mushroom")),
+                    qMushR = quint16(IdPaletteStart + paletteIndexOf("minecraft:red_mushroom"));
+        auto floor6 = [](int v) { return v >= 0 ? v / 6 : -((-v + 5) / 6); };   // cell of the same 6×6 grid as the forest loop
+        QSet<ColKey> cells;
+        for (ColKey ck : swampCols)
+            cells.insert(pairKey(floor6(keyFirst(ck)), floor6(keySecond(ck))));
+        int nSwampTrees = 0;
+        for (ColKey cell : cells)
+        {
+            const quint32 hs = colHash(cell ^ 0x2F8C3ull);
+            if (hs % 100u >= 40u) continue;                                    // open swamp — rare trees (~40% of cells)
+            const int tx = keyFirst(cell) * 6 + int(hs % 6u), tz = keySecond(cell) * 6 + int((hs >> 8) % 6u);
+            const ColKey ck = pairKey(tx, tz);
+            if (!swampCols.contains(ck)) continue;                             // the tree spot fell outside the contour
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(tx, y0, tz) != IdAir) continue;                      // something already stands here
+            const int h = 5 + int(hs % 4u);
+            if (y0 + h + 4 > 255) continue;
+            plantSwampOak(tx, tz, y0, h, hs);
+            ++nSwampTrees;
+        }
+        for (ColKey ck : swampCols)
+        {
+            const quint32 hd = colHash(ck ^ 0x77AC11ull);
+            if (hd % 100u >= 7u) continue;                                     // flora on ~7% of the columns
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck)) continue;
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(bx, y0, bz) != IdAir) continue;                      // not on a trunk or an object
+            const quint32 r = (hd >> 8) % 100u;
+            store.set(bx, y0, bz, r < 40u ? qDb : (r < 58u ? qMushB : (r < 76u ? qMushR : qFern)));
+        }
+        tmcStepLog(QString("3.5 swamp biome: %1 columns, %2 open-ground oaks").arg(swampCols.size()).arg(nSwampTrees).toUtf8().constData());
     }
     lap("before 3.51");
     beginStep(5);
@@ -15496,6 +15666,185 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     npcs.append(m);
                 }
             }
+        }
+    }
+
+    lap("before 3.575");
+    // 3.575 Objects from points on the map (sources with a modelField, step 3.575): memorials and monuments,
+    // fountains, communication towers and waste bins stand on the READY ground (after the street furniture; the
+    // trees were not planted around them — their columns were reserved in noTreePadCols). Which structure to build
+    // is decided by the model number from point_models.csv (the object's code from the modelField column);
+    // "atop a building" is the communication tower only (from its roof), the rest are skipped if a
+    // structure/water/roadway lies under the point. The variant of every object is a hash of its column.
+    {
+        if (!spots.isEmpty())
+        {
+            auto blk = [](const char* name) -> quint16
+            { return quint16(IdPaletteStart + paletteIndexOf(name)); };
+            const quint16 qStone = blk("minecraft:stone"), qCobb = blk("minecraft:cobblestone"),
+                        qMossy = blk("minecraft:mossy_cobblestone"), qSBrick = blk("minecraft:stone_bricks"),
+                        qBrick = blk("minecraft:bricks"), qPDsl = blk("minecraft:polished_deepslate"),
+                        qCDsl = blk("minecraft:cobbled_deepslate"), qPBlk = blk("minecraft:polished_blackstone"),
+                        qBlk = blk("minecraft:blackstone"), qGran = blk("minecraft:granite"),
+                        qDior = blk("minecraft:diorite"), qAnd = blk("minecraft:andesite"),
+                        qSmth = blk("minecraft:smooth_stone"), qGold = blk("minecraft:gold_block"),
+                        qQuartz = blk("minecraft:quartz_block");
+            static const quint16 kStairs[4] = { IdStoneStairsN, IdStoneStairsE, IdStoneStairsS, IdStoneStairsW };
+            int nPlaced = 0, nSkipped = 0;
+            for (const SpotSite& sp : spots)
+            {
+                const qint64 ck = pairKey(sp.x, sp.z);
+                if (colWater.contains(ck) || roadCols.contains(ck)) { ++nSkipped; continue; }   // a pit/roadway under the object
+                const int gy = surfaceTop(ck) + 1;
+                if (gy + 40 > 255) continue;
+                // the highest solid non-vegetation block of the column: for a tower — the roof to grow from,
+                // for the others — the fact that something is already built here
+                int topSolid = -1;
+                for (int y = 255; y >= gy; --y)
+                {
+                    const quint16 b = store.get(sp.x, y, sp.z);
+                    if (b && !isVegBlockId(b)) { topSolid = y; break; }
+                }
+                const quint32 hsh = colHash(ck ^ 0x53507u);
+                switch (sp.model)
+                {
+                case kComposter:                                         // a waste bin — just a composter
+                    store.set(sp.x, gy, sp.z, IdComposter);
+                    ++nPlaced;
+                    break;
+                case kStatue:                                            // a MEMORIAL — a small statue (6 variants)
+                {
+                    if (topSolid >= gy) { ++nSkipped; break; }           // something is already built here
+                    const int cx = sp.x, cz = sp.z;
+                    switch (hsh % 6u)
+                    {
+                    case 0:                                              // an obelisk on a two-wide plinth
+                        store.set(cx, gy, cz, qMossy); store.set(cx + 1, gy, cz, qCobb);
+                        store.set(cx, gy, cz + 1, qCobb); store.set(cx + 1, gy, cz + 1, qMossy);
+                        store.set(cx, gy + 1, cz, qPDsl); store.set(cx, gy + 2, cz, qPDsl); store.set(cx, gy + 3, cz, qPDsl);
+                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
+                        break;
+                    case 1:                                              // a brick stele with a memorial plaque
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz) { store.set(cx + dx, gy, cz + dz, qBrick); store.set(cx + dx, gy + 1, cz + dz, qBrick); }
+                        store.set(cx, gy + 2, cz, qSBrick); store.set(cx, gy + 3, cz, qSBrick);
+                        store.set(cx, gy + 4, cz, IdPressurePlateStone);
+                        break;
+                    case 2:                                              // an eternal flame on a black post with corner fence posts
+                        store.set(cx, gy, cz, qPBlk); store.set(cx, gy + 1, cz, qPBlk);
+                        store.set(cx, gy + 2, cz, IdLanternStanding);
+                        store.set(cx - 1, gy, cz - 1, IdCobbleWall); store.set(cx + 1, gy, cz - 1, IdCobbleWall);
+                        store.set(cx - 1, gy, cz + 1, IdCobbleWall); store.set(cx + 1, gy, cz + 1, IdCobbleWall);
+                        break;
+                    case 3:                                              // a megalith: a boulder of mossy stone
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz)
+                            {
+                                const quint32 hb = colHash(pairKey(cx + dx, cz + dz) ^ 0x4EB01ull);
+                                const quint16 mb = hb % 3u == 0u ? qMossy : (hb % 3u == 1u ? qCobb : qAnd);
+                                store.set(cx + dx, gy, cz + dz, mb);
+                                if (hb % 7u < 3u) store.set(cx + dx, gy + 1, cz + dz, mb);
+                            }
+                        break;
+                    case 4:                                              // a broken column on a platform
+                        for (int dx = -1; dx <= 1; ++dx)
+                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qCobb);
+                        store.set(cx - 1, gy + 1, cz - 1, qSmth); store.set(cx + 1, gy + 1, cz - 1, qSmth);
+                        store.set(cx - 1, gy + 1, cz + 1, qSmth); store.set(cx + 1, gy + 1, cz + 1, qSmth);
+                        store.set(cx, gy + 1, cz, qSBrick); store.set(cx, gy + 2, cz, qSBrick); store.set(cx, gy + 3, cz, qSBrick);
+                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
+                        break;
+                    default:                                             // a shattered deepslate stele
+                        store.set(cx, gy, cz, qCDsl); store.set(cx + 1, gy, cz, qCDsl);
+                        store.set(cx, gy, cz + 1, qCDsl); store.set(cx + 1, gy, cz + 1, qCDsl);
+                        store.set(cx, gy + 1, cz, qBlk); store.set(cx, gy + 2, cz, qBlk);
+                        store.set(cx, gy + 3, cz, qCDsl);
+                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
+                        break;
+                    }
+                    ++nPlaced;
+                    break;
+                }
+                case kStele:                                             // a MONUMENT — a stele in several materials (3 variants)
+                {
+                    if (topSolid >= gy) { ++nSkipped; break; }
+                    const int cx = sp.x, cz = sp.z;
+                    switch (hsh % 3u)
+                    {
+                    case 0:                                              // a dark obelisk with a gilded top
+                        for (int dx = -1; dx <= 1; ++dx)
+                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qStone);
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy + 1, cz + dz, qPDsl);
+                        for (int dy = 2; dy <= 6; ++dy) store.set(cx, gy + dy, cz, qPBlk);
+                        store.set(cx, gy + 7, cz, qGold);
+                        break;
+                    case 1:                                              // a brick stele with an eternal flame (granite podium)
+                        for (int dx = -1; dx <= 1; ++dx)
+                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qGran);
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz)
+                                for (int dy = 1; dy <= 4; ++dy) store.set(cx + dx, gy + dy, cz + dz, qBrick);
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy + 5, cz + dz, qSBrick);
+                        store.set(cx, gy + 6, cz, IdLanternStanding);
+                        break;
+                    default:                                              // a stone-brick column with side walls on a diorite base
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qDior);
+                        for (int dy = 1; dy <= 6; ++dy) store.set(cx, gy + dy, cz, qSBrick);
+                        store.set(cx - 1, gy, cz, IdStoneBrickWall); store.set(cx - 1, gy + 1, cz, IdStoneBrickWall);
+                        store.set(cx + 2, gy, cz, IdStoneBrickWall); store.set(cx + 2, gy + 1, cz, IdStoneBrickWall);
+                        store.set(cx, gy + 7, cz, kStairs[(hsh >> 8) % 4u]);
+                        break;
+                    }
+                    ++nPlaced;
+                    break;
+                }
+                case kFountain:                                          // a FOUNTAIN: a stone ring, a pool, a post with water running down it
+                {
+                    if (topSolid >= gy) { ++nSkipped; break; }
+                    const int cx = sp.x, cz = sp.z;
+                    const bool mossyRim = (hsh >> 6) % 4u == 0u;         // an old weathered ring sometimes
+                    const quint16 ringMat = mossyRim ? qMossy : qSBrick;
+                    for (int dx = -2; dx <= 2; ++dx)
+                        for (int dz = -2; dz <= 2; ++dz)
+                        {
+                            const int r = std::max(std::abs(dx), std::abs(dz));
+                            if (r == 2) { store.set(cx + dx, gy, cz + dz, ringMat); store.set(cx + dx, gy + 1, cz + dz, ringMat); }
+                            else if (dx || dz) { store.set(cx + dx, gy, cz + dz, qStone); store.set(cx + dx, gy + 1, cz + dz, IdWater); }
+                        }
+                    store.set(cx, gy, cz, qStone); store.set(cx, gy + 1, cz, qSBrick); store.set(cx, gy + 2, cz, qSBrick);
+                    store.set(cx, gy + 3, cz, IdWater);                  // the source atop the post
+                    static const int kD4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                    for (const auto& d : kD4)                            // water STREAMS running down the post (level=8 — falling)
+                    {
+                        store.set(cx + d[0], gy + 3, cz + d[1], IdWaterFalling);
+                        store.set(cx + d[0], gy + 2, cz + d[1], IdWaterFalling);
+                    }
+                    ++nPlaced;
+                    break;
+                }
+                case kTower:                                             // a COMMUNICATION TOWER: an iron base, a spire of stone fence, 3 quartz blocks on top
+                {   // ~32 blocks above the ground; from the roof of a high building — a 6-block body + the antenna
+                    const int baseY = colMin.contains(ck) ? std::max(gy, topSolid + 1) : gy;
+                    const int above = baseY - gy;
+                    const int body = above >= 32 ? 6 : std::max(6, 32 - above - 4);
+                    if (baseY + body + 3 > 255) { ++nSkipped; break; }
+                    store.set(sp.x, baseY, sp.z, IdIronBlock);
+                    for (int dy = 1; dy <= body; ++dy) store.set(sp.x, baseY + dy, sp.z, IdCobbleWall);
+                    for (int dy = 1; dy <= 3; ++dy) store.set(sp.x, baseY + body + dy, sp.z, qQuartz);
+                    ++nPlaced;
+                    break;
+                }
+                default:
+                    ++nSkipped;                                          // an unknown code — nothing is built
+                    break;
+                }
+            }
+            char buf[128];
+            snprintf(buf, sizeof buf, "3.575 point objects: placed %d, skipped %d", nPlaced, nSkipped);
+            tmcStepLog(buf);
         }
     }
 

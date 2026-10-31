@@ -60,6 +60,7 @@ bool parseT3dSettings(const QByteArray& json, T3dSettings& out, QString* err)
         vs.liftField = ro["liftField"].toString();
         vs.liftMultiplier = ro["liftMultiplier"].toDouble(1.0);
         vs.liftAdd = ro["liftAdd"].toDouble(0.0);
+        vs.modelField = ro["modelField"].toString();
         vs.absorptionMode = ModelAbsorptionMode(ro["absorptionMode"].toInt(int(ModelAbsorptionMode::PerLayer)));
         vs.absorptionValue = ro["absorptionValue"].toDouble(20.0);
         vs.absorptionColumn = ro["absorptionColumn"].toString();

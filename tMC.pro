@@ -32,7 +32,7 @@ RC_LANG = 0x0419
 QMAKE_CXXFLAGS += /utf-8
 QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.2.26.10305
+    VERSION = 1.2.26.10311
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
@@ -117,7 +117,7 @@ SOURCES += \
 # The program looks for them next to the exe, so nothing has to be copied by hand. Missing files (for example the enhancer) are skipped.
 CONFIG(debug, debug|release): TMC_OUTDIR = $$OUT_PWD/debug
 else: TMC_OUTDIR = $$OUT_PWD/release
-TMC_RES = default.t3d osm_rules.json heights.csv tmc_buildings.dat
+TMC_RES = default.t3d osm_rules.json heights.csv tmc_buildings.dat point_models.csv
 for(f, TMC_RES): exists($$PWD/resources/$$f): QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/$$f)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)
 QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/templates/*.bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)
 # The GDAL runtime (gdal.dll and its dependencies, gdal-data, projlib, gdalplugins) is not in the repository (about 100 MB): if it is put into <GDAL folder>/bin

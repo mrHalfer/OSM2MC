@@ -1,0 +1,10 @@
+# The point structures: the object code (the modelField column of the source in the 3D settings) -> the
+# model number that the exporter builds on the point (step 3.575). Comment lines start with '#'.
+# Models: 1 = a memorial statue (6 variants), 2 = a monument stele (3 variants), 3 = a fountain with
+# water running down the post, 4 = a communication tower, 5 = a composter (a waste bin).
+code;model
+53520900;1
+53520000;2
+31650000;3
+53340900;4
+51000101;5

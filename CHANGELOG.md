@@ -5,6 +5,20 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.2.26.10311] — 2026-10-31
+
+### Changed
+- Church domes without a `roof:colour` and without a known `roof:material` are now plain gray concrete instead of always being gilded; a white dome is now built of polished quartz, which is whiter than white concrete (`roof:colour=white`, `snow`, `ivory`, `pearl` or any near-white hex color). Colored domes and their spires (gold, lapis, diamond, redstone, coal), copper and metal domes are unchanged.
+
+### Added
+- A label next to the "Export settings" button always shows where the world goes now: local zip, launcher, Modrinth or CurseForge (hovering it shows the exact folder).
+- Small OSM objects marked by a single point are now built in the world too: `historic=memorial` gets a small statue in one of six variants (obelisk, stele with a plaque, eternal flame, megalith, broken column, shattered stele), `historic=monument` gets a tall stele in one of several materials, `amenity=fountain` gets a classic fountain — a stone ring with a pool and a post with water running down it, waste bins (`amenity=waste_disposal`) become composters, and communication towers (`tower:type=communication` or `communication:mobile_phone=yes`) become ~32-block spires of stone fence with an iron base and a quartz antenna — on top of a tall building such a tower grows from its roof and is only as tall as needed. Nothing is built where the point's ground is water, a roadway or another structure. Which layers give such objects and which code maps to which model is set by the user: the point layers are ordinary sources in the 3D settings with a "model field" (the column holding the object code), and the code-to-model table lives in `point_models.csv` next to the program (like `heights.csv`); a code absent from the table is not built.
+- Wetlands (`natural=wetland`) became a swamp biome OVERLAY rather than an object: the forest under a wetland turns into a grove of swamp oaks with vines, open swamp ground gets rare oaks, ferns, mushrooms and dead branches — while lakes, roads and buildings under the contour stay as they were; open water is not drawn. The biome is attached to the wetland layer by a new "swamp" effect in the 3D settings, so custom layers can carry it too.
+
+### Fixed
+- The Pale Garden no longer gets abrupt terrain walls inside the forest: the areas where an extra forest mansion from the donor template is replaced with ordinary forest used to end at the box edges with steps up to 38 blocks (the replacement terrain is mirrored, so the edges did not match). The terrain now ramps from the neighbor ground just outside the box through 12 blocks.
+- Pale oaks no longer stand half over the water at the edge of a drawn pond: the 2x2 trunk used to hang over the columns of a lake (most visible in a wetland, where ponds are common) because only the anchor column of the tree was checked for water. Now all four trunk columns must be dry.
+
 ## [1.2.26.10305] — 2026-10-30
 
 ### Added
