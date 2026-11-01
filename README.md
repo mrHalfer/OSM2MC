@@ -21,9 +21,9 @@ Instead of the online map you can use a file: type the path to an OpenStreetMap 
 ## What you get
 
 - **Buildings** with floors, windows, doors, furnished interiors (rooms, stairs, furniture) and roofs; the height, the number of floors and the material are taken from the map data. Schools, kindergartens, research institutes and churches get their own look and unique interiors.
-- **Roads** with marking and crosswalks, bridges over water, railways, street lamps, signs with street names and house numbers.
-- **Nature**: water, forests, climate zones, parks, yards, fields and terrain relief - just like real life, only better.
-- **Underground and hidden places**: caves, church and laboratory dungeons, a stronghold and an Ancient City with secret passages, a Pale Garden with a mansion, bandit outposts and camps, shipwrecks in big lakes, ruined portals, floating islands above the parks, and villages grown from clusters of private houses.
+- **Roads** with marking and crosswalks, bridges over water, railways (electrified ones get powered rails on a stone bed, trams on stone bricks), street lamps, signs with street names and house numbers.
+- **Nature**: water, forests, parks, yards, fields and terrain relief - just like real life, only better. The climate zone is worked out from the coordinates automatically (or set by hand): 12 zones from tundra and taiga to deserts, savannas and tropical jungles - they pick the tree species, the ground surface and the biomes.
+- **Underground and hidden places**: caves, metro tunnels with rails and lanterns, church and laboratory dungeons, a stronghold and an Ancient City with secret passages, a Pale Garden with a mansion, bandit outposts and camps, shipwrecks in big lakes, ruined portals, floating islands above the parks, and villages grown from clusters of private houses.
 - Villagers, mannequins, furniture and chests with ordinary game loot.
 - The result is an ordinary save (a `.zip`): drop it into `.minecraft/saves`, no need to unpack it. Versions **26.x** and **1.21.x** are supported; outside the exported area you get either a regular seed-based world or a superflat one.
 

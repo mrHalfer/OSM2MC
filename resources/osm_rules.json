@@ -1327,6 +1327,21 @@
    }
   },
   {
+   "note": "Underground metro: a subway line inside a tunnel (the exporter digs an underground tunnel for it)",
+   "from": "lines",
+   "layer": "rrslin",
+   "when": {
+    "railway": "subway",
+    "tunnel": [
+     "yes",
+     "1"
+    ]
+   },
+   "fields": {
+    "CODE": "61123100"
+   }
+  },
+  {
    "note": "Not railways: abandoned and dismantled",
    "from": "lines",
    "layer": "-",
@@ -1343,14 +1358,15 @@
    }
   },
   {
-   "note": "A railway",
+   "note": "A railway; when electrified (the electrified tag other than no, passed via the ELEC column) the exporter lays powered rails and a stone bed under the track",
    "from": "lines",
    "layer": "rrslin",
    "when": {
     "railway": "rail"
    },
    "fields": {
-    "CODE": "61111000"
+    "CODE": "61111000",
+    "ELEC": "{electrified}"
    }
   },
   {
@@ -1365,7 +1381,8 @@
     ]
    },
    "fields": {
-    "CODE": "61112000"
+    "CODE": "61112000",
+    "ELEC": "{electrified}"
    }
   },
   {
@@ -1376,11 +1393,12 @@
     "railway": "monorail"
    },
    "fields": {
-    "CODE": "61113000"
+    "CODE": "61113000",
+    "ELEC": "{electrified}"
    }
   },
   {
-   "note": "A tram",
+   "note": "A tram: tram tracks, always electrified, on a stone brick bed",
    "from": "lines",
    "layer": "rrslin",
    "when": {

@@ -5,6 +5,29 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.3.26.11021] — 2026-11-02
+
+### Added
+- Underground metro: a subway line drawn in a tunnel (`railway=subway` + `tunnel=yes`) no longer falls through the
+  rules and does not lie on the surface — the exporter digs a real tunnel ~10 blocks deep: the floor is two blocks,
+  the interior is five blocks high with slightly rounded top corners, the walls are a one-block lining of a mixed
+  stone masonry (stone bricks, cracked and mossy ones, polished andesite, granite and diorite, andesite, cobblestone).
+  Real lines in OSM are long diagonals, and the block grid would turn them into a staircase turning on every block —
+  the route is straightened instead: straight runs of up to 80 blocks joined by right-angle bends, stations and
+  curve breaks stay in place. Slopes never land on a bend (a sloped rail cannot turn), and where the corridors of
+  the two tracks touch, cross or pass one over another they are fused into one shell — no stray pillars inside
+  the corridor, at a crossing or at a bend.
+  The tunnel cuts through caves on its way, the surface above it stays intact (grass, roads and buildings know
+  nothing about the rails below). The rails sit on the tunnel floor, every twentieth is electrified - a powered rail
+  cannot be curved, so those lie on straight runs only, and a hit that lands on a turn is carried to the next straight
+  cell and laid there at once as a row of 2-5 powered rails. A lantern
+  hangs from the ceiling every few blocks, so the tunnels are lit. A subway *without* `tunnel=yes` stays ignored,
+  as before.
+- Electrified surface railways (a railway with an `electrified` tag other than `no`) get powered rails like the metro
+  ones, with the same straight-run carry-over; ordinary stone replaces the ground under the track of such a line.
+- Trams (`railway=tram`) are now real tram tracks: electrified even without an electrification tag, with stone bricks
+  instead of the ground under the track.
+
 ## [1.3.26.11011] — 2026-11-01
 
 ### Added

@@ -33,6 +33,7 @@ struct ExportItem
     bool linear = false;
     double roadScale = 1.0;
     int code = 0;
+    bool elec = false;                              // Railway: the ELEC column (OSM "electrified" other than "no")
     bool lift = false;
     bool onion = false;
     double roofH = 0.0;
@@ -336,6 +337,16 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                 default: break;
                 }
             }
+            // rail electrification: the ELEC column (the OSM "electrified" tag other than "no")
+            if (kind == Kind::Railway)
+            {
+                const int eno = layer->fieldIndex(QStringLiteral("ELEC"));
+                if (eno >= 0)
+                {
+                    const QString ev = obj->fields.value(eno).trimmed();
+                    e.elec = !ev.isEmpty() && ev.compare(QLatin1String("no"), Qt::CaseInsensitive) != 0;
+                }
+            }
             // house address / street name
             if (kind == Kind::Building || kind == Kind::Road)
             {
@@ -541,6 +552,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             mo.extrudeH = std::abs(rel) * invZ;
             mo.code = e.code;
             mo.model = e.model;
+            mo.railElec = e.elec;
             if (e.kind == Kind::Plate && mo.extrudeH < 1.0 && (e.code == 51230000 || e.code == 51133000 || e.code == 51410000))
             {   // csrpol 51230000/51133000/51410000 with zero height — a 15 m tower
                 float zmin = std::numeric_limits<float>::max(), zmax = -zmin;

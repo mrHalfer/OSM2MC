@@ -123,6 +123,10 @@ public:
         //! rail line along them with correct shapes (straight, turns, slopes) and connections; for 61111000 — two
         //! parallel lines. Empty — the axis line is derived from the mesh ribbon (a straight line along the long axis).
         QVector<QVector<QPointF>> paths;
+        //! For Railway — the ELEC column of osm_rules.json (the OSM tag "electrified" other than "no"): the surface
+        //! rails are electrified like in the metro (every 20th on a straight run), and the ground under the track is
+        //! replaced by stone (stone bricks for trams); trams (61124000) are electrified even without the tag.
+        bool railElec = false;
     };
 
     //! The terrain height at a world point (X,Y) — honest meters, -9999 for "no data" (the same contract

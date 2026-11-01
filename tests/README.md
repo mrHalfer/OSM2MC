@@ -43,7 +43,13 @@ A quick cycle while editing the OSM rules: `py -3 run_tests.py osm`. Before hand
 - `tools\test_osm.py`, `tools\test_shp.py` — separate stages (exit code 0 — PASS, 77 — SKIP).
 - `tools\server_check.py 26|121 <zip> [--area x0 z0 x1 z1]` — open any world with a server, forceload a box.
 - `tools\smoke_mc.py 26|121 <zip>` — a server smoke test of the harness noise worlds (mannequins, spawner, the bottom).
-- `tools\verify_mc_export.py [zip ...]`, `tools\lightcheck.py`, `tools\probe_blocks.py` and the others — checks of ready worlds; the worlds lie in `tests\worlds`.
+- `tools\verify_mc_export.py [zip ...]`, `tools\lightcheck.py`, `tools\probe_blocks.py` and the others - checks of ready worlds; the worlds lie in `tests\worlds`.
+- `tools\verify_subway.py <zip>` - the underground metro: rails under a solid ceiling (section 7+2 wide, air at +-3 and lining at +-4 on straight runs), lamps, floor, no holes above; no stray solid columns inside the corridor; powered rails only on straight runs and never at turns; electrified surface rails (trams, `electrified` railways) must stand on a stone/brick bed (exit code 77 - no metro in the world).
+- `tools\verify_fauna.py <zip> [zone]` - the aquatic fauna as entities: PersistenceRequired and the species fields, the fish species per climate zone.
+- `tools\verify_biomes.py <zip | unpacked save> [biome]` - the biome palette histogram and the chunks of the wanted biome (with a spawn hint).
+- `tools\scan_points.py <zip> [marker ...]`, `tools\scan_zone.py <zip> [log ...]`, `tools\count_blocks.py <zip ...> [name part ...]`, `tools\chunk_range.py <zip>` - world scans: point-structure markers, zone trees, block counts, the real world size.
+- `tools\steps_report.py <mcx log ...>` - the step table over `MCX_LOG_STEPS` logs (the last one is compared with the first - speed regressions).
+- `tools\bench_scenes.py <dir> [scene ...]` - the bench/probe .osm scenes (s1..s6, bench, p1..p5; see the speed check in DEVELOPING/AGENTS); `tools\check_zones.py` - the climate zone of the world at real city coordinates.
 - With `TMC_OSM_DEBUG=1` the tMC log has a line per building: the tags the rules saw and the resulting layer/code.
 
 ## What was not carried over

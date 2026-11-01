@@ -196,6 +196,12 @@ static const NamedColor kBlockPalette[] = {
     { "minecraft:mossy_cobblestone",    112, 120,  88 },
     // White church domes (roof:colour=white — see the dome pass): polished quartz, whiter than any concrete
     { "minecraft:smooth_quartz",         240, 238, 228 },
+    // Underground metro (61123100): the mixed masonry of the tunnel walls and floor
+    { "minecraft:mossy_stone_bricks",    117, 117, 105 },
+    { "minecraft:cracked_stone_bricks",  110, 110, 110 },
+    { "minecraft:polished_andesite",     133, 133, 133 },
+    { "minecraft:polished_granite",      153,  97,  72 },
+    { "minecraft:polished_diorite",      197, 197, 197 },
 };
 
 //! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
@@ -434,6 +440,9 @@ enum : quint16
     IdBeetroots,                          // 'minecraft:beetroots' age=3
     IdStoneFence,                         // 'minecraft:stone_brick_wall' — the BASE of a stone fence: id = IdStoneFence + conn (north=1, east=2, south=4, west=8), pass 3.58
     IdStoneFenceMax = int(IdStoneFence) + 16,
+    IdPoweredRailShapeBase,               // IdPoweredRailShapeBase + k, k=0..9: 'minecraft:powered_rail'
+                                          //  with the shape kRailShapes[k] (electrified rails of the metro tunnels)
+    IdPoweredRailShapeMax = int(IdPoweredRailShapeBase) + 10,
     IdVine,                               // 'minecraft:vine' without properties (the game connects the faces itself) — jungle trees
     IdWaterFalling,                       // 'minecraft:water' level=8 (falling) — the streams running down a fountain post (3.575)
     IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
@@ -582,6 +591,8 @@ static QString blockName(quint16 id)
         return QLatin1String(kDoorNames[(int(id) - int(IdDoorBase)) / 16]);
     if (id >= IdRailShapeBase && id < IdRailShapeMax)
         return QLatin1String("minecraft:rail");
+    if (id >= IdPoweredRailShapeBase && id < IdPoweredRailShapeMax)
+        return QLatin1String("minecraft:powered_rail");
     if (id >= IdBedBase && id < IdBedMax)          // a bed: the color from the kBeds table
         return QLatin1String(kBeds[(int(id) - int(IdBedBase)) / 8]);
     if (id >= IdPainting && id < IdPaintingMax)    // a painting: the motif is in the BE, only facing here
@@ -720,6 +731,12 @@ static void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
     if (id >= IdRailShapeBase && id < IdRailShapeMax)
     {   // a rail: the shape by index (straight / turns / slopes)
         out << qMakePair(QStringLiteral("shape"), QLatin1String(kRailShapes[int(id) - int(IdRailShapeBase)]))
+            << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
+        return;
+    }
+    if (id >= IdPoweredRailShapeBase && id < IdPoweredRailShapeMax)
+    {   // an electrified rail (the metro tunnels): the same shapes as a plain rail, powered=false by default
+        out << qMakePair(QStringLiteral("shape"), QLatin1String(kRailShapes[int(id) - int(IdPoweredRailShapeBase)]))
             << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
         return;
     }
@@ -6362,6 +6379,43 @@ static int railShapeFor(const QPoint& cur, const QPoint* prev, const QPoint* nex
     return 1;
 }
 
+//! Electrifies a 1-block-wide rail line: every 20th rail becomes a powered rail. A powered rail cannot be
+//! curved, so the hit must land on a STRAIGHT cell: if the count falls on a turn, the hit carries over to the
+//! next straight cell and several powered rails are laid in a row there (2-5 in a row). Only rails that are
+//! really in the store are electrified (a cell blocked by a bridge is skipped and carries its hit further).
+//! Returns the number of powered rails laid.
+static int electrifyRails(VoxelStore& store, const QVector<QPoint>& chain, const QVector<int>& ys)
+{
+    const int n = chain.size();
+    if (n < 3)
+        return 0;
+    QVector<char> straight(n, 0);       // both neighbours on one line — a straight cell, not a turn
+    for (int ci = 1; ci + 1 < n; ++ci)
+        straight[ci] = (chain[ci] - chain[ci - 1]) == (chain[ci + 1] - chain[ci]);
+    int pending = 0, done = 0;
+    for (int ci = 0; ci < n; ++ci)
+    {
+        if ((ci + 1) % 20 != 0)
+            continue;                   // the count itself stays "every 20th", the extras are only the carry-overs
+        if (!straight[ci]) { ++pending; continue; }
+        int place = pending + 1;
+        pending = 0;
+        for (int k = ci; k < n && place > 0; ++k)
+        {
+            if (!straight[k])
+                break;                  // a turn ahead — the rest of the carry-over moves further along the line
+            const quint16 b = store.get(chain[k].x(), ys[k], chain[k].y());
+            if (b < IdRailShapeBase || b >= IdRailShapeMax)
+                continue;               // occupied / already powered
+            store.set(chain[k].x(), ys[k], chain[k].y(),
+                      quint16(int(IdPoweredRailShapeBase) + (int(b) - int(IdRailShapeBase))));
+            ++done; --place;
+        }
+        pending += place;
+    }
+    return done;
+}
+
 //! A column segment: x is fixed, z in [z0, z1]. A forest is stored by segments, not by column: on large data
 //! these are tens of millions of columns (gigabytes and tens of seconds of hash insertions) versus tens of thousands of segments.
 struct ColSpan { int x, z0, z1; };
@@ -8135,7 +8189,11 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     struct ParkCand { int cx, cz; double areaM2; quint32 h; };
     QVector<ParkCand> parkCands;                                  // parks 71126000: candidates for floating islands
     QSet<ColKey> roadCols;            // the columns of the roadway (wool in the ground) — we put lamp posts along them
-    QSet<ColKey> railColsAll;         // the rail columns — we plant trees (rule 3.51) without running onto the tracks
+    QSet<ColKey> railColsAll;         // the rail columns - we plant trees (rule 3.51) without running onto the tracks
+    QVector<QVector<QPoint>> subwayTunnels;   // the underground metro (code 61123100): cell chains in block coords,
+                                              //  the tunnels are dug after the ground fill (the surface is needed)
+    QHash<ColKey, quint16> railBedCols;       // electrified surface rails and trams: the ground block under the
+                                              //  track is replaced (stone; stone bricks for trams) - see makeGround
     QHash<ColKey, int> colWater;      // a column -> the depth of the water pit (hydrography), blocks
     QSet<ColKey> colWaterArt;         // the columns of artificial reservoirs (all outline corners are right): without a smooth descent, sandy shores and sandy bottom
     QSet<ColKey> colWaterNat;         // the columns of natural reservoirs (resolving intersections)
@@ -8885,6 +8943,38 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         bp << QPointF(toBlockX(tf, w.x()), toBlockZ(tf, w.y()));
                     if (bp.size() >= 2) lines << bp;
                 }
+                if (o.code == 61123100)
+                {   // the underground metro: no surface rails - the rails go into a tunnel dug deep
+                    // under the ground (see the "subway tunnels" pass after the ground fill).
+                    // Real lines in OSM are long diagonals (Moscow: 95% of the length off the axes) and the
+                    // orthogonal cell grid turns them into a staircase that turns on EVERY cell. Trains do
+                    // not corner per block, so the polyline is straightened first: every segment becomes a
+                    // staircase with straight steps of up to 80 blocks (occasional 90-degree bends instead
+                    // of a turn per metre; the nodes - the stations and the curve breaks - stay in place).
+                    for (const QVector<QPointF>& ln : lines)
+                    {
+                        QVector<QPointF> pl;
+                        for (const QPointF& p : ln)
+                        {
+                            if (pl.isEmpty()) { pl << p; continue; }
+                            QPointF c = pl.last();
+                            double rx = std::abs(p.x() - c.x()), rz = std::abs(p.y() - c.y());
+                            const int sx = p.x() >= c.x() ? 1 : -1, sz = p.y() >= c.y() ? 1 : -1;
+                            while (rx > 1.0 || rz > 1.0)
+                            {   // consume the dominant axis first, in steps of at most 80 blocks
+                                const double t = std::min(rx >= rz ? rx : rz, 80.0);
+                                if (rx >= rz) { c.setX(c.x() + sx * t); rx -= t; }
+                                else          { c.setY(c.y() + sz * t); rz -= t; }
+                                if (rx <= 1.0 && rz <= 1.0) c = p;        // land exactly on the node
+                                pl << c;
+                            }
+                        }
+                        const QVector<QPoint> chain = railCellChain(pl);
+                        if (chain.size() >= 2) subwayTunnels << chain;
+                    }
+                    ++res.objectCount;
+                    continue;
+                }
                 if (lines.isEmpty() && !topY.isEmpty())
                 {   // no axes — a straight line in the middle of the strip along its long axis
                     int rx0 = std::numeric_limits<int>::max(), rx1 = std::numeric_limits<int>::min();
@@ -8934,6 +9024,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     ok = have;
                     return best;
                 };
+                const bool elec = o.railElec || o.code == 61124000;   // powered rails: the ELEC column, or a tram (always)
+                const quint16 bedId = elec ? quint16(IdPaletteStart + paletteIndexOf(
+                                             o.code == 61124000 ? "minecraft:stone_bricks" : "minecraft:stone"))
+                                           : quint16(0);              // the track bed: stone under the electrified rails,
+                                                                       // stone bricks under the tram tracks
+                int nRailElectro = 0;
                 for (const QVector<QPointF>& ln : lines)
                 {
                     const QVector<QPoint> chain = railCellChain(ln);
@@ -8951,6 +9047,18 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     // slopes no steeper than 1 block per cell (a "stepped" rail with a gap will not connect)
                     for (int ci = 1; ci < n; ++ci) ys[ci] = std::max(ys[ci - 1] - 1, std::min(ys[ci - 1] + 1, ys[ci]));
                     for (int ci = n - 2; ci >= 0; --ci) ys[ci] = std::max(ys[ci + 1] - 1, std::min(ys[ci + 1] + 1, ys[ci]));
+                    // the corner cells stay FLAT (a sloped rail cannot turn), the step moves to the
+                    // neighbouring straight cells - the re-clamp may push a corner back up, so a few rounds
+                    for (int round = 0; round < 4; ++round)
+                    {
+                        bool moved = false;
+                        for (int ci = 1; ci + 1 < n; ++ci)
+                            if ((chain[ci] - chain[ci - 1]) != (chain[ci + 1] - chain[ci]) && ys[ci] != ys[ci - 1])
+                            { ys[ci] = ys[ci - 1]; moved = true; }
+                        if (!moved) break;
+                        for (int ci = 1; ci < n; ++ci) ys[ci] = std::max(ys[ci - 1] - 1, std::min(ys[ci - 1] + 1, ys[ci]));
+                        for (int ci = n - 2; ci >= 0; --ci) ys[ci] = std::max(ys[ci + 1] - 1, std::min(ys[ci + 1] + 1, ys[ci]));
+                    }
                     for (int ci = 0; ci < n; ++ci)
                     {
                         const QPoint& c = chain[ci];
@@ -8968,12 +9076,22 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         }
                         const qint64 ck = pairKey(c.x(), c.y());
                         railColsAll.insert(ck);                      // trees (3.51) avoid the tracks
+                        if (bedId)
+                            railBedCols.insert(ck, bedId);           // the ground under the track becomes stone/brick
                         if (store.get(c.x(), ys[ci], c.y()) != IdAir) continue;
                         store.set(c.x(), ys[ci], c.y(), quint16(int(IdRailShapeBase) + shape));
                         auto mit = colMin.find(ck);
                         if (mit == colMin.end() || ys[ci] < mit.value())
                             colMin[ck] = ys[ci];
                     }
+                    if (elec)
+                        nRailElectro += electrifyRails(store, chain, ys);   // powered rails on straight cells only
+                }
+                if (elec && nRailElectro > 0)
+                {   // a trace for the diagnostics (the same style as the subway pass)
+                    char ebuf[96];
+                    snprintf(ebuf, sizeof ebuf, "electrified rail line %d: %d powered rails", int(o.code), nRailElectro);
+                    tmcStepLog(ebuf);
                 }
             }
             ++res.objectCount;
@@ -11002,7 +11120,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     }
     // The chunks that have any building / wool / water columns at all: the ground fill looks into these hashes for each of tens of millions of columns (cache misses are
     // the longest part of the step on big projects), and the overwhelming majority of chunks (forests, fields) are not touched by them.
-    QSet<ColKey> chunksMin, chunksWool, chunksWater;
+    QSet<ColKey> chunksMin, chunksWool, chunksWater, chunksBed;
     {
         auto addChunks = [](QSet<ColKey>& dst, const auto& m)
         {
@@ -11016,6 +11134,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         addChunks(chunksMin, colMin);
         addChunks(chunksWool, colWool);
         addChunks(chunksWater, colWater);
+        addChunks(chunksBed, railBedCols);
     }
     QHash<ColKey, GroundChunk> ground;
     ground.reserve(int(fillChunks.size()));
@@ -11025,7 +11144,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         g.top.resize(256); g.surf.resize(256); g.wd.resize(256); g.art.fill(0, 256);
         int stoneFloor = std::numeric_limits<int>::max();
         const int bx0 = keyFirst(ckKey) << 4, bz0 = keySecond(ckKey) << 4;
-        const bool hasMin = chunksMin.contains(ckKey), hasWool = chunksWool.contains(ckKey), hasWat = chunksWater.contains(ckKey);
+        const bool hasMin = chunksMin.contains(ckKey), hasWool = chunksWool.contains(ckKey), hasWat = chunksWater.contains(ckKey),
+                   hasBed = chunksBed.contains(ckKey);
         for (int lz = 0; lz < 16; ++lz)
             for (int lx = 0; lx < 16; ++lx)
             {
@@ -11071,6 +11191,10 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         if (h % 100u < (nearD == 1 ? 70u : 35u)) surface = g_sandId;
                     }
                 }
+                const auto bit = hasBed ? railBedCols.constFind(ck) : railBedCols.constEnd();
+                if (bit != railBedCols.constEnd() && wit == colWool.constEnd() && witW == colWater.constEnd())
+                    surface = bit.value();      // the track bed: the rails lie on stone/brick, not on turf
+                                                // (a road crossing or a water body wins over the bed)
                 const int col = lz * 16 + lx;
                 g.top[col] = qint16(top);
                 g.surf[col] = surface;
@@ -11456,6 +11580,231 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     }
                 }
         res.lairInfo += QObject::tr("; terrain and trees of the real Pale Garden: %1 blocks").arg(nBl);
+    }
+    // The underground metro (code 61123100, railway=subway + tunnel=yes): the rails do NOT lie on the surface
+    // but in a tunnel dug ~10 blocks deep. The floor is 2 blocks, the interior is 5 blocks high, the walls are a
+    // 1-block lining; the section is a little rounded (the top corners of the interior are solid stone).
+    // The cavity is dug "ground-down" like the church dungeons (restore the rock above the ceiling into the store
+    // and lower the column top under the floor): the cave cast never applies to a lowered column, so the tunnel
+    // cuts through any cave it touches, and the lining (store blocks) wins over the cast as well.
+    // The walls and the floor are of a mixed stone masonry (a deterministic hash per cell), the lamps hang from
+    // the ceiling every 6th chain cell; every 20th rail is electrified, but a powered rail cannot be curved, so
+    // a hit that falls on a turn carries to the next straight cell and is laid there as a row of 2-5 powered rails.
+    if (!subwayTunnels.isEmpty())
+    {
+        static const char* const kWallNames[16] = {
+            "minecraft:stone_bricks", "minecraft:stone_bricks", "minecraft:stone_bricks", "minecraft:cracked_stone_bricks",
+            "minecraft:mossy_stone_bricks", "minecraft:cobblestone", "minecraft:mossy_cobblestone", "minecraft:stone",
+            "minecraft:stone", "minecraft:andesite", "minecraft:polished_andesite", "minecraft:polished_andesite",
+            "minecraft:polished_granite", "minecraft:polished_diorite", "minecraft:granite", "minecraft:diorite" };
+        static const char* const kFloorNames[8] = {
+            "minecraft:stone_bricks", "minecraft:polished_andesite", "minecraft:polished_diorite", "minecraft:polished_granite",
+            "minecraft:smooth_stone", "minecraft:stone", "minecraft:andesite", "minecraft:smooth_stone" };
+        static const char* const kCeilNames[4] = {
+            "minecraft:stone", "minecraft:cobblestone", "minecraft:andesite", "minecraft:mossy_cobblestone" };
+        quint16 wallId[16], floorId[8], ceilId[4];
+        for (int i = 0; i < 16; ++i) wallId[i] = quint16(IdPaletteStart + paletteIndexOf(kWallNames[i]));
+        for (int i = 0; i < 8; ++i) floorId[i] = quint16(IdPaletteStart + paletteIndexOf(kFloorNames[i]));
+        for (int i = 0; i < 4; ++i) ceilId[i] = quint16(IdPaletteStart + paletteIndexOf(kCeilNames[i]));
+        int nTun = 0, nRails = 0, nElectro = 0, nLamps = 0;
+        // The union of the sections of ALL chains is built first, the shell is applied once after it.
+        // Chains that touch or cross (the two tracks of one line, a corner of one chain running along
+        // another one) would otherwise paint each other's cells: the wall column of one chain landing
+        // inside the interior of another became a solid "column" in the middle of the corridor. An
+        // interior column always wins over a wall column; a shared interior follows its deepest floor,
+        // the lining of a shared wall spans every floor level it passes through.
+        struct TunCol { int floorY; int maxFloor; int minU; };    // deepest and highest floor claiming the column
+        QHash<qint64, TunCol> tInt;
+        QHash<qint64, int> tWallLo, tWallHi;                   // the wall rows [lo, hi] over all the passes
+        QVector<QVector<QPoint>> tunChains;                    // chains with a floor (the rest has no ground)
+        QVector<QVector<int>> tunFy;                           // the final floor levels, per that chain
+        for (const QVector<QPoint>& chain : subwayTunnels)
+        {
+            const int n = chain.size();
+            if (n < 2) continue;
+            ++nTun;
+            // The floor level of every chain cell: 10 blocks under the surface (deeper under water bodies so that
+            // the ceiling stays under the bed), slopes no steeper than 1 block per cell (the rails must connect).
+            QVector<int> fy(n, 0);
+            int last = std::numeric_limits<int>::min();
+            for (int ci = 0; ci < n; ++ci)
+            {
+                const QPoint& c = chain[ci];
+                const auto git = ground.find(pairKey(c.x() >> 4, c.y() >> 4));
+                if (git != ground.end())
+                {
+                    const int gc = (c.y() & 15) * 16 + (c.x() & 15);
+                    const int wd = git->wd[gc];
+                    last = git->top[gc] - (wd > 0 ? std::max(10, wd + 6) : 10);
+                }
+                fy[ci] = last;
+            }
+            if (last == std::numeric_limits<int>::min()) continue;      // the tunnel lies over nowhere (no ground)
+            for (int ci = 1; ci < n; ++ci) fy[ci] = std::max(fy[ci - 1] - 1, std::min(fy[ci - 1] + 1, fy[ci]));
+            for (int ci = n - 2; ci >= 0; --ci) fy[ci] = std::max(fy[ci + 1] - 1, std::min(fy[ci + 1] + 1, fy[ci]));
+            // the corner cells stay FLAT (a sloped rail cannot turn): the step moves to the neighbouring
+            // straight cells, the re-clamp may push a corner back up, so a few rounds (as on the surface)
+            for (int round = 0; round < 4; ++round)
+            {
+                bool moved = false;
+                for (int ci = 1; ci + 1 < n; ++ci)
+                    if ((chain[ci] - chain[ci - 1]) != (chain[ci + 1] - chain[ci]) && fy[ci] != fy[ci - 1])
+                    { fy[ci] = fy[ci - 1]; moved = true; }
+                if (!moved) break;
+                for (int ci = 1; ci < n; ++ci) fy[ci] = std::max(fy[ci - 1] - 1, std::min(fy[ci - 1] + 1, fy[ci]));
+                for (int ci = n - 2; ci >= 0; --ci) fy[ci] = std::max(fy[ci + 1] - 1, std::min(fy[ci + 1] + 1, fy[ci]));
+            }
+            // ---- the sections of this chain into the union maps (the interior of 7 columns, the wall
+            // columns on both sides, 9 across in all); nothing is written to the world at this stage
+            for (int ci = 0; ci < n; ++ci)
+            {
+                const QPoint& c = chain[ci];
+                QPoint dIn(0, 0), dOut(0, 0);                     // the path directions (the chain is orthogonal)
+                if (ci + 1 < n && chain[ci + 1] != c) dOut = chain[ci + 1] - c;
+                if (ci > 0 && c != chain[ci - 1]) dIn = c - chain[ci - 1];
+                QPoint d = (dOut.x() || dOut.y()) ? dOut : dIn;
+                if (!d.x() && !d.y()) d = QPoint(1, 0);           // a single-cell chain
+                const int floorY = fy[ci];
+                auto claim = [&](const QPoint& dir)
+                {
+                    const QPoint px(-dir.y(), dir.x());                 // the cross-section perpendicular to the path
+                    for (int u = -4; u <= 4; ++u)
+                    {
+                        const int x = c.x() + px.x() * u, z = c.y() + px.y() * u;
+                        const qint64 ck = pairKey(x, z);
+                        railColsAll.insert(ck);                      // lone trees (3.51) do not stand over the tunnel
+                        if (!ground.contains(pairKey(x >> 4, z >> 4))) continue;   // a column over nowhere is not built
+                        const int au = std::abs(u);
+                        if (au <= 3)
+                        {   // the interior wins over any wall pass; the deepest floor sets the column, minU
+                            // tells whether the top corner of the interior is rounded off here at all. When a
+                            // higher chain also takes the column (a crossing of two levels), the interior of
+                            // the lower one must stay open up to the ceiling of the upper one (maxFloor),
+                            // otherwise the rock restored over the lower ceiling plugs the upper corridor.
+                            tWallLo.remove(ck);
+                            tWallHi.remove(ck);
+                            auto it = tInt.find(ck);
+                            if (it == tInt.end()) tInt.insert(ck, TunCol{ floorY, floorY, au });
+                            else
+                            {
+                                TunCol& v = it.value();
+                                if (floorY > v.maxFloor) { v.maxFloor = floorY; v.minU = au; }
+                                else if (floorY == v.maxFloor && au < v.minU) v.minU = au;
+                                if (floorY < v.floorY) v.floorY = floorY;
+                            }
+                        }
+                        else if (!tInt.contains(ck))
+                        {   // the wall column: the lining spans from the lowest floor to the highest ceiling
+                            auto it = tWallLo.find(ck);
+                            if (it == tWallLo.end()) { tWallLo.insert(ck, floorY); tWallHi.insert(ck, floorY + 6); }
+                            else
+                            {
+                                if (floorY < it.value()) it.value() = floorY;
+                                int& hi = tWallHi[ck];
+                                if (floorY + 6 > hi) hi = floorY + 6;
+                            }
+                        }
+                    }
+                };
+                claim(d);                                          // the exit axis (or the entry one at a chain end)
+                // a turn cell claims BOTH cross-sections: the corridor comes in along one axis and the
+                // section of the turn cell alone (perpendicular to the exit) would leave the three columns
+                // behind the corner solid - a rock stub inside the corridor on every bend
+                if ((dIn.x() || dIn.y()) && (dOut.x() || dOut.y()) && dIn != dOut) claim(dIn);
+            }
+            tunChains << chain;
+            tunFy << fy;
+        }
+        for (auto it = tWallLo.constBegin(); it != tWallLo.constEnd(); ++it)
+        {   // the wall columns: a mixed-masonry lining from the floor to the ceiling row - store blocks
+            // win over the cave cast, so the tunnel keeps its shape even inside a cave it crossed
+            const int x = int(keyFirst(it.key())), z = int(keySecond(it.key()));
+            for (int y = it.value(); y <= tWallHi.value(it.key()); ++y)
+                store.set(x, y, z, wallId[colHash(it.key() ^ (qint64(y) * 31 + 0x7EED1ull)) % 16u]);
+        }
+        for (auto it = tInt.constBegin(); it != tInt.constEnd(); ++it)
+        {   // the interior columns: the rock above the ceiling is restored as store blocks (the surface
+            // stays intact), the column top drops under the floor - above it both the ground and the
+            // cave cast read air
+            const int x = int(keyFirst(it.key())), z = int(keySecond(it.key()));
+            const auto git = ground.find(pairKey(x >> 4, z >> 4));
+            if (git == ground.end()) continue;
+            const int gc = (z & 15) * 16 + (x & 15);
+            GroundChunk& g = git.value();
+            const int orig = g.top[gc];
+            const int floorY = it.value().floorY;
+            const int topF = it.value().maxFloor;                 // the highest floor sharing this column
+            const quint32 hh = colHash(it.key() ^ 0x5AB51ull);
+            for (int y = topF + 6; y <= orig; ++y)
+            {
+                const quint16 id = (y == orig) ? g.surf[gc] : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
+                if (store.get(x, y, z) == IdAir) store.set(x, y, z, id);   // building blocks are not overwritten
+            }
+            if (orig > floorY - 1) g.top[gc] = qint16(floorY - 1);
+            store.set(x, floorY, z, floorId[hh % 8u]);                      // the floor, two layers
+            if (store.get(x, floorY - 1, z) == IdAir)
+                store.set(x, floorY - 1, z, floorId[(hh >> 8) % 8u]);
+            if (topF - floorY >= 5)
+            {   // two separate levels cross here: the lower interior keeps its height, a floor slab of
+              // the upper tunnel divides them, the upper interior is dug above that slab
+                for (int y = floorY + 1; y <= floorY + 5; ++y) store.erase(x, y, z);
+                store.set(x, topF, z, floorId[(hh >> 4) % 8u]);
+                for (int y = topF + 1; y <= topF + 5; ++y) store.erase(x, y, z);
+            }
+            else
+            {   // the levels touch (a shallow crossing): one merged interior from the deepest floor
+                for (int y = floorY + 1; y <= topF + 5; ++y) store.erase(x, y, z);
+            }
+            if (it.value().minU == 3)
+                store.set(x, topF + 5, z, ceilId[(hh >> 4) % 4u]);         // the rounded top corners
+        }
+        for (int ti = 0; ti < tunChains.size(); ++ti)
+        {   // ---- the rails and the lamps: after ALL the shells, so that a crossing section of a turn
+            // (the same cell seen from two chains or two directions) cannot chip an already laid rail off
+            const QVector<QPoint>& chain = tunChains[ti];
+            const QVector<int>& fy = tunFy[ti];
+            const int n = chain.size();
+            for (int ci = 0; ci < n; ++ci)
+            {
+                const QPoint& c = chain[ci];
+                const QPoint* pv = ci > 0 ? &chain[ci - 1] : nullptr;
+                const QPoint* nx = ci + 1 < n ? &chain[ci + 1] : nullptr;
+                int shape = railShapeFor(c, pv, nx);
+                if (shape <= 1 && pv && nx)
+                {   // a straight section: the slope toward the higher neighbor cell (as on the surface rails)
+                    const int up = (fy[ci + 1] == fy[ci] + 1) ? ci + 1 : (fy[ci - 1] == fy[ci] + 1 ? ci - 1 : -1);
+                    if (up >= 0)
+                    {
+                        const QPoint& u = chain[up];
+                        shape = u.x() > c.x() ? 2 : u.x() < c.x() ? 3 : u.y() < c.y() ? 4 : 5;
+                    }
+                }
+                const int ry = fy[ci] + 1;                               // the rails lie on the floor
+                if (store.get(c.x(), ry, c.y()) == IdAir)
+                {   // ordinary rails; the electrification pass comes after the whole line is laid
+                    if (store.get(c.x(), ry - 1, c.y()) == IdAir)        // the column floor ended lower (someone
+                        store.set(c.x(), ry - 1, c.y(),                  // else's corridor passes under it):
+                                  floorId[colHash(pairKey(c.x(), c.y()) ^ 0x5AB51ull) % 8u]);   // prop the rails up
+                    store.set(c.x(), ry, c.y(), quint16(int(IdRailShapeBase) + shape));
+                    ++nRails;
+                }
+                if (ci % 6 == 3 && store.get(c.x(), fy[ci] + 5, c.y()) == IdAir)
+                {   // the lamps hang from the ceiling between the rails (the rails lie a row lower)
+                    store.set(c.x(), fy[ci] + 5, c.y(), IdLanternHung);
+                    ++nLamps;
+                }
+            }
+            QVector<int> railYs(n);
+            for (int ci = 0; ci < n; ++ci)
+                railYs[ci] = fy[ci] + 1;
+            nElectro += electrifyRails(store, chain, railYs);            // every 20th, straight cells only
+        }
+        if (nTun > 0)
+            res.lairInfo += QObject::tr("; subway: %1 tunnels, %2 rails (%3 electrified), %4 lamps")
+                               .arg(nTun).arg(nRails).arg(nElectro).arg(nLamps);
+        char buf[160];
+        snprintf(buf, sizeof buf, "subway tunnels: %d, rails %d/%d electro, lamps %d", nTun, nElectro, nRails, nLamps);
+        tmcStepLog(buf);
     }
     lap("before 3.5");
     beginStep(4, vegCells);
