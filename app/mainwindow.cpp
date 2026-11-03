@@ -70,6 +70,7 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
         mLang->addItem(tr("Auto (system language)"), QStringLiteral("auto"));
         mLang->addItem(QStringLiteral("English"), QStringLiteral("en"));
         mLang->addItem(QStringLiteral("\u0420\u0443\u0441\u0441\u043a\u0438\u0439"), QStringLiteral("ru"));      // native names of languages are not translated
+        mLang->addItem(QStringLiteral("\u7b80\u4f53\u4e2d\u6587"), QStringLiteral("zh"));
         mLang->setCurrentIndex(std::max(0, mLang->findData(tmcLanguageInEffect())));
         mLang->setMinimumHeight(kControlH);
         hdr->addWidget(mLang, 0, Qt::AlignVCenter);

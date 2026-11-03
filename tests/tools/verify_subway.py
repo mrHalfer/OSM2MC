@@ -174,12 +174,29 @@ def main(path):
     if colBad:
         fails.append('columns inside the tunnel')
 
-    # a powered rail cannot be curved: its rail neighbours must lie on ONE axis (an end cell is fine)
+    # a powered rail cannot be curved: read the block shape itself (curved_* is the illegal one; ascending is
+    # fine). The old heuristic looked at rail neighbours on both axes - but near a station two lines run parallel
+    # and cross, so a straight electrified cell of one line legally touches the other line's rails sideways.
+    def shape_at(x, y, z):
+        ent = chunks.get((x >> 4, z >> 4), {}).get(y >> 4)
+        if ent is None:
+            return None
+        entries, data = ent
+        if data is None:
+            return (entries[0][1] or {}).get('shape')
+        bits = max(4, (len(entries) - 1).bit_length()); per = 64 // bits
+        i = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15)
+        v = (data[i // per] >> ((i % per) * bits)) & ((1 << bits) - 1)
+        if v >= len(entries):
+            return None
+        return (entries[v][1] or {}).get('shape')
     curvedPow = 0
     for x, y, z in tPow:
-        nb = [(dx, dz) for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)) if (x + dx, y, z + dz) in setT]
-        if any(dz == 0 for dx, dz in nb) and any(dx == 0 for dx, dz in nb):
+        sh = shape_at(x, y, z)
+        if sh and sh.startswith('curved'):
             curvedPow += 1
+            if curvedPow <= 4:
+                print('  curved powered rail at', (x, y, z), sh)
     print('powered rails at turns (must be 0): %d' % curvedPow)
     if curvedPow:
         fails.append('powered rail at a turn')

@@ -5,6 +5,35 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.3.26.11031] — 2026-11-03
+
+### Added
+- Railway stations (`building=train_station`) become big underground station halls under the surface: a two-block
+  checkerboard floor, pillars with chiseled caps every few rows, benches, a statue, a wall mosaic and hanging
+  lamps; the platform edges by the tracks are painted white and yellow. Every metro line that passes within about
+  96 blocks of a station now bends to cross exactly under it, and the hall floor lands on the tunnel level, so the
+  corridors run straight through the station; rails, lamps and electrification are redrawn through the hall. A
+  station without a line underneath gets the same hall without tracks. Each hall has an escape shaft with a ladder
+  to the surface, the opening fenced with stone brick walls.
+- Military grounds (`landuse=military`) are fenced: the plot gets a stone-brick boundary wall two rows high with
+  brick pillars every few cells and two open gateways, and iron golems guard the grounds - from 2 for a small unit
+  up to 10 for a huge base, depending on the plot area. The ground inside stays as it was.
+- Chinese (Simplified) interface: the whole UI is translated (auto-detected from the system language, selectable in
+  the "Language" list, or with `--lang zh`).
+
+### Changed
+- The "Boundary" button now stands before the "Spawn" button in the tool row.
+- Station halls: the ladder to the surface now starts INSIDE the station building, not on the hall edge by the
+  fence; the opening cuts through the lobby floor and is framed by a chiselled stone-brick portal with a glowing
+  lantern under its beam, so the entrance is easy to spot inside the building.
+
+### Fixed
+- Sports plots: when a pitch with court markings lies inside a bigger fenced plot, benches and playground equipment
+  of the outer plot are no longer placed right through the pitch lines - the court zone (with a small margin) is
+  reserved across all overlapping plots.
+- Station halls: the lamps over the metro tracks inside a hall hang from the hall ceiling now; before they were
+  left at the (lower) tunnel ceiling row and hung in mid air under the taller hall vault.
+
 ## [1.3.26.11021] — 2026-11-02
 
 ### Added

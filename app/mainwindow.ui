@@ -421,6 +421,19 @@
         <item>
          <layout class="QHBoxLayout" name="rowTools">
           <item>
+           <widget class="QPushButton" name="toolClip">
+            <property name="toolTip">
+             <string>Draw a polygon: only what is inside it is exported</string>
+            </property>
+            <property name="text">
+             <string>Boundary</string>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QPushButton" name="toolSpawn">
             <property name="toolTip">
              <string>A click on the map — the point where the player appears</string>
@@ -432,19 +445,6 @@
              <bool>true</bool>
             </property>
             <property name="checked">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QPushButton" name="toolClip">
-            <property name="toolTip">
-             <string>Draw a polygon: only what is inside it is exported</string>
-            </property>
-            <property name="text">
-             <string>Boundary</string>
-            </property>
-            <property name="checkable">
              <bool>true</bool>
             </property>
            </widget>
@@ -610,8 +610,8 @@
   <tabstop>goButton</tabstop>
   <tabstop>cancelButton</tabstop>
   <tabstop>loadPreviewButton</tabstop>
-  <tabstop>toolSpawn</tabstop>
   <tabstop>toolClip</tabstop>
+  <tabstop>toolSpawn</tabstop>
   <tabstop>toolStronghold</tabstop>
   <tabstop>toolCity</tabstop>
   <tabstop>toolPale</tabstop>

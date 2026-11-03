@@ -202,6 +202,8 @@ static const NamedColor kBlockPalette[] = {
     { "minecraft:polished_andesite",     133, 133, 133 },
     { "minecraft:polished_granite",      153,  97,  72 },
     { "minecraft:polished_diorite",      197, 197, 197 },
+    // Underground stations (44330000): chisel caps of the pylons and the statue head
+    { "minecraft:chiseled_stone_bricks", 170, 170, 172 },
 };
 
 //! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
@@ -8463,6 +8465,26 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     const int objTotal = objects.size();
     qint64 nsByKind[11] = {}, cntByKind[11] = {};                  // debugging (MCX_LOG_STEPS): the time of sequential object preparation by kind
     struct KindTimer { qint64& ns; QElapsedTimer t; KindTimer(qint64& s) : ns(s) { t.start(); } ~KindTimer() { ns += t.nsecsElapsed(); } };
+    // Station buildings (CODE 44330000, building=train_station): the outline bbox and the center in block
+    // coordinates. Two consumers: the subway straightener inserts a station center into the line's polyline
+    // (every line near a station turns at it and passes exactly under it), the "station halls" pass after the
+    // subway tunnels digs a decorated underground hall under the building.
+    struct StationSite { QRect bb; QPoint c; };
+    QVector<StationSite> stations;
+    for (const McObject& q : objects)
+    {
+        if (q.code != 44330000) continue;
+        int x0 = std::numeric_limits<int>::max(), x1 = std::numeric_limits<int>::min();
+        int z0 = x0, z1 = x1;
+        for (const QVector3D& v : q.vertices)         // the building outline lives in the mesh vertices
+        {
+            const int x = int(std::floor(toBlockX(tf, v.x()))), z = int(std::floor(toBlockZ(tf, v.y())));
+            x0 = std::min(x0, x); x1 = std::max(x1, x); z0 = std::min(z0, z); z1 = std::max(z1, z);
+        }
+        if (x1 < x0 || z1 < z0) continue;
+        stations.append(StationSite{ QRect(x0, z0, x1 - x0 + 1, z1 - z0 + 1), QPoint((x0 + x1) / 2, (z0 + z1) / 2) });
+    }
+    QVector<char> stationBuilt(stations.size(), 0);
     for (const McObject& o : objects)
     {
         KindTimer kindTimer(nsByKind[std::min(10, int(o.kind))]);
@@ -8561,7 +8583,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             // The coverage by csrpol code: grass stays (a cemetery, the territories of social and religious facilities, an apiary, a farm), stone (a memorial), dark concrete (a gas station, an airport,
             // an industrial enterprise, a substation); the rest (sports, etc.) — calm gray wool
             const bool grassPad = (o.code == 53510000 || o.code == 53600000 || o.code == 53400000 || o.code == 52400000 || o.code == 52100000
-                                   || o.code == 51111000 || o.code == 51123000 || o.code == 71323000);     // a quarry/a spoil heap/a greenhouse: the surface is set by their own logic
+                                   || o.code == 51111000 || o.code == 51123000 || o.code == 71323000
+                                   || o.code == 53210000);   // a quarry/a spoil heap/a greenhouse/a military ground: the surface is set by their own logic
             if (o.code == 53530000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
             else if (o.code == 51220000 || o.code == 53110000 || o.code == 51130000 || o.code == 51460000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
             const bool lake = (o.code == 51480000);                  // a lake: water instead of wool, the fence — as for plates
@@ -8577,7 +8600,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             else if (!grassPad)
                 for (qint64 ck : cols)
                     colWool.insert(ck, wid);
-            if (o.code == 52400000 || o.code == 52100000 || o.code == 51111000 || o.code == 51123000 || o.code == 71323000)
+            if (o.code == 52400000 || o.code == 52100000 || o.code == 51111000 || o.code == 51123000 || o.code == 71323000
+                || o.code == 53210000)   // a military ground: the grass stays, but a base is not a forest
                 for (qint64 ck : cols) noTreePadCols.insert(ck);
             pads.append(cols);
             padIsLake.append(lake ? 1 : 0);
@@ -8951,6 +8975,31 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     // not corner per block, so the polyline is straightened first: every segment becomes a
                     // staircase with straight steps of up to 80 blocks (occasional 90-degree bends instead
                     // of a turn per metre; the nodes - the stations and the curve breaks - stay in place).
+                    // Station buildings (CODE 44330000) are ALWAYS turned through: a line passing within 96 blocks
+                    // of a station center gets that center inserted as a polyline node, so the tunnel crosses
+                    // exactly under the station and its hall (dug later) connects to the corridor.
+                    for (const StationSite& st : stations)
+                        for (QVector<QPointF>& ln : lines)
+                        {
+                            int bi = -1;
+                            double bd = 96.0 * 96.0;
+                            for (int i = 0; i + 1 < ln.size(); ++i)
+                            {   // the polyline segment nearest to the station center
+                                const double vx = ln[i + 1].x() - ln[i].x(), vy = ln[i + 1].y() - ln[i].y();
+                                const double ll = vx * vx + vy * vy;
+                                double t = ll > 1e-9 ? ((st.c.x() - ln[i].x()) * vx + (st.c.y() - ln[i].y()) * vy) / ll : 0.0;
+                                t = std::max(0.0, std::min(1.0, t));
+                                const double dx = st.c.x() - (ln[i].x() + vx * t), dy = st.c.y() - (ln[i].y() + vy * t);
+                                const double d2 = dx * dx + dy * dy;
+                                if (d2 < bd) { bd = d2; bi = i; }
+                            }
+                            if (bi < 0) continue;
+                            const QPointF sp(double(st.c.x()), double(st.c.y()));
+                            bool dup = false;                     // the OSM way itself may already have a node here
+                            for (const QPointF& p : ln)
+                                if (std::abs(p.x() - sp.x()) < 2.0 && std::abs(p.y() - sp.y()) < 2.0) { dup = true; break; }
+                            if (!dup) ln.insert(bi + 1, sp);
+                        }
                     for (const QVector<QPointF>& ln : lines)
                     {
                         QVector<QPointF> pl;
@@ -11581,6 +11630,254 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 }
         res.lairInfo += QObject::tr("; terrain and trees of the real Pale Garden: %1 blocks").arg(nBl);
     }
+    // A station hall under a station building (CODE 44330000, building=train_station): a big decorated hall
+    // (platform strips, two rows of pylons, benches, a statue, a wall mosaic, hanged lamps and an entrance
+    // shaft with a ladder to the surface, its mouth inside the station building). When a subway line passes
+    // under the station, the hall floor is the tunnel
+    // floor (the line was bent to the station by the straightener) and the hall sits OVER the already built
+    // corridor: its entry cells are not walled up. The dig is "ground-down" (restore the rock above the ceiling
+    // and lower the column top under the floor) as in the tunnels, so the hall also survives inside a cave.
+    auto digStationHall = [&](const QPoint& center, int fy, const QRect& hall, const QRect& bld,
+                              const QSet<qint64>& trackCols, const QSet<qint64>& openCols, bool lineStation) -> bool
+    {
+        const auto gcen = ground.find(pairKey(center.x() >> 4, center.y() >> 4));
+        if (gcen == ground.end()) return false;
+        const int gc0 = (center.y() & 15) * 16 + (center.x() & 15);
+        // a line station sits exactly on the tunnel floor: the corridor has already lowered the column tops
+        // there, so the surface guard only makes sense for the lone dig
+        if (!lineStation && (gcen->wd[gc0] > 0 || gcen->top[gc0] < fy + 12)) return false;   // under water / no earth above the ceiling
+        const int x0 = hall.x(), z0 = hall.y();
+        const int x1 = hall.x() + hall.width() - 1, z1 = hall.y() + hall.height() - 1;
+        const bool axisX = hall.width() >= hall.height();
+        const int A0 = axisX ? x0 : z0, A1 = axisX ? x1 : z1;               // along the hall / across it
+        const int B0 = axisX ? z0 : x0, B1 = axisX ? z1 : x1;
+        const int ac = (A0 + A1) / 2, bc = (B0 + B1) / 2;
+        auto cell = [&](int a, int b) { return axisX ? pairKey(a, b) : pairKey(b, a); };
+        auto put = [&](int a, int b, int y, quint16 id) { if (axisX) store.set(a, y, b, id); else store.set(b, y, a, id); };
+        auto eraseV = [&](int a, int b, int y) { if (axisX) store.erase(a, y, b); else store.erase(b, y, a); };
+        auto airAt = [&](int a, int b, int y) { return axisX ? store.get(a, y, b) == IdAir : store.get(b, y, a) == IdAir; };
+        const auto stBlk = [](const char* n) { return quint16(IdPaletteStart + paletteIndexOf(n)); };
+        static const char* const kMasonry[8] = { "minecraft:stone_bricks", "minecraft:stone_bricks",
+            "minecraft:cracked_stone_bricks", "minecraft:mossy_stone_bricks", "minecraft:cobblestone",
+            "minecraft:stone", "minecraft:andesite", "minecraft:polished_andesite" };
+        static const char* const kFloor[8] = {
+            "minecraft:stone_bricks", "minecraft:polished_andesite", "minecraft:polished_diorite", "minecraft:polished_granite",
+            "minecraft:smooth_stone", "minecraft:stone", "minecraft:andesite", "minecraft:smooth_stone" };
+        quint16 masId[8], floorId[8];
+        for (int i = 0; i < 8; ++i) { masId[i] = stBlk(kMasonry[i]); floorId[i] = stBlk(kFloor[i]); }
+        const quint16 idWhite = stBlk("minecraft:white_concrete"), idYellow = stBlk("minecraft:yellow_concrete");
+        const quint16 idRed = stBlk("minecraft:red_concrete"), idLBlue = stBlk("minecraft:light_blue_concrete");
+        const quint16 idLGray = stBlk("minecraft:light_gray_concrete"), idChis = stBlk("minecraft:chiseled_stone_bricks");
+        const quint16 idAnd = stBlk("minecraft:polished_andesite"), idDi = stBlk("minecraft:polished_diorite");
+
+        // ---- the interior: the hall rectangle plus the boundary cells the tunnel corridor already hollowed
+        QSet<qint64> inner;
+        QHash<qint64, int> origTops;                                       // the original ground top (the shaft needs it)
+        for (int x = x0; x <= x1; ++x)
+            for (int z = z0; z <= z1; ++z) inner.insert(pairKey(x, z));
+        for (int x = x0; x <= x1; ++x)
+            for (int z : { z0 - 1, z1 + 1 })
+                if (openCols.contains(pairKey(x, z))) inner.insert(pairKey(x, z));
+        for (int z = z0; z <= z1; ++z)
+            for (int x : { x0 - 1, x1 + 1 })
+                if (openCols.contains(pairKey(x, z))) inner.insert(pairKey(x, z));
+        for (const qint64 ck : inner)
+        {
+            const int x = int(keyFirst(ck)), z = int(keySecond(ck));
+            railColsAll.insert(ck);                                        // lone trees (3.51) do not stand over the station
+            const auto git = ground.find(pairKey(x >> 4, z >> 4));
+            if (git == ground.end()) continue;                             // a column over nowhere - solid rock stays
+            const int gc = (z & 15) * 16 + (x & 15);
+            GroundChunk& g = git.value();
+            const int orig = std::max(int(g.top[gc]), fy + 10);    // a column the tunnel has already lowered: the original surface is fy+10 (floor = surface-10 there)
+            origTops.insert(ck, orig);
+            const quint32 hh = colHash(ck ^ 0x515A77ull);
+            for (int y = fy + 9; y <= orig; ++y)
+            {   // the rock above the ceiling is restored as store blocks (building blocks are not overwritten)
+                const quint16 id = (y == orig) ? g.surf[gc] : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
+                if (store.get(x, y, z) == IdAir) store.set(x, y, z, id);
+            }
+            if (orig > fy - 1) g.top[gc] = qint16(fy - 1);
+            if (store.get(x, fy, z) == IdAir) store.set(x, fy, z, floorId[hh % 8u]);       // the floor, two layers
+            if (store.get(x, fy - 1, z) == IdAir) store.set(x, fy - 1, z, floorId[(hh >> 8) % 8u]);
+            for (int y = fy + 1; y <= fy + 8; ++y) store.erase(x, y, z);                   // the interior is 8 rows high
+        }
+        // ---- the lining walls around the hall (the entry of a corridor is left open)
+        for (int x = x0 - 1; x <= x1 + 1; ++x)
+            for (int z = z0 - 1; z <= z1 + 1; ++z)
+            {
+                if (x > x0 - 1 && x < x1 + 1 && z > z0 - 1 && z < z1 + 1) continue;
+                const qint64 ck = pairKey(x, z);
+                if (inner.contains(ck)) continue;
+                railColsAll.insert(ck);
+                for (int y = fy; y <= fy + 9; ++y)
+                    store.set(x, y, z, masId[colHash(ck ^ (qint64(y) * 31 + 0x2A17ull)) % 8u]);
+            }
+
+        // ---- the entrance shaft up to the surface: a 4x3 pit, a ladder, the opening fenced by walls. Its
+        // mouth must stand INSIDE the station building, not outside it: the building rectangle clamped with
+        // a one-cell inset picks the end row along the hall; across the hall the shaft keeps the centre row
+        // when the building covers it, otherwise it takes the building's centre row. A building too small
+        // for the pit falls back to a hall end. The pit cuts two rows over the surface so that the opening
+        // passes through the floor slab of the station lobby.
+        const int ba0 = std::max((axisX ? bld.left() : bld.top()) + 1, A0 + 1);
+        const int ba1 = std::min((axisX ? bld.right() : bld.bottom()) - 1, A1 - 1);
+        const bool fits = ba1 - ba0 >= 6;                                   // four pit columns and a gap on each side
+        const quint32 hSel = colHash(cell(A0, B0) ^ 0xA11CEull);
+        const bool lowEnd = (hSel & 1u) == 0;
+        const int sa0 = fits ? (lowEnd ? ba0 : ba1 - 3) : (lowEnd ? A0 : A1 - 3);
+        const int sa1 = sa0 + 3;
+        int bS = bc;
+        const int bb0 = axisX ? bld.top() : bld.left(), bb1 = axisX ? bld.bottom() : bld.right();
+        if (!(bb0 <= bc - 2 && bb1 >= bc + 2))                              // the building does not cover the centre row
+            bS = std::max(B0 + 2, std::min(B1 - 2, (bb0 + bb1) / 2));       // - the shaft stands on the building's centre
+        auto inShaft = [&](int a, int b) { return a >= sa0 && a <= sa1 && b >= bS - 1 && b <= bS + 1; };
+        int ladTop = fy + 12;
+        for (int a = sa0; a <= sa1; ++a)
+            for (int b = bS - 1; b <= bS + 1; ++b)
+            {
+                const qint64 ck = cell(a, b);
+                if (!inner.contains(ck)) continue;
+                const int orig = origTops.value(ck, fy + 12);
+                ladTop = std::max(ladTop, orig);
+                for (int y = fy + 9; y <= orig + 2; ++y) eraseV(a, b, y);   // out to the surface, through the lobby floor
+            }
+        for (int a = sa0 - 1; a <= sa1 + 1; ++a)
+            for (int b = bS - 2; b <= bS + 2; ++b)
+            {
+                const bool border = (a == sa0 - 1 || a == sa1 + 1 || b == bS - 2 || b == bS + 2);
+                if (!border || inShaft(a, b)) continue;
+                if (a == (lowEnd ? sa1 + 1 : sa0 - 1) && b >= bS - 1 && b <= bS + 1) continue;   // the doorway into the hall
+                const qint64 ck = cell(a, b);
+                const auto git = ground.find(pairKey(int(keyFirst(ck)) >> 4, int(keySecond(ck)) >> 4));
+                const int top = git == ground.end() ? fy + 10
+                                                    : std::max(int(git->top[(int(keySecond(ck)) & 15) * 16 + (int(keyFirst(ck)) & 15)]), fy + 10);
+                for (int y = fy; y <= top + 1; ++y)
+                {
+                    const quint16 id = masId[colHash(ck ^ (qint64(y) * 31 + 0x9B1Dull)) % 8u];
+                    if (axisX) store.set(a, y, b, id); else store.set(b, y, a, id);
+                }
+                const int fh = (a == (lowEnd ? sa1 + 1 : sa0 - 1)) ? 2 : 1;    // the fence: high on the hall side (no fall
+                for (int k = 1; k <= fh; ++k) put(a, b, top + 1 + k, IdStoneBrickWall);          // into the pit from the grass),
+            }                                                                                     // low on the other sides (an emergency exit)
+        {   // the ladder against the far wall (the holder - the wall of the pit)
+            const int la = lowEnd ? sa0 : sa1;
+            const quint16 ladId = axisX ? (lowEnd ? quint16(IdLadderE) : quint16(IdLadderW))
+                                        : (lowEnd ? quint16(IdLadderS) : quint16(IdLadderN));
+            for (int y = fy + 1; y <= ladTop + 1; ++y) put(la, bS, y, ladId);
+        }
+        {   // the entrance portal: chiselled jambs of the gate into the hall with a lamp above it, and at the
+            // surface mouth a chiselled arch with a glowing lantern under the beam (seen from any corner of the lobby)
+            const int ga = lowEnd ? sa1 + 1 : sa0 - 1;                       // the doorway row
+            for (int db : { -2, 2 })
+                for (int y = fy; y <= fy + 8; ++y) put(ga, bS + db, y, idChis);
+            put(ga, bS, fy + 8, IdLanternHung);                              // a lamp above the doorway
+            const qint64 ck = cell(ga, bS);
+            const auto git = ground.find(pairKey(int(keyFirst(ck)) >> 4, int(keySecond(ck)) >> 4));
+            const int top = git == ground.end() ? fy + 10
+                            : std::max(int(git->top[(int(keySecond(ck)) & 15) * 16 + (int(keyFirst(ck)) & 15)]), fy + 10);
+            for (int db : { -2, 2 })
+                for (int y = top + 2; y <= top + 4; ++y) put(ga, bS + db, y, idChis);   // the jamb posts over the floor
+            for (int db : { -1, 0, 1 }) put(ga, bS + db, top + 5, idChis);   // the beam across the doorway
+            put(ga, bS, top + 4, IdLanternHung);                             // the lamp glowing under the beam
+        }
+
+        // ---- the floor: polished checker tiles; the platform edge white by the rails, yellow behind it
+        QSet<qint64> whiteSet;
+        for (int a = A0; a <= A1; ++a)
+            for (int b = B0; b <= B1; ++b)
+            {
+                const qint64 ck = cell(a, b);
+                if (!inner.contains(ck) || trackCols.contains(ck) || inShaft(a, b)) continue;
+                put(a, b, fy, (((a >> 1) + (b >> 1)) & 1) ? idDi : idAnd);
+                if (trackCols.contains(cell(a - 1, b)) || trackCols.contains(cell(a + 1, b))
+                    || trackCols.contains(cell(a, b - 1)) || trackCols.contains(cell(a, b + 1)))
+                { put(a, b, fy, idWhite); whiteSet.insert(ck); }
+            }
+        for (int a = A0; a <= A1; ++a)
+            for (int b = B0; b <= B1; ++b)
+            {
+                const qint64 ck = cell(a, b);
+                if (!inner.contains(ck) || trackCols.contains(ck) || whiteSet.contains(ck) || inShaft(a, b)) continue;
+                if (whiteSet.contains(cell(a - 1, b)) || whiteSet.contains(cell(a + 1, b))
+                    || whiteSet.contains(cell(a, b - 1)) || whiteSet.contains(cell(a, b + 1)))
+                    put(a, b, fy, idYellow);
+            }
+        // ---- pylons: two rows of 2x2 columns every 8 cells (chiseled caps, polished granite shafts)
+        const int pBase[2] = { bc - 6, bc + 4 };
+        for (int side = 0; side < 2; ++side)
+            for (int t = A0 + 7; t + 1 <= A1 - 7; t += 8)
+            {
+                bool ok = true;
+                for (int da = 0; da <= 1 && ok; ++da)
+                    for (int db = 0; db <= 1 && ok; ++db)
+                    {
+                        const int a = t + da, b = pBase[side] + db;
+                        const qint64 ck = cell(a, b);
+                        if (!inner.contains(ck) || inShaft(a, b) || trackCols.contains(ck)
+                            || trackCols.contains(cell(a - 1, b)) || trackCols.contains(cell(a + 1, b))
+                            || trackCols.contains(cell(a, b - 1)) || trackCols.contains(cell(a, b + 1)))
+                            ok = false;
+                    }
+                if (!ok) continue;
+                for (int da = 0; da <= 1; ++da)
+                    for (int db = 0; db <= 1; ++db)
+                    {
+                        const int a = t + da, b = pBase[side] + db;
+                        put(a, b, fy + 1, idChis);
+                        for (int y = fy + 2; y <= fy + 6; ++y) put(a, b, y, idAnd);
+                        put(a, b, fy + 7, idChis);
+                        put(a, b, fy + 8, idChis);
+                    }
+            }
+        // ---- benches: three steps facing the middle, along the long walls between the pylons
+        const int bRow[2] = { B0 + 1, B1 - 1 };
+        const quint16 bId[2] = { quint16(axisX ? IdStairsS : IdStairsE), quint16(axisX ? IdStairsN : IdStairsW) };
+        for (int r = 0; r < 2; ++r)
+            for (int t = A0 + 10; t + 2 <= A1 - 7; t += 8)
+            {
+                bool ok = true;
+                for (int k = 0; k < 3 && ok; ++k)
+                    ok = inner.contains(cell(t + k, bRow[r])) && !inShaft(t + k, bRow[r])
+                         && !trackCols.contains(cell(t + k, bRow[r])) && airAt(t + k, bRow[r], fy + 1);
+                if (!ok) continue;
+                for (int k = 0; k < 3; ++k) put(t + k, bRow[r], fy + 1, bId[r]);
+            }
+        // ---- the statue at the end opposite the shaft (a pedestal, a wall torso, a chiseled head, a lamp above)
+        {
+            const int fa = lowEnd ? A1 - 2 : A0 + 2;
+            int fb = bc;
+            if (trackCols.contains(cell(fa, fb))) fb = trackCols.contains(cell(fa, bc - 3)) ? bc + 3 : bc - 3;
+            if (inner.contains(cell(fa, fb)) && !inShaft(fa, fb) && !trackCols.contains(cell(fa, fb)) && airAt(fa, fb, fy + 1))
+            {
+                put(fa, fb, fy + 1, masId[0]); put(fa, fb, fy + 2, masId[0]);
+                put(fa, fb, fy + 3, IdStoneBrickWall); put(fa, fb, fy + 4, IdStoneBrickWall);
+                put(fa, fb, fy + 5, idChis);
+                put(fa, fb, fy + 8, idChis); put(fa, fb, fy + 7, IdLanternHung);
+            }
+            // ---- the wall mosaic: a concentric diamond on one of the long walls (a hash picks the side)
+            const int bM = (hSel & 2u) ? B1 + 1 : B0 - 1;
+            for (int a = ac - 5; a <= ac + 5; ++a)
+            {
+                const qint64 ck = cell(a, bM);
+                if (inner.contains(ck) || openCols.contains(ck)) continue;          // a corridor entry - keep it open
+                for (int dy = 0; dy < 5; ++dy)
+                {
+                    const int d = std::abs(a - ac) + std::abs(dy - 2);
+                    const quint16 id = d == 0 ? idYellow : d == 1 ? idRed : d == 2 ? idLBlue : d == 3 ? idWhite : idLGray;
+                    put(a, bM, fy + 2 + dy, id);
+                }
+            }
+        }
+        // ---- hanged lamps along the two platform rows
+        for (int t = A0 + 4; t <= A1 - 4; t += 6)
+            for (int r = 0; r < 2; ++r)
+            {
+                const int b = r ? B1 - 2 : B0 + 2;
+                if (inner.contains(cell(t, b)) && airAt(t, b, fy + 8)) put(t, b, fy + 8, IdLanternHung);
+            }
+        return true;
+    };
     // The underground metro (code 61123100, railway=subway + tunnel=yes): the rails do NOT lie on the surface
     // but in a tunnel dug ~10 blocks deep. The floor is 2 blocks, the interior is 5 blocks high, the walls are a
     // 1-block lining; the section is a little rounded (the top corners of the interior are solid stone).
@@ -11640,8 +11937,20 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 fy[ci] = last;
             }
             if (last == std::numeric_limits<int>::min()) continue;      // the tunnel lies over nowhere (no ground)
-            for (int ci = 1; ci < n; ++ci) fy[ci] = std::max(fy[ci - 1] - 1, std::min(fy[ci - 1] + 1, fy[ci]));
-            for (int ci = n - 2; ci >= 0; --ci) fy[ci] = std::max(fy[ci + 1] - 1, std::min(fy[ci + 1] + 1, fy[ci]));
+            // The cells hanging over "nowhere" (no ground chunk at the chain end) carry INT_MIN: clamping must
+            // not do arithmetic on it (INT_MIN±1 overflows and poisons the whole chain - the wall pass then
+            // spins on a -10..2e9 row loop). Such cells take the neighbor's level instead.
+            const int MN = std::numeric_limits<int>::min();
+            for (int ci = 1; ci < n; ++ci)
+            {
+                if (fy[ci] == MN) fy[ci] = fy[ci - 1];
+                else if (fy[ci - 1] != MN) fy[ci] = std::max(fy[ci - 1] - 1, std::min(fy[ci - 1] + 1, fy[ci]));
+            }
+            for (int ci = n - 2; ci >= 0; --ci)
+            {
+                if (fy[ci] == MN) fy[ci] = fy[ci + 1];
+                else if (fy[ci + 1] != MN) fy[ci] = std::max(fy[ci + 1] - 1, std::min(fy[ci + 1] + 1, fy[ci]));
+            }
             // the corner cells stay FLAT (a sloped rail cannot turn): the step moves to the neighbouring
             // straight cells, the re-clamp may push a corner back up, so a few rounds (as on the surface)
             for (int round = 0; round < 4; ++round)
@@ -11799,12 +12108,130 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 railYs[ci] = fy[ci] + 1;
             nElectro += electrifyRails(store, chain, railYs);            // every 20th, straight cells only
         }
+        // Station halls under the station buildings the line passes (the straightener bent the line to them):
+        // the hall floor is the tunnel floor. openCols - the tunnel interior columns: the boundary cells of the
+        // hall touched by a corridor are not walled up. The dig erases the rails and the lamps inside the hall:
+        // they are laid again and the electrification of the line is applied anew.
+        QSet<qint64> openCols;
+        for (auto it = tInt.constBegin(); it != tInt.constEnd(); ++it) openCols.insert(it.key());
+        int nSt = 0;
+        for (int si = 0; si < stations.size(); ++si)
+        {
+            const StationSite& st = stations[si];
+            QSet<int> hit;
+            QSet<qint64> track;
+            int tx0 = std::numeric_limits<int>::max(), tx1 = std::numeric_limits<int>::min();
+            int tz0 = tx0, tz1 = tx1, fy = tx1;
+            for (int ti = 0; ti < tunChains.size(); ++ti)
+                for (int ci = 0; ci < tunChains[ti].size(); ++ci)
+                {
+                    const QPoint& c = tunChains[ti][ci];
+                    if (qAbs(c.x() - st.c.x()) > 30 || qAbs(c.y() - st.c.y()) > 30) continue;
+                    hit.insert(ti);
+                    track.insert(pairKey(c.x(), c.y()));
+                    tx0 = std::min(tx0, c.x()); tx1 = std::max(tx1, c.x());
+                    tz0 = std::min(tz0, c.y()); tz1 = std::max(tz1, c.y());
+                    fy = std::max(fy, tunFy[ti][ci]);                      // the shallower track sets the floor level
+                }
+            if (hit.isEmpty()) continue;                                   // no line under the station - the lone dig below
+            // the hall = the building outline together with the touched cells, stretched along the long axis
+            // to the length of a real platform
+            int hx0 = std::min(tx0, st.bb.left()), hx1 = std::max(tx1, st.bb.right());
+            int hz0 = std::min(tz0, st.bb.top()), hz1 = std::max(tz1, st.bb.bottom());
+            if (hx1 - hx0 >= hz1 - hz0)
+            {
+                if (hx1 - hx0 < 40) { const int d = (40 - (hx1 - hx0) + 1) / 2; hx0 -= d; hx1 += d; }
+                else if (hx1 - hx0 > 82) { const int d = (hx1 - hx0 - 82) / 2; hx0 += d; hx1 -= d; }
+                if (hz1 - hz0 < 16) { const int d = (16 - (hz1 - hz0) + 1) / 2; hz0 -= d; hz1 += d; }
+                else if (hz1 - hz0 > 20) { const int d = (hz1 - hz0 - 20) / 2; hz0 += d; hz1 -= d; }
+            }
+            else
+            {
+                if (hz1 - hz0 < 40) { const int d = (40 - (hz1 - hz0) + 1) / 2; hz0 -= d; hz1 += d; }
+                else if (hz1 - hz0 > 82) { const int d = (hz1 - hz0 - 82) / 2; hz0 += d; hz1 -= d; }
+                if (hx1 - hx0 < 16) { const int d = (16 - (hx1 - hx0) + 1) / 2; hx0 -= d; hx1 += d; }
+                else if (hx1 - hx0 > 20) { const int d = (hx1 - hx0 - 20) / 2; hx0 += d; hx1 -= d; }
+            }
+            const QRect hrgn(hx0, hz0, hx1 - hx0 + 1, hz1 - hz0 + 1);
+            if (!digStationHall(st.c, fy, hrgn, st.bb, track, openCols, true)) continue;
+            stationBuilt[si] = 1;
+            ++nSt;
+            for (const int ti : hit)
+            {   // rails and lamps inside the hall are laid again (the dig erased them), then the line electrifies
+                const QVector<QPoint>& chain = tunChains[ti];
+                const QVector<int>& fyv = tunFy[ti];
+                const int n = chain.size();
+                for (int ci = 0; ci < n; ++ci)
+                {
+                    const QPoint& c = chain[ci];
+                    if (!hrgn.contains(c) || fyv[ci] != fy) continue;
+                    const QPoint* pv = ci > 0 ? &chain[ci - 1] : nullptr;
+                    const QPoint* nx = ci + 1 < n ? &chain[ci + 1] : nullptr;
+                    int shape = railShapeFor(c, pv, nx);
+                    if (shape <= 1 && pv && nx)
+                    {   // the same slope rule as in the tunnel pass
+                        const int up = (fyv[ci + 1] == fyv[ci] + 1) ? ci + 1 : (fyv[ci - 1] == fyv[ci] + 1 ? ci - 1 : -1);
+                        if (up >= 0)
+                        {
+                            const QPoint& u = chain[up];
+                            shape = u.x() > c.x() ? 2 : u.x() < c.x() ? 3 : u.y() < c.y() ? 4 : u.y() > c.y() ? 5 : 0;
+                        }
+                    }
+                    const int ry = fyv[ci] + 1;
+                    if (store.get(c.x(), ry, c.y()) == IdAir)
+                        store.set(c.x(), ry, c.y(), quint16(int(IdRailShapeBase) + shape));
+                    if (ci % 6 == 3 && store.get(c.x(), fyv[ci] + 8, c.y()) == IdAir)
+                        store.set(c.x(), fyv[ci] + 8, c.y(), IdLanternHung);    // the hall ceiling is 3 rows over the tunnel's
+                }
+                QVector<int> railYs(n);
+                for (int ci = 0; ci < n; ++ci) railYs[ci] = fyv[ci] + 1;
+                electrifyRails(store, chain, railYs);
+            }
+        }
+        if (nSt > 0) tmcStepLog(("subway: station halls at the lines: " + std::to_string(nSt)).c_str());
         if (nTun > 0)
             res.lairInfo += QObject::tr("; subway: %1 tunnels, %2 rails (%3 electrified), %4 lamps")
                                .arg(nTun).arg(nRails).arg(nElectro).arg(nLamps);
         char buf[160];
         snprintf(buf, sizeof buf, "subway tunnels: %d, rails %d/%d electro, lamps %d", nTun, nElectro, nRails, nLamps);
         tmcStepLog(buf);
+    }
+    // Station halls under the station buildings no line passes (digStationHall above): dug on their own, the
+    // floor 12 blocks under the surface (the tunnel floor sits 10 under it), the platform without rails -
+    // a concert hall/anticipatory station. The decorated interior is the same as at the line stations.
+    int nStations = 0;
+    for (int si = 0; si < stations.size(); ++si)
+    {
+        if (stationBuilt[si]) { ++nStations; continue; }
+        const StationSite& st = stations[si];
+        const auto git = ground.find(pairKey(st.c.x() >> 4, st.c.y() >> 4));
+        if (git == ground.end()) continue;
+        const int gc = (st.c.y() & 15) * 16 + (st.c.x() & 15);
+        if (git->wd[gc] > 0) continue;                                    // under water - no station
+        int hx0 = st.bb.left() - 4, hx1 = st.bb.right() + 4;
+        int hz0 = st.bb.top() - 4, hz1 = st.bb.bottom() + 4;
+        if (hx1 - hx0 >= hz1 - hz0)
+        {
+            if (hx1 - hx0 < 30) { const int d = (30 - (hx1 - hx0) + 1) / 2; hx0 -= d; hx1 += d; }
+            else if (hx1 - hx0 > 56) { const int d = (hx1 - hx0 - 56) / 2; hx0 += d; hx1 -= d; }
+            if (hz1 - hz0 < 15) { const int d = (15 - (hz1 - hz0) + 1) / 2; hz0 -= d; hz1 += d; }
+            else if (hz1 - hz0 > 20) { const int d = (hz1 - hz0 - 20) / 2; hz0 += d; hz1 -= d; }
+        }
+        else
+        {
+            if (hz1 - hz0 < 30) { const int d = (30 - (hz1 - hz0) + 1) / 2; hz0 -= d; hz1 += d; }
+            else if (hz1 - hz0 > 56) { const int d = (hz1 - hz0 - 56) / 2; hz0 += d; hz1 -= d; }
+            if (hx1 - hx0 < 15) { const int d = (15 - (hx1 - hx0) + 1) / 2; hx0 -= d; hx1 += d; }
+            else if (hx1 - hx0 > 20) { const int d = (hx1 - hx0 - 20) / 2; hx0 += d; hx1 -= d; }
+        }
+        if (digStationHall(st.c, git->top[gc] - 12, QRect(hx0, hz0, hx1 - hx0 + 1, hz1 - hz0 + 1),
+                           st.bb, QSet<qint64>(), QSet<qint64>(), false))
+            ++nStations;
+    }
+    if (nStations > 0)
+    {
+        res.lairInfo += QObject::tr("; station halls: %1").arg(nStations);
+        tmcStepLog(("station halls: " + std::to_string(nStations)).c_str());
     }
     lap("before 3.5");
     beginStep(4, vegCells);
@@ -13249,7 +13676,17 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         //   along the edges the result is the same row, and on the OUTER CORNERS diagonal cells appear —
         //   without them the fence diverged at the corners and the posts did not connect.
         int nSportEq = 0;
-        for (int padIdx = 0; padIdx < pads.size(); ++padIdx)
+        // columns covered by a court of ANY pad (markings, goals and a 2-block margin). Sports plots often
+        // lie inside a bigger csrpol plot (a stadium with its own code): without the global set the outer
+        // plot filled its free area with benches right through the pitch lines of the inner one
+        QSet<ColKey> courtCols;
+        // the smallest plots go first: a pitch with its own court markings must be painted before the bigger
+        // plot that contains it fills the free area with benches (the court zone is only known after its build)
+        QVector<int> padOrder(pads.size());
+        for (int i = 0; i < pads.size(); ++i) padOrder[i] = i;
+        std::stable_sort(padOrder.begin(), padOrder.end(),
+                         [&pads](int a, int b) { return pads[a].size() < pads[b].size(); });
+        for (int padIdx : padOrder)
         {
             const QList<qint64>& padCols = pads[padIdx];
             const QSet<ColKey> pad(padCols.constBegin(), padCols.constEnd());
@@ -13376,13 +13813,34 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             const int gateA = findFree(int(h0 % quint32(ring.size())));
             const int gateB = findFree((gateA >= 0 ? gateA : 0) + int(ring.size()) / 2
                                        + int(h0 >> 8) % 3);
+            const bool militaryPad = (padCode.value(padIdx, 0) == 53210000);
+            const quint16 milBrick = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+            const quint16 milMossy = quint16(IdPaletteStart + paletteIndexOf("minecraft:mossy_stone_bricks"));
             for (int ri = 0; ri < int(ring.size()); ++ri)
             {
                 if (!freeAt(ri)) continue;              // occupied (a fence of a neighboring spot/a post/a planting)
                 const qint64 ck = ring.at(ri);
+                const int x = keyFirst(ck), z = keySecond(ck);
                 const int y = surfaceTop(ck) + 1;
-                store.set(keyFirst(ck), y, keySecond(ck),
-                          (ri == gateA || ri == gateB) ? gateIdFor(ck, pad) : IdFence);
+                if (militaryPad)
+                {   // a military ground (landuse=military): a stone boundary wall two rows high with
+                    // brick pillars every few cells and two open gateways; guards patrol inside
+                    if (ri == gateA || ri == gateB) continue;                    // the gateway is left open
+                    const quint32 hm = colHash(ck ^ 0x4C177ull);
+                    if (hm % 5u == 0u && store.get(x, y + 1, z) == IdAir && store.get(x, y + 2, z) == IdAir)
+                    {   // a pillar: a brick column taller than the wall
+                        store.set(x, y, z, milBrick);
+                        store.set(x, y + 1, z, (hm >> 8) % 4u == 0u ? milMossy : milBrick);
+                        store.set(x, y + 2, z, milBrick);
+                    }
+                    else
+                    {
+                        store.set(x, y, z, IdStoneBrickWall);
+                        if (store.get(x, y + 1, z) == IdAir) store.set(x, y + 1, z, IdStoneBrickWall);
+                    }
+                    continue;
+                }
+                store.set(x, y, z, (ri == gateA || ri == gateB) ? gateIdFor(ck, pad) : IdFence);
             }
             // Iron golems: on a fenced site (except lakes) a 25% chance is counted TWICE (deterministically
             // by the spot hash) — a site has 0, 1 or 2 golems. They stand on free columns inside the spot closer to
@@ -13398,9 +13856,16 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 }
                 const double mx = 0.5 * (gx0 + gx1), mz = 0.5 * (gz0 + gz1);
                 QVector<QPoint> golemAt;
-                for (int roll = 0; roll < 2; ++roll)
+                // a military ground is guarded for real: 2 golems up to 10 for a huge base, standing in a ring
+                // around the center; other sites keep the old deterministic 25% chance of 0, 1 or 2 golems
+                const int wantGolems = militaryPad ? std::min(10, 2 + int(padCols.size()) / 100000) : 2;
+                for (int roll = 0; roll < wantGolems; ++roll)
                 {
-                    if (colHash(ring.first() ^ (0x601E3ull + quint64(roll) * 0x9E37ull)) % 100u >= 25u) continue;
+                    if (!militaryPad && colHash(ring.first() ^ (0x601E3ull + quint64(roll) * 0x9E37ull)) % 100u >= 25u)
+                        continue;
+                    const double fa = 6.283185307179586 * roll / std::max(1, wantGolems);
+                    const double fx = militaryPad ? mx + 0.3 * (gx1 - gx0) * std::cos(fa) : mx;
+                    const double fz = militaryPad ? mz + 0.3 * (gz1 - gz0) * std::sin(fa) : mz;
                     qint64 best = 0; double bestD = 1e18; bool have = false;
                     for (qint64 ck : padCols)
                     {
@@ -13410,7 +13875,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         for (const QPoint& q : golemAt)
                             if (std::max(std::abs(q.x() - keyFirst(ck)), std::abs(q.y() - keySecond(ck))) < 3) nearOther = true;
                         if (nearOther) continue;
-                        const double d = (keyFirst(ck) - mx) * (keyFirst(ck) - mx) + (keySecond(ck) - mz) * (keySecond(ck) - mz);
+                        const double d = (keyFirst(ck) - fx) * (keyFirst(ck) - fx) + (keySecond(ck) - fz) * (keySecond(ck) - fz);
                         if (d < bestD) { bestD = d; best = ck; have = true; }
                     }
                     if (!have) continue;
@@ -13423,6 +13888,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     golemAt.append(QPoint(g.x, g.z));
                 }
             }
+            if (militaryPad) continue;      // the wall and the guards are enough; no courts, lawns or benches
             // SPORTS EQUIPMENT on sites (CODE 53700000 — sports, 53710000 — children's): by the size and shape of the site — a football pitch (goals, the center
             // line and circle in white wool), volleyball/tennis (a net on posts), basketball (two backboards with cauldron hoops), workout (pull-up bars, parallel bars, benches) or a children's
             // playground (swings, a sandbox, a carousel, benches). We place only on free columns inside the spot not closer than 1 block to the fence and with air above them.
@@ -13455,6 +13921,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     if (!inside(u, v, 1)) return false;
                     const QPoint q = toXZ(u, v);
                     if (q.x() >= resX0 && q.x() <= resX1 && q.y() >= resZ0 && q.y() <= resZ1) return false;
+                    if (courtCols.contains(pairKey(q.x(), q.y()))) return false;   // somebody else's court
                     const int y = surfaceTop(pairKey(q.x(), q.y())) + 1;
                     if (y + h > 253) return false;
                     for (int dy = 0; dy < h; ++dy) if (store.get(q.x(), y + dy, q.y()) != IdAir) return false;
@@ -13864,6 +14331,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         {
                             const QPoint q = cxz(cu, cv);
                             if (!pad.contains(pairKey(q.x(), q.y()))) continue;
+                            if (courtCols.contains(pairKey(q.x(), q.y()))) return false;   // no courts on top of each other
                             if (store.get(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1, q.y()) != IdAir) return false;
                         }
                     switch (kindSel)
@@ -13947,6 +14415,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     const QPoint pA = cxz(-2, -2), pB = cxz(Lc + 1, Wc + 1);
                     resX0 = std::min(pA.x(), pB.x()); resX1 = std::max(pA.x(), pB.x());
                     resZ0 = std::min(pA.y(), pB.y()); resZ1 = std::max(pA.y(), pB.y());
+                    for (int qx = resX0; qx <= resX1; ++qx)
+                        for (int qz = resZ0; qz <= resZ1; ++qz)
+                            courtCols.insert(pairKey(qx, qz));                     // and to the items of the other pads too
                     if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[court] kind=%d rect %dx%d court %dx%d area=%d\n", kindSel, a, b, Lc, Wc, area);
                     return true;
                 };

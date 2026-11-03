@@ -109,9 +109,9 @@ int main(int argc, char* argv[])
     p.addOption({ QStringLiteral("download-osm"), QObject::tr("download OSM data for the polygon \"lon lat; lon lat; …\" (up to 25 km²) into the --out file and exit; the result goes to the --log file"), QStringLiteral("vertices") });
     p.addOption({ QStringLiteral("climate"), QObject::tr("climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid"), QStringLiteral("zone") });
     p.addOption({ QStringLiteral("net-test"), QObject::tr("(for testing) download a test OSM tile and a Nominatim reply, write the response codes to a file and exit"), QStringLiteral("file") });
-    p.addOption({ QStringLiteral("gui-switch-lang"), QObject::tr("(for testing, with --gui-screenshot) switch the interface language at run time (en or ru) before the screenshot; the saved choice is not changed"), QStringLiteral("en|ru") });
+    p.addOption({ QStringLiteral("gui-switch-lang"), QObject::tr("(for testing, with --gui-screenshot) switch the interface language at run time (en, ru or zh) before the screenshot; the saved choice is not changed"), QStringLiteral("en|ru|zh") });
     p.addOption({ QStringLiteral("gui-project"), QObject::tr("(for testing, with --gui-screenshot) \"open:file\" or \"save:file\" — open or save a project file around the screenshot"), QStringLiteral("action:file") });
-    p.addOption({ QStringLiteral("lang"), QObject::tr("interface language: auto (the system one, default), en or ru; not saved"), QStringLiteral("auto|en|ru") });
+    p.addOption({ QStringLiteral("lang"), QObject::tr("interface language: auto (the system one, default), en, ru or zh; not saved"), QStringLiteral("auto|en|ru|zh") });
     p.addOption({ QStringLiteral("nogui"), QObject::tr("no window: run the export and exit (code 0 — success)") });
     p.process(app);
 

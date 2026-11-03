@@ -80,7 +80,7 @@ private:
 
     QComboBox* mClimate = nullptr;
     QVector<QWidget*> mLocalRows;       //!< the rows of the local preview (top row, tools, spawn buttons), hidden as a whole in the online mode
-    QComboBox* mLang = nullptr;         //!< the interface language selector (auto / English / Russian)
+    QComboBox* mLang = nullptr;         //!< the interface language selector (auto / English / Russian / Chinese)
     QLabel* mLangLabel = nullptr;
     QPushButton* mOpenProjBtn = nullptr;
     QPushButton* mSaveProjBtn = nullptr;

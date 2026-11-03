@@ -173,6 +173,19 @@
    "fields": { "CODE": "31421000" }
   },
   {
+   "note": "Railway/subway station building: the exporter digs a decorated underground hall with a platform under it (see the station pass in mcworldexporter.cpp)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "train_station"
+   },
+   "fields": {
+    "CODE": "44330000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
    "note": "School/college/university: building=*",
    "from": "multipolygons",
    "layer": "bldpol",
@@ -1637,6 +1650,18 @@
    },
    "fields": {
     "CODE": "62230000"
+   }
+  },
+  {
+   "note": "Military grounds: the exporter walls the plot with a stone boundary wall and posts golem guards",
+   "from": "multipolygons",
+   "layer": "csrpol",
+   "when": {
+    "landuse": "military"
+   },
+   "fields": {
+    "CODE": "53210000",
+    "REL": "0"
    }
   },
   {

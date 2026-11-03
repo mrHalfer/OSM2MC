@@ -10,20 +10,23 @@ const char* const kKey = "language";
 QString g_override;                       // the --lang value of this run (not saved)
 QTranslator* g_translator = nullptr;      // the Russian translator while it is installed
 
-//! Makes the translator match the resolved language: removes the old one and installs the Russian one if needed
+//! Makes the translator match the resolved language: removes the old one and installs the Russian or Chinese one if needed
 void applyLanguage(const QString& lang)
 {
     if (g_translator) { QCoreApplication::removeTranslator(g_translator); delete g_translator; g_translator = nullptr; }
-    if (lang != QLatin1String("ru")) return;                                // English is the source language: nothing to load
+    QString resource;                                                         // English is the source language: nothing to load
+    if (lang == QLatin1String("ru")) resource = QStringLiteral(":/i18n/tmc_ru.qm");
+    else if (lang == QLatin1String("zh")) resource = QStringLiteral(":/i18n/tmc_zh.qm");
+    else return;
     auto* tr = new QTranslator(QCoreApplication::instance());
-    if (tr->load(QStringLiteral(":/i18n/tmc_ru.qm"))) { g_translator = tr; QCoreApplication::installTranslator(tr); }
+    if (tr->load(resource)) { g_translator = tr; QCoreApplication::installTranslator(tr); }
     else delete tr;
 }
 
 QString normalized(const QString& v)
 {
     const QString s = v.trimmed().toLower();
-    return (s == QLatin1String("en") || s == QLatin1String("ru")) ? s : QStringLiteral("auto");
+    return (s == QLatin1String("en") || s == QLatin1String("ru") || s == QLatin1String("zh")) ? s : QStringLiteral("auto");
 }
 }
 
@@ -46,10 +49,11 @@ QString tmcResolveLanguage(const QString& choice)
 {
     const QString c = normalized(choice);
     if (c != QLatin1String("auto")) return c;
-    const QStringList ui = QLocale::system().uiLanguages();                 // e.g. "ru-RU", "en-US"
+    const QStringList ui = QLocale::system().uiLanguages();                 // e.g. "ru-RU", "zh-CN", "en-US"
     for (const QString& l : ui)
     {
         if (l.startsWith(QLatin1String("ru"), Qt::CaseInsensitive)) return QStringLiteral("ru");
+        if (l.startsWith(QLatin1String("zh"), Qt::CaseInsensitive)) return QStringLiteral("zh");
         if (l.startsWith(QLatin1String("en"), Qt::CaseInsensitive)) return QStringLiteral("en");
     }
     return QStringLiteral("en");                                            // other languages: English until a translation appears

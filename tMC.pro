@@ -32,7 +32,7 @@ RC_LANG = 0x0419
 QMAKE_CXXFLAGS += /utf-8
 QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.3.26.11021
+    VERSION = 1.3.26.11031
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
@@ -78,9 +78,10 @@ HEADERS += \
 FORMS += \
     app/mainwindow.ui
 
-# Translations: the source strings are English; tmc_ru.ts is the Russian translation. lrelease compiles it and embed_translations puts the .qm into the executable (:/i18n/tmc_ru.qm).
+# Translations: the source strings are English; tmc_ru.ts is the Russian translation, tmc_zh.ts is the Chinese one. lrelease compiles them and embed_translations puts the .qm into the executable (:/i18n/tmc_ru.qm, :/i18n/tmc_zh.qm).
 # Update the .ts files with: lupdate tMC.pro
-TRANSLATIONS += translations/tmc_ru.ts
+TRANSLATIONS += translations/tmc_ru.ts \
+    translations/tmc_zh.ts
 CONFIG += lrelease embed_translations
 QM_FILES_RESOURCE_PREFIX = /i18n
 
