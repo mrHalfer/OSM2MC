@@ -874,6 +874,25 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
         }
     };
 
+    // SUBWAY ENTRANCES (`railway=subway_entrance` nodes): collected here first, so that the loop below can
+    // promote a `building=transportation` outline that stands on such a node or within ~10 m of it to a
+    // station hall (CODE 44330000; the tag case `subway=yes` is an osm_rules.json rule, the geometry is not).
+    QVector<QPointF> subwayEnvs;
+    if (OGRLayer* el = ds->GetLayerByName("points"))
+    {
+        const LayerCols ec = colsOf(el->GetLayerDefn());
+        el->ResetReading();
+        OGRFeature* f;
+        while ((f = el->GetNextFeature()) != nullptr)
+        {
+            const OGRGeometry* g = f->GetGeometryRef();
+            if (g && wkbFlatten(g->getGeometryType()) == wkbPoint &&
+                tagsOf(f, ec).value(QStringLiteral("railway")) == QLatin1String("subway_entrance"))
+                subwayEnvs << QPointF(static_cast<const OGRPoint*>(g)->getX(), static_cast<const OGRPoint*>(g)->getY());
+            OGRFeature::DestroyFeature(f);
+        }
+    }
+
     for (const QString& from : rules.sourceLayers())
     {
         OGRLayer* lyr = ds->GetLayerByName(from.toUtf8().constData());
@@ -935,7 +954,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                 tags.insert(QStringLiteral("_perim"), QString::number(perim, 'f', 1));
             }
             bool anyRule = false;
-            const QVector<OsmClassified> cl = rules.classify(from, tags, 1, &anyRule);
+            QVector<OsmClassified> cl = rules.classify(from, tags, 1, &anyRule);
             if (!unmatchedFile.isEmpty() && !anyRule && !tags.contains(QStringLiteral("building")))
             {   // TMC_OSM_UNMATCHED=file: what the rules did NOT cover — a counter by the "main" tag (the first of the list), separately for outlines/lines/points
                 static const char* primary[] = { "highway", "railway", "amenity", "shop", "leisure", "landuse", "natural", "waterway", "man_made", "power", "barrier",
@@ -956,6 +975,41 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                 kv.sort();
                 log(QStringLiteral("  [osm %1] %2 -> %3").arg(tags.value(QStringLiteral("osm_id")), kv.join(QStringLiteral(", ")),
                                                            cl.isEmpty() ? QStringLiteral("(none)") : cl.first().layer + QLatin1Char(' ') + cl.first().fields.value(0).second));
+            }
+            if (!subwayEnvs.isEmpty() && from == QLatin1String("multipolygons") && g0 && !g0->IsEmpty() &&
+                tags.value(QStringLiteral("building")) == QLatin1String("transportation"))
+            {   // a subway entrance node on or within ~10 m of a transportation outline makes it a station
+                // hall even without the subway=yes tag (the rule engine is tag-only, the distance is ours)
+                OGREnvelope e2;
+                g0->getEnvelope(&e2);
+                const double mLat = 1.0 / 111320.0;
+                const double mLon = mLat / std::max(0.2, std::cos(0.5 * (e2.MinY + e2.MaxY) * 3.14159265358979 / 180.0));
+                for (const QPointF& p : subwayEnvs)
+                {
+                    if (p.x() < e2.MinX - 15.0 * mLon || p.x() > e2.MaxX + 15.0 * mLon ||
+                        p.y() < e2.MinY - 15.0 * mLat || p.y() > e2.MaxY + 15.0 * mLat)
+                        continue;
+                    const OGRPoint pt(p.x(), p.y());
+                    if (!g0->Contains(&pt) && g0->Distance(&pt) * 111320.0 > 10.0)
+                        continue;
+                    if (cl.isEmpty())
+                    {   // no rule caught a bare transportation building - classify it right here
+                        OsmClassified c;
+                        c.layer = QStringLiteral("bldpol");
+                        c.fields << qMakePair(QStringLiteral("CODE"), QStringLiteral("44330000"))
+                                 << qMakePair(QStringLiteral("REL"), QStringLiteral("auto"))
+                                 << qMakePair(QStringLiteral("MAT"),
+                                              tags.value(QStringLiteral("building:material"),
+                                                         tags.value(QStringLiteral("building:facade:material"))));
+                        cl << c;
+                    }
+                    else
+                        for (OsmClassified& c : cl)
+                            for (auto& fv : c.fields)
+                                if (fv.first == QLatin1String("CODE"))
+                                    fv.second = QStringLiteral("44330000");
+                    break;
+                }
             }
             const bool isBld = from == QLatin1String("multipolygons") && tags.contains(QStringLiteral("building"));
             if (isBld && g0 && !g0->IsEmpty())

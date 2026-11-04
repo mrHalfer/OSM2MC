@@ -431,7 +431,10 @@
             <property name="checkable">
              <bool>true</bool>
             </property>
-           </widget>
+            <property name="checked">
+            <bool>true</bool>
+            </property>
+            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="toolSpawn">
@@ -442,9 +445,6 @@
              <string>Spawn</string>
             </property>
             <property name="checkable">
-             <bool>true</bool>
-            </property>
-            <property name="checked">
              <bool>true</bool>
             </property>
            </widget>

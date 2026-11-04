@@ -28,6 +28,7 @@ public:
 protected:
     void closeEvent(QCloseEvent* e) override;
     void changeEvent(QEvent* e) override;                 // QEvent::LanguageChange: all the texts are set again
+    bool eventFilter(QObject* watched, QEvent* event) override;   // the export-destination label: a click opens its folder
 
 private slots:
     void browseProject();
@@ -67,6 +68,7 @@ private:
     void showTextDialog(const QString& title, const QString& text, const QString& file = QString());
     void saveProjectFile();                                //!< "Save project…": the map view, the boundary, the marks and the world options into a .tmc file
     QString resolvedSavesDir() const;                      //!< saves folder for the chosen export destination; empty — the zip (the saved path is gone)
+    QString exportFolderToOpen() const;                    //!< the folder opened by a click on the export-destination label (saves / output / source)
     void updateExportDestUi();                             //!< greys out the zip file row when the world goes to a launcher/instance
     void openProjectFile();                                //!< "Open project…"
     bool writeProject(const QString& path);

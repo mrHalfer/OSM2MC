@@ -204,6 +204,8 @@ static const NamedColor kBlockPalette[] = {
     { "minecraft:polished_diorite",      197, 197, 197 },
     // Underground stations (44330000): chisel caps of the pylons and the statue head
     { "minecraft:chiseled_stone_bricks", 170, 170, 172 },
+    // Metro vestibule vending machines (a request to furnish them) and the lab interior: polished blackstone
+    { "minecraft:polished_blackstone",    38,  32,  43 },
 };
 
 //! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
@@ -447,6 +449,12 @@ enum : quint16
     IdPoweredRailShapeMax = int(IdPoweredRailShapeBase) + 10,
     IdVine,                               // 'minecraft:vine' without properties (the game connects the faces itself) — jungle trees
     IdWaterFalling,                       // 'minecraft:water' level=8 (falling) — the streams running down a fountain post (3.575)
+    IdBrickStairsN,                       // 'minecraft:stone_brick_stairs' facing — the flights of the metro
+    IdBrickStairsE,                       //   entrance stair (stone under foot; the oak IdStairs* are the
+    IdBrickStairsS,                       //   pitched-roof ones). Kept out of the IdStairsN..IdStairsW and
+    IdBrickStairsW,                       //   IdStoneStairsN..IdStoneStairsW ranges used by the roof checks
+    IdTorch,                              // 'minecraft:torch' ON THE FLOOR (without properties) — the metro
+                                          //   stairwell ledges (a request: "hang torches on the column")
     IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
                                           //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
 };
@@ -523,6 +531,7 @@ static QString blockName(quint16 id)
     case IdBarrel:        return QLatin1String("minecraft:barrel");
     case IdFurnace:       return QLatin1String("minecraft:furnace");
     case IdLanternStanding: return QLatin1String("minecraft:lantern");
+    case IdTorch: return QLatin1String("minecraft:torch");
     case IdCauldron:      return QLatin1String("minecraft:cauldron");
     case IdComposter:     return QLatin1String("minecraft:composter");
     case IdLoom:          return QLatin1String("minecraft:loom");
@@ -542,6 +551,10 @@ static QString blockName(quint16 id)
     case IdStoneStairsE:
     case IdStoneStairsS:
     case IdStoneStairsW:  return QLatin1String("minecraft:stone_stairs");
+    case IdBrickStairsN:
+    case IdBrickStairsE:
+    case IdBrickStairsS:
+    case IdBrickStairsW:  return QLatin1String("minecraft:stone_brick_stairs");
     case IdLadderN:
     case IdLadderE:
     case IdLadderS:
@@ -864,6 +877,10 @@ static void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
     case IdStoneStairsE: out << qMakePair(QStringLiteral("facing"), QStringLiteral("east")); break;
     case IdStoneStairsS: out << qMakePair(QStringLiteral("facing"), QStringLiteral("south")); break;
     case IdStoneStairsW: out << qMakePair(QStringLiteral("facing"), QStringLiteral("west")); break;
+    case IdBrickStairsN: out << qMakePair(QStringLiteral("facing"), QStringLiteral("north")); break;
+    case IdBrickStairsE: out << qMakePair(QStringLiteral("facing"), QStringLiteral("east")); break;
+    case IdBrickStairsS: out << qMakePair(QStringLiteral("facing"), QStringLiteral("south")); break;
+    case IdBrickStairsW: out << qMakePair(QStringLiteral("facing"), QStringLiteral("west")); break;
     default: break;
     }
 }
@@ -3756,7 +3773,9 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
     // of width 1 (malls — 2) and height 2: the room graph is a tree, so everything is connected. The partitions
     // are laid with the building wall block and marked "4" in the grid — chests/spawners/light do not
     // climb onto them, and torches can hang on them as on ordinary walls.
-    if (floors && obj.closed && storyP > 0 && lyLow + 2 <= lyHigh - 4)
+    // Metro station buildings (44330000) stay ONE open ticket hall (a user request: "do not split the
+    // ideal vestibule building into rooms") — the staircase and its portal frame need the open space.
+    if (floors && obj.closed && storyP > 0 && obj.code != 44330000 && lyLow + 2 <= lyHigh - 4)
     {
         const int minA = obj.code == 44318000 ? 300 : 100;
         const int maxA = obj.code == 44318000 ? 900 : 300;
@@ -4424,6 +4443,173 @@ static int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransfor
                 finPts.append(FinPt{ bx, byc, bz });
                 return true;
             };
+            // The ground floor of a METRO STATION building (44330000) is the entrance vestibule (a request:
+            // "the whole 1st floor of a metro entrance building must look like a vestibule — a bed next to
+            // the entrance is strange"): checker tiles over the whole floor, a ticket counter with a bell,
+            // benches, vending machines, waste bins, potted plants, lamp posts, info panels and posters. The
+            // corridor in front of the entrance doors stays free of furniture (a request: "the most important
+            // thing is that it does not get in the way of the entrance"). The shaft itself walks out through
+            // its own light portal frame (digStationHall), no ticket rows (a round-4 request: "just a frame
+            // and an entrance").
+            if (obj.code == 44330000 && k == 0)
+            {
+                auto blkName = [](const char* name) -> quint16
+                { return quint16(IdPaletteStart + paletteIndexOf(name)); };
+                const quint16 vTileA = blkName("minecraft:polished_andesite"),
+                            vTileB = blkName("minecraft:polished_diorite"),
+                            vDsl   = blkName("minecraft:polished_deepslate"),
+                            vBlk   = blkName("minecraft:polished_blackstone"),
+                            vChis  = blkName("minecraft:chiseled_stone_bricks");
+                int placedV = 0;
+                // tiles: the whole walking floor of the storey is re-laid in the polished checker (as the
+                // underground hall itself, so the stair door walks out onto the same pattern)
+                int cxSum = 0, czSum = 0, cN = 0;
+                for (int lz = 1; lz < sz - 1; ++lz)
+                    for (int lx = 1; lx < sx - 1; ++lx)
+                    {
+                        const char gc = grid[lz * sxy + (lyF)*sx + lx];
+                        if (gc != char(3) && gc != char(4)) continue;
+                        const int bx = minx + lx, bz = minz + lz;
+                        if (store.get(bx, miny + lyF - 1 - sink, bz) == IdAir) continue;   // no slab — no tile
+                        addVoxel(bx, miny + lyF - 1, bz, ((lx >> 1) + (lz >> 1)) & 1 ? vTileA : vTileB);
+                        cxSum += lx; czSum += lz; ++cN;
+                    }
+                if (cN == 0) continue;
+                const double cxA = double(cxSum) / cN, czA = double(czSum) / cN;
+                // the corridor in front of the ENTRANCE doors stays free (a request: "the most important
+                // thing is that the furniture does not get in the way of the entrance"): two cells deep
+                QVector<char> doorNear(sx * sz, 0);
+                {
+                    QVector<int> fronts;
+                    for (int lz = 1; lz < sz - 1; ++lz)
+                        for (int lx = 1; lx < sx - 1; ++lx)
+                            for (int d = 0; d < 4; ++d)
+                            {
+                                const int wx = lx + dvec[d][0], wz = lz + dvec[d][1];
+                                bool door = false;
+                                for (int q = -1; q <= 2 && !door; ++q)
+                                {
+                                    const quint16 b = store.get(minx + wx, miny + lyF + q - sink, minz + wz);
+                                    if (b >= IdDoorBase && b < IdDoorMax) door = true;
+                                }
+                                if (door) { fronts.append(lz * sx + lx); break; }
+                            }
+                    for (int f : fronts)
+                    {
+                        const int fx = f % sx, fz = f / sx;
+                        for (int dz = -2; dz <= 2; ++dz)
+                            for (int dx = -2; dx <= 2; ++dx)
+                            {
+                                if (std::abs(dx) + std::abs(dz) > 2) continue;
+                                const int nx = fx + dx, nz = fz + dz;
+                                if (nx < 1 || nx >= sx - 1 || nz < 1 || nz >= sz - 1) continue;
+                                doorNear[nz * sx + nx] = 1;
+                            }
+                    }
+                }
+                // the ticket counter: the wall cell nearest to the floor centre, a two-wide polished counter
+                // with a stair on top facing into the hall
+                int cntLx = -1, cntLz = -1, cntD = 0;
+                double cntBest = 1e18;
+                for (int lz = 1; lz < sz - 1; ++lz)
+                    for (int lx = 1; lx < sx - 1; ++lx)
+                    {
+                        if (!cellFree(lx, lz, 0) || doorNear[lz * sx + lx]) continue;
+                        for (int d = 0; d < 4; ++d)
+                        {
+                            if (!wallAt(lx, lz, d)) continue;
+                            const double dx = lx + dvec[d][0] * 0.5 - cxA, dz = lz + dvec[d][1] * 0.5 - czA;
+                            const double dist = dx * dx + dz * dz;
+                            if (dist >= cntBest) continue;
+                            cntBest = dist; cntLx = lx; cntLz = lz; cntD = d;
+                        }
+                    }
+                if (cntLx >= 0)
+                {
+                    const int ox = -dvec[cntD][0], oz = -dvec[cntD][1];        // into the hall
+                    const int s0 = cntLx + ox, s1 = cntLz + oz;
+                    const bool sideFree = cellFree(s0 + oz, s1 + ox, 0);       // the counter stands sideways
+                    put(cntLx, cntLz, 0, vDsl, &placedV);
+                    if (cellFree(s0, s1, 0))
+                    {
+                        put(s0, s1, 0, vDsl, &placedV);
+                        const bool outZ = (oz != 0);                             // the counter faces along Z
+                        const quint16 cntStair = outZ ? (oz > 0 ? IdStoneStairsS : IdStoneStairsN)
+                                                      : (ox > 0 ? IdStoneStairsE : IdStoneStairsW);
+                        if (cellFree(s0, s1, 1)) put(s0, s1, 1, cntStair, &placedV);
+                        if (sideFree) put(s0 + oz, s1 + ox, 0, vDsl, &placedV);
+                    }
+                    if (cellFree(cntLx, cntLz, 1))
+                        put(cntLx, cntLz, 1, IdBell, &placedV);      // the stationmaster's bell on the counter
+                }
+                // benches, waste bins and potted plants by the walls, posters above them; the lamp posts,
+                // vending machines and info panels (chiseled plaques) as before
+                const quint16 kBenchStair[4] = { quint16(IdStairsN), quint16(IdStairsE),
+                                                 quint16(IdStairsS), quint16(IdStairsW) };   // the dvec order
+                for (int lz = 1; lz < sz - 1; ++lz)
+                    for (int lx = 1; lx < sx - 1; ++lx)
+                    {
+                        if (!cellFree(lx, lz, 0)) continue;
+                        const quint32 vh = finHash(minx + lx, minz + lz, miny + lyF, 0x5E57u);
+                        bool onWall = false;
+                        int wd = 0;
+                        for (int d = 0; d < 4; ++d)
+                            if (wallAt(lx, lz, d)) { onWall = true; wd = d; break; }
+                        if (!onWall) continue;
+                        const quint32 v30 = vh % 30u;
+                        if (v30 == 0u && farOtherFin(minx + lx, miny + lyF, minz + lz, 3))
+                        {   // a lamp post in the corner of the hall
+                            put(lx, lz, 0, IdCobbleWall, &placedV);
+                            if (cellFree(lx, lz, 1)) put(lx, lz, 1, IdLanternStanding, &placedV);
+                        }
+                        else if (v30 >= 1u && v30 <= 4u && farOtherFin(minx + lx, miny + lyF, minz + lz, 2))
+                        {   // a vending machine against the wall: a dark column with a lit face panel
+                            put(lx, lz, 0, vBlk, &placedV);
+                            if (cellFree(lx, lz, 1)) put(lx, lz, 1, vChis, &placedV);
+                        }
+                        else if (v30 >= 5u && v30 <= 7u && !doorNear[lz * sx + lx]
+                                 && farOtherFin(minx + lx, miny + lyF, minz + lz, 3))
+                        {   // a waiting bench: stone steps with the tall (backrest) side to the wall
+                            // (facing = uphill, the same stairs as the benches of the underground hall)
+                            const quint16 bStair = kBenchStair[wd];
+                            put(lx, lz, 0, bStair, &placedV);
+                            for (int s = -1; s <= 1; s += 2)              // a neighbour seat along the wall
+                            {
+                                const int nx = lx + (wd % 2 ? 0 : s), nz = lz + (wd % 2 ? s : 0);
+                                if (nx < 1 || nz < 1 || !cellFree(nx, nz, 0) || doorNear[nz * sx + nx]
+                                    || !wallAt(nx, nz, wd)
+                                    || !farOtherFin(minx + nx, miny + lyF, minz + nz, 2)) continue;
+                                put(nx, nz, 0, bStair, &placedV);
+                            }
+                        }
+                        else if (v30 == 8u && farOtherFin(minx + lx, miny + lyF, minz + lz, 2))
+                        {   // a waste bin: a barrel against the wall
+                            put(lx, lz, 0, IdBarrel, &placedV);
+                        }
+                        else if (v30 == 9u && farOtherFin(minx + lx, miny + lyF, minz + lz, 1))
+                        {   // a potted plant by the wall
+                            put(lx, lz, 0, quint16(IdFlowerPotBase + int(finHash(minx + lx, minz + lz,
+                                    miny + lyF, 0xF10Au) % quint32(kFlowersCount))), &placedV);
+                        }
+                        else if (v30 >= 10u && v30 <= 12u && cellFree(lx, lz, 1))
+                        {   // an info panel: a chiseled plaque on the wall at the eye level
+                            const int wx = lx + dvec[wd][0], wz = lz + dvec[wd][1];
+                            quint16 wb0 = store.get(minx + wx, miny + lyF - sink, minz + wz);
+                            quint16 wb1 = store.get(minx + wx, miny + lyF + 1 - sink, minz + wz);
+                            if (wb0 != IdAir && wb0 != IdGlass && wb1 != IdAir && wb1 != IdGlass)
+                                put(lx, lz, 1, vChis, &placedV);
+                        }
+                        else if (v30 >= 13u && v30 <= 14u && cellFree(lx, lz, 1))
+                        {   // a poster: a blank banner hung flat on a wall (its facing looks out of the wall)
+                            const int wx = lx + dvec[wd][0], wz = lz + dvec[wd][1];
+                            quint16 wb0 = store.get(minx + wx, miny + lyF - sink, minz + wz);
+                            quint16 wb1 = store.get(minx + wx, miny + lyF + 1 - sink, minz + wz);
+                            if (wb0 != IdAir && wb0 != IdGlass && wb1 != IdAir && wb1 != IdGlass)
+                                put(lx, lz, 1, quint16(IdWallBannerBase + ((wd + 2) & 3)), &placedV);
+                        }
+                    }
+                continue;
+            }
             // The free cells of the walking row are the basis of rooms; a room = a 4-connected
             // component (openings, shafts and the door buffer are the natural boundaries).
             QVector<char> open(sx * sz, 0);
@@ -6385,12 +6571,15 @@ static int railShapeFor(const QPoint& cur, const QPoint* prev, const QPoint* nex
 //! curved, so the hit must land on a STRAIGHT cell: if the count falls on a turn, the hit carries over to the
 //! next straight cell and several powered rails are laid in a row there (2-5 in a row). Only rails that are
 //! really in the store are electrified (a cell blocked by a bridge is skipped and carries its hit further).
+//! A redstone block is put under every powered rail (a user request: "so that the electrified rails are
+//! always active") - a rail on redstone never switches to its braking state.
 //! Returns the number of powered rails laid.
 static int electrifyRails(VoxelStore& store, const QVector<QPoint>& chain, const QVector<int>& ys)
 {
     const int n = chain.size();
     if (n < 3)
         return 0;
+    const quint16 rsBlock = quint16(IdPaletteStart + paletteIndexOf("minecraft:redstone_block"));
     QVector<char> straight(n, 0);       // both neighbours on one line — a straight cell, not a turn
     for (int ci = 1; ci + 1 < n; ++ci)
         straight[ci] = (chain[ci] - chain[ci - 1]) == (chain[ci + 1] - chain[ci]);
@@ -6411,6 +6600,7 @@ static int electrifyRails(VoxelStore& store, const QVector<QPoint>& chain, const
                 continue;               // occupied / already powered
             store.set(chain[k].x(), ys[k], chain[k].y(),
                       quint16(int(IdPoweredRailShapeBase) + (int(b) - int(IdRailShapeBase))));
+            store.set(chain[k].x(), ys[k] - 1, chain[k].y(), rsBlock);    // the rail's power source
             ++done; --place;
         }
         pending += place;
@@ -8469,7 +8659,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     // coordinates. Two consumers: the subway straightener inserts a station center into the line's polyline
     // (every line near a station turns at it and passes exactly under it), the "station halls" pass after the
     // subway tunnels digs a decorated underground hall under the building.
-    struct StationSite { QRect bb; QPoint c; };
+    struct StationSite { QRect bb; QPoint c; char canopy = 0; };
     QVector<StationSite> stations;
     for (const McObject& q : objects)
     {
@@ -8482,7 +8672,17 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             x0 = std::min(x0, x); x1 = std::max(x1, x); z0 = std::min(z0, z); z1 = std::max(z1, z);
         }
         if (x1 < x0 || z1 < z0) continue;
-        stations.append(StationSite{ QRect(x0, z0, x1 - x0 + 1, z1 - z0 + 1), QPoint((x0 + x1) / 2, (z0 + z1) / 2) });
+        // the entrance hut too small for a staircase and a vestibule INSIDE it (a user request:
+        // "the arched canopy instead of the building is only for when the stair and the lobby do not
+        // fit into the building"): the station pass sweeps such a hut and builds the compact square
+        // entrance object on its footprint. The stairwell takes 9x9 with its fence, so a building
+        // under 13 blocks on the short side cannot host it; the height bound keeps the sweep of the
+        // voxelize pass in range (a 4.5 m hut measures 7.6 mesh units with the scene's z exaggeration,
+        // a taller thin tower simply keeps its stair inside)
+        StationSite site{ QRect(x0, z0, x1 - x0 + 1, z1 - z0 + 1), QPoint((x0 + x1) / 2, (z0 + z1) / 2),
+                          char(q.extrudeH > 0.5 && q.extrudeH <= 9.0 &&
+                               std::min(x1 - x0 + 1, z1 - z0 + 1) <= 12) };
+        stations.append(site);
     }
     QVector<char> stationBuilt(stations.size(), 0);
     for (const McObject& o : objects)
@@ -8972,34 +9172,61 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     // under the ground (see the "subway tunnels" pass after the ground fill).
                     // Real lines in OSM are long diagonals (Moscow: 95% of the length off the axes) and the
                     // orthogonal cell grid turns them into a staircase that turns on EVERY cell. Trains do
-                    // not corner per block, so the polyline is straightened first: every segment becomes a
-                    // staircase with straight steps of up to 80 blocks (occasional 90-degree bends instead
-                    // of a turn per metre; the nodes - the stations and the curve breaks - stay in place).
-                    // Station buildings (CODE 44330000) are ALWAYS turned through: a line passing within 96 blocks
-                    // of a station center gets that center inserted as a polyline node, so the tunnel crosses
-                    // exactly under the station and its hall (dug later) connects to the corridor.
+                    // not corner per block, so the polyline is straightened first: every segment becomes
+                    // a staircase of short 10-block straight steps with 20-block diagonal corrections
+                    // back toward the real line (the nodes - the stations and the curve breaks - stay in
+                    // place; the corrections keep parallel lines from knotting into one corridor).
+                    // Station buildings (CODE 44330000) are ALWAYS turned through - by ONE line though, the
+                    // nearest one (between 20 and 96 blocks - a closer line is never bent, the hall widens
+                    // to it instead): its polyline gets the station point inserted as a node,
+                    // so the tunnel crosses exactly under the station and its hall (dug later) connects to
+                    // the corridor. Pulling EVERY line that passes nearby into the one point used to knot the
+                    // station: parallel lines merged into a shared corridor and then crossed again past the
+                    // hall. The rest keep their OSM geometry (parallel lines stay parallel) and only get
+                    // rails in the hall if they already run under it on their own.
                     for (const StationSite& st : stations)
-                        for (QVector<QPointF>& ln : lines)
-                        {
-                            int bi = -1;
-                            double bd = 96.0 * 96.0;
-                            for (int i = 0; i + 1 < ln.size(); ++i)
+                    {
+                        int bl = -1, bi = -1;                                 // the nearest line, its nearest segment
+                        double bd = 96.0 * 96.0;
+                        for (int li = 0; li < lines.size(); ++li)
+                            for (int i = 0; i + 1 < lines[li].size(); ++i)
                             {   // the polyline segment nearest to the station center
-                                const double vx = ln[i + 1].x() - ln[i].x(), vy = ln[i + 1].y() - ln[i].y();
+                                const QPointF& p0 = lines[li][i], & p1 = lines[li][i + 1];
+                                const double vx = p1.x() - p0.x(), vy = p1.y() - p0.y();
                                 const double ll = vx * vx + vy * vy;
-                                double t = ll > 1e-9 ? ((st.c.x() - ln[i].x()) * vx + (st.c.y() - ln[i].y()) * vy) / ll : 0.0;
+                                double t = ll > 1e-9 ? ((st.c.x() - p0.x()) * vx + (st.c.y() - p0.y()) * vy) / ll : 0.0;
                                 t = std::max(0.0, std::min(1.0, t));
-                                const double dx = st.c.x() - (ln[i].x() + vx * t), dy = st.c.y() - (ln[i].y() + vy * t);
+                                const double dx = st.c.x() - (p0.x() + vx * t), dy = st.c.y() - (p0.y() + vy * t);
                                 const double d2 = dx * dx + dy * dy;
-                                if (d2 < bd) { bd = d2; bi = i; }
+                                if (d2 < bd) { bd = d2; bl = li; bi = i; }
                             }
-                            if (bi < 0) continue;
-                            const QPointF sp(double(st.c.x()), double(st.c.y()));
-                            bool dup = false;                     // the OSM way itself may already have a node here
-                            for (const QPointF& p : ln)
-                                if (std::abs(p.x() - sp.x()) < 2.0 && std::abs(p.y() - sp.y()) < 2.0) { dup = true; break; }
-                            if (!dup) ln.insert(bi + 1, sp);
-                        }
+                        if (bl < 0) continue;
+                        const bool stAxisX = st.bb.width() >= st.bb.height();
+                        const int stAcross = stAxisX ? st.bb.height() : st.bb.width();
+                        // a line closer than 20 blocks to the station is NEVER pulled (a user request:
+                        // "if a metro line is within 20 blocks of the station - do not pull the line,
+                        // widen the station itself"): the hall dig below unions the track cells it
+                        // touches and stretches the hall toward them, so the line keeps its shape
+                        if (bd <= 20.0 * 20.0) continue;
+                        // the attraction point stands off the hall centre, on the side OPPOSITE the
+                        // entrance shaft (the hall takes its side from this same 0x51DE hash): the rails
+                        // then cross the hall mid-way, the entrance sits in a corner, and the shaft's
+                        // ring fence can never wall up the corridor it almost stands on
+                        const quint32 sSide = colHash(pairKey(st.c.x(), st.c.y()) ^ 0x51DEull);
+                        const int sb = (sSide & 1u) ? 1 : -1;
+                        const int stOff = std::min(8, std::max(0, stAcross / 2 - 7));
+                        const QPointF sp(double(st.c.x() - (stAxisX ? 0 : sb * stOff)),
+                                         double(st.c.y() - (stAxisX ? sb * stOff : 0)));
+                        bool dup = false;                     // the OSM way itself may already have a node here
+                        for (const QPointF& p : lines[bl])
+                            if (std::abs(p.x() - sp.x()) < 2.0 && std::abs(p.y() - sp.y()) < 2.0) { dup = true; break; }
+                        if (!dup) lines[bl].insert(bi + 1, sp);
+                    }
+                    // (the user pattern: "10 blocks straight, 20 diagonal - the lines then stand closer
+                    // to their real places") every segment becomes a staircase of short 10-block straight
+                    // runs alternating with 20-block diagonals back toward the real line; once the line is
+                    // caught up, the remainder of the segment runs along the OSM line itself. The nodes -
+                    // the stations and the curve breaks - stay in place.
                     for (const QVector<QPointF>& ln : lines)
                     {
                         QVector<QPointF> pl;
@@ -9007,15 +9234,42 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         {
                             if (pl.isEmpty()) { pl << p; continue; }
                             QPointF c = pl.last();
-                            double rx = std::abs(p.x() - c.x()), rz = std::abs(p.y() - c.y());
-                            const int sx = p.x() >= c.x() ? 1 : -1, sz = p.y() >= c.y() ? 1 : -1;
-                            while (rx > 1.0 || rz > 1.0)
-                            {   // consume the dominant axis first, in steps of at most 80 blocks
-                                const double t = std::min(rx >= rz ? rx : rz, 80.0);
-                                if (rx >= rz) { c.setX(c.x() + sx * t); rx -= t; }
-                                else          { c.setY(c.y() + sz * t); rz -= t; }
-                                if (rx <= 1.0 && rz <= 1.0) c = p;        // land exactly on the node
+                            const bool domX = std::abs(p.x() - c.x()) >= std::abs(p.y() - c.y());
+                            const int sA = domX ? (p.x() >= c.x() ? 1 : -1) : (p.y() >= c.y() ? 1 : -1);
+                            const int sC = domX ? (p.y() >= c.y() ? 1 : -1) : (p.x() >= c.x() ? 1 : -1);
+                            const auto step = [&](double advA, double advC)
+                            {   // one piece: along the dominant axis, crossed by advC, the turn is kept
+                                if (domX) c.setX(c.x() + sA * advA), c.setY(c.y() + sC * advC);
+                                else      c.setY(c.y() + sA * advA), c.setX(c.x() + sC * advC);
                                 pl << c;
+                            };
+                            double da = domX ? std::abs(p.x() - c.x()) : std::abs(p.y() - c.y());
+                            double dc = domX ? std::abs(p.y() - c.y()) : std::abs(p.x() - c.x());
+                            // the slope of the correction: a period is 10 straight + 20 diagonal = 30
+                            // blocks along the dominant axis, so 20*rc = 30 * the line's own cross rate
+                            // (clamped 1:1 - steeper OSM keeps a cross residual for the landing below)
+                            const double rc = std::min(1.0, 1.5 * dc / std::max(da, 1.0));
+                            while (da > 1.0 && dc > 1.0)
+                            {
+                                const double s = std::min(10.0, da);               // drift off the line
+                                step(s, 0.0); da -= s;
+                                if (da <= 1.0) break;
+                                const double adv = std::min(20.0, da);             // the walk back
+                                const double cr = std::min(dc, adv * rc);
+                                step(adv, cr); da -= adv; dc -= cr;
+                            }
+                            if (dc <= 1.0)
+                            {   // caught up with the real line (the usual finish): repeat the original
+                                // line to the node (a user request) - a plain piece, the rail pass
+                                // stairs it along the true direction
+                                pl << p; c = p;
+                            }
+                            else
+                            {   // a steep line the 1:1 diagonals could not fully catch: land on the
+                              // node with straight steps (rare, only on steep OSM data)
+                                while (da > 1.0) { const double s = std::min(80.0, da); step(s, 0.0); da -= s; }
+                                if (dc > 1.0) step(0.0, dc);
+                                pl[pl.size() - 1] = p;
                             }
                         }
                         const QVector<QPoint> chain = railCellChain(pl);
@@ -10156,7 +10410,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     // "X of N" goes on and does not freeze after the earth fill (the scale is monotonic: ground, then planting).
     qint64 vegCells64 = 0;
     for (const VegSite& site : forests)
-        vegCells64 += qint64(site.maxX / 6 - site.minX / 6 + 2) * qint64(site.maxZ / 6 - site.minZ / 6 + 2);
+    {   // the same clamp as in the planting loops: a site wider than the world must not inflate the counter
+        const int vgX0 = std::max(site.minX, (rcx0 - rectM) * 16), vgX1 = std::min(site.maxX, (rcx1 + rectM + 1) * 16 - 1);
+        const int vgZ0 = std::max(site.minZ, (rcz0 - rectM) * 16), vgZ1 = std::min(site.maxZ, (rcz1 + rectM + 1) * 16 - 1);
+        if (vgX1 < vgX0 || vgZ1 < vgZ0) continue;
+        vegCells64 += qint64(vgX1 / 6 - vgX0 / 6 + 2) * qint64(vgZ1 / 6 - vgZ0 / 6 + 2);
+    }
     const int vegCells = int(std::min<qint64>(vegCells64, 1000000000));
     const int progTotal = gTotal;               // the "ground" stage has its own scale; later the steps have their own stages (below)
     int planeCols = 0;
@@ -11632,13 +11891,15 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     }
     // A station hall under a station building (CODE 44330000, building=train_station): a big decorated hall
     // (platform strips, two rows of pylons, benches, a statue, a wall mosaic, hanged lamps and an entrance
-    // shaft with a ladder to the surface, its mouth inside the station building). When a subway line passes
+    // shaft with a staircase to the surface, its mouth inside the station building - or, when the hut is
+    // too small to hold it, on the plaza where the swept pavilion stood). When a subway line passes
     // under the station, the hall floor is the tunnel
     // floor (the line was bent to the station by the straightener) and the hall sits OVER the already built
     // corridor: its entry cells are not walled up. The dig is "ground-down" (restore the rock above the ceiling
     // and lower the column top under the floor) as in the tunnels, so the hall also survives inside a cave.
     auto digStationHall = [&](const QPoint& center, int fy, const QRect& hall, const QRect& bld,
-                              const QSet<qint64>& trackCols, const QSet<qint64>& openCols, bool lineStation) -> bool
+                              const QSet<qint64>& trackCols, const QSet<qint64>& openCols, bool lineStation,
+                              bool canopy = false) -> bool
     {
         const auto gcen = ground.find(pairKey(center.x() >> 4, center.y() >> 4));
         if (gcen == ground.end()) return false;
@@ -11669,6 +11930,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         const quint16 idRed = stBlk("minecraft:red_concrete"), idLBlue = stBlk("minecraft:light_blue_concrete");
         const quint16 idLGray = stBlk("minecraft:light_gray_concrete"), idChis = stBlk("minecraft:chiseled_stone_bricks");
         const quint16 idAnd = stBlk("minecraft:polished_andesite"), idDi = stBlk("minecraft:polished_diorite");
+        const quint16 idQuartz = stBlk("minecraft:smooth_quartz");         // the light portal posts
 
         // ---- the interior: the hall rectangle plus the boundary cells the tunnel corridor already hollowed
         QSet<qint64> inner;
@@ -11689,7 +11951,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (git == ground.end()) continue;                             // a column over nowhere - solid rock stays
             const int gc = (z & 15) * 16 + (x & 15);
             GroundChunk& g = git.value();
-            const int orig = std::max(int(g.top[gc]), fy + 10);    // a column the tunnel has already lowered: the original surface is fy+10 (floor = surface-10 there)
+            const int orig = std::max(int(g.top[gc]), fy + 15);    // a column the tunnel has already lowered: the original surface is fy+15 (floor = surface-15 there)
             origTops.insert(ck, orig);
             const quint32 hh = colHash(ck ^ 0x515A77ull);
             for (int y = fy + 9; y <= orig; ++y)
@@ -11714,75 +11976,310 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     store.set(x, y, z, masId[colHash(ck ^ (qint64(y) * 31 + 0x2A17ull)) % 8u]);
             }
 
-        // ---- the entrance shaft up to the surface: a 4x3 pit, a ladder, the opening fenced by walls. Its
-        // mouth must stand INSIDE the station building, not outside it: the building rectangle clamped with
-        // a one-cell inset picks the end row along the hall; across the hall the shaft keeps the centre row
-        // when the building covers it, otherwise it takes the building's centre row. A building too small
-        // for the pit falls back to a hall end. The pit cuts two rows over the surface so that the opening
-        // passes through the floor slab of the station lobby.
-        const int ba0 = std::max((axisX ? bld.left() : bld.top()) + 1, A0 + 1);
-        const int ba1 = std::min((axisX ? bld.right() : bld.bottom()) - 1, A1 - 1);
-        const bool fits = ba1 - ba0 >= 6;                                   // four pit columns and a gap on each side
+        // ---- the entrance shaft up to the surface: a 5x5 pit standing INSIDE the station building (or,
+        // for a swept street pavilion, on the plaza over the hall - the same construction either way).
+        // The whole structure - the pit, the wall ring around it and the door passage to the lobby - is
+        // checked against the building walls and never cuts them: the ring stands a cell off the facade;
+        // a building too narrow for the ring loses the ring (a bare pit, still a cell off the walls), and
+        // a building where even the pit with its passage does not fit gets NO shaft at all - no entrance
+        // is better than a door carved through a facade. The stairs are "multi-storey" style:
+        // 2-block-wide flights with full-width landings.
+        const int aB0 = axisX ? bld.left() : bld.top(), aB1 = axisX ? bld.right() : bld.bottom();
+        const int bB0 = axisX ? bld.top() : bld.left(), bB1 = axisX ? bld.bottom() : bld.right();
         const quint32 hSel = colHash(cell(A0, B0) ^ 0xA11CEull);
-        const bool lowEnd = (hSel & 1u) == 0;
-        const int sa0 = fits ? (lowEnd ? ba0 : ba1 - 3) : (lowEnd ? A0 : A1 - 3);
-        const int sa1 = sa0 + 3;
-        int bS = bc;
-        const int bb0 = axisX ? bld.top() : bld.left(), bb1 = axisX ? bld.bottom() : bld.right();
-        if (!(bb0 <= bc - 2 && bb1 >= bc + 2))                              // the building does not cover the centre row
-            bS = std::max(B0 + 2, std::min(B1 - 2, (bb0 + bb1) / 2));       // - the shaft stands on the building's centre
-        auto inShaft = [&](int a, int b) { return a >= sa0 && a <= sa1 && b >= bS - 1 && b <= bS + 1; };
-        int ladTop = fy + 12;
+        const quint32 sSide = colHash(pairKey(center.x(), center.y()) ^ 0x51DEull);   // the same hash the
+        const bool lowEnd = (sSide & 2u) == 0;                              // straightener used for the rails
+        // the a window is common to both shaft variants: the three-cell door passage to the lobby must also
+        // stay inside the building (the ring / door columns stand a cell off the facade walls)
+        int wA0 = std::max(A0 + 1, aB0 + 2), wA1 = std::min(A1 - 5, aB1 - 6);
+        int wR0 = std::max(B0 + 3, bB0 + 4), wR1 = std::min(B1 - 3, bB1 - 4);   // the ring variant owns
+        int wP0 = std::max(B0 + 3, bB0 + 3), wP1 = std::min(B1 - 3, bB1 - 3);   // one more cell across
+        if (canopy)
+        {   // the entrance hut too small for a stairwell is REPLACED by the standard street entrance -
+            // the same shaft, ring and portal a lobby building gets, only without the turnstile lane
+            // (a user request: "make the entrance identical to the one used in buildings; without the
+            // turnstiles it is square and compact enough to fit anywhere"). The hut is swept away, so
+            // there is no facade to guard - the window is the hall itself, the hut's centre orders
+            // the candidates, and a bare pit with no ring on an open plaza would just be a hazard
+            wA0 = A0; wA1 = A1 - 4;
+            wR0 = B0 + 3; wR1 = B1 - 3;
+            wP0 = B1 + 1; wP1 = B0;                                       // the bare-pit level is disabled
+        }
+        int sa0 = A0, sa1 = A0 + 4, bS = bc;                               // the pit rectangle in (a, b)
+        int ringLv = 0;                                     // 2 = the pit with the ring fence, 1 = the pit only
+        auto shaftFree = [&](int a0, int a1, int b0, int b1)
+        {   // neither the shaft nor its ring may touch a live corridor column or a rail
+            for (int a = a0; a <= a1; ++a)
+                for (int b = b0; b <= b1; ++b)
+                    if (openCols.contains(cell(a, b)) || trackCols.contains(cell(a, b)))
+                        return false;
+            return true;
+        };
+        if (wA0 <= wA1 && wR0 <= wR1)
+        {   // a big building keeps the staircase right in the middle of the hall (a user request:
+            // "if the building is big enough by area - the stairway must be INSIDE it, literally in
+            // the centre of the hall"). Only the line rule stands above it: the shaft may not cross
+            // the corridor, so a hall pierced through its middle falls back to a corner shaft below.
+            // A canopy station aims at its own swept hut's centre, not at the middle of the hall
+            const int aCt = canopy ? (aB0 + aB1 - 4) / 2 : ac - 2;
+            const int bCt = canopy ? (bB0 + bB1) / 2 : bc;
+            const int saC = std::min(std::max(aCt, wA0), wA1);
+            const int sbC = std::min(std::max(bCt, wR0), wR1);
+            // a canopy hut stands on a plaza dense with tunnels: the fence may cross a live corridor
+            // (the ring pass simply omits those wall columns), so only the pit and the portal's jamb
+            // column at ga must stand on clear ground
+            const int a0c = canopy ? (lowEnd ? saC - 1 : saC) : saC - 1;
+            const int a1c = canopy ? (lowEnd ? saC + 4 : saC + 5) : saC + 5;
+            const int bp = canopy ? 2 : 3;
+            if (std::abs(saC - aCt) <= 1 && std::abs(sbC - bCt) <= 1 &&
+                shaftFree(a0c, a1c, sbC - bp, sbC + bp))
+            { sa0 = saC; sa1 = sa0 + 4; bS = sbC; ringLv = 2; }
+        }
+        if (wA0 <= wA1 && !ringLv)
+        {   // the shaft corner inside the building: the hashed corner first, then the opposite one - a
+            // live corridor crosses the hall at odd places and a shaft at any free corner still beats
+            // no entrance at all (the old three fixed candidates almost always collided with one).
+            // Within a corner: the ring variant everywhere before the bare pit; the candidates run
+            // hash side, opposite side, centre, then the whole b window from its low edge.
+            const int saCs[2] = { canopy ? std::min(std::max((aB0 + aB1 - 4) / 2, wA0), wA1)   // the shaft
+                                         : (lowEnd ? wA0 : wA1),                                // stands on
+                                          lowEnd ? wA1 : wA0 };                                // the hut itself
+            const int bCen = canopy ? (bB0 + bB1) / 2 : bc;      // the hut's own centre, not the hall's
+            for (int ci = 0; ci < 2 && !ringLv; ++ci)
+                for (int lv = 2; lv >= 1 && !ringLv; --lv)
+                {
+                    const int wb0 = lv == 2 ? wR0 : wP0, wb1 = lv == 2 ? wR1 : wP1;
+                    if (wb0 > wb1) continue;                            // even the pit edge would cut a wall
+                    const bool sgnHi = (sSide & 1u) != 0;               // the side the rails were pulled away from
+                    const int sp[3] = { sgnHi ? wb1 : wb0, sgnHi ? wb0 : wb1,
+                                        std::min(std::max(bCen, wb0), wb1) };
+                    const int ord[3] = { canopy ? sp[2] : sp[0], canopy ? sp[0] : sp[1],
+                                         canopy ? sp[1] : sp[2] };      // the hut's own centre first for a canopy
+                    QSet<int> tried;
+                    for (int pass = 0; pass < 2 && !ringLv; ++pass)
+                    {
+                        // the full-window sweep: a canopy searches outward from the hut's middle (the
+                        // pit should cover the hut's centre - the entrance looks right), the ordinary
+                        // shaft simply walks the window from its low edge
+                        QVector<int> sweep;
+                        if (pass == 1)
+                        {
+                            for (int b = wb0; b <= wb1; ++b) sweep << b;
+                            if (canopy)
+                                std::stable_sort(sweep.begin(), sweep.end(), [&](int l, int r)
+                                                 { return std::abs(l - bCen) < std::abs(r - bCen); });
+                        }
+                        const int hi = pass == 0 ? 2 : sweep.size() - 1;
+                        for (int i = 0; i <= hi && !ringLv; ++i)
+                        {
+                            const int cand = pass == 0 ? ord[i] : sweep[i];
+                            if (tried.contains(cand)) continue;
+                            tried.insert(cand);
+                            // a canopy hut usually stands right where the tunnels converge (that is what
+                            // a metro entrance is): an indoor shaft keeps its WHOLE ring clear of a live
+                            // corridor, the canopy keeps the pit and the portal's jamb column at ga - the
+                            // fence on a plaza may cross a corridor, the ring pass omits those wall
+                            // columns there (a round-4 request: the street entrance fits anywhere)
+                            const int a0c = canopy ? (lowEnd ? saCs[ci] - 1 : saCs[ci]) : saCs[ci] - 1;
+                            const int a1c = canopy ? (lowEnd ? saCs[ci] + 4 : saCs[ci] + 5) : saCs[ci] + 5;
+                            const int bp = canopy ? 2 : (lv == 2 ? 3 : 2);
+                            if (!shaftFree(a0c, a1c, cand - bp, cand + bp))
+                                continue;
+                            sa0 = saCs[ci]; sa1 = sa0 + 4; bS = cand; ringLv = lv; break;
+                        }
+                    }
+                }
+        }
+        auto inShaft = [&](int a, int b)
+        { return ringLv && a >= sa0 && a <= sa1 && b >= bS - 2 && b <= bS + 2; };
+        auto dropTop = [&](int a, int b, int newTop)                        // the ground writer must not refill the pit
+        {
+            const qint64 ck = cell(a, b);
+            const auto git = ground.find(pairKey(int(keyFirst(ck)) >> 4, int(keySecond(ck)) >> 4));
+            if (git == ground.end()) return;
+            qint16& t = git.value().top[(int(keySecond(ck)) & 15) * 16 + (int(keyFirst(ck)) & 15)];
+            if (t > newTop) t = qint16(newTop);
+        };
+        // the pit top one over the highest natural surface over it: the top landing block takes the surface
+        // block's own row, so the plaza walks straight onto it. The old fy-relative init stood two rows over
+        // the ground - every entrance turned into a step the player had to jump up on (a user complaint)
+        int topS = fy + 2;
         for (int a = sa0; a <= sa1; ++a)
-            for (int b = bS - 1; b <= bS + 1; ++b)
-            {
-                const qint64 ck = cell(a, b);
-                if (!inner.contains(ck)) continue;
-                const int orig = origTops.value(ck, fy + 12);
-                ladTop = std::max(ladTop, orig);
-                for (int y = fy + 9; y <= orig + 2; ++y) eraseV(a, b, y);   // out to the surface, through the lobby floor
-            }
-        for (int a = sa0 - 1; a <= sa1 + 1; ++a)
             for (int b = bS - 2; b <= bS + 2; ++b)
+                topS = std::max(topS, origTops.value(cell(a, b), fy + 1) + 1);
+        const int ga = lowEnd ? sa0 - 1 : sa1 + 1;                          // the doorway row in the wall ring
+        if (canopy && ringLv)
+        {   // the hut too small for a stairwell is REPLACED by the compact square entrance (a user
+            // request: "the arch instead of the building only when the stair and the lobby do not fit
+            // inside; sweep the structure entirely so no ruined walls remain"). Done AFTER the shaft
+            // placement: a hut over a corridor where even the pit cannot be placed standing free of
+            // the rails keeps its building and simply gets no entrance. The hut was built as usual by
+            // the voxelize pass (it cannot know about the hall decision made later), so the station
+            // pass sweeps everything it put above the surface and leaves an open plaza
+            for (int x = bld.left() - 1; x <= bld.right() + 1; ++x)
+                for (int z = bld.top() - 1; z <= bld.bottom() + 1; ++z)
+                {
+                    const qint64 ck = pairKey(x, z);
+                    int top = origTops.value(ck, -1);
+                    if (top < 0)
+                    {   // a long hut reaches past the clamped hall rectangle and origTops only knows the
+                        // hall columns - read the real surface height off the ground chunk, floored so the
+                        // sweep never bites into the hall lining under the building
+                        const auto g0 = ground.find(pairKey(x >> 4, z >> 4));
+                        top = g0 == ground.end()
+                                  ? fy + 17
+                                  : std::max(int(g0->top[(z & 15) * 16 + (x & 15)]), fy + 14);
+                    }
+                    for (int y = top + 1; y <= top + 14; ++y)
+                        store.erase(x, y, z);
+                    const auto git = ground.find(pairKey(x >> 4, z >> 4));   // a point object that stood on
+                    if (git != ground.end() && top >= fy + 14)               // the hut left its base in the
+                    {                                                        // turf - put the turf back
+                        const int gcx = (z & 15) * 16 + (x & 15);
+                        const int gt = std::max(int(git->top[gcx]), top);
+                        if (gt >= 0 && store.get(x, gt, z) != git->surf[gcx])
+                            store.set(x, gt, z, git->surf[gcx]);
+                    }
+                }
+        }
+        // dig the whole pit, not only what the hall had already hollowed: the old design left a solid column
+        // standing in the pit whenever the shaft touched rock the hall had not opened - that was the wall
+        // hiding the way out. The placement loop above guarantees the pit stands clear of the corridor.
+        if (ringLv)
+        {
+            for (int a = sa0; a <= sa1; ++a)
+                for (int b = bS - 2; b <= bS + 2; ++b)
+                {
+                    const qint64 ck = cell(a, b);
+                    railColsAll.insert(ck);                                 // lone trees do not stand in the shaft
+                    for (int y = fy + 1; y <= origTops.value(ck, fy + 17) + 2; ++y) eraseV(a, b, y);
+                    dropTop(a, b, fy - 1);
+                }
+        }
+        // ---- the "multi-storey" staircase: 2-block-wide flights of stone brick steps, one block of rise per
+        // step, climbing along the long sides of the pit turn about turn; a full-width landing (solid masonry)
+        // ends every flight - those landings are the slabs that divide the "floors" of a stairwell in an
+        // apartment block, and every flight hangs over the empty half of the pit, so the headroom is honest.
+        // The last flight is shortened so that its landing walks flush with the surface over the pit. The
+        // flight parity is picked so that the top landing ends exactly on the doorway row (the hall door,
+        // the portal and the passage all stand in one line on that side of the pit). A deeper pit is simply
+        // more flights - the old ladder fallback is gone.
+        int exa = ga, exb = bS, oda = 0, odb = 0;                           // the stair door cell and its out direction
+        int topRow = topS;                                                  // the passage floor hangs on it
+        if (ringLv)
+        {
+            const int nFl = (topS - fy + 2) / 4;                            // flights, the last one shortened
+            const bool invert = (((nFl - 1) & 1) != 0) != lowEnd;   // the parity that lands the top
+                                                                    // flight right on the ga doorway
+            int rAbs = fy + 1;                                              // the row of the next step
+            auto placeFlight = [&](int f, int steps)
             {
-                const bool border = (a == sa0 - 1 || a == sa1 + 1 || b == bS - 2 || b == bS + 2);
-                if (!border || inShaft(a, b)) continue;
-                if (a == (lowEnd ? sa1 + 1 : sa0 - 1) && b >= bS - 1 && b <= bS + 1) continue;   // the doorway into the hall
+                const bool back = (((f & 1) != 0) != invert);               // a return flight runs toward sa0
+                const int q0 = back ? 3 : 0;                                // its strip in the pit rows (0..4)
+                const quint16 sid = quint16(axisX ? (back ? IdBrickStairsW : IdBrickStairsE)
+                                                  : (back ? IdBrickStairsN : IdBrickStairsS));
+                for (int j = 0; j < steps; ++j)
+                {
+                    const int p = back ? (sa1 - 1 - j) : (sa0 + j);         // a cell short of its landing
+                    for (int q = q0; q < q0 + 2; ++q)
+                        put(p, bS - 2 + q, rAbs + j, sid);
+                }
+                // a 2x1 ledge in the middle of the flight (a user request): the full-height web cut
+                // through the flights, while the open middle row was a free fall to the bottom. Two
+                // masonry cells at the mid-step row break every fall down the well; a torch on the
+                // ledge lights the stairwell the way an apartment-block one is lit
+                if (steps >= 3)
+                {
+                    const int pM = back ? (sa1 - 3) : (sa0 + 1);            // the two middle step cells
+                    for (int j = 0; j <= 1; ++j)
+                    {
+                        const qint64 ck = cell(pM + j, bS);
+                        put(pM + j, bS, rAbs + 1,
+                            masId[colHash(ck ^ (qint64(rAbs + 1) * 31 + 0x2E17ull)) % 8u]);
+                    }
+                    put(pM + 1, bS, rAbs + 2, IdTorch);                     // standing on the ledge
+                }
+                const int pL = back ? sa0 : sa1;                            // the landing across the pit end
+                const int rL = rAbs + steps - 1;                            // solid at the top step's row
+                for (int q = 0; q < 5; ++q)
+                {
+                    const int b = bS - 2 + q;
+                    const qint64 ck = cell(pL, b);
+                    put(pL, b, rL, masId[colHash(ck ^ (qint64(rL) * 31 + 0x2E17ull)) % 8u]);
+                }
+                rAbs += steps;
+                topRow = rL + 1;                                            // the passage floor a row under
+                exa = back ? sa0 - 1 : sa1 + 1;                             // the door over the top landing's
+                exb = bS; oda = back ? -1 : 1; odb = 0;                     // end, through the ring wall
+            };
+            for (int f = 0; f + 1 < nFl; ++f) placeFlight(f, 4);
+            placeFlight(nFl - 1, topS - rAbs);                  // the short last flight lands flush with the surface
+        }
+        // ---- the wall ring around the pit and the fence over it: high on the hall side (no fall into the
+        // pit from the grass), low on the other sides (an emergency exit); open at the hall doorway and at
+        // the stair door. The bare-pit variant of a narrow building has no ring (it would cut the facade)
+        for (int a = sa0 - 1; ringLv == 2 && a <= sa1 + 1; ++a)
+            for (int b = bS - 3; b <= bS + 3; ++b)
+            {
+                const bool border = (a == sa0 - 1 || a == sa1 + 1 || b == bS - 3 || b == bS + 3);
+                if (!border || inShaft(a, b) || (a == exa && b == exb)) continue;
+                if (a == ga && b >= bS - 1 && b <= bS + 1)                  // the doorway into the hall stays open,
+                {   // only the rock above it is restored (the ring column may stand outside the hall interior)
+                    const qint64 ckd = cell(a, b);
+                    for (int y = fy + 9; y <= std::max(origTops.value(ckd, fy + 17), fy + 15) + 2; ++y)
+                        if (airAt(a, b, y)) put(a, b, y, masId[colHash(ckd ^ (qint64(y) * 31 + 0x2A17ull)) % 8u]);
+                    continue;
+                }
                 const qint64 ck = cell(a, b);
-                const auto git = ground.find(pairKey(int(keyFirst(ck)) >> 4, int(keySecond(ck)) >> 4));
-                const int top = git == ground.end() ? fy + 10
-                                                    : std::max(int(git->top[(int(keySecond(ck)) & 15) * 16 + (int(keyFirst(ck)) & 15)]), fy + 10);
+                if (openCols.contains(ck) || trackCols.contains(ck)) continue;   // a fallback shaft crossing the
+                const auto git = ground.find(pairKey(int(keyFirst(ck)) >> 4, int(keySecond(ck)) >> 4));   // corridor: the ring walls
+                const int top = git == ground.end() ? fy + 15
+                                                    : std::max(int(git->top[(int(keySecond(ck)) & 15) * 16 + (int(keyFirst(ck)) & 15)]), fy + 15);
                 for (int y = fy; y <= top + 1; ++y)
                 {
                     const quint16 id = masId[colHash(ck ^ (qint64(y) * 31 + 0x9B1Dull)) % 8u];
                     if (axisX) store.set(a, y, b, id); else store.set(b, y, a, id);
                 }
-                const int fh = (a == (lowEnd ? sa1 + 1 : sa0 - 1)) ? 2 : 1;    // the fence: high on the hall side (no fall
-                for (int k = 1; k <= fh; ++k) put(a, b, top + 1 + k, IdStoneBrickWall);          // into the pit from the grass),
-            }                                                                                     // low on the other sides (an emergency exit)
-        {   // the ladder against the far wall (the holder - the wall of the pit)
-            const int la = lowEnd ? sa0 : sa1;
-            const quint16 ladId = axisX ? (lowEnd ? quint16(IdLadderE) : quint16(IdLadderW))
-                                        : (lowEnd ? quint16(IdLadderS) : quint16(IdLadderN));
-            for (int y = fy + 1; y <= ladTop + 1; ++y) put(la, bS, y, ladId);
+                const int fh = (a == ga) ? 2 : 1;
+                for (int k = 1; k <= fh; ++k) put(a, b, top + 1 + k, IdStoneBrickWall);
+            }
+        // ---- the stair door: a short passage through the ring wall out to the lobby floor (or, for a
+        // swept street pavilion, straight onto the plaza), its floor a row below the top landing (a
+        // threshold step out of the shaft); it punches up through the ground surface even when the
+        // stair ran a little higher than the surface over the pit
+        for (int e = 0; e <= 2 && ringLv; ++e)
+        {
+            const int xa = exa + e * oda, xb = exb + e * odb;
+            const qint64 ck = cell(xa, xb);
+            railColsAll.insert(ck);
+            for (int y = topRow; y <= std::max(origTops.value(ck, topRow + 2), topRow + 4) + 2; ++y)
+                eraseV(xa, xb, y);                                          // the passage body
+            put(xa, xb, topRow - 1, idAnd);                                 // its floor
+            dropTop(xa, xb, topRow - 1);
         }
-        {   // the entrance portal: chiselled jambs of the gate into the hall with a lamp above it, and at the
-            // surface mouth a chiselled arch with a glowing lantern under the beam (seen from any corner of the lobby)
-            const int ga = lowEnd ? sa1 + 1 : sa0 - 1;                       // the doorway row
+        if (ringLv)
+        {   // the entrance portal: a plain light frame (a user request: "the turnstiles looked bad -
+            // just a frame and an entrance", and "the arch lighter - iron blocks and something light,
+            // quartz for example"). Smooth quartz posts with iron bases and an iron beam over the
+            // gate; the same frame stands at the hall door below and at the surface mouth above,
+            // indoors and on the street alike (seen from any corner of the lobby or the plaza)
+            const quint16 idIron = quint16(IdIronBlock);
             for (int db : { -2, 2 })
-                for (int y = fy; y <= fy + 8; ++y) put(ga, bS + db, y, idChis);
-            put(ga, bS, fy + 8, IdLanternHung);                              // a lamp above the doorway
+                for (int y = fy; y <= fy + 8; ++y) put(ga, bS + db, y, y == fy ? idIron : idQuartz);
+            put(ga, bS, fy + 8, IdLanternHung);                             // a lamp above the doorway
             const qint64 ck = cell(ga, bS);
             const auto git = ground.find(pairKey(int(keyFirst(ck)) >> 4, int(keySecond(ck)) >> 4));
-            const int top = git == ground.end() ? fy + 10
-                            : std::max(int(git->top[(int(keySecond(ck)) & 15) * 16 + (int(keyFirst(ck)) & 15)]), fy + 10);
-            for (int db : { -2, 2 })
-                for (int y = top + 2; y <= top + 4; ++y) put(ga, bS + db, y, idChis);   // the jamb posts over the floor
-            for (int db : { -1, 0, 1 }) put(ga, bS + db, top + 5, idChis);   // the beam across the doorway
-            put(ga, bS, top + 4, IdLanternHung);                             // the lamp glowing under the beam
+            const int top = git == ground.end() ? fy + 15
+                            : std::max(int(git->top[(int(keySecond(ck)) & 15) * 16 + (int(keyFirst(ck)) & 15)]), fy + 15);
+            for (int db : { -2, 2 })                                        // the jamb posts over the floor
+                for (int y = top + 2; y <= top + 4; ++y) put(ga, bS + db, y, y == top + 2 ? idIron : idQuartz);
+            for (int db : { -1, 0, 1 }) put(ga, bS + db, top + 5, idIron);  // the beam across the doorway
+            put(ga, bS, top + 4, IdLanternHung);                            // the lamp glowing under the beam
         }
 
-        // ---- the floor: polished checker tiles; the platform edge white by the rails, yellow behind it
+        // ---- the floor: polished checker tiles, the platform edge white by the rails, yellow behind it;
+        // the rails lie ON it (a user request: no trench under the tracks inside a station - the floor is
+        // flush with them, less authentic but playable)
         QSet<qint64> whiteSet;
         for (int a = A0; a <= A1; ++a)
             for (int b = B0; b <= B1; ++b)
@@ -11830,9 +12327,10 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         put(a, b, fy + 8, idChis);
                     }
             }
-        // ---- benches: three steps facing the middle, along the long walls between the pylons
+        // ---- benches: three steps along the long walls between the pylons; the tall (backrest) side of a
+        // stair faces its wall (facing = uphill), so a person sitting looks at the tracks, not at the wall
         const int bRow[2] = { B0 + 1, B1 - 1 };
-        const quint16 bId[2] = { quint16(axisX ? IdStairsS : IdStairsE), quint16(axisX ? IdStairsN : IdStairsW) };
+        const quint16 bId[2] = { quint16(axisX ? IdStairsN : IdStairsW), quint16(axisX ? IdStairsS : IdStairsE) };
         for (int r = 0; r < 2; ++r)
             for (int t = A0 + 10; t + 2 <= A1 - 7; t += 8)
             {
@@ -11879,7 +12377,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         return true;
     };
     // The underground metro (code 61123100, railway=subway + tunnel=yes): the rails do NOT lie on the surface
-    // but in a tunnel dug ~10 blocks deep. The floor is 2 blocks, the interior is 5 blocks high, the walls are a
+    // but in a tunnel dug ~15 blocks deep. The floor is 2 blocks, the interior is 5 blocks high, the walls are a
     // 1-block lining; the section is a little rounded (the top corners of the interior are solid stone).
     // The cavity is dug "ground-down" like the church dungeons (restore the rock above the ceiling into the store
     // and lower the column top under the floor): the cave cast never applies to a lowered column, so the tunnel
@@ -11920,8 +12418,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             const int n = chain.size();
             if (n < 2) continue;
             ++nTun;
-            // The floor level of every chain cell: 10 blocks under the surface (deeper under water bodies so that
-            // the ceiling stays under the bed), slopes no steeper than 1 block per cell (the rails must connect).
+            // The floor level of every chain cell: 15 blocks under the surface (5 deeper than the first
+            // design - a user request; deeper under water bodies so that the ceiling stays under the bed),
+            // slopes no steeper than 1 block per cell (the rails must connect).
             QVector<int> fy(n, 0);
             int last = std::numeric_limits<int>::min();
             for (int ci = 0; ci < n; ++ci)
@@ -11932,7 +12431,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 {
                     const int gc = (c.y() & 15) * 16 + (c.x() & 15);
                     const int wd = git->wd[gc];
-                    last = git->top[gc] - (wd > 0 ? std::max(10, wd + 6) : 10);
+                    last = git->top[gc] - (wd > 0 ? std::max(15, wd + 11) : 15);
                 }
                 fy[ci] = last;
             }
@@ -11963,8 +12462,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 for (int ci = 1; ci < n; ++ci) fy[ci] = std::max(fy[ci - 1] - 1, std::min(fy[ci - 1] + 1, fy[ci]));
                 for (int ci = n - 2; ci >= 0; --ci) fy[ci] = std::max(fy[ci + 1] - 1, std::min(fy[ci + 1] + 1, fy[ci]));
             }
-            // ---- the sections of this chain into the union maps (the interior of 7 columns, the wall
-            // columns on both sides, 9 across in all); nothing is written to the world at this stage
+            // ---- the sections of this chain into the union maps (the interior of 5 columns, the wall
+            // columns on both sides, 7 across in all); nothing is written to the world at this stage
             for (int ci = 0; ci < n; ++ci)
             {
                 const QPoint& c = chain[ci];
@@ -11977,14 +12476,14 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 auto claim = [&](const QPoint& dir)
                 {
                     const QPoint px(-dir.y(), dir.x());                 // the cross-section perpendicular to the path
-                    for (int u = -4; u <= 4; ++u)
+                    for (int u = -3; u <= 3; ++u)
                     {
                         const int x = c.x() + px.x() * u, z = c.y() + px.y() * u;
                         const qint64 ck = pairKey(x, z);
                         railColsAll.insert(ck);                      // lone trees (3.51) do not stand over the tunnel
                         if (!ground.contains(pairKey(x >> 4, z >> 4))) continue;   // a column over nowhere is not built
                         const int au = std::abs(u);
-                        if (au <= 3)
+                        if (au <= 2)
                         {   // the interior wins over any wall pass; the deepest floor sets the column, minU
                             // tells whether the top corner of the interior is rounded off here at all. When a
                             // higher chain also takes the column (a crossing of two levels), the interior of
@@ -12064,8 +12563,15 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             {   // the levels touch (a shallow crossing): one merged interior from the deepest floor
                 for (int y = floorY + 1; y <= topF + 5; ++y) store.erase(x, y, z);
             }
-            if (it.value().minU == 3)
-                store.set(x, topF + 5, z, ceilId[(hh >> 4) % 4u]);         // the rounded top corners
+            if (it.value().minU == 2)
+            {   // the rounded top corners; and the sidewalk (a user request: "the 1st and the 5th
+                // floor cells, the edge ones by the walls, stand 1 block over the rails") - the outer
+                // columns of the 5-wide interior get one more floor row, the rails then run in the
+                // 3-cell trench between the sidewalks
+                store.set(x, topF + 5, z, ceilId[(hh >> 4) % 4u]);
+                if (store.get(x, topF + 1, z) == IdAir)
+                    store.set(x, topF + 1, z, floorId[(hh >> 12) % 8u]);
+            }
         }
         for (int ti = 0; ti < tunChains.size(); ++ti)
         {   // ---- the rails and the lamps: after ALL the shells, so that a crossing section of a turn
@@ -12153,7 +12659,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 else if (hx1 - hx0 > 20) { const int d = (hx1 - hx0 - 20) / 2; hx0 += d; hx1 -= d; }
             }
             const QRect hrgn(hx0, hz0, hx1 - hx0 + 1, hz1 - hz0 + 1);
-            if (!digStationHall(st.c, fy, hrgn, st.bb, track, openCols, true)) continue;
+            if (!digStationHall(st.c, fy, hrgn, st.bb, track, openCols, true, st.canopy != 0)) continue;
             stationBuilt[si] = 1;
             ++nSt;
             for (const int ti : hit)
@@ -12195,6 +12701,128 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         char buf[160];
         snprintf(buf, sizeof buf, "subway tunnels: %d, rails %d/%d electro, lamps %d", nTun, nElectro, nRails, nLamps);
         tmcStepLog(buf);
+        // ---- secret loot rooms: hash-picked tunnel cells far from any station (>=96 blocks from a station
+        // centre) open a narrow 3-high passage into a small rock chamber with a double chest of expensive
+        // loot guarded by mobs (zombies, skeletons, spiders, witches). The room is dug "ground-down" exactly
+        // like the tunnel shell: the dug columns drop their ground top, the rock above the ceiling is
+        // restored into the store (store blocks win over the ground and the cave cast).
+        int nSecret = 0, nSecretMobs = 0;
+        QSet<qint64> secretCols;                                     // claimed columns: no two rooms share a wall
+        for (int ti = 0; ti < tunChains.size() && nSecret < 32; ++ti)
+        {
+            const QVector<QPoint>& chain = tunChains[ti];
+            const QVector<int>& fyv = tunFy[ti];
+            const int n = chain.size();
+            for (int ci = 4; ci + 4 < n && nSecret < 32; ++ci)
+            {
+                const QPoint& c = chain[ci];
+                const quint32 hs = colHash(pairKey(c.x(), c.y()) ^ 0x5EC37ull);
+                if (hs % 1000u >= 5u) continue;                      // roughly every 200th cell of a chain
+                const int fy = fyv[ci];
+                if (fy <= 5) continue;                               // the floor would fall into the void
+                if (store.get(c.x(), fy + 2, c.y()) != IdAir) continue;   // the tunnel interior is not here
+                                                                            // (row fy+1 is where the rails lie)
+                bool far = true;
+                for (const StationSite& st : stations)
+                    if (qAbs(c.x() - st.c.x()) <= 96 && qAbs(c.y() - st.c.y()) <= 96) { far = false; break; }
+                if (!far) continue;                                  // no secrets under or near a station
+                // the local direction of the line. The corridor is 5 columns wide (interior at +-2 of the
+                // chain axis, the lining at +-3) and a line may have a second tube alongside, so the hash
+                // side is tried first and the opposite side next; whichever footprint is free wins
+                const QPoint& pv = chain[ci - 2];
+                const QPoint& nx = chain[ci + 2];
+                const bool alongX = qAbs(nx.x() - pv.x()) >= qAbs(nx.y() - pv.y());
+                QPoint dirv[2];
+                dirv[0] = alongX ? QPoint(0, (hs & 4u) ? 1 : -1) : QPoint((hs & 4u) ? 1 : -1, 0);
+                dirv[1] = QPoint(-dirv[0].x(), -dirv[0].y());
+                bool ok = false;
+                QPoint chosen(0, 0);
+                QVector<QPoint> digCols;
+                for (int s2 = 0; s2 < 2 && !ok; ++s2)
+                {
+                    const QPoint& s = dirv[s2];
+                    // a door bored through the lining column at +-3, a 3-cell passage at 4..6, the 7x7
+                    // chamber centered at 10 (its near wall at 7 adjoins the passage)
+                    const QPoint e4(c.x() + s.x() * 3, c.y() + s.y() * 3);
+                    const qint64 ckE = pairKey(e4.x(), e4.y());
+                    if (!tWallLo.contains(ckE) || tInt.contains(ckE) || secretCols.contains(ckE)) continue;
+                    if (ground.find(pairKey(e4.x() >> 4, e4.y() >> 4)) == ground.end()) continue;
+                    QVector<QPoint> dc;
+                    for (int k = 5; k <= 7; ++k) dc << QPoint(c.x() + s.x() * k, c.y() + s.y() * k);
+                    const QRect room(c.x() + s.x() * 10 - 3, c.y() + s.y() * 10 - 3, 7, 7);
+                    for (int x = room.left(); x <= room.right(); ++x)
+                        for (int z = room.top(); z <= room.bottom(); ++z) dc << QPoint(x, z);
+                    bool bad = false;
+                    for (const QPoint& q : dc)
+                    {
+                        const qint64 ck = pairKey(q.x(), q.y());
+                        if (tInt.contains(ck) || secretCols.contains(ck) || railColsAll.contains(ck)) { bad = true; break; }
+                        if (ground.find(pairKey(q.x() >> 4, q.y() >> 4)) == ground.end()) { bad = true; break; }
+                    }
+                    if (bad) continue;
+                    dc.prepend(e4);                                   // the lining column checked on its own
+                    ok = true; chosen = s; digCols = dc;
+                }
+                if (!ok) continue;
+                const int rcx = c.x() + chosen.x() * 10, rcz = c.y() + chosen.y() * 10;
+                const QRect room(rcx - 3, rcz - 3, 7, 7);
+                for (const QPoint& q : digCols)
+                {
+                    const qint64 ck = pairKey(q.x(), q.y());
+                    secretCols.insert(ck);
+                    const auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
+                    const int gc = (q.y() & 15) * 16 + (q.x() & 15);
+                    GroundChunk& g = git.value();
+                    const int orig = g.top[gc];
+                    const quint32 hh = colHash(ck ^ 0x5EC77ull);
+                    for (int y = (room.contains(q) ? fy + 6 : fy + 4); y <= orig; ++y)
+                    {   // the rock over the ceiling goes back into the store (the surface stays intact)
+                        const quint16 id = (y == orig) ? g.surf[gc] : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
+                        if (store.get(q.x(), y, q.y()) == IdAir) store.set(q.x(), y, q.y(), id);
+                    }
+                    if (orig > fy - 1) g.top[gc] = qint16(fy - 1);
+                    store.set(q.x(), fy, q.y(), floorId[hh % 8u]);                   // the floor, two layers
+                    if (store.get(q.x(), fy - 1, q.y()) == IdAir)
+                        store.set(q.x(), fy - 1, q.y(), floorId[(hh >> 8) % 8u]);
+                    const int topIn = room.contains(q) ? fy + 5 : fy + 3;           // the chamber is taller than the passage
+                    for (int y = fy + 1; y <= topIn; ++y) store.erase(q.x(), y, q.y());
+                }
+                // the lamps hang in the four corners of the chamber
+                const QPoint kLamp[4] = { QPoint(room.left() + 1, room.top() + 1), QPoint(room.right() - 1, room.top() + 1),
+                                          QPoint(room.left() + 1, room.bottom() - 1), QPoint(room.right() - 1, room.bottom() - 1) };
+                for (const QPoint& lp : kLamp)
+                    if (store.get(lp.x(), fy + 5, lp.y()) == IdAir) store.set(lp.x(), fy + 5, lp.y(), IdLanternHung);
+                // the double chest in the middle: the expensive loot tier only
+                const quint32 hc = colHash(pairKey(rcx, rcz) ^ 0x5E177ull);
+                const int tbl = pickChestLoot(hc >> 4, 0, 0);
+                store.set(rcx - 1, fy + 1, rcz, IdChestL);
+                store.set(rcx, fy + 1, rcz, IdChestR);
+                chests << ChestSite{ rcx - 1, fy + 1, rcz, tbl } << ChestSite{ rcx, fy + 1, rcz, tbl };
+                // the guardians: 2-3 of zombie / skeleton / spider / witch on free cells of the chamber
+                QSet<qint64> mobAt;
+                const int nMob = 2 + int((hc >> 12) % 2u);
+                for (int m = 0; m < nMob; ++m)
+                {
+                    const quint32 hm = colHash(pairKey(rcx + m * 7, rcz - m * 5) ^ 0x5EB17ull);
+                    const int mx = room.left() + 1 + int((hm >> 16) % 5u), mz = room.top() + 1 + int((hm >> 20) % 5u);
+                    const qint64 mk = pairKey(mx, mz);
+                    if (mobAt.contains(mk) || store.get(mx, fy + 1, mz) != IdAir) continue;
+                    mobAt.insert(mk);
+                    NpcSite ms;
+                    ms.kind = 4; ms.variant = int((hm >> 8) % 4u);                   // 0 zombie, 1 skeleton, 2 spider, 3 witch
+                    ms.x = mx; ms.y = fy + 1; ms.z = mz; ms.yaw = int((hm >> 4) % 4u) * 90;
+                    npcs.append(ms);
+                    ++nSecretMobs;
+                }
+                ++nSecret;
+            }
+        }
+        if (nSecret > 0)
+        {
+            snprintf(buf, sizeof buf, "secret loot rooms: %d, guardians %d", nSecret, nSecretMobs);
+            tmcStepLog(buf);
+            res.lairInfo += QObject::tr("; secret rooms in the metro: %1").arg(nSecret);
+        }
     }
     // Station halls under the station buildings no line passes (digStationHall above): dug on their own, the
     // floor 12 blocks under the surface (the tunnel floor sits 10 under it), the platform without rails -
@@ -12224,8 +12852,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (hx1 - hx0 < 15) { const int d = (15 - (hx1 - hx0) + 1) / 2; hx0 -= d; hx1 += d; }
             else if (hx1 - hx0 > 20) { const int d = (hx1 - hx0 - 20) / 2; hx0 += d; hx1 -= d; }
         }
-        if (digStationHall(st.c, git->top[gc] - 12, QRect(hx0, hz0, hx1 - hx0 + 1, hz1 - hz0 + 1),
-                           st.bb, QSet<qint64>(), QSet<qint64>(), false))
+        if (digStationHall(st.c, git->top[gc] - 17, QRect(hx0, hz0, hx1 - hx0 + 1, hz1 - hz0 + 1),
+                           st.bb, QSet<qint64>(), QSet<qint64>(), false, st.canopy != 0))
             ++nStations;
     }
     if (nStations > 0)
@@ -12633,8 +13261,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         // A 6×6 grid (~2.8% of the columns, like the former ~2.5%): in every cell one hash-shifted place, inside
         // the forest — a tree. The work is of the order of the number of bbox cells, not the number of forest columns (tens of millions).
         const int G = site.dense ? 8 : 6;                // yards (OSM): an 8×8 grid (it was 4×4: the crowns of neighboring trees merged into a solid canopy over the whole yard)
-        const int gx0 = int(std::floor(double(site.minX) / G)), gx1 = int(std::floor(double(site.maxX) / G));
-        const int gz0 = int(std::floor(double(site.minZ) / G)), gz1 = int(std::floor(double(site.maxZ) / G));
+        // The grid is clamped to the export rectangle: an OSM forest polygon can be many times wider
+        // than the world (a park strip with a bbox of 11 km used to cost the whole grid over its bbox).
+        const int vgX0 = std::max(site.minX, (rcx0 - rectM) * 16), vgX1 = std::min(site.maxX, (rcx1 + rectM + 1) * 16 - 1);
+        const int vgZ0 = std::max(site.minZ, (rcz0 - rectM) * 16), vgZ1 = std::min(site.maxZ, (rcz1 + rectM + 1) * 16 - 1);
+        const int gx0 = int(std::floor(double(vgX0) / G)), gx1 = int(std::floor(double(vgX1) / G));
+        const int gz0 = int(std::floor(double(vgZ0) / G)), gz1 = int(std::floor(double(vgZ1) / G));
         for (int gx = gx0; gx <= gx1; ++gx)
         for (int gz = gz0; gz <= gz1; ++gz)
         {
@@ -13600,11 +14232,31 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         {
             const VegSite& site = forests[fiC];
             const bool paleF = (fiC == paleIdx);                // Pale Garden: about 2.5 times more chests (a grid of 12, radius 18) and often expensive
-            QVector<QPoint> placed;                             // the treasures of THIS polygon — for the radius
+            const int tRad = paleF ? 18 : 30;                   // the mutual distance of the treasures inside one polygon
+            QHash<qint64, QVector<QPoint>> near;                // the treasures of THIS polygon bucketed by
+            auto clash = [&](int bx, int bz)                    //   the radius: the old linear scan of ALL
+            {   // 3x3 buckets around the candidate, the exact metric inside them (a forest of tens of
+                //   thousands of treasures made that scan the slowest loop of the whole export)
+                for (int ax = -1; ax <= 1; ++ax)
+                    for (int az = -1; az <= 1; ++az)
+                    {
+                        const auto it = near.constFind(pairKey(bx / tRad + ax, bz / tRad + az));
+                        if (it == near.constEnd()) continue;
+                        for (const QPoint& p : *it)
+                        {
+                            const long long dx = p.x() - bx, dz = p.y() - bz;
+                            if (dx * dx + dz * dz < tRad * tRad) return true;
+                        }
+                    }
+                return false;
+            };
             // a 20×20 grid (~1/400 of the columns, like the former 1/384): one hash-shifted place per cell
             const int G = paleF ? 12 : 20;
-            const int gx0 = int(std::floor(double(site.minX) / G)), gx1 = int(std::floor(double(site.maxX) / G));
-            const int gz0 = int(std::floor(double(site.minZ) / G)), gz1 = int(std::floor(double(site.maxZ) / G));
+            // the grid is clamped to the export rectangle (a forest polygon can be many times wider than the world)
+            const int vgX0 = std::max(site.minX, (rcx0 - rectM) * 16), vgX1 = std::min(site.maxX, (rcx1 + rectM + 1) * 16 - 1);
+            const int vgZ0 = std::max(site.minZ, (rcz0 - rectM) * 16), vgZ1 = std::min(site.maxZ, (rcz1 + rectM + 1) * 16 - 1);
+            const int gx0 = int(std::floor(double(vgX0) / G)), gx1 = int(std::floor(double(vgX1) / G));
+            const int gz0 = int(std::floor(double(vgZ0) / G)), gz1 = int(std::floor(double(vgZ1) / G));
             for (int gx = gx0; gx <= gx1; ++gx)
             for (int gz = gz0; gz <= gz1; ++gz)
             {
@@ -13618,16 +14270,11 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 const int tx = gx * G + int(hc % G), tz = gz * G + int((hc >> 8) % G);
                 if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
                 if (!spansContain(site.spans, tx, tz)) continue;
+                if (!ground.contains(pairKey(tx >> 4, tz >> 4))) continue;    // outside the written ground — there is no surface to stand a treasure on
                 const qint64 ck = pairKey(tx, tz);
                 if (colWater.contains(ck) || colMin.contains(ck)) continue;   // on water/under buildings — skipped
                 const int bx = keyFirst(ck), bz = keySecond(ck);
-                bool far = true;
-                for (const QPoint& p : placed)
-                {
-                    const long long dx = p.x() - bx, dz = p.y() - bz;
-                    if (dx * dx + dz * dz < (paleF ? 324 : 900)) { far = false; break; }       // 30² blocks (in the Pale Garden 18²)
-                }
-                if (!far) continue;
+                if (clash(bx, bz)) continue;                                  // a treasure stands closer than the radius
                 const int y = surfaceTop(ck) + 1;
                 if (y > 254) continue;
                 if (paleF && patchCols.contains(ck)) continue;                // not inside the mansion / a patch
@@ -13649,7 +14296,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 }
                 else
                     chests.append(ChestSite{ bx, y, bz, pickChestLoot(colHash(ck ^ 0x51ull), 85, 15) });   // treasures in forests — without the expensive ones
-                placed.append(QPoint(bx, bz));
+                near[pairKey(bx / tRad, bz / tRad)].append(QPoint(bx, bz));
             }
         }
     }
@@ -13843,8 +14490,10 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 store.set(x, y, z, (ri == gateA || ri == gateB) ? gateIdFor(ck, pad) : IdFence);
             }
             // Iron golems: on a fenced site (except lakes) a 25% chance is counted TWICE (deterministically
-            // by the spot hash) — a site has 0, 1 or 2 golems. They stand on free columns inside the spot closer to
-            // the center of its bbox; the second one — not closer than 3 blocks to the first.
+            // by the spot hash) — a site has 0, 1 or 2 guards. They stand on free columns inside the spot closer to
+            // the center of its bbox; the second one — not closer than 3 blocks to the first. A CHILDREN'S
+            // playground gets baby villagers playing there instead of a guard (the same hash choice as the
+            // equipment stage below makes).
             if (!padIsLake.value(padIdx, 0))
             {
                 int gx0 = std::numeric_limits<int>::max(), gx1 = std::numeric_limits<int>::min();
@@ -13856,16 +14505,26 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 }
                 const double mx = 0.5 * (gx0 + gx1), mz = 0.5 * (gz0 + gz1);
                 QVector<QPoint> golemAt;
+                // the same deterministic choice the equipment stage below makes: CODE 53710000 is a
+                // children's playground; a small mixed 53700000 site may become one by the pad hash
+                const quint32 hpNow = colHash(ring.first() ^ 0x5B027ull);
+                const bool kidsPad = padCode.value(padIdx, 0) == 53710000 ||
+                    (padCode.value(padIdx, 0) == 53700000 && padCols.size() < 700 && hpNow % 100u < 30u);
                 // a military ground is guarded for real: 2 golems up to 10 for a huge base, standing in a ring
-                // around the center; other sites keep the old deterministic 25% chance of 0, 1 or 2 golems
-                const int wantGolems = militaryPad ? std::min(10, 2 + int(padCols.size()) / 100000) : 2;
+                // around the center; other sites keep the old deterministic 25% chance of 0, 1 or 2 golems;
+                // a children's playground gets a full gang of 4-6 kids instead, always (they came to play)
+                const int wantKids = kidsPad ? 4 + int((hpNow >> 8) % 3u) : 0;
+                const int wantGolems = militaryPad ? std::min(10, 2 + int(padCols.size()) / 100000)
+                                                   : (kidsPad ? wantKids : 2);
                 for (int roll = 0; roll < wantGolems; ++roll)
                 {
-                    if (!militaryPad && colHash(ring.first() ^ (0x601E3ull + quint64(roll) * 0x9E37ull)) % 100u >= 25u)
+                    if (!militaryPad && !kidsPad &&
+                        colHash(ring.first() ^ (0x601E3ull + quint64(roll) * 0x9E37ull)) % 100u >= 25u)
                         continue;
                     const double fa = 6.283185307179586 * roll / std::max(1, wantGolems);
-                    const double fx = militaryPad ? mx + 0.3 * (gx1 - gx0) * std::cos(fa) : mx;
-                    const double fz = militaryPad ? mz + 0.3 * (gz1 - gz0) * std::sin(fa) : mz;
+                    const bool spread = militaryPad || kidsPad;           // kids roam the whole plot too
+                    const double fx = spread ? mx + 0.3 * (gx1 - gx0) * std::cos(fa) : mx;
+                    const double fz = spread ? mz + 0.3 * (gz1 - gz0) * std::sin(fa) : mz;
                     qint64 best = 0; double bestD = 1e18; bool have = false;
                     for (qint64 ck : padCols)
                     {
@@ -13880,7 +14539,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     }
                     if (!have) continue;
                     NpcSite g;
-                    g.kind = 3;                                          // minecraft:iron_golem
+                    if (kidsPad)
+                    {   // children play on the playground instead of a guard (baby villagers)
+                        g.kind = 0; g.baby = true; g.prof = PfNone; g.level = 1;
+                    }
+                    else
+                        g.kind = 3;                                      // minecraft:iron_golem
                     g.x = keyFirst(best); g.z = keySecond(best);
                     g.y = surfaceTop(best) + 1;                          // surfaceTop already includes the yShift lift
                     g.yaw = int(colHash(best ^ 0x601Eull) % 4u) * 90;

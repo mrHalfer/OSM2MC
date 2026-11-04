@@ -186,6 +186,20 @@
    }
   },
   {
+   "note": "Subway entrance building: transportation with subway=yes is a station hall too (proximity of a railway=subway_entrance node is checked in tmcproject.cpp)",
+   "from": "multipolygons",
+   "layer": "bldpol",
+   "when": {
+    "building": "transportation",
+    "subway": "yes"
+   },
+   "fields": {
+    "CODE": "44330000",
+    "REL": "auto",
+    "MAT": "{building:material,building:facade:material}"
+   }
+  },
+  {
    "note": "School/college/university: building=*",
    "from": "multipolygons",
    "layer": "bldpol",

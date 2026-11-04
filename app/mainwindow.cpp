@@ -17,11 +17,17 @@
 #include <QtConcurrent/QtConcurrentRun>
 #include <QProcess>
 #include <QRandomGenerator>
+#include <QStandardPaths>
+#include <QDesktopServices>
 #include <cmath>
 
 namespace
 {
-const char* kStageNames[] = { QT_TRANSLATE_NOOP("MainWindow", "Loading the project"), QT_TRANSLATE_NOOP("MainWindow", "Building object models"), QT_TRANSLATE_NOOP("MainWindow", "Export: objects"), QT_TRANSLATE_NOOP("MainWindow", "Export: ground and vegetation"), QT_TRANSLATE_NOOP("MainWindow", "Export: chunks"), QT_TRANSLATE_NOOP("MainWindow", "Export: writing the zip") };
+const char* kStageNames[] = { QT_TRANSLATE_NOOP("MainWindow", "Loading the project"), QT_TRANSLATE_NOOP("MainWindow", "Building object models"), QT_TRANSLATE_NOOP("MainWindow", "Export: objects"), QT_TRANSLATE_NOOP("MainWindow", "Export: ground and vegetation"), QT_TRANSLATE_NOOP("MainWindow", "Export: chunks"), QT_TRANSLATE_NOOP("MainWindow", "Export: writing the zip"),
+    // the exporter's inner stages (its stage + 2): without these names the label was clamped to "writing the zip"
+    // long before the archive — the vegetation/chests/turf phases looked like a hang at the end of the export
+    QT_TRANSLATE_NOOP("MainWindow", "Export: planting vegetation"), QT_TRANSLATE_NOOP("MainWindow", "Export: planting by user rules"), QT_TRANSLATE_NOOP("MainWindow", "Export: forest treasures"), QT_TRANSLATE_NOOP("MainWindow", "Export: street furniture"), QT_TRANSLATE_NOOP("MainWindow", "Export: ground cover"), QT_TRANSLATE_NOOP("MainWindow", "Export: finishing the ground"), QT_TRANSLATE_NOOP("MainWindow", "Export: villages, interiors and structures"), QT_TRANSLATE_NOOP("MainWindow", "Export: writing the zip"), QT_TRANSLATE_NOOP("MainWindow", "Export: writing the zip") };
+constexpr int kStageCount = int(sizeof(kStageNames) / sizeof(kStageNames[0]));
 }
 
 MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent) : QMainWindow(parent), mInit(initial), mDebug(debug), ui(new Ui::MainWindow)
@@ -218,6 +224,8 @@ void MainWindow::loadSettings(const TmcRunOptions& init)
     mSavesModrinth = s.value(QStringLiteral("savesModrinth")).toString();
     mSavesCurse = s.value(QStringLiteral("savesCurse")).toString();
     updateExportDestUi();
+    ui->labelExportDest->setCursor(Qt::PointingHandCursor);   // the label is clickable: a click opens the saves folder
+    ui->labelExportDest->installEventFilter(this);
     ui->datapackCheck->setChecked(s.value(QStringLiteral("locateDatapack"), init.locateDatapack).toBool() && init.locateDatapack);
     ui->seedEdit->setText(init.seed ? QString::number(init.seed) : QString());
     ui->cavesCheck->setEnabled(noise); ui->seedEdit->setEnabled(noise); ui->genSeedButton->setEnabled(noise);
@@ -295,8 +303,46 @@ void MainWindow::updateExportDestUi()
     else if (mExportDest == 2) where = tr("Export: Modrinth");
     else where = tr("Export: CurseForge");
     ui->labelExportDest->setText(where);
-    ui->labelExportDest->setToolTip(zipMode ? tr("A zip file next to the source data (or the chosen output file)")
-                                            : QDir::toNativeSeparators(dest));
+    QString destTip = zipMode ? tr("A zip file next to the source data (or the chosen output file)")
+                              : QDir::toNativeSeparators(dest);
+    destTip += QStringLiteral(" ") + tr("Click to open the folder.");
+    ui->labelExportDest->setToolTip(destTip);
+}
+
+QString MainWindow::exportFolderToOpen() const
+{
+    const QString dest = resolvedSavesDir();
+    if (!dest.isEmpty())
+        return dest;                                      // the saves folder chosen in "Export settings"
+    const QString out = ui->outEdit->text().trimmed();
+    if (!out.isEmpty())
+        return QFileInfo(out).absolutePath();             // the folder of the chosen output zip
+    const QString src = ui->sourceEdit->text().trimmed(); // no destination — the zip goes next to the source data
+    if (!src.isEmpty())
+    {
+        const QFileInfo fi(src);
+        return fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();
+    }
+    return QString();
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == ui->labelExportDest && event->type() == QEvent::MouseButtonRelease)
+    {
+        auto* me = static_cast<QMouseEvent*>(event);
+        if (me->button() == Qt::LeftButton)
+        {
+            const QString dir = exportFolderToOpen();
+            if (!dir.isEmpty())
+            {
+                QDir().mkpath(dir);                                           // the chosen saves folder may not exist yet
+                QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+            }
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 TmcRunOptions MainWindow::collect() const
@@ -332,10 +378,17 @@ TmcRunOptions MainWindow::collect() const
 
 void MainWindow::browseProject()
 {
+    // without a chosen source the dialog opens in Documents\tMC (the folder is created on the first click)
+    QString start = ui->sourceEdit->text();
+    if (start.isEmpty())
+    {
+        start = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(QStringLiteral("tMC"));
+        QDir().mkpath(start);
+    }
     const QString f = mDebug
-        ? QFileDialog::getOpenFileName(this, tr("tqt project file or OSM extract"), ui->sourceEdit->text(),
+        ? QFileDialog::getOpenFileName(this, tr("tqt project file or OSM extract"), start,
                                        tr("tqt project, OSM extract (*.tqt *.osm *.pbf);;tqt project (*.tqt);;OSM extract (*.osm *.pbf);;All files (*)"))
-        : QFileDialog::getOpenFileName(this, tr("OpenStreetMap extract"), ui->sourceEdit->text(),
+        : QFileDialog::getOpenFileName(this, tr("OpenStreetMap extract"), start,
                                        tr("OSM extract (*.osm *.pbf);;All files (*)"));
     if (!f.isEmpty()) ui->sourceEdit->setText(QDir::toNativeSeparators(f));
 }
@@ -390,7 +443,7 @@ void MainWindow::appendLog(const QString& s)
 
 void MainWindow::onProgress(int stage, int done, int total)
 {
-    mStageIdx = qBound(0, stage, 5); mStageDone = done; mStageTotal = total; mFinalState = 0;
+    mStageIdx = qBound(0, stage, kStageCount - 1); mStageDone = done; mStageTotal = total; mFinalState = 0;
     updateStageLabel();
     if (total > 0) { ui->progressBar->setRange(0, total); ui->progressBar->setValue(done); }
     else ui->progressBar->setRange(0, 0);                           // no counter — "busy"
@@ -767,7 +820,7 @@ void MainWindow::updateStageLabel()
         return;
     }
     if (mStageIdx < 0) { ui->stageLabel->clear(); return; }
-    const QString stageName = tr(kStageNames[qBound(0, mStageIdx, 5)]);
+    const QString stageName = tr(kStageNames[qBound(0, mStageIdx, kStageCount - 1)]);
     ui->stageLabel->setText(mStageTotal > 0 ? tr("%1 — %2%").arg(stageName).arg(int(100.0 * mStageDone / mStageTotal)) : stageName);
 }
 

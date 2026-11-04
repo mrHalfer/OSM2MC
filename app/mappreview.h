@@ -76,7 +76,7 @@ private:
     QPointF mPan;                 //!< offset of the picture center from the widget center, pixels
     bool mDragging = false, mMoved = false;
     QPoint mPressPos, mLastPos;
-    Tool mTool = Tool::Spawn;
+    Tool mTool = Tool::Clip;
     bool mMarkSet[3] = { false, false, false };
     QPointF mMark[3];
     QVector<QPointF> mClip;       //!< boundary vertices, project coordinates

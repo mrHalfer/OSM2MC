@@ -5,6 +5,71 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.3.26.11041] — 2026-11-04
+
+### Added
+- Metro entrance buildings recognized as stations: `building=transportation` with `subway=yes` gets the same
+  station hall as `building=train_station`, and so does a transportation building that stands on or within
+  about 10 blocks of a `railway=subway_entrance` node.
+- Metro station vestibule: the whole first floor of a station building is laid out as an entrance hall -
+  polished stone checker tiles, a ticket counter, vending machines, lamp posts and info panels - so a
+  bedroom no longer shares the floor with a metro entrance.
+- The "Open file" dialog now starts in `Documents\tMC` (created on the first click) when no source file was
+  chosen yet.
+- The export-destination label next to the "Export settings" button is clickable: it opens the folder where
+  the world will be saved (the chosen saves folder, the output zip's folder, or the source data folder).
+- Metro vestibules are furnished: waiting benches, a bell on the ticket counter, waste bins, potted plants
+  and blank-banner posters along the walls; the two cells in front of every entrance door stay free.
+
+### Changed
+- Metro deeper by 5 blocks: the tunnel floor is 15 blocks under the surface (deeper under water), a lone
+  station hall 17.
+- Metro lines: a long diagonal is straightened as a 10-block straight run followed by a 20-block diagonal
+  correction back toward the line as it is mapped, and once the correction rejoins it, the real OSM geometry
+  is repeated to the node (before: straight runs of up to 80 blocks joined by right-angle bends).
+- Only the nearest line bends to a station now; the other lines keep their mapped geometry, so parallel lines
+  stay parallel instead of knotting into a shared corridor at every station, and they get rails in the hall
+  only where their own path already runs under it. A line that passes within 20 blocks of a hall is not
+  pulled at all - the hall widens to contain it instead.
+- The rails' attraction point is pulled off the hall centre to the side opposite the entrance shaft - the
+  tracks cross the hall mid-way and the shaft never walls up the corridor under it.
+- Subway tunnels are narrower: the corridor and its floor are 5 columns wide across all three build passes
+  (was 7), the lining stands a column out and the ceiling rounding follows the narrower profile; the
+  station rings, the loot-room doors and the rail column sets use the same width.
+- Tunnels: the two floor cells along each wall stand one block over the rails - the trains run in a shallow
+  trench between walkways.
+- The station entrance shaft rebuilt: no ladder anymore, but an apartment-block staircase - 2-block-wide
+  flights of stone brick steps climbing the pit turn about turn, a full-width masonry landing ending every
+  flight, and a 2-wide ledge with a torch in the middle of each flight so nobody falls down the well and
+  nothing crowds the steps. The doorway into the hall and the mouth at the surface wear a plain light
+  frame - smooth quartz posts on iron bases under an iron beam with a hanging lantern, no ticket machines
+  in the way. The 5x5 pit stands strictly inside the station building: near the hall centre in a big
+  building, or in a free corner when a line crosses that spot. The pit, the wall ring and the lobby
+  passage are checked against the building walls, so a building too narrow for the ring loses the ring
+  and one too narrow for the pit gets no shaft at all rather than a door carved through the facade. The
+  top landing and every exit passage land flush with the ground - the entrance is walked into, not
+  jumped up.
+- Tiny one-storey entrance huts are swept away and take the very same street entrance as a lobby building
+  gets - the pit, the ring fence, the light portal frame - standing on the hut's own footprint, where it
+  fits free of the rails; the frame without the ticket machines is square and compact enough to fit
+  anywhere. A hut over rails tight enough for even the pit does not fit keeps its building and gets no
+  entrance.
+- Station halls: the benches by the long walls now sit with their backs to the wall and face the tracks.
+- The "Boundary" tool is the active one when the offline map loads (it was "Spawn" before).
+- Children's playgrounds (`leisure=playground` and small sports plots) get a gang of 4-6 baby villagers
+  playing on them instead of iron golems; golems still guard sports grounds and military bases.
+- Electrified rails are powered: a redstone block is laid under every powered rail, so the rail is always
+  active and never slows a minecart down.
+
+### Fixed
+- Large metro projects no longer look hung near the end of the export: the forest-treasure pass re-scanned
+  every already-placed chest for every candidate (a quadratic scan taking minutes inside a forest polygon
+  clipped into the world), the vegetation grids iterated forest bounding boxes far outside the export
+  rectangle, and the progress bar had no names for the exporter's inner stages - it stayed on
+  "writing the zip" from halfway through the run while the world was still being planted.
+- Metro vestibule vending machines (and one lab interior block) were built of plain stone: the polished
+  blackstone they are made of was missing from the block palette and its id silently fell back to stone.
+
 ## [1.3.26.11031] — 2026-11-03
 
 ### Added
@@ -56,6 +121,9 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   ones, with the same straight-run carry-over; ordinary stone replaces the ground under the track of such a line.
 - Trams (`railway=tram`) are now real tram tracks: electrified even without an electrification tag, with stone bricks
   instead of the ground under the track.
+- Secret loot rooms hide off the metro tunnels: about at every 200th hashed corridor cell that lies at
+  least ~96 blocks from a station a narrow passage branches into a small rock chamber with a double chest
+  of the rarest loot tables, guarded by zombies, skeletons, spiders or witches.
 
 ## [1.3.26.11011] — 2026-11-01
 
