@@ -68,6 +68,9 @@ HEADERS += \
     export/blocks.h \
     export/colkey.h \
     export/voxelstore.h \
+    export/caveset.h \
+    export/lairset.h \
+    export/paledonor.h \
     export/mcworldexporter.h \
     export/format/bytes.h \
     export/format/nbtwriter.h \
@@ -115,6 +118,9 @@ SOURCES += \
     scene/modelbuilder.cpp \
     export/mcworldexporter.cpp \
     export/blocks.cpp \
+    export/caveset.cpp \
+    export/lairset.cpp \
+    export/paledonor.cpp \
     export/format/bytes.cpp \
     core/heightraster.cpp
 
