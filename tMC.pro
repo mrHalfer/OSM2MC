@@ -67,6 +67,7 @@ HEADERS += \
     export/climate.h \
     export/blocks.h \
     export/colkey.h \
+    export/voxelstore.h \
     export/mcworldexporter.h \
     export/format/bytes.h \
     export/format/nbtwriter.h \
