@@ -206,6 +206,12 @@ static const NamedColor kBlockPalette[] = {
     { "minecraft:chiseled_stone_bricks", 170, 170, 172 },
     // Metro vestibule vending machines (a request to furnish them) and the lab interior: polished blackstone
     { "minecraft:polished_blackstone",    38,  32,  43 },
+    // Lighting masts (tower:type=lighting, 3.575): the polished calcite of the pole (glowstone is already above)
+    { "minecraft:polished_calcite",      222, 222, 220 },
+    // Cemeteries (csrpol 53510000): a carved pumpkin on the grass (the lit one is an enum id, see IdJackLanternBase)
+    { "minecraft:carved_pumpkin",        196, 124,  18 },
+    // Rail platforms (rdcpol 62134000): a half-block step over the stone-brick paving (a user request)
+    { "minecraft:stone_brick_slab",      122, 122, 122 },
 };
 
 //! Block identifiers in the "registry": 0=air, 1..3 ground, 4.. — the palette above.
@@ -455,6 +461,8 @@ enum : quint16
     IdBrickStairsW,                       //   IdStoneStairsN..IdStoneStairsW ranges used by the roof checks
     IdTorch,                              // 'minecraft:torch' ON THE FLOOR (without properties) — the metro
                                           //   stairwell ledges (a request: "hang torches on the column")
+    IdJackLanternBase,                    // IdJackLanternBase + i = 'minecraft:jack_o_lantern' facing north/east/
+                                          //   south/west — a lit jack o'lantern on a post by a grave cross (3.5)
     IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
                                           //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
 };
@@ -588,6 +596,7 @@ static QString blockName(quint16 id)
     if (id == IdSpruceLeaves) return QLatin1String("minecraft:spruce_leaves");
     if (id == IdBirchLeaves) return QLatin1String("minecraft:birch_leaves");
     if (id == IdDarkOakLeaves) return QLatin1String("minecraft:dark_oak_leaves");
+    if (id >= IdJackLanternBase && id < IdJackLanternBase + 4) return QLatin1String("minecraft:jack_o_lantern");
     if (id == IdRedPoplarLeaves) return QLatin1String("minecraft:red_poplar_leaves");
     if (id == IdOrangePoplarLeaves) return QLatin1String("minecraft:orange_poplar_leaves");
     if (id == IdYellowPoplarLeaves) return QLatin1String("minecraft:yellow_poplar_leaves");
@@ -667,6 +676,11 @@ static void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
     if (id >= IdWallBannerBase && id < IdWallBannerMax)
     {
         out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdWallBannerBase)) & 3]));
+        return;
+    }
+    if (id >= IdJackLanternBase && id < IdJackLanternBase + 4)
+    {   // a jack o'lantern: the carved face looks to `facing` (a cemetery lantern post)
+        out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[int(id) - int(IdJackLanternBase)]));
         return;
     }
     if (id >= IdAnvilBase && id < IdAnvilMax)
@@ -963,10 +977,25 @@ static bool isForestExtraVeg(quint16 bid)
 static bool isVegBlockId(quint16 bid)
 {
     if (bid == IdAir) return false;
-    return bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdDarkOakLeaves || bid == IdAcaciaLeaves || bid == IdJungleLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves
+    if (bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdDarkOakLeaves || bid == IdAcaciaLeaves || bid == IdJungleLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves
         || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter || bid == IdPaleHangingMoss || bid == IdVine
         || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass || bid == IdTallGrassUpper || bid == IdWheat
-        || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
+        || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid)) return true;
+    if (bid >= IdCaveBase && g_caveStates)
+    {   // a template state (the Pale Garden scatters its leaf litter and grass through the template palette):
+        // recognize plant-like names there too; solid blocks and 'grass_block' stay obstacles
+        const int off = int(bid) - int(IdCaveBase);
+        if (off < g_caveStates->size())
+        {
+            const QString tail = (*g_caveStates)[off].name.section(QLatin1Char(':'), -1);
+            static const char* const kPlantKeys[] = { "grass", "fern", "leaves", "sapling", "vine", "flower", "sprout",
+                                                      "litter", "moss_carpet", "hanging_moss", "seedling", "bush", "kelp", "wheat", "berries" };
+            if (tail != QLatin1String("grass_block"))
+                for (const char* pk : kPlantKeys)
+                    if (tail.contains(QLatin1String(pk))) return true;
+        }
+    }
+    return false;
 }
 
 //! The building material from the "Material" column (the bldpol layer in the "Material from a column" mode — the same
@@ -1147,11 +1176,12 @@ struct GroundChunk
 //! The ground block in a column (top/surf/wd — metadata) at height y; IdAir above the surface.
 //! It repeats the former rules of the fill loop: water up to top, surface exactly at top, 2 ground blocks under it,
 //! deeper — stone (with wd>3 the water also reaches below top-3 — hence the stone threshold max(3, wd)).
-//! The climate zone of the current export (Climate::Zone) and the chunk biome names for the cell values 0..8 (see biomeCells); set in Export before the chunk assembly.
+//! The climate zone of the current export (Climate::Zone) and the chunk biome names for the cell values 0..9 (see biomeCells); set in Export before the chunk assembly.
 static int g_zone = 0;
-static const char* g_biomeName[9] = { "minecraft:plains", "minecraft:pale_garden", "minecraft:taiga", "minecraft:forest",
+static const char* g_biomeName[10] = { "minecraft:plains", "minecraft:pale_garden", "minecraft:taiga", "minecraft:forest",
                                       "minecraft:birch_forest", "minecraft:dappled_forest", "minecraft:flower_forest", "minecraft:meadow",
-                                      "minecraft:swamp" };        // 8 — a swamp in the game (the OSM "natural=wetland" on mrspol, value 8; the same in every zone)
+                                      "minecraft:swamp", "minecraft:dark_forest" };   // 8 — a swamp in the game (the OSM "natural=wetland" on mrspol, value 8),
+                                                                                      // 9 — a dark forest (a cemetery, csrpol 53510000); both the same in every zone
 static quint16 g_zoneSurface = 1;                                   // the top block of natural ground (1 = IdGrass; desert — sand, tundra — a snow block)
 static quint16 g_sandId = 0, g_clayId = 0;                      // the sand and clay ids (palette ones; set in Export before the chunk assembly)
 static inline quint16 groundBlockAt(int top, quint16 surf, int wd, int y, int wx = 0, int wz = 0, bool artificial = false)
@@ -6567,7 +6597,7 @@ static int railShapeFor(const QPoint& cur, const QPoint* prev, const QPoint* nex
     return 1;
 }
 
-//! Electrifies a 1-block-wide rail line: every 20th rail becomes a powered rail. A powered rail cannot be
+//! Electrifies a 1-block-wide rail line: every 10th rail becomes a powered rail. A powered rail cannot be
 //! curved, so the hit must land on a STRAIGHT cell: if the count falls on a turn, the hit carries over to the
 //! next straight cell and several powered rails are laid in a row there (2-5 in a row). Only rails that are
 //! really in the store are electrified (a cell blocked by a bridge is skipped and carries its hit further).
@@ -6586,8 +6616,8 @@ static int electrifyRails(VoxelStore& store, const QVector<QPoint>& chain, const
     int pending = 0, done = 0;
     for (int ci = 0; ci < n; ++ci)
     {
-        if ((ci + 1) % 20 != 0)
-            continue;                   // the count itself stays "every 20th", the extras are only the carry-overs
+        if ((ci + 1) % 10 != 0)
+            continue;                   // the count itself stays "every 10th", the extras are only the carry-overs
         if (!straight[ci]) { ++pending; continue; }
         int place = pending + 1;
         pending = 0;
@@ -7215,9 +7245,9 @@ static QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector
         w.beginCompound("biomes");          // uniform plains — a unary palette without data
         if ((anyOther || zoneBiome) && !(lairDeep && si <= -1))
         {
-            int pidx[9] = { -1, -1, -1, -1, -1, -1, -1, -1, -1 };            // value -> index in the palette
+            int pidx[10] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };          // value -> index in the palette
             QVector<int> usedVals;
-            for (int vv = 0; vv < 9; ++vv)
+            for (int vv = 0; vv < 10; ++vv)
                 for (int ci = 0; ci < 16; ++ci)
                     if (cellBiome[ci] == vv) { pidx[vv] = usedVals.size(); usedVals.append(vv); break; }
             w.beginList("palette", Nbt::String, usedVals.size());
@@ -7231,7 +7261,7 @@ static QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector
             if (usedVals.size() > 1)
             {
                 int bits = 1;
-                while ((1 << bits) < usedVals.size()) ++bits;               // the palette <= 9 -> 1..4 bits; the values do not cross a long boundary
+                while ((1 << bits) < usedVals.size()) ++bits;               // the palette <= 10 -> 1..4 bits; the values do not cross a long boundary
                 const int per = 64 / bits, nLongs = (64 + per - 1) / per;
                 QVector<qint64> longs(nLongs, 0);
                 for (int y4 = 0; y4 < 4; ++y4)
@@ -8363,17 +8393,20 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     QVector<char> padIsLake;          // 1 — this is a lake (csrpol 51480000: water + a fence), 0 — an ordinary plate
     QSet<ColKey> noTreePadCols;       // the columns of apiaries and farms (csrpol 52400000/52100000): we do not plant trees there
     QVector<int> padCode;             // the CODE of the plate object (53700000/53710000 — sports/children's: we place equipment)
-    // Objects from points on the map (sources with a modelField, e.g. csrpnt/hdtpnt): a memorial, a monument,
-    // a fountain, a communication tower, a waste bin. The anchor is the center of the point's square; the structure
+    // Objects from points on the map (sources with a modelField, e.g. csrpnt/hdtpnt/rdcpnt): a memorial, a monument,
+    // a fountain, a communication tower, a waste bin, a lighting mast, a bench, a sculpture, a bus stop. The anchor is the center of the point's square; the structure
     // is built in 3.575 on the ready ground; the model number comes from point_models.csv (the code -> model table).
     // 1 — a memorial statue, 2 — a monument stele, 3 — a fountain, 4 — a communication tower, 5 — a composter.
-    enum SpotModel : int { kStatue = 1, kStele = 2, kFountain = 3, kTower = 4, kComposter = 5 };
+    enum SpotModel : int { kStatue = 1, kStele = 2, kFountain = 3, kTower = 4, kComposter = 5,
+                           kLightPole = 6, kBench = 7, kSculpture = 8, kBusStop = 9 };
     struct SpotSite { int x, z, model; };
     QVector<SpotSite> spots;
     // The swamp biome (sources with ModelEffect::Swamp, e.g. mrspol): every column under the layer's polygons.
     // An OVERLAY, not an object: the vegetation step turns the trees of any forest under the contour into swamp
     // oaks with vines, plants rare oaks and mushrooms on the open swamp ground, and skips water/roads/structures.
     QSet<ColKey> swampCols;
+    QSet<ColKey> cemeteryCols;              // csrpol 53510000 (landuse=cemetery): dark oaks, crosses, jack o'lanterns,
+                                            // monster spawns and rare loot chests (the dark forest biome overlay)
     // Forests under portals to the Nether (vegpol, CODE 71111110/71126000): the patch columns + the area in REAL m².
     // The frame is placed in 3.57 (the ground and the trees are ready).
     struct PortalForest { QVector<ColSpan> spans; double areaM2; quint32 h; };
@@ -8381,6 +8414,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     struct ParkCand { int cx, cz; double areaM2; quint32 h; };
     QVector<ParkCand> parkCands;                                  // parks 71126000: candidates for floating islands
     QSet<ColKey> roadCols;            // the columns of the roadway (wool in the ground) — we put lamp posts along them
+    QSet<ColKey> autoRoadCols;        // the roadway of MOTOR roads only (paths and bike lines aside) — bus stops face them
+    QSet<ColKey> platformCols;        // rdcpol 62134000 (railway=platform): the paving columns — half-slab in 3.576
     QSet<ColKey> railColsAll;         // the rail columns - we plant trees (rule 3.51) without running onto the tracks
     QVector<QVector<QPoint>> subwayTunnels;   // the underground metro (code 61123100): cell chains in block coords,
                                               //  the tunnels are dug after the ground fill (the surface is needed)
@@ -8411,6 +8446,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         quint16 markId = 0;           // 0 = no marking, otherwise the id of the marking carpet (lies ON the wool)
         bool axisX = true;            // the long axis of the ribbon (splitting into cross slices)
         bool fullCarpet = false;      // a bike path: on top of the red wool there is also a continuous carpet of the same color (cid)
+        bool car = false;             // a motor road (asphalt or dirt): pedestrian paths and bike lines are not
         QVector<QVector<QPointF>> lines;   // the axis lines of the object (block coordinates): the center marking follows them
         QVector<QPointF> ends;        // the ends of the axis lines (block coordinates) — we do not lay a curb next to them
         double endR = 0.0;            // the "end" radius: half the road width + a reserve
@@ -8697,6 +8733,20 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         {   // rdcpol: over the polygon patch the turf is replaced with dark gray concrete (the surface layer of the ground), the place marking — after the ground
             QList<qint64> cols = std::move(pre[objDone - 1]);
             if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            if (o.code == 62134000)
+            {   // a railway platform (railway=platform): just a stone-brick slab over the patch — no lot marking,
+                // the park site is not registered (a request: "just a slab of stone bricks"). The columns are kept:
+                // 3.576 tops the paving with a stone-brick half slab (a request: the platform is half a block higher)
+                static const quint16 kPlatform = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+                for (qint64 ck : cols)
+                    if (!colWool.contains(ck))
+                    {
+                        colWool.insert(ck, kPlatform);
+                        platformCols.insert(ck);
+                    }
+                ++res.objectCount;
+                continue;
+            }
             static const quint16 kDarkConcrete = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
             ParkSite ps;
             for (qint64 ck : cols)
@@ -8744,7 +8794,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             // (the rule's "as: square:N" centers it on the point). The model was resolved in mcscene by the code
             // from the modelField column (point_models.csv). The structure is built in 3.575 on the ready ground;
             // the neighborhood is reserved against trees already here.
-            if (o.model < kStatue || o.model > kComposter) { ++res.skippedCount; continue; }
+            if (o.model < kStatue || o.model > kBusStop) { ++res.skippedCount; continue; }
             QList<qint64> cols = std::move(pre[objDone - 1]);
             if (cols.isEmpty()) { ++res.skippedCount; continue; }
             int x0 = std::numeric_limits<int>::max(), x1 = std::numeric_limits<int>::min();
@@ -8803,6 +8853,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (o.code == 52400000 || o.code == 52100000 || o.code == 51111000 || o.code == 51123000 || o.code == 71323000
                 || o.code == 53210000)   // a military ground: the grass stays, but a base is not a forest
                 for (qint64 ck : cols) noTreePadCols.insert(ck);
+            if (o.code == 53510000)      // a cemetery: the biome, groves, crosses and monsters are built in 3.5
+                for (qint64 ck : cols) cemeteryCols.insert(ck);
             pads.append(cols);
             padIsLake.append(lake ? 1 : 0);
             padCode.append(o.code);
@@ -9096,6 +9148,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 job.road = road;
                 job.cid = cid;
                 job.woolId = woolForCarpetId(cid);
+                job.car = !ped && !bike;                  // a motor road (dirt roads too) — bus stops look for these
                 const bool earthRoad = (o.code == 61310000 || o.code == 61320000 || o.code == 61330000 || o.code == 61330001
                                         || o.code == 45233333 || o.code == 45200003 || o.code == 71610000);
                 {   // the roadway material: motor roads — dark concrete, pedestrian — light concrete (grass does not grow on concrete);
@@ -9327,11 +9380,14 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     ok = have;
                     return best;
                 };
-                const bool elec = o.railElec || o.code == 61124000;   // powered rails: the ELEC column, or a tram (always)
-                const quint16 bedId = elec ? quint16(IdPaletteStart + paletteIndexOf(
-                                             o.code == 61124000 ? "minecraft:stone_bricks" : "minecraft:stone"))
-                                           : quint16(0);              // the track bed: stone under the electrified rails,
-                                                                       // stone bricks under the tram tracks
+                const bool tram = (o.code == 61124000);               // tram tracks: brick bed under the rail line only
+                const bool elec = o.railElec || tram;                 // powered rails: the ELEC column, or a tram (always)
+                const quint16 bedId = quint16(IdPaletteStart + paletteIndexOf(
+                                          tram ? "minecraft:stone_bricks" : "minecraft:stone"));
+                                                                      // the track bed: stone along an ordinary railway
+                                                                      // (a request — the rail column and BOTH sides), stone
+                                                                      // bricks under the tram rails only; the powered rails
+                                                                      // sit on redstone from electrifyRails (store wins)
                 int nRailElectro = 0;
                 for (const QVector<QPointF>& ln : lines)
                 {
@@ -9380,7 +9436,22 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         const qint64 ck = pairKey(c.x(), c.y());
                         railColsAll.insert(ck);                      // trees (3.51) avoid the tracks
                         if (bedId)
+                        {
                             railBedCols.insert(ck, bedId);           // the ground under the track becomes stone/brick
+                            if (!tram)
+                            {   // an ordinary railway: the earth turns to stone in 3 columns — the rail and both
+                                // sides (a request). The sides are perpendicular to the local direction; a corner
+                                // cell takes the prev->next chord, so the stone strip follows the bend
+                                const QPoint d = (pv && nx) ? (*nx - *pv) : (nx ? *nx - c : (pv ? c - *pv : QPoint(1, 0)));
+                                const QPoint n(int((d.x() > 0) - (d.x() < 0)), int((d.y() > 0) - (d.y() < 0)));
+                                const QPoint lat(-n.y(), n.x());
+                                if (lat.x() || lat.y())
+                                {
+                                    railBedCols.insert(pairKey(c.x() + lat.x(), c.y() + lat.y()), bedId);
+                                    railBedCols.insert(pairKey(c.x() - lat.x(), c.y() - lat.y()), bedId);
+                                }
+                            }
+                        }
                         if (store.get(c.x(), ys[ci], c.y()) != IdAir) continue;
                         store.set(c.x(), ys[ci], c.y(), quint16(int(IdRailShapeBase) + shape));
                         auto mit = colMin.find(ck);
@@ -9878,6 +9949,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 if (j.woolId && j.fullCarpet)
                     store.set(bx, t2.value(), bz, j.cid);                 // bike path: a carpet of the same color on top of the wool
                 roadCols.insert(t2.key());                              // street lamps will stand along the strip edge
+                if (j.car) autoRoadCols.insert(t2.key());               // bus stops turn to motor roads, not to paths
                 auto mit = colMin.find(t2.key());                       // the ground exactly under the roadway
                 if (mit == colMin.end() || t2.value() < mit.value())
                     colMin[t2.key()] = t2.value();
@@ -10623,6 +10695,10 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     // Swamps (mrspol, natural=wetland): the minecraft:swamp biome cells — the game tints the grass, leaves and water there (value 8; wins over a forest under the swamp: the trees there are already swamp oaks).
     for (const qint64 ck : swampCols)
         biomeCells.insert(pairKey(keyFirst(ck) >> 2, keySecond(ck) >> 2), quint8(8));
+    // Cemeteries (csrpol 53510000): the minecraft:dark_forest biome cells (value 9) — the dark tint of the grass and
+    // leaves (wins over a swamp under the same contour: the cemetery plants its own dark oaks).
+    for (const qint64 ck : cemeteryCols)
+        biomeCells.insert(pairKey(keyFirst(ck) >> 2, keySecond(ck) >> 2), quint8(9));
     // Donor: the terrain of the real Pale Garden instead of the forest terrain (smoothly at the border), trees are carried over together with it.
     struct PaleCol { int top; qint16 dy; quint8 w; quint16 surf; qint32 di = 0; qint16 pid = -1; };   // pid >= 0 — a patch (outpost/camp), otherwise the Pale Garden donor
     QVector<PaleDonor>& patches = patchesLoaded;                   // terrain patches with structures (patch_*.bin)
@@ -11256,7 +11332,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     // CLIMATE ZONE (export/climate.h): the chunk biomes, the surface and the tree species of the export area (the world around — as before)
     g_zone = std::max(0, std::min(int(Climate::Count) - 1, world.climateZone));
     {
-        // cell values: 0 other, 1 Pale Garden, 2 taiga, 3 forest, 4 birch forest, 5 dappled forest, 6 flower forest, 7 meadow
+        // cell values: 0 other, 1 Pale Garden, 2 taiga, 3 forest, 4 birch forest, 5 dappled forest, 6 flower forest, 7 meadow (8 and 9 are fixed: swamp, dark forest)
         static const char* const kPlains = "minecraft:plains";
         const char* b[8] = { "minecraft:plains", "minecraft:pale_garden", "minecraft:taiga", "minecraft:forest", "minecraft:birch_forest",
                              "minecraft:dappled_forest", "minecraft:flower_forest", "minecraft:meadow" };
@@ -12383,7 +12459,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
     // and lower the column top under the floor): the cave cast never applies to a lowered column, so the tunnel
     // cuts through any cave it touches, and the lining (store blocks) wins over the cast as well.
     // The walls and the floor are of a mixed stone masonry (a deterministic hash per cell), the lamps hang from
-    // the ceiling every 6th chain cell; every 20th rail is electrified, but a powered rail cannot be curved, so
+    // the ceiling every 6th chain cell; every 10th rail is electrified, but a powered rail cannot be curved, so
     // a hit that falls on a turn carries to the next straight cell and is laid there as a row of 2-5 powered rails.
     if (!subwayTunnels.isEmpty())
     {
@@ -13037,6 +13113,31 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         if (zt.jungle) jungleCrownVines(bx, bz, topTree - 2, 2);       // a jungle tree — a small one with vines (the game's look)
         return true;
     };
+    // A dark oak (a cemetery, a request): a trunk and a dense wide flat-topped crown, as the game's dark forests.
+    auto plantDarkOak = [&](int bx, int bz, int y0, int h, quint32 hh) -> bool
+    {
+        for (int sx2 = -3; sx2 <= 3; sx2 += 6)
+            for (int sz2 = -3; sz2 <= 3; sz2 += 6)
+                if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
+        const quint16 dLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:dark_oak_log"));
+        for (int dy = 0; dy < h; ++dy)
+            if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, dLog);
+        const int topTree = y0 + h - 1;
+        static const int kR[4] = { 2, 3, 3, 2 };                     // the crown layers topTree+1 .. topTree-2
+        for (int li = 0; li < 4; ++li)
+        {
+            const int dy = 1 - li, r = kR[li];
+            for (int dx = -r; dx <= r; ++dx)
+                for (int dz = -r; dz <= r; ++dz)
+                {
+                    if (dy == 1 && std::abs(dx) + std::abs(dz) > 2) continue;            // a flat broad top
+                    if (dy == -2 && std::abs(dx) == r && std::abs(dz) == r) continue;    // no far corners at the bottom
+                    if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
+                        store.set(bx + dx, topTree + dy, bz + dz, IdDarkOakLeaves);
+                }
+        }
+        return true;
+    };
     // A tree of arbitrary size: a trunk of height h, a spherical crown of radius R (1..3) with cut corners — for intra-block greenery of different sizes
     auto plantSized = [&](int bx, int bz, int y0, int h, int R, quint16 logId, quint16 leafId) -> bool
     {
@@ -13310,6 +13411,16 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 if (colWater.contains(pairKey(bx + 1, bz)) || colWater.contains(pairKey(bx, bz + 1)) || colWater.contains(pairKey(bx + 1, bz + 1))) continue;
                 if (!spansContain(site.spans, bx + 1, bz + 1)) continue;
                 plantPaleTree(bx, bz, y0, hh, hp >> 4);
+                continue;
+            }
+            if (cemeteryCols.contains(ck))
+            {   // a cemetery (csrpol 53510000, landuse=cemetery): whatever forest was planned here becomes a dense
+                // grove of dark oaks (a user request) — the dark forest look, independent of the climate zone
+                const quint32 hc = colHash(ck ^ 0x0CE51ull);
+                if (hc % 100u >= 85u) continue;                                // ~85% of the grid cells are planted
+                const int h = 7 + int(hc % 4u);                                // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
+                if (y0 + h + 4 > 255) continue;
+                plantDarkOak(bx, bz, y0, h, hc);
                 continue;
             }
             if (swampCols.contains(ck))
@@ -13746,6 +13857,147 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             store.set(bx, y0, bz, r < 40u ? qDb : (r < 58u ? qMushB : (r < 76u ? qMushR : qFern)));
         }
         tmcStepLog(QString("3.5 swamp biome: %1 columns, %2 open-ground oaks").arg(swampCols.size()).arg(nSwampTrees).toUtf8().constData());
+    }
+    // Cemeteries (csrpol 53510000, a user request): the dark-forest plot of the dead. Forests under the contour
+    // already became dark-oak groves in the forest loop; the OPEN cemetery ground gets dense dark oaks (a 5x5 grid),
+    // stone crosses between them (a 3x3 grid), a lit jack o'lantern on a fence post by some crosses, rare carved
+    // pumpkins, wandering monsters (zombies, skeletons, spiders, witches) and rare loot chests (middling often,
+    // expensive rarely). Water, roads and built-up columns stay alone — an overlay, not an owner of the land.
+    if (!cemeteryCols.isEmpty())
+    {
+        const quint16 qPumpkin = quint16(IdPaletteStart + paletteIndexOf("minecraft:carved_pumpkin")),
+                    qStoneC = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone"));
+        auto floorC5 = [](int v) { return v >= 0 ? v / 5 : -((-v + 4) / 5); };
+        auto floorC3 = [](int v) { return v >= 0 ? v / 3 : -((-v + 2) / 3); };
+        auto floorC6 = [](int v) { return v >= 0 ? v / 6 : -((-v + 5) / 6); };
+        auto floorC9 = [](int v) { return v >= 0 ? v / 9 : -((-v + 8) / 9); };
+        int nCemTrees = 0, nCross = 0, nJack = 0, nPumpkin = 0, nCemMob = 0, nCemChest = 0;
+        QSet<ColKey> cells5;
+        for (ColKey ck : cemeteryCols)
+            cells5.insert(pairKey(floorC5(keyFirst(ck)), floorC5(keySecond(ck))));
+        for (ColKey cell : cells5)
+        {   // dark oaks on the open ground — quite dense: ~70% of the 5x5 cells
+            const quint32 hs = colHash(cell ^ 0x0CE117ull);
+            if (hs % 100u >= 70u) continue;
+            const int tx = keyFirst(cell) * 5 + int(hs % 5u), tz = keySecond(cell) * 5 + int((hs >> 8) % 5u);
+            const ColKey ck = pairKey(tx, tz);
+            if (!cemeteryCols.contains(ck)) continue;                            // the tree spot fell outside the contour
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(tx, y0, tz) != IdAir) continue;                        // something already stands here
+            const int h = 7 + int(hs % 4u);                                   // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
+            if (y0 + h + 4 > 255) continue;
+            plantDarkOak(tx, tz, y0, h, hs);
+            ++nCemTrees;
+        }
+        QSet<ColKey> cells3;
+        for (ColKey ck : cemeteryCols)
+            cells3.insert(pairKey(floorC3(keyFirst(ck)), floorC3(keySecond(ck))));
+        for (ColKey cell : cells3)
+        {   // stone crosses — a quarter of the 3x3 cells (a request: half as many); the whole cross must stand in the air
+            const quint32 hc = colHash(cell ^ 0xC83C11ull);
+            if (hc % 100u >= 25u) continue;
+            const int tx = keyFirst(cell) * 3 + int(hc % 3u), tz = keySecond(cell) * 3 + int((hc >> 8) % 3u);
+            const ColKey ck = pairKey(tx, tz);
+            if (!cemeteryCols.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(tx, y0, tz) != IdAir || store.get(tx, y0 + 1, tz) != IdAir || store.get(tx, y0 + 2, tz) != IdAir
+                || store.get(tx - 1, y0 + 2, tz) != IdAir || store.get(tx + 1, y0 + 2, tz) != IdAir) continue;
+            if (roadCols.contains(pairKey(tx - 1, tz)) || roadCols.contains(pairKey(tx + 1, tz))) continue;   // the crossbar must not hang over a roadway (a request)
+            store.set(tx, y0, tz, qStoneC);                          // a stone base
+            store.set(tx, y0 + 1, tz, IdCobbleWall);                 // the upright
+            store.set(tx, y0 + 2, tz, IdCobbleWall);
+            store.set(tx - 1, y0 + 2, tz, IdCobbleWall);             // the crossbar
+            store.set(tx + 1, y0 + 2, tz, IdCobbleWall);
+            ++nCross;
+            if (hc % 100u >= 9u) continue;                           // a jack o'lantern by 9% of the cells (~1/4 of the old share — a request)
+            const int side = ((hc >> 10) & 1u) ? 1 : -1;
+            const int px = tx + side * 2;
+            const ColKey pk = pairKey(px, tz);
+            if (colWater.contains(pk) || roadCols.contains(pk) || colMin.contains(pk) || railColsAll.contains(pk)
+                || store.get(px, y0, tz) != IdAir || store.get(px, y0 + 1, tz) != IdAir) continue;
+            store.set(px, y0, tz, IdFence);                          // a fence post (no connections)
+            store.set(px, y0 + 1, tz, quint16(IdJackLanternBase + int((hc >> 12) % 4u)));   // the lit face looks by hash
+            ++nJack;
+        }
+        for (ColKey ck : cemeteryCols)
+        {   // carved pumpkins dot the grass (~0.75% of the columns — a request: four times rarer)
+            const quint32 hp = colHash(ck ^ 0x9AB1CEull);
+            if (hp % 400u >= 3u) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck)) continue;
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(bx, y0, bz) != IdAir) continue;
+            store.set(bx, y0, bz, qPumpkin);
+            ++nPumpkin;
+        }
+        QSet<ColKey> cells6;
+        for (ColKey ck : cemeteryCols)
+            cells6.insert(pairKey(floorC6(keyFirst(ck)), floorC6(keySecond(ck))));
+        for (ColKey cell : cells6)
+        {   // the monsters of the graveyard — a 6x6 grid, ~45% of the cells: a zombie, a skeleton, a spider or a witch
+            const quint32 hm = colHash(cell ^ 0x4045E7ull);
+            if (hm % 100u >= 45u) continue;
+            const int mx = keyFirst(cell) * 6 + int(hm % 6u), mz = keySecond(cell) * 6 + int((hm >> 8) % 6u);
+            const ColKey ck = pairKey(mx, mz);
+            if (!cemeteryCols.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(mx, y0, mz) != IdAir || store.get(mx, y0 + 1, mz) != IdAir) continue;   // the body needs two rows
+            NpcSite ms;
+            ms.kind = 4; ms.variant = int((hm >> 16) % 4u);          // 0 zombie, 1 skeleton, 2 spider, 3 witch
+            ms.x = mx; ms.y = y0; ms.z = mz; ms.yaw = int((hm >> 4) % 4u) * 90;
+            npcs.append(ms);
+            ++nCemMob;
+        }
+        QSet<ColKey> cells9;
+        for (ColKey ck : cemeteryCols)
+            cells9.insert(pairKey(floorC9(keyFirst(ck)), floorC9(keySecond(ck))));
+        for (ColKey cell : cells9)
+        {   // the loot of the old graves — ~1 cell out of 15 of the 9x9 grid (a request: many more chests):
+            // a chest standing on the ground OR buried under a grave (the chest lies in the dug row of the old
+            // surface under a turf cover with a headstone — the lid is blocked, the treasure must be dug out).
+            // Middling loot often, expensive rarely — pCheap=0 in pickChestLoot.
+            const quint32 hl = colHash(cell ^ 0x51E9Cull);
+            if (hl % 1000u >= 65u) continue;
+            const int tx = keyFirst(cell) * 9 + int(hl % 9u), tz = keySecond(cell) * 9 + int((hl >> 8) % 9u);
+            const ColKey ck = pairKey(tx, tz);
+            if (!cemeteryCols.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(tx, y0, tz) != IdAir || store.get(tx, y0 + 1, tz) != IdAir) continue;
+            bool buried = false;
+            if (hl & 1u)
+            {   // a buried grave: dig one row of the column (the writer builds it from `top`), the chest at the
+                // old surface level, a turf block covers it from above, a cobblestone wall marks the grave
+                const auto git = ground.find(pairKey(tx >> 4, tz >> 4));
+                const int T = y0 - 1;
+                if (git != ground.end())
+                {
+                    const int col = (tz & 15) * 16 + (tx & 15);
+                    if (int(git.value().top[col]) == T && store.get(tx, T, tz) == IdAir)
+                    {
+                        git.value().top[col] = qint16(T - 1);
+                        store.set(tx, T, tz, IdChest);
+                        chests << ChestSite{ tx, T, tz, pickChestLoot(hl >> 4, 0, 65) };
+                        store.set(tx, T + 1, tz, IdGrass);
+                        store.set(tx, T + 2, tz, IdCobbleWall);
+                        buried = true;
+                    }
+                }
+            }
+            if (!buried)
+            {
+                store.set(tx, y0, tz, IdChest);
+                chests << ChestSite{ tx, y0, tz, pickChestLoot(hl >> 4, 0, 65) };
+            }
+            ++nCemChest;
+        }
+        char cbuf[192];
+        snprintf(cbuf, sizeof cbuf, "3.5 cemeteries: %d columns, %d dark oaks, %d crosses, %d jack o'lanterns, %d pumpkins, %d monsters, %d chests",
+                 int(cemeteryCols.size()), nCemTrees, nCross, nJack, nPumpkin, nCemMob, nCemChest);
+        tmcStepLog(cbuf);
     }
     lap("before 3.51");
     beginStep(5);
@@ -17275,7 +17527,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
 
     lap("before 3.575");
     // 3.575 Objects from points on the map (sources with a modelField, step 3.575): memorials and monuments,
-    // fountains, communication towers and waste bins stand on the READY ground (after the street furniture; the
+    // fountains, communication towers, waste bins, lighting masts, benches, sculptures and bus-stop shelters
+    // stand on the READY ground (after the street furniture; the
     // trees were not planted around them — their columns were reserved in noTreePadCols). Which structure to build
     // is decided by the model number from point_models.csv (the object's code from the modelField column);
     // "atop a building" is the communication tower only (from its roof), the rest are skipped if a
@@ -17292,9 +17545,27 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         qBlk = blk("minecraft:blackstone"), qGran = blk("minecraft:granite"),
                         qDior = blk("minecraft:diorite"), qAnd = blk("minecraft:andesite"),
                         qSmth = blk("minecraft:smooth_stone"), qGold = blk("minecraft:gold_block"),
-                        qQuartz = blk("minecraft:quartz_block");
+                        qQuartz = blk("minecraft:quartz_block"), qPCalc = blk("minecraft:polished_calcite"),
+                        qGlow = blk("minecraft:glowstone");
             static const quint16 kStairs[4] = { IdStoneStairsN, IdStoneStairsE, IdStoneStairsS, IdStoneStairsW };
             int nPlaced = 0, nSkipped = 0;
+            // Roadside greenery (leaves, plants, carpets, vines) does not forbid the install: it is
+            // sheared off inside the object footprint. A trunk (log) or anything built stays a blocker.
+            auto clearVeg = [&](int x0, int x1, int y0, int y1, int z0, int z1)
+            {
+                for (int x = x0; x <= x1; ++x)
+                    for (int z = z0; z <= z1; ++z)
+                        for (int y = y0; y <= y1; ++y)
+                        {
+                            const quint16 b = store.get(x, y, z);
+                            if (b && b != IdAir && isVegBlockId(b))
+                            {
+                                const QString bn = blockName(b);
+                                if (!bn.contains(QLatin1String("_log")) && !bn.contains(QLatin1String("stem")))
+                                    store.erase(x, y, z);
+                            }
+                        }
+            };
             for (const SpotSite& sp : spots)
             {
                 const qint64 ck = pairKey(sp.x, sp.z);
@@ -17441,6 +17712,158 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     ++nPlaced;
                     break;
                 }
+                case kLightPole:                                         // a LIGHTING MAST: polished calcite with glowstone lights
+                    if (topSolid >= gy) { ++nSkipped; break; }           // something is already built here
+                    for (int dy = 0; dy < 3; ++dy) store.set(sp.x, gy + dy, sp.z, qPCalc);
+                    store.set(sp.x, gy + 3, sp.z, qGlow);                // a request: 3 calcite, glowstone, 2 calcite, glowstone
+                    store.set(sp.x, gy + 4, sp.z, qPCalc);
+                    store.set(sp.x, gy + 5, sp.z, qPCalc);
+                    store.set(sp.x, gy + 6, sp.z, qGlow);
+                    ++nPlaced;
+                    break;
+                case kBench:                                             // a STREET BENCH — 2x1 oak stairs (a request)
+                {   // the bench axis is chosen by the column hash; the seat faces along it, the backrest on the side;
+                    // both cells must be free ground — no road, no water, no structure, nothing already built
+                    static const int kAx[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };   // N/E/S/W (kDirNames order)
+                    const int k = int(hsh % 4u);
+                    const int x2 = sp.x + kAx[k][0], z2 = sp.z + kAx[k][1];
+                    const qint64 ck2 = pairKey(x2, z2);
+                    const int gyB = std::max(gy, surfaceTop(ck2) + 1);   // the seat is level: the higher of the two columns
+                    clearVeg(std::min(sp.x, x2), std::max(sp.x, x2), gyB, gyB + 1,
+                             std::min(sp.z, z2), std::max(sp.z, z2));      // a leaf or a bush in the seat footprint is sheared
+                    if (colWater.contains(ck2) || roadCols.contains(ck2) || colMin.contains(ck2)
+                        || store.get(sp.x, gyB, sp.z) != IdAir || store.get(x2, gyB, z2) != IdAir
+                        || store.get(sp.x, gyB + 1, sp.z) != IdAir || store.get(x2, gyB + 1, z2) != IdAir)
+                    { ++nSkipped; break; }
+                    const quint16 st = quint16(IdStairsN + ((k + 1) & 3));   // the seat turned sideways to its axis
+                    store.set(sp.x, gyB, sp.z, st);
+                    store.set(x2, gyB, z2, st);
+                    ++nPlaced;
+                    break;
+                }
+                case kSculpture:                                         // a SMALL SCULPTURE (3 variants)
+                {
+                    const bool stand = (hsh % 3u) == 2u;                // the 2x2 variant shares one level floor
+                    int gyB = gy;
+                    if (stand)
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz)
+                                gyB = std::max(gyB, surfaceTop(pairKey(sp.x + dx, sp.z + dz)) + 1);
+                    clearVeg(sp.x, sp.x + 1, gyB, gyB + 3, sp.z, sp.z + 1);   // the widest variant is 2x2x4
+                    if (topSolid >= gy) { ++nSkipped; break; }
+                    if (!stand)
+                    {   // the 1x1 variants stand on the node column itself
+                        if (hsh % 3u == 0u)
+                        {   // a modernist: a dark stone mass on a diorite pedestal
+                            store.set(sp.x, gyB, sp.z, qDior); store.set(sp.x, gyB + 1, sp.z, qPDsl);
+                            store.set(sp.x, gyB + 2, sp.z, qBlk); store.set(sp.x, gyB + 3, sp.z, qPBlk);
+                        }
+                        else
+                        {   // a bust on a stone-brick column
+                            store.set(sp.x, gyB, sp.z, qSBrick); store.set(sp.x, gyB + 1, sp.z, qSBrick);
+                            store.set(sp.x, gyB + 2, sp.z, qSBrick); store.set(sp.x, gyB + 3, sp.z, qAnd);
+                        }
+                        ++nPlaced;
+                        break;
+                    }
+                    {   // a sculptor's stand: a cobble pedestal and a stone cutter; the whole 2x2 needs free
+                        // air above the level floor (a trunk in a corner blocks it)
+                        bool ok2 = true;
+                        for (int dx = 0; dx <= 1 && ok2; ++dx)
+                            for (int dz = 0; dz <= 1 && ok2; ++dz)
+                            {
+                                const qint64 bk = pairKey(sp.x + dx, sp.z + dz);
+                                if (colWater.contains(bk) || roadCols.contains(bk) || colMin.contains(bk)) ok2 = false;
+                                for (int dy = 0; dy <= 1 && ok2; ++dy)
+                                    if (store.get(sp.x + dx, gyB + dy, sp.z + dz) != IdAir) ok2 = false;
+                            }
+                        if (ok2)
+                        {
+                            for (int dx = 0; dx <= 1; ++dx)             // the pedestal, plinth-filled to the level floor
+                                for (int dz = 0; dz <= 1; ++dz)
+                                {
+                                    const int t0 = surfaceTop(pairKey(sp.x + dx, sp.z + dz));
+                                    for (int y = t0 + 1; y < gyB && t0 >= 0; ++y)
+                                        store.set(sp.x + dx, y, sp.z + dz, qCobb);
+                                    store.set(sp.x + dx, gyB, sp.z + dz, qCobb);
+                                }
+                            store.set(sp.x, gyB + 1, sp.z, qAnd);
+                            store.set(sp.x + 1, gyB + 1, sp.z + 1, qAnd);
+                            store.set(sp.x, gyB + 1, sp.z + 1, quint16(IdStonecutterBase + int((hsh >> 8) % 4u)));
+                            ++nPlaced;
+                        }
+                        else ++nSkipped;
+                    }
+                    break;
+                }
+                case kBusStop:                                           // a BUS STOP SHELTER: 5x3, the long side along the road (requests)
+                {   // the open side looks at the nearest MOTOR road (a ring up to 10 blocks; pedestrian and bike
+                    // paths do not count — a user request; an ordinary roadway is only a fallback), else by hash;
+                    // the shelter is shifted OFF the road — 2..3 blocks away from the node, the footprint must be free
+                    static const int kD[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };    // N/E/S/W (kDirNames order)
+                    int od = -1;
+                    for (int r = 1; r <= 10 && od < 0; ++r)
+                        for (int k = 0; k < 4 && od < 0; ++k)
+                            if (autoRoadCols.contains(pairKey(sp.x + kD[k][0] * r, sp.z + kD[k][1] * r))) od = k;
+                    for (int r = 1; r <= 10 && od < 0; ++r)               // no motor road near — any roadway will do
+                        for (int k = 0; k < 4 && od < 0; ++k)
+                            if (roadCols.contains(pairKey(sp.x + kD[k][0] * r, sp.z + kD[k][1] * r))) od = k;
+                    if (od < 0) od = int(hsh % 4u);
+                    const int rx = kD[od][0], rz = kD[od][1];             // the roadway direction (the open side faces it)
+                    const bool alongX = (rz != 0);                        // the road runs N/S — the 5-block side lies along X
+                    bool built = false;
+                    for (int sh = 2; sh <= 3 && !built; ++sh)
+                    {
+                        const int bx0 = sp.x - rx * sh, bz0 = sp.z - rz * sh;   // the box stands OFF the road, behind the node
+                        const int ax = alongX ? 2 : 1, az = alongX ? 1 : 2;     // 5 blocks along the road, 3 across it
+                        // the FLOOR IS THE GROUND SURFACE ITSELF (a request: flush, no raised plinth): the paving
+                        // replaces the turf of the highest footprint level, low columns are raised to it
+                        int gyB = gy - 1;
+                        bool have = true;
+                        for (int dx = -ax; dx <= ax && have; ++dx)
+                            for (int dz = -az; dz <= az && have; ++dz)
+                            {
+                                const qint64 bk = pairKey(bx0 + dx, bz0 + dz);
+                                if (colWater.contains(bk) || roadCols.contains(bk) || colMin.contains(bk)
+                                    || railColsAll.contains(bk)
+                                    || !ground.contains(pairKey((bx0 + dx) >> 4, (bz0 + dz) >> 4))) have = false;
+                            }
+                        if (have)
+                            for (int dx = -ax; dx <= ax; ++dx)            // the paving level — the highest column
+                                for (int dz = -az; dz <= az; ++dz)
+                                    gyB = std::max(gyB, surfaceTop(pairKey(bx0 + dx, bz0 + dz)));
+                        if (have)
+                            clearVeg(bx0 - ax, bx0 + ax, gyB, gyB + 4, bz0 - az, bz0 + az);   // leaves and bushes off the box
+                        bool free = have;
+                        for (int dx = -ax; dx <= ax && free; ++dx)
+                            for (int dz = -az; dz <= az && free; ++dz)
+                                for (int dy = 0; dy <= 4 && free; ++dy)
+                                    if (store.get(bx0 + dx, gyB + dy, bz0 + dz) != IdAir) free = false;
+                        if (!free) continue;
+                        for (int dx = -ax; dx <= ax; ++dx)                 // the floor: the paving replaces the surface
+                            for (int dz = -az; dz <= az; ++dz)             // block of the ground (flush join with the terrain)
+                            {
+                                GroundChunk& g = ground.find(pairKey((bx0 + dx) >> 4, (bz0 + dz) >> 4)).value();
+                                const int col = ((bz0 + dz) & 15) * 16 + ((bx0 + dx) & 15);
+                                g.top[col] = qint16(gyB);                  // level the whole footprint to the paving row
+                                g.surf[col] = qSmth;
+                            }
+                        for (int dx = -ax; dx <= ax; ++dx)                 // the walls: perimeter, the road side open
+                            for (int dz = -az; dz <= az; ++dz)
+                            {
+                                if (std::abs(dx) < ax && std::abs(dz) < az) continue;   // the interior row stays free
+                                if (dx * rx + dz * rz == 1) continue;      // the whole long side toward the road is open
+                                for (int dy = 1; dy <= 3; ++dy) store.set(bx0 + dx, gyB + dy, bz0 + dz, qSBrick);
+                            }
+                        for (int dx = -ax; dx <= ax; ++dx)                 // the flat roof
+                            for (int dz = -az; dz <= az; ++dz) store.set(bx0 + dx, gyB + 4, bz0 + dz, qSBrick);
+                        store.set(bx0, gyB + 3, bz0, IdLanternHung);       // a lamp under the roof
+                        built = true;
+                        ++nPlaced;
+                    }
+                    if (!built) ++nSkipped;
+                    break;
+                }
                 default:
                     ++nSkipped;                                          // an unknown code — nothing is built
                     break;
@@ -17450,6 +17873,37 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             snprintf(buf, sizeof buf, "3.575 point objects: placed %d, skipped %d", nPlaced, nSkipped);
             tmcStepLog(buf);
         }
+    }
+
+    lap("before 3.576");
+    // 3.576 Rail platforms (rdcpol 62134000): a stone brick half SLAB over the stone-brick paving
+    // (a user request: "the platform is raised by half a block"). Laid AFTER the street furniture (3.57)
+    // and the point objects (3.575): where something solid already stands (a lamp post, a shelter) the
+    // slab gives up its cell (a request); low plants are removed first.
+    if (!platformCols.isEmpty())
+    {
+        const quint16 kSlab = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_brick_slab"));
+        int nSlab = 0;
+        for (const qint64 ck : platformCols)
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            if (!ground.contains(pairKey(bx >> 4, bz >> 4))) continue;  // the platform crossed the world edge — no ground, no slab
+            if (colWater.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            const quint16 cur = store.get(bx, y0, bz);
+            if (cur != IdAir)
+            {
+                if (!isVegBlockId(cur)) continue;                        // a post or a wall — the slab is not needed here
+                store.erase(bx, y0, bz);
+                const quint16 up = store.get(bx, y0 + 1, bz);
+                if (up && isVegBlockId(up)) store.erase(bx, y0 + 1, bz);   // tall grass — both of its rows
+            }
+            store.set(bx, y0, bz, kSlab);
+            ++nSlab;
+        }
+        char sbuf[96];
+        snprintf(sbuf, sizeof sbuf, "3.576 platform slabs: %d of %d columns", nSlab, int(platformCols.size()));
+        tmcStepLog(sbuf);
     }
 
     lap("before 3.59");

@@ -5,6 +5,21 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.3.26.11051] — 2026-11-05
+
+### Added
+- New point objects built on the map: a lighting mast (`tower:type=lighting`, polished calcite with glowstone),
+  a street bench (`amenity=bench`), a small street sculpture (`artwork_type=sculpture`, three variants) and a
+  bus stop shelter (`highway=bus_stop`) - a 5x3 three-wall booth laid along the carriageway, the open long
+  side facing the nearest car road, its floor level with the ground.
+- Railway platforms (`railway=platform`) become boarding platforms paved with stone bricks and raised by a
+  half-block of stone brick slabs; the slab steps back where a lamp post or a piece of furniture stands.
+- Cemeteries (`landuse=cemetery`): the ground turns into a dark forest - tall dense dark oaks, stone crosses,
+  carved pumpkins and lit jack o'lanterns, loot chests (some buried under a headstone), and zombie, skeleton,
+  spider and witch spawns.
+- Ordinary railway tracks run on a three-column-wide stone ballast (tram tracks get stone bricks); powered
+  rails come every tenth rail on straight sections and sit on redstone, so they stay active.
+
 ## [1.3.26.11041] — 2026-11-04
 
 ### Added

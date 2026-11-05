@@ -1369,6 +1369,17 @@
    }
   },
   {
+   "note": "A railway platform (a multipolygon relation or a closed way that GDAL keeps as a polygon) — paving of stone bricks instead of the turf, a half slab on top in the exporter",
+   "from": "multipolygons",
+   "layer": "rdcpol",
+   "when": {
+    "railway": "platform"
+   },
+   "fields": {
+    "CODE": "62134000"
+   }
+  },
+  {
    "note": "Not railways: abandoned and dismantled",
    "from": "lines",
    "layer": "-",
@@ -1667,6 +1678,18 @@
    }
   },
   {
+   "note": "A cemetery — a grass plate fenced like the other plates; the exporter turns it into a dark forest: dark oaks, stone crosses, jack o'lanterns, monster spawns and rare loot chests",
+   "from": "multipolygons",
+   "layer": "csrpol",
+   "when": {
+    "landuse": "cemetery"
+   },
+   "fields": {
+    "CODE": "53510000",
+    "REL": "0"
+   }
+  },
+  {
    "note": "Military grounds: the exporter walls the plot with a stone boundary wall and posts golem guards",
    "from": "multipolygons",
    "layer": "csrpol",
@@ -1818,6 +1841,54 @@
     "REL": "0"
    },
    "as": "square:12"
+  },
+  {
+   "note": "A lighting mast (tower:type=lighting) — a single-column pole of polished calcite with glowstone lights (see 3.575)",
+   "from": "points",
+   "layer": "csrpnt",
+   "when": {
+    "tower:type": "lighting"
+   },
+   "fields": {
+    "CODE": "53340910"
+   },
+   "as": "square:1"
+  },
+  {
+   "note": "A street bench (amenity=bench) — a 2x1 oak bench; the exporter skips it where it would stand on a road or another object (see 3.575)",
+   "from": "points",
+   "layer": "csrpnt",
+   "when": {
+    "amenity": "bench"
+   },
+   "fields": {
+    "CODE": "53520950"
+   },
+   "as": "square:1"
+  },
+  {
+   "note": "A small sculpture (artwork_type=sculpture) — a modest monument in a few variants (see 3.575)",
+   "from": "points",
+   "layer": "csrpnt",
+   "when": {
+    "artwork_type": "sculpture"
+   },
+   "fields": {
+    "CODE": "53520930"
+   },
+   "as": "square:3"
+  },
+  {
+   "note": "A bus stop (highway=bus_stop) — a small shelter-booth with 3 walls and a roof, open on the road side (see 3.575)",
+   "from": "points",
+   "layer": "rdcpnt",
+   "when": {
+    "highway": "bus_stop"
+   },
+   "fields": {
+    "CODE": "62211000"
+   },
+   "as": "square:5"
   },
   {
    "note": "A memorial marked by a point (historic=memorial) — a 5 m square; the exporter builds a small statue in its center (several variants, see 3.575)",
