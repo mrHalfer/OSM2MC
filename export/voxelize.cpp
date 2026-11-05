@@ -53,6 +53,23 @@ private:
     QVector<BannerSite>* banners;
     QVector<LairZone>* zones;
     QVector<IslandSite>* islands;
+
+
+    // The rasterized mesh (filled by buildGrid()): the grid cell (x,y,z) sits at
+    // ((z*sy + y)*sx + x), the world block of the cell is (minx+x, miny+y, minz+z).
+    QByteArray grid;
+    QVector<int> surfaceCells;
+    int sx = 0, sy = 0, sz = 0;
+    int minx = 0, miny = 0, minz = 0;
+    long long vol = 0;
+    int volI = 0;
+    int rowLo = 0, rowHi = -1;
+
+    // Rasterizes the mesh into the grid and picks the private-house material.
+    // Returns false when the object must be skipped (empty mesh, a huge extent).
+    bool buildGrid();
+    // The structural material (foundation/slabs/roof rows) for the wall row ry.
+    quint16 structFor(int ry) const;
 };
 
 ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
@@ -87,11 +104,11 @@ int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransform& tf, 
                            structId, woodSingle, privMode, deepRole).run();
 }
 
-int ObjectVoxelizer::run()
+bool ObjectVoxelizer::buildGrid()
 {
     const int nv = obj.vertices.size();
     if (nv < 3 || obj.indices.size() < 3)
-        return 0;
+        return false;
 
     // Into block coordinates + the extent
     QVector<QVector3D> bc;
@@ -127,7 +144,7 @@ int ObjectVoxelizer::run()
         mxy = std::max(mxy, (long long)std::floor(yMinF + h * k) + 1);
     }
     if (mxx <= mnx || mxy <= mny || mxz <= mnz)
-        return 0;
+        return false;
 
     // The extent in integer cells + a gap of 1 on all sides (the shell of the flood fill must have an "air
     // corridor" around the object)
@@ -138,18 +155,16 @@ int ObjectVoxelizer::run()
     // Reasonable limits: giant objects (flat forest polygons tens of km across) are skipped explicitly —
     // their rasterization would eat memory/time out of proportion to the result.
     if (sxl > 100000 || syl > 4096 || szl > 100000)
-        return 0;
-    const long long vol = sxl * syl * szl;
+        return false;
+    vol = sxl * syl * szl;
     if (vol > 64ll * 1024 * 1024)
-        return 0;
-    const int volI = int(vol);   // the volume is certainly < INT_MAX (the check above) — it is convenient to index a QByteArray with an int
+        return false;
+    volI = int(vol);   // the volume is certainly < INT_MAX (the check above) — it is convenient to index a QByteArray with an int
 
-    const int sx = int(sxl), sy = int(syl), sz = int(szl);
-    const int minx = int(gx0), miny = int(gy0), minz = int(gz0);
+    sx = int(sxl); sy = int(syl); sz = int(szl);
+    minx = int(gx0); miny = int(gy0); minz = int(gz0);
 
-    QByteArray grid;
     grid.fill(0, volI);
-    QVector<int> surfaceCells;
 
     for (int i = 0; i + 2 < obj.indices.size(); i += 3)
     {
@@ -159,10 +174,10 @@ int ObjectVoxelizer::run()
         rasterizeTriangle(bc[i0], bc[i1], bc[i2], minx, miny, minz, sx, sy, sz, grid, surfaceCells);
     }
     if (surfaceCells.isEmpty())
-        return 0;
+        return false;
     // The structural part with a given wall material (structId != 0): the foundation (the two bottom rows),
     // the floors between stories and the roof (the two top rows) — gray concrete whatever is in the walls.
-    int rowLo = std::numeric_limits<int>::max(), rowHi = -1;
+    rowLo = std::numeric_limits<int>::max(); rowHi = -1;
     if (structId || privMode)
         for (int cell : surfaceCells)
         {
@@ -180,8 +195,16 @@ int ObjectVoxelizer::run()
         structId = slabNeeded ? quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete")) : quint16(0);
         woodSingle = !slabNeeded;
     }
-    const auto structFor = [&](int ry) -> quint16
-    { return (structId && (ry <= rowLo + 1 || ry >= rowHi - 1)) ? structId : quint16(0); };
+    return true;
+}
+
+quint16 ObjectVoxelizer::structFor(int ry) const
+{ return (structId && (ry <= rowLo + 1 || ry >= rowHi - 1)) ? structId : quint16(0); }
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
 
     // The interior of a closed mesh: a 3D flood fill of the outer air from the extent boundary; the cells
     // it did not reach are the body of the object.
@@ -801,7 +824,7 @@ int ObjectVoxelizer::run()
         for (int lz = 0; lz < sz; ++lz)
             for (int lx = 0; lx < sx; ++lx)
                 cav[lz * sx + lx] = (grid[lz * sxy + lyC0 * sx + lx] == char(3));
-        auto rectCav = [&cav, sx](int x0, int z0, int w, int h)
+        auto rectCav = [&](int x0, int z0, int w, int h)
         {   // the whole rectangle x0..x0+w-1, z0..z0+h-1 — a cavity?
             for (int z = z0; z < z0 + h; ++z)
                 for (int x = x0; x < x0 + w; ++x)
