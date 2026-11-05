@@ -1,4 +1,5 @@
 #include "export/geom.h"
+#include "export/colkey.h"
 #include <QHash>
 #include <cstring>
 
@@ -225,3 +226,109 @@ void rasterizeTriangle(const QVector3D& t0, const QVector3D& t1, const QVector3D
 }
 
 
+//! Segments from a sorted (sort+unique) list of pairKey(x, z) keys. The key order: by x, inside x
+//! non-negative z in ascending order, then negative ones — so a segment also breaks at the z=-1/0 joint
+//! (that is not terrible: segments do not have to be maximal), then everything is sorted numerically.
+QVector<ColSpan> spansFromCols(const QList<qint64>& sorted)
+{
+    QVector<ColSpan> out;
+    if (sorted.isEmpty()) return out;
+    int px = 0, pz = 0;
+    bool have = false;
+    for (qint64 ck : sorted)
+    {
+        const int x = int(qint32(quint32(quint64(ck) >> 32))), z = int(qint32(quint32(quint64(ck) & 0xFFFFFFFFull)));
+        if (have && x == px && z == pz + 1) out.last().z1 = z;
+        else out.append(ColSpan{ x, z, z });
+        px = x; pz = z; have = true;
+    }
+    std::sort(out.begin(), out.end(), [](const ColSpan& a, const ColSpan& b)
+    { return a.x != b.x ? a.x < b.x : a.z0 < b.z0; });
+    return out;
+}
+
+//! Merge the segments of several polygons into a non-intersecting sorted set (for the "is the column in the forest?" checks).
+QVector<ColSpan> mergeSpans(QVector<ColSpan> v)
+{
+    std::sort(v.begin(), v.end(), [](const ColSpan& a, const ColSpan& b)
+    { return a.x != b.x ? a.x < b.x : a.z0 < b.z0; });
+    QVector<ColSpan> out;
+    for (const ColSpan& c : v)
+    {
+        if (!out.isEmpty() && out.last().x == c.x && c.z0 <= out.last().z1 + 1)
+            out.last().z1 = std::max(out.last().z1, c.z1);
+        else out.append(c);
+    }
+    return out;
+}
+
+//! Whether the column (x, z) belongs to a set of segments (sorted by (x, z0), without intersections).
+bool spansContain(const QVector<ColSpan>& v, int x, int z)
+{
+    auto it = std::upper_bound(v.constBegin(), v.constEnd(), 0, [x, z](int, const ColSpan& c)
+    { return x < c.x || (x == c.x && z < c.z0); });
+    if (it == v.constBegin()) return false;
+    --it;
+    return it->x == x && z >= it->z0 && z <= it->z1;
+}
+
+void footprintColumns(const McWorldExporter::McObject& obj, const VxTransform& tf,
+                             QList<qint64>& out, const std::atomic_bool* cancel)
+{
+    const int nv = obj.vertices.size();
+    if (nv < 3 || obj.indices.size() < 3)
+        return;
+    QVector<QPointF> proj;
+    proj.reserve(nv);
+    for (int i = 0; i < nv; ++i)
+    {
+        const QVector3D& v = obj.vertices[i];
+        proj << QPointF(float(toBlockX(tf, v.x())), float(toBlockZ(tf, v.y())));
+    }
+    for (int i = 0; i + 2 < obj.indices.size(); i += 3)
+    {
+        if ((i & 0x3FFF) == 0 && cancel && cancel->load())
+            return;
+        const quint32 i0 = obj.indices[i], i1 = obj.indices[i + 1], i2 = obj.indices[i + 2];
+        if (i0 >= quint32(nv) || i1 >= quint32(nv) || i2 >= quint32(nv)) continue;
+        const QPointF a = proj[i0], b = proj[i1], c = proj[i2];
+        const double area = (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+        if (std::abs(area) < 1e-6) continue;                   // degenerate (a wall) — not a "patch"
+        double minx = std::min({a.x(), b.x(), c.x()}), maxx = std::max({a.x(), b.x(), c.x()});
+        double minz = std::min({a.y(), b.y(), c.y()}), maxz = std::max({a.y(), b.y(), c.y()});
+        if (maxx - minx > 20000.0 || maxz - minz > 20000.0)    // insurance against giant polygons
+            continue;
+        // Row by row along X: the intersection of the vertical x+0.5 with a triangle is a segment along Z; the cells whose
+        // center is inside are consecutive Z. Before, the whole bbox of the triangle was iterated: for thin
+        // "slivers" of a polygon triangulation that is tens of times its area.
+        const QPointF tri[3] = { a, b, c };
+        const int xLo = int(std::floor(minx)), xHi = int(std::ceil(maxx));
+        for (int X = xLo; X <= xHi; ++X)
+        {
+            const double x = double(X) + 0.5;
+            double zlo = std::numeric_limits<double>::max(), zhi = -zlo;
+            for (int e = 0; e < 3; ++e)
+            {
+                const QPointF& p0 = tri[e];
+                const QPointF& p1 = tri[(e + 1) % 3];
+                const double x0 = p0.x(), x1 = p1.x();
+                if (x < std::min(x0, x1) || x > std::max(x0, x1)) continue;
+                if (x1 == x0)
+                {   // a vertical edge exactly on the line — both ends
+                    zlo = std::min({ zlo, p0.y(), p1.y() }); zhi = std::max({ zhi, p0.y(), p1.y() });
+                    continue;
+                }
+                const double z = p0.y() + (p1.y() - p0.y()) * (x - x0) / (x1 - x0);
+                zlo = std::min(zlo, z); zhi = std::max(zhi, z);
+            }
+            if (zlo > zhi) continue;
+            const int zA = int(std::ceil(zlo - 0.5)), zB = int(std::floor(zhi - 0.5));
+            for (int Z = zA; Z <= zB; ++Z)
+                out.append(pairKey(X, Z));
+        }
+    }
+    // A list + sort/unique instead of a QSet: on forests of tens of millions of columns hash insertions were the main
+    // item of time; duplicates occur only on shared edges of neighboring triangles.
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+}

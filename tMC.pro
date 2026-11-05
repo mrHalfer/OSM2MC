@@ -72,6 +72,7 @@ HEADERS += \
     export/geom.h \
     export/lairset.h \
     export/paledonor.h \
+    export/rails.h \
     export/sites.h \
     export/mcworldexporter.h \
     export/format/bytes.h \
@@ -124,6 +125,7 @@ SOURCES += \
     export/geom.cpp \
     export/lairset.cpp \
     export/paledonor.cpp \
+    export/rails.cpp \
     export/sites.cpp \
     export/format/bytes.cpp \
     core/heightraster.cpp

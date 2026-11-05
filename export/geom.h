@@ -10,6 +10,9 @@
 #include <QVector>
 #include <QVector3D>
 #include <algorithm>
+#include <atomic>
+#include <limits>
+#include <QList>
 #include <cmath>
 
 // Convex clipping of polygons (Sutherland-Hodgman)
@@ -35,6 +38,15 @@ inline double toBlockZ(const VxTransform& tf, double wy) { return (tf.cy0 - wy) 
 void clipHalf3(const Poly3& in, Poly3& out, bool minY, double plane);
 void clipStripX(const Poly2& in, Poly2& out, double x0, double x1);
 bool isRectilinearOutline(const McWorldExporter::McObject& o, double sx, double sy, double tolDeg);
+//! A column segment: x is fixed, z in [z0, z1]. A forest is stored by segments, not by column: on large data
+//! these are tens of millions of columns (gigabytes and tens of seconds of hash insertions) versus tens of thousands of segments.
+struct ColSpan { int x, z0, z1; };
+
+QVector<ColSpan> spansFromCols(const QList<qint64>& sorted);
+QVector<ColSpan> mergeSpans(QVector<ColSpan> v);
+bool spansContain(const QVector<ColSpan>& v, int x, int z);
+void footprintColumns(const McWorldExporter::McObject& obj, const VxTransform& tf,
+                             QList<qint64>& out, const std::atomic_bool* cancel);
 void rasterizeTriangle(const QVector3D& t0, const QVector3D& t1, const QVector3D& t2,
                        int minx, int miny, int minz, int sx, int sy, int sz,
                        QByteArray& grid, QVector<int>& surfaceCells);
