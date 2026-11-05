@@ -35,6 +35,24 @@ private:
     bool woodSingle;
     int privMode;
     int deepRole;
+
+    // The collected outputs, aliased from `out` once: the same names as the
+    // old parameters, so the stage methods read/write them directly.
+    const bool raisedObj;
+    QHash<ColKey, int>& colMin;
+    QHash<ColKey, int>* colAnchor;
+    QVector<ChestSite>* chests;
+    QVector<PaintingSite>* paints;
+    QVector<MannequinSite>* mannequins;
+    QVector<SpawnerSite>* spawners;
+    int* storyCounter;
+    QVector<NpcSite>* npcs;
+    QVector<FrameSite>* frames;
+    QVector<BasementSite>* basements;
+    QVector<SignCand>* signs;
+    QVector<BannerSite>* banners;
+    QVector<LairZone>* zones;
+    QVector<IslandSite>* islands;
 };
 
 ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
@@ -43,8 +61,18 @@ ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const Vx
                                  quint16 structId_, bool woodSingle_, int privMode_, int deepRole_)
     : obj(obj_), tf(tf_), id(id_), store(store_), out(out_), cancel(cancel_),
       sink(sink_), extraBlocks(extraBlocks_), floors(floors_), structId(structId_),
-      woodSingle(woodSingle_), privMode(privMode_), deepRole(deepRole_)
+      woodSingle(woodSingle_), privMode(privMode_), deepRole(deepRole_),
+      raisedObj(obj_.kind == McWorldExporter::McObject::Building && obj_.raised > 0.0),
+      colMin(*out_.colMin), colAnchor(out_.colAnchor),
+      chests(out_.chests), paints(out_.paints), mannequins(out_.mannequins),
+      spawners(out_.spawners), storyCounter(out_.storyCounter),
+      npcs(out_.npcs), frames(out_.frames), basements(out_.basements),
+      signs(out_.signs), banners(out_.banners), zones(out_.zones), islands(out_.islands)
 {
+    // A part raised above the ground (min_height): a floating body - no foundation into the ground,
+    // the ground under it is not touched and not raised (colMin/colAnchor stay without it),
+    // no basement and no dungeon below it.
+    if (raisedObj) { sink = 0; colAnchor = nullptr; basements = nullptr; deepRole = 0; }
 }
 
 //! Voxelizes an object and writes the result into the store; returns the number of written blocks (0 — the object
@@ -61,29 +89,9 @@ int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransform& tf, 
 
 int ObjectVoxelizer::run()
 {
-    // The outputs gathered into VoxelOut: the aliases keep the rest of the body
-    // exactly as it was with the old parameter list.
-    QHash<ColKey, int>& colMin = *out.colMin;         // mandatory at every call site
-    QHash<ColKey, int>* colAnchor = out.colAnchor;
-    QVector<ChestSite>* chests = out.chests;
-    QVector<PaintingSite>* paints = out.paints;
-    QVector<MannequinSite>* mannequins = out.mannequins;
-    QVector<SpawnerSite>* spawners = out.spawners;
-    int* storyCounter = out.storyCounter;
-    QVector<NpcSite>* npcs = out.npcs;
-    QVector<FrameSite>* frames = out.frames;
-    QVector<BasementSite>* basements = out.basements;
-    QVector<SignCand>* signs = out.signs;
-    QVector<BannerSite>* banners = out.banners;
-    QVector<LairZone>* zones = out.zones;
-    QVector<IslandSite>* islands = out.islands;
     const int nv = obj.vertices.size();
     if (nv < 3 || obj.indices.size() < 3)
         return 0;
-    // A part raised above the ground (min_height): a floating body — no foundation into the ground, the ground under it is not touched and not raised
-    // (colMin/colAnchor stay without it), no basement and no dungeon below it
-    const bool raisedObj = obj.kind == McWorldExporter::McObject::Building && obj.raised > 0.0;
-    if (raisedObj) { sink = 0; colAnchor = nullptr; basements = nullptr; deepRole = 0; }
 
     // Into block coordinates + the extent
     QVector<QVector3D> bc;
