@@ -272,6 +272,11 @@ bool spansContain(const QVector<ColSpan>& v, int x, int z)
     return it->x == x && z >= it->z0 && z <= it->z1;
 }
 
+//! The "patch" of an object on XZ: the set of integer columns (blockX, blockZ) whose center falls into the projection
+//! of some mesh triangle onto the horizontal plane. This is how vegetation turns from a
+//! polygon into an area for a forest/grass, without voxelizing the mesh itself. The wall (vertical) triangles
+//! degenerate into a segment and are skipped — the patch is given only by the cap/bottom.
+
 void footprintColumns(const McWorldExporter::McObject& obj, const VxTransform& tf,
                              QList<qint64>& out, const std::atomic_bool* cancel)
 {

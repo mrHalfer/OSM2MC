@@ -65,11 +65,13 @@ HEADERS += \
     scene/modelbuilder.h \
     scene/modeldata.h \
     export/climate.h \
+    export/anvil.h \
     export/blocks.h \
     export/colkey.h \
     export/voxelstore.h \
     export/caveset.h \
     export/geom.h \
+    export/ground.h \
     export/lairset.h \
     export/paledonor.h \
     export/rails.h \
@@ -120,9 +122,11 @@ SOURCES += \
     scene/mcscene.cpp \
     scene/modelbuilder.cpp \
     export/mcworldexporter.cpp \
+    export/anvil.cpp \
     export/blocks.cpp \
     export/caveset.cpp \
     export/geom.cpp \
+    export/ground.cpp \
     export/lairset.cpp \
     export/paledonor.cpp \
     export/rails.cpp \
