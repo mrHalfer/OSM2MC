@@ -15,6 +15,7 @@ set LIBS=/link /LIBPATH:%QT%\lib Qt5Core.lib Qt5Gui.lib Qt5Concurrent.lib
 cl /c %CXXFLAGS% /Fobytes.obj "%ROOT%\export\format\bytes.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foblocks.obj "%ROOT%\export\blocks.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foanvil.obj "%ROOT%\export\anvil.cpp" || goto :fail
+cl /c %CXXFLAGS% /Fobuildingmerge.obj "%ROOT%\export\buildingmerge.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foground.obj "%ROOT%\export\ground.cpp" || goto :fail
 cl /c %CXXFLAGS% /Focaveset.obj "%ROOT%\export\caveset.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fogeom.obj "%ROOT%\export\geom.cpp" || goto :fail
@@ -23,8 +24,8 @@ cl /c %CXXFLAGS% /Folairset.obj "%ROOT%\export\lairset.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fopaledonor.obj "%ROOT%\export\paledonor.cpp" || goto :fail
 cl /c %CXXFLAGS% /Forails.obj "%ROOT%\export\rails.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fomcworldexporter.obj "%ROOT%\export\mcworldexporter.cpp" || goto :fail
-cl %CXXFLAGS% /Fomc_export_test.obj /Fe:mc_export_test.exe "%~dp0mc_export_test.cpp" mcworldexporter.obj geom.obj sites.obj rails.obj anvil.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
-cl %CXXFLAGS% /Fomc_scene_run.obj /Fe:mc_scene_run.exe "%~dp0mc_scene_run.cpp" mcworldexporter.obj geom.obj sites.obj rails.obj anvil.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
+cl %CXXFLAGS% /Fomc_export_test.obj /Fe:mc_export_test.exe "%~dp0mc_export_test.cpp" mcworldexporter.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
+cl %CXXFLAGS% /Fomc_scene_run.obj /Fe:mc_scene_run.exe "%~dp0mc_scene_run.cpp" mcworldexporter.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
 popd
 rem Export templates (caves, lairs, pale forest, wrecks ...) must lie next to the exe
 copy /y "%ROOT%\resources\templates\*.bin" "%OUT%\" >nul

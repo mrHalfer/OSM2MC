@@ -67,6 +67,7 @@ HEADERS += \
     export/climate.h \
     export/anvil.h \
     export/blocks.h \
+    export/buildingmerge.h \
     export/colkey.h \
     export/voxelstore.h \
     export/caveset.h \
@@ -124,6 +125,7 @@ SOURCES += \
     export/mcworldexporter.cpp \
     export/anvil.cpp \
     export/blocks.cpp \
+    export/buildingmerge.cpp \
     export/caveset.cpp \
     export/geom.cpp \
     export/ground.cpp \
