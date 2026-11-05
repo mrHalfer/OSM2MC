@@ -126,6 +126,16 @@ private:
     void buildLight();
     // "Interiors" v2: furniture, paintings, mannequins, shelves, carpets.
     void buildInteriors();
+    // The ominous banners outside the lair (one per compass side).
+    void buildLairBanners();
+    // A floating island over a kindergarten.
+    void buildIsland();
+    // The raider spawn zone inside a large industrial lair.
+    void buildRaiderZone();
+    // A basement room with loot under a private house.
+    void buildBasement();
+    // The aviation warning lights on tall buildings.
+    void buildBeacons();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -3780,38 +3790,8 @@ void ObjectVoxelizer::buildInteriors()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::buildLairBanners()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
-    calcFloors();
-
-    calcPatch();
-    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
-    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
-    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
-    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
-    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
-    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
-
-    buildEntrances();
-    buildWalls();
-    buildLining();
-    buildStairs();
-    buildSlabs();
-    buildCeiling();
-    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
-    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
-    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
-    buildAddressPlate();
-    buildPartitions();
-    buildGableRoof();
-    buildLight();
-    buildInteriors();
     // THE LAIR BANNERS OUTSIDE: on each compass side one ominous banner on the wall of the 1st floor above the door row
     // (2–3 rows above the floor), not on a window, the cell outside is free; closer to the middle of the facade.
     if (lair && banners)
@@ -3844,6 +3824,10 @@ int ObjectVoxelizer::run()
                 banners->append(BannerSite{ bx4[d], by4[d] - sink, bz4[d], d });
             }
     }
+}
+
+void ObjectVoxelizer::buildIsland()
+{
     // A FLOATING ISLAND over a kindergarten (44313000): the center above the building, the semi-axes ~1.25 of the building size (the island is 2–3 building sizes), the height — above the roof.
     if ((obj.code == 44313000 || obj.code == 44312000 || obj.code == 44315000) && islands && obj.closed && sx >= 6 && sz >= 6)
     {
@@ -3856,6 +3840,10 @@ int ObjectVoxelizer::run()
         is.hash = quint32(is.cx) * 374761393u ^ quint32(is.cz) * 668265263u ^ 0x151A9Du;
         islands->append(is);
     }
+}
+
+void ObjectVoxelizer::buildRaiderZone()
+{
     // THE RAIDER SPAWN ZONE: only lairs in industrial zones and only in a large building. We take the largest rectangle of "deep" cells
     // of the 1st-floor interior (with a further inset of a cell from the walls), in height — from the floor to a row below the lowest roof above it: the zone is certainly
     // smaller than the building so that raiders do not spawn outside. Smaller than 8×8 or fewer than 300 cells inside — no zone.
@@ -3921,6 +3909,10 @@ int ObjectVoxelizer::run()
             }
         }
     }
+}
+
+void ObjectVoxelizer::buildBasement()
+{
     // A BASEMENT (a request): in ~30% of private houses — a room from 18 cells (5×5, 5×4, 4×5, 6×3, 3×6 — the first that fits) with a ceiling of 2 blocks under the floor of the 1st floor, a descent by a vertical
     // ladder through a hatch opening in the floor. Inside either a chest with valuable loot or a heap of mobs. The place is chosen after the furniture:
     // 9 cells of the room — there is a floor, under it is empty (neither a foundation nor a past basement); the descent cell is free 2 blocks upward,
@@ -4015,6 +4007,10 @@ int ObjectVoxelizer::run()
             }
         }
     }
+}
+
+void ObjectVoxelizer::buildBeacons()
+{
     // "Aviation beacons" (a user request): on buildings ABOVE 15 floors, starting with the 15th
     // and then every 5th (15-20-25-30) — on the facade, on a pair of DIAGONAL corners (which pair — by
     // the hash of the building and the tier) we hang a wall_torch near the ceiling of the floor (row +3 from the floor). The holder
@@ -4074,5 +4070,44 @@ int ObjectVoxelizer::run()
             }
         }
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
+
+    calcPatch();
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+
+    buildEntrances();
+    buildWalls();
+    buildLining();
+    buildStairs();
+    buildSlabs();
+    buildCeiling();
+    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
+    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
+    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
+    buildAddressPlate();
+    buildPartitions();
+    buildGableRoof();
+    buildLight();
+    buildInteriors();
+    buildLairBanners();
+    buildIsland();
+    buildRaiderZone();
+    buildBasement();
+    buildBeacons();
     return added;
 }
