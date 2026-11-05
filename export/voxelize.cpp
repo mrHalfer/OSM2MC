@@ -80,6 +80,11 @@ private:
     QVector<qint64> entranceKeys;                               // the entrance cells (furniture keeps out)
     QSet<int> forcedWall;                                       // the outer cells where a window is forbidden
 
+    // The wall-patch extent (calcPatch): the facade rectangle and the ridge axis.
+    int fx0 = 0, fx1 = -1, fz0 = 0, fz1 = -1;
+    bool ridgeZ = false;
+    int a0 = 0, a1 = -1, b0 = 0, b1 = -1;
+
     // Rasterizes the mesh into the grid and picks the private-house material.
     // Returns false when the object must be skipped (empty mesh, a huge extent).
     bool buildGrid();
@@ -96,6 +101,10 @@ private:
     int windowDir(int lx, int ly, int lz) const;
     // Writes the wall patch and the windows into the store (entrances already marked).
     void buildWalls();
+    // Computes the facade rectangle and the ridge axis of the wall patch.
+    void calcPatch();
+    // Places the entrances (doors, buttons, plates) and marks forcedWall.
+    void buildEntrances();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -585,34 +594,23 @@ void ObjectVoxelizer::buildWalls()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::calcPatch()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
-    calcFloors();
-
     // The wall patch by surface cells — needed by the pitched roof (the roof used to compute it itself).
-    int fx0 = sx, fx1 = -1, fz0 = sz, fz1 = -1;
+    fx0 = sx; fx1 = -1; fz0 = sz; fz1 = -1;
     for (int cell : surfaceCells)
     {
         const int lx = cell % sx, lz = cell / sxy;
         fx0 = std::min(fx0, lx); fx1 = std::max(fx1, lx);
         fz0 = std::min(fz0, lz); fz1 = std::max(fz1, lz);
     }
-    const bool ridgeZ = (fz1 - fz0) >= (fx1 - fx0);             // the ridge along Z ⇒ slopes along X
-    const int a0 = ridgeZ ? fx0 : fz0, a1 = ridgeZ ? fx1 : fz1; // across the slopes
-    const int b0 = ridgeZ ? fz0 : fx0, b1 = ridgeZ ? fz1 : fx1; // along the ridge
-    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
-    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
-    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
-    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
-    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
-    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+    ridgeZ = (fz1 - fz0) >= (fx1 - fx0);             // the ridge along Z ⇒ slopes along X
+    a0 = ridgeZ ? fx0 : fz0; a1 = ridgeZ ? fx1 : fz1; // across the slopes
+    b0 = ridgeZ ? fz0 : fx0; b1 = ridgeZ ? fz1 : fx1; // along the ridge
+}
 
+void ObjectVoxelizer::buildEntrances()
+{
     // ——— BUILDING ENTRANCES ———
     // Buildings (except elevator shafts LIFT=1 and sheds 44000000) get an entrance in the 1st-floor wall: a 1×2 opening through both
     // walls (the outer layer — a door, the inner one — emptiness). The entrance is MANDATORY: first we look for an ideal place (a flat
@@ -784,6 +782,27 @@ int ObjectVoxelizer::run()
             }
         }
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
+
+    calcPatch();
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+
+    buildEntrances();
     buildWalls();
     // Dark buildings without a single window: cobwebs in the upper corners of rooms (at the ceiling, where at least two walls meet).
     if (nWindows == 0 && obj.closed && sx >= 5 && sz >= 5 && sy >= 4)
