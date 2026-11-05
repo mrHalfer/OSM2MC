@@ -110,6 +110,10 @@ private:
     void buildLining();
     // The inter-floor flights and vertical ladders (marks "5" in the grid).
     void buildStairs();
+    // The 1-block slabs at every next floor level (grid "3" -> store).
+    void buildSlabs();
+    // The plank ceiling over a one-storey private house (no inter-floor slab).
+    void buildCeiling();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -1163,28 +1167,8 @@ void ObjectVoxelizer::buildStairs()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::buildSlabs()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
-    calcFloors();
-
-    calcPatch();
-    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
-    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
-    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
-    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
-    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
-    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
-
-    buildEntrances();
-    buildWalls();
-    buildLining();
-    buildStairs();
     // Inter-floor slabs (1 block) — deep body cells at the floor level of each next floor;
     // the roof serves as the top slab itself, the floor of the first floor is already two-layered (surface+lining).
     // The formula lyLow+1+k*storyP = the walking level of the previous floor + storyP. "+sink" must not
@@ -1213,6 +1197,10 @@ int ObjectVoxelizer::run()
                 }
         }
     }
+}
+
+void ObjectVoxelizer::buildCeiling()
+{
     // A one-storey private house (log walls): there is no floor between stories (fewer than 6 rows, the slab
     // lyLow+5 does not lie), but a ceiling over the room is needed — planks on the top row of walls (lyHigh), under
     // the roof slopes. We never write the flat interior cap of a private house, so here the cell
@@ -1231,6 +1219,32 @@ int ObjectVoxelizer::run()
                 ++added;
             }
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
+
+    calcPatch();
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+
+    buildEntrances();
+    buildWalls();
+    buildLining();
+    buildStairs();
+    buildSlabs();
+    buildCeiling();
     // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
     // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
     auto dkey = [](int bx, int by, int bz)
