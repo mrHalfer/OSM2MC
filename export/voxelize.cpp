@@ -120,6 +120,10 @@ private:
     void buildAddressPlate();
     // The room partitions (a guillotine cut of the cavity) and their door cells.
     void buildPartitions();
+    // The gable (oak half-block) roof of the private-sector codes.
+    void buildGableRoof();
+    // Torches and hanging lanterns on the inner walls of the floors.
+    void buildLight();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -1592,35 +1596,8 @@ void ObjectVoxelizer::buildPartitions()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::buildGableRoof()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
-    calcFloors();
-
-    calcPatch();
-    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
-    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
-    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
-    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
-    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
-    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
-
-    buildEntrances();
-    buildWalls();
-    buildLining();
-    buildStairs();
-    buildSlabs();
-    buildCeiling();
-    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
-    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
-    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
-    buildAddressPlate();
-    buildPartitions();
     // The gable roof of the private sector (a user request) for bldpol with the codes
     // 44400002 / 44400100 / 44400110: two slopes of oak half blocks (oak_slab, alternating
     // type=bottom/top: a rise of 0.5 block per column — "first a half block in the lower position,
@@ -1732,6 +1709,10 @@ int ObjectVoxelizer::run()
             }
         }
     }
+}
+
+void ObjectVoxelizer::buildLight()
+{
     // The light inside (a user request): torches on the inner walls of floors — not often (a block
     // ~1/10 by the cell hash, no closer than 6 blocks to already hanging lights) and carrying lamps under
     // the floor (lantern hanging=true) with the same distance, so that the light comes in "spots", not a garland.
@@ -1865,6 +1846,39 @@ int ObjectVoxelizer::run()
             }
         }
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
+
+    calcPatch();
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+
+    buildEntrances();
+    buildWalls();
+    buildLining();
+    buildStairs();
+    buildSlabs();
+    buildCeiling();
+    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
+    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
+    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
+    buildAddressPlate();
+    buildPartitions();
+    buildGableRoof();
+    buildLight();
     // "Interiors" v2 (a request: "houses stopped being boxes"; edits after the first test:
     // the table top is a slab ON TOP of the fence (type=top: the bottom slab sank into the post —
     // a "half block in the center"); the chairs are turned: facing = AWAY from the table, the bottom to the table; no more
