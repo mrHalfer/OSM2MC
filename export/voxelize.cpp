@@ -7,6 +7,46 @@
 #include <cmath>
 #include <limits>
 
+
+// Everything a single-object voxelization needs: the object mesh, the transform,
+// the store to write into and the collected outputs (the old parameter list).
+class ObjectVoxelizer
+{
+public:
+    ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
+                    VoxelStore& store_, const VoxelOut& out_, const std::atomic_bool* cancel_,
+                    int sink_, int extraBlocks_, bool floors_,
+                    quint16 structId_, bool woodSingle_, int privMode_, int deepRole_);
+
+    // Voxelizes the object; returns the number of written blocks (0 - skipped).
+    int run();
+
+private:
+    const McWorldExporter::McObject& obj;
+    const VxTransform& tf;
+    quint16 id;
+    VoxelStore& store;
+    const VoxelOut& out;
+    const std::atomic_bool* cancel;
+    int sink;
+    int extraBlocks;
+    bool floors;
+    quint16 structId;
+    bool woodSingle;
+    int privMode;
+    int deepRole;
+};
+
+ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
+                                 VoxelStore& store_, const VoxelOut& out_, const std::atomic_bool* cancel_,
+                                 int sink_, int extraBlocks_, bool floors_,
+                                 quint16 structId_, bool woodSingle_, int privMode_, int deepRole_)
+    : obj(obj_), tf(tf_), id(id_), store(store_), out(out_), cancel(cancel_),
+      sink(sink_), extraBlocks(extraBlocks_), floors(floors_), structId(structId_),
+      woodSingle(woodSingle_), privMode(privMode_), deepRole(deepRole_)
+{
+}
+
 //! Voxelizes an object and writes the result into the store; returns the number of written blocks (0 — the object
 //! was skipped: an empty mesh or an extent beyond reason). colMin — the minimum voxel Y of the object per
 //! XZ column (for the subsequent ground fill), it is updated.
@@ -14,6 +54,12 @@ int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransform& tf, 
                    VoxelStore& store, const VoxelOut& out, const std::atomic_bool* cancel,
                    int sink, int extraBlocks, bool floors,
                    quint16 structId, bool woodSingle, int privMode, int deepRole)
+{
+    return ObjectVoxelizer(obj, tf, id, store, out, cancel, sink, extraBlocks, floors,
+                           structId, woodSingle, privMode, deepRole).run();
+}
+
+int ObjectVoxelizer::run()
 {
     // The outputs gathered into VoxelOut: the aliases keep the rest of the body
     // exactly as it was with the old parameter list.
