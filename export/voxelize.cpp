@@ -79,6 +79,7 @@ private:
     int nWindows = 0;                                           // the windows (0 - cobwebs inside)
     QVector<qint64> entranceKeys;                               // the entrance cells (furniture keeps out)
     QSet<int> forcedWall;                                       // the outer cells where a window is forbidden
+    QSet<ColKey> stairXZ;                                       // the cells (lx,lz) of flights and ladders: furniture is not placed in front of or under them
 
     // The wall-patch extent (calcPatch): the facade rectangle and the ridge axis.
     int fx0 = 0, fx1 = -1, fz0 = 0, fz1 = -1;
@@ -107,6 +108,8 @@ private:
     void buildEntrances();
     // Cobwebs in windowless buildings and the interior lining (grid 4) pass.
     void buildLining();
+    // The inter-floor flights and vertical ladders (marks "5" in the grid).
+    void buildStairs();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -849,27 +852,8 @@ void ObjectVoxelizer::buildLining()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::buildStairs()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
-    calcFloors();
-
-    calcPatch();
-    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
-    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
-    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
-    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
-    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
-    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
-
-    buildEntrances();
-    buildWalls();
-    buildLining();
     // Inter-floor stairs (a user request, globally for multi-storey buildings). The "head-on" criterion:
     // we scan the cavity of the 1st floor row by row — where a flight window fits
     // (storyP+1) x 2..3 blocks (the very "patch of ~6x10") — we put a staircase there; in LARGE
@@ -883,7 +867,6 @@ int ObjectVoxelizer::run()
     // step j occupies the cell lyS-R+j (R = storyP, +1 in the private sector), the top one stands INSTEAD of
     // the slab. "+sink" is
     // not needed here: the foundation is already in the grid, an external shift dropped the flight under the floor.
-    QSet<ColKey> stairXZ;                                       // the cells (lx,lz) of flights and ladders: furniture is not placed in front of or under them
     if (floors && obj.closed && storyP > 0 && nStories >= 2 && lyLow + 2 <= lyHigh - 2)
     {
         // The private sector: the walking level of the 1st floor is lyLow+1 (a 1-block foundation), one step more
@@ -1178,6 +1161,30 @@ int ObjectVoxelizer::run()
                 ladderFlight(lyS - R + 1, lyS);                 // the bottom ladder — in the walking cell of the floor
         }
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
+
+    calcPatch();
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+
+    buildEntrances();
+    buildWalls();
+    buildLining();
+    buildStairs();
     // Inter-floor slabs (1 block) — deep body cells at the floor level of each next floor;
     // the roof serves as the top slab itself, the floor of the first floor is already two-layered (surface+lining).
     // The formula lyLow+1+k*storyP = the walking level of the previous floor + storyP. "+sink" must not
