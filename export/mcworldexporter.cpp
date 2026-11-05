@@ -13882,7 +13882,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             const int tx = keyFirst(cell) * 5 + int(hs % 5u), tz = keySecond(cell) * 5 + int((hs >> 8) % 5u);
             const ColKey ck = pairKey(tx, tz);
             if (!cemeteryCols.contains(ck)) continue;                            // the tree spot fell outside the contour
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)
+                || colWool.contains(ck)) continue;                     // paved squares and roadways are no place for a grave tree (a request)
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(tx, y0, tz) != IdAir) continue;                        // something already stands here
             const int h = 7 + int(hs % 4u);                                   // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
@@ -13894,28 +13895,32 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         for (ColKey ck : cemeteryCols)
             cells3.insert(pairKey(floorC3(keyFirst(ck)), floorC3(keySecond(ck))));
         for (ColKey cell : cells3)
-        {   // stone crosses — a quarter of the 3x3 cells (a request: half as many); the whole cross must stand in the air
+        {   // stone crosses — ~17% of the 3x3 cells (a request: ~1.5x fewer, so the paths between the graves are wider);
+            // the whole cross must stand in the air
             const quint32 hc = colHash(cell ^ 0xC83C11ull);
-            if (hc % 100u >= 25u) continue;
+            if (hc % 100u >= 17u) continue;
             const int tx = keyFirst(cell) * 3 + int(hc % 3u), tz = keySecond(cell) * 3 + int((hc >> 8) % 3u);
             const ColKey ck = pairKey(tx, tz);
             if (!cemeteryCols.contains(ck)) continue;
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
+                || colWool.contains(ck)) continue;                                 // no crosses on roadways and paved squares (a request)
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(tx, y0, tz) != IdAir || store.get(tx, y0 + 1, tz) != IdAir || store.get(tx, y0 + 2, tz) != IdAir
                 || store.get(tx - 1, y0 + 2, tz) != IdAir || store.get(tx + 1, y0 + 2, tz) != IdAir) continue;
-            if (roadCols.contains(pairKey(tx - 1, tz)) || roadCols.contains(pairKey(tx + 1, tz))) continue;   // the crossbar must not hang over a roadway (a request)
+            if (roadCols.contains(pairKey(tx - 1, tz)) || roadCols.contains(pairKey(tx + 1, tz))
+                || colWool.contains(pairKey(tx - 1, tz)) || colWool.contains(pairKey(tx + 1, tz))) continue;   // nor may the crossbar hang over one (a request)
             store.set(tx, y0, tz, qStoneC);                          // a stone base
             store.set(tx, y0 + 1, tz, IdCobbleWall);                 // the upright
             store.set(tx, y0 + 2, tz, IdCobbleWall);
             store.set(tx - 1, y0 + 2, tz, IdCobbleWall);             // the crossbar
             store.set(tx + 1, y0 + 2, tz, IdCobbleWall);
             ++nCross;
-            if (hc % 100u >= 9u) continue;                           // a jack o'lantern by 9% of the cells (~1/4 of the old share — a request)
+            if (hc % 100u >= 6u) continue;                            // a jack o'lantern by ~6% of the cells (kept proportional to the rarer crosses)
             const int side = ((hc >> 10) & 1u) ? 1 : -1;
             const int px = tx + side * 2;
             const ColKey pk = pairKey(px, tz);
             if (colWater.contains(pk) || roadCols.contains(pk) || colMin.contains(pk) || railColsAll.contains(pk)
+                || colWool.contains(pk)
                 || store.get(px, y0, tz) != IdAir || store.get(px, y0 + 1, tz) != IdAir) continue;
             store.set(px, y0, tz, IdFence);                          // a fence post (no connections)
             store.set(px, y0 + 1, tz, quint16(IdJackLanternBase + int((hc >> 12) % 4u)));   // the lit face looks by hash
@@ -13925,7 +13930,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         {   // carved pumpkins dot the grass (~0.75% of the columns — a request: four times rarer)
             const quint32 hp = colHash(ck ^ 0x9AB1CEull);
             if (hp % 400u >= 3u) continue;
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || colWool.contains(ck)) continue;
             const int bx = keyFirst(ck), bz = keySecond(ck);
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(bx, y0, bz) != IdAir) continue;
@@ -13942,7 +13947,8 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             const int mx = keyFirst(cell) * 6 + int(hm % 6u), mz = keySecond(cell) * 6 + int((hm >> 8) % 6u);
             const ColKey ck = pairKey(mx, mz);
             if (!cemeteryCols.contains(ck)) continue;
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
+                || colWool.contains(ck)) continue;
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(mx, y0, mz) != IdAir || store.get(mx, y0 + 1, mz) != IdAir) continue;   // the body needs two rows
             NpcSite ms;
@@ -13955,20 +13961,22 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         for (ColKey ck : cemeteryCols)
             cells9.insert(pairKey(floorC9(keyFirst(ck)), floorC9(keySecond(ck))));
         for (ColKey cell : cells9)
-        {   // the loot of the old graves — ~1 cell out of 15 of the 9x9 grid (a request: many more chests):
+        {   // the loot of the old graves — a 9x9 grid; buried graves twice as often as the ground ones (a request):
             // a chest standing on the ground OR buried under a grave (the chest lies in the dug row of the old
             // surface under a turf cover with a headstone — the lid is blocked, the treasure must be dug out).
-            // Middling loot often, expensive rarely — pCheap=0 in pickChestLoot.
+            // Buried: 20% expensive, 80% middling; ground chests: 80% cheap, 20% middling (a request).
             const quint32 hl = colHash(cell ^ 0x51E9Cull);
-            if (hl % 1000u >= 65u) continue;
+            const bool wantBuried = (hl & 1u) != 0;                 // half of the candidates ask for a buried grave
+            if (hl % 1000u >= (wantBuried ? 130u : 65u)) continue;  // buried ones twice as often (a request), the ground ones as before
             const int tx = keyFirst(cell) * 9 + int(hl % 9u), tz = keySecond(cell) * 9 + int((hl >> 8) % 9u);
             const ColKey ck = pairKey(tx, tz);
             if (!cemeteryCols.contains(ck)) continue;
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
+                || colWool.contains(ck)) continue;
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(tx, y0, tz) != IdAir || store.get(tx, y0 + 1, tz) != IdAir) continue;
             bool buried = false;
-            if (hl & 1u)
+            if (wantBuried)
             {   // a buried grave: dig one row of the column (the writer builds it from `top`), the chest at the
                 // old surface level, a turf block covers it from above, a cobblestone wall marks the grave
                 const auto git = ground.find(pairKey(tx >> 4, tz >> 4));
@@ -13980,7 +13988,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     {
                         git.value().top[col] = qint16(T - 1);
                         store.set(tx, T, tz, IdChest);
-                        chests << ChestSite{ tx, T, tz, pickChestLoot(hl >> 4, 0, 65) };
+                        chests << ChestSite{ tx, T, tz, pickChestLoot(hl >> 4, 0, 80) };   // 80% middling, 20% expensive
                         store.set(tx, T + 1, tz, IdGrass);
                         store.set(tx, T + 2, tz, IdCobbleWall);
                         buried = true;
@@ -13990,7 +13998,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             if (!buried)
             {
                 store.set(tx, y0, tz, IdChest);
-                chests << ChestSite{ tx, y0, tz, pickChestLoot(hl >> 4, 0, 65) };
+                chests << ChestSite{ tx, y0, tz, pickChestLoot(hl >> 4, 80, 20) };   // 80% cheap, 20% middling (a request)
             }
             ++nCemChest;
         }
@@ -14882,12 +14890,30 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                     {
                     case 53510000:
                     {   // CEMETERY: rows of graves every 3 blocks along and 4 across: a gravestone (a stone wall 2 blocks) or a cross (a fence), in front of it a mound of coarse dirt; rare flowers
+                        const quint16 paveA = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
+                        const quint16 paveB = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+                        auto pavedC = [&](int u, int v) -> bool
+                        {   // a roadway, a paved square or water under the grave spot (a request: roads cross the cemetery);
+                            // the surface row is checked too: paving can get there without leaving a mark in the maps
+                            const QPoint q = toXZ(u, v);
+                            const ColKey ck = pairKey(q.x(), q.y());
+                            if (roadCols.contains(ck) || colWool.contains(ck) || colWater.contains(ck)) return true;
+                            const auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
+                            if (git != ground.end())
+                            {
+                                const quint16 s = git->surf[(q.y() & 15) * 16 + (q.x() & 15)];
+                                if (s >= IdWoolBase && s < quint16(IdWoolBase + kWoolsCount)) return true;
+                                if (s == paveA || s == paveB) return true;
+                            }
+                            return false;
+                        };
                         for (int v = 2; v < Wd - 2; v += 4)
                             for (int u = 2; u < L - 2; u += 3)
                             {
                                 const quint32 hq = colHash(pairKey(u * 31, v * 17) ^ ring.first() ^ 0xC3E7ull);
                                 if (hq % 100u >= 70u) continue;
                                 if (!(freeCol(u, v, 3) && freeCol(u, v + 1, 1) && freeCol(u, v + 2, 1))) continue;
+                                if (pavedC(u, v) || pavedC(u, v + 1) || pavedC(u, v + 2)) continue;   // no grave across a road (a request)
                                 if ((hq >> 8) % 100u < 55u)
                                 {   // a gravestone
                                     put1(u, v, 0, IdStoneBrickWall);
@@ -14896,11 +14922,12 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                                 else
                                 {   // a cross
                                     put1(u, v, 0, IdFence); put1(u, v, 1, IdFence); put1(u, v, 2, IdFence);
-                                    if (freeCol(u - 1, v, 2) && freeCol(u + 1, v, 2)) { put1(u - 1, v, 1, IdFence); put1(u + 1, v, 1, IdFence); }
+                                    if (freeCol(u - 1, v, 2) && freeCol(u + 1, v, 2)
+                                        && !pavedC(u - 1, v) && !pavedC(u + 1, v)) { put1(u - 1, v, 1, IdFence); put1(u + 1, v, 1, IdFence); }
                                 }
                                 put1(u, v + 1, 0, IdCoarseDirt);                          // a grave mound
                                 put1(u, v + 2, 0, IdCoarseDirt);
-                                if ((hq >> 16) % 100u < 25u) flowerAt(u + 1, v + 1);
+                                if ((hq >> 16) % 100u < 25u && !pavedC(u + 1, v + 1)) flowerAt(u + 1, v + 1);
                                 ++nEq;
                             }
                         // benches at the edge
@@ -14908,7 +14935,7 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                         {
                             const int u0 = 1 + k * std::max(4, L - 5);
                             bool ok = true;
-                            for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, 1, 1);
+                            for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, 1, 1) && !pavedC(u, 1);
                             if (!ok) continue;
                             for (int u = u0; u < u0 + 3; ++u) put1(u, 1, 0, alongX ? IdStairsS : IdStairsE);
                             ++nEq;
@@ -17875,37 +17902,6 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         }
     }
 
-    lap("before 3.576");
-    // 3.576 Rail platforms (rdcpol 62134000): a stone brick half SLAB over the stone-brick paving
-    // (a user request: "the platform is raised by half a block"). Laid AFTER the street furniture (3.57)
-    // and the point objects (3.575): where something solid already stands (a lamp post, a shelter) the
-    // slab gives up its cell (a request); low plants are removed first.
-    if (!platformCols.isEmpty())
-    {
-        const quint16 kSlab = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_brick_slab"));
-        int nSlab = 0;
-        for (const qint64 ck : platformCols)
-        {
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            if (!ground.contains(pairKey(bx >> 4, bz >> 4))) continue;  // the platform crossed the world edge — no ground, no slab
-            if (colWater.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)) continue;
-            const int y0 = surfaceTop(ck) + 1;
-            const quint16 cur = store.get(bx, y0, bz);
-            if (cur != IdAir)
-            {
-                if (!isVegBlockId(cur)) continue;                        // a post or a wall — the slab is not needed here
-                store.erase(bx, y0, bz);
-                const quint16 up = store.get(bx, y0 + 1, bz);
-                if (up && isVegBlockId(up)) store.erase(bx, y0 + 1, bz);   // tall grass — both of its rows
-            }
-            store.set(bx, y0, bz, kSlab);
-            ++nSlab;
-        }
-        char sbuf[96];
-        snprintf(sbuf, sizeof sbuf, "3.576 platform slabs: %d of %d columns", nSlab, int(platformCols.size()));
-        tmcStepLog(sbuf);
-    }
-
     lap("before 3.59");
     beginStep(9);
     // 3.59 Extra ground fill for "late" chunks: the site fences (3.57) and lamp posts are written
@@ -18181,6 +18177,61 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 }
             }
         }
+    }
+
+    lap("before 3.576");
+    // 3.576 Rail platforms (rdcpol 62134000): a stone brick half SLAB over the stone-brick paving
+    // (a user request: "the platform is raised by half a block"). Runs LAST — after every ground correction
+    // (3.59 adds the ground of the "late" chunks, 3.59b/c bevel the world edge): only here the full set of
+    // the saved columns and their true surfaces are known. The slab reads the ground chunk itself: its top row
+    // and the condition that the paving is still paving (not overwritten by a road or water). Where something
+    // solid already stands (a lamp post, a shelter) the slab gives up its cell (a request); low plants go first.
+    if (!platformCols.isEmpty())
+    {
+        const quint16 kSlab = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_brick_slab"));
+        const quint16 kPave = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+        int nSlab = 0;
+        for (const qint64 ck : platformCols)
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const auto git = ground.constFind(pairKey(bx >> 4, bz >> 4));
+            if (git == ground.constEnd()) continue;              // the platform crossed the world edge — no ground here
+            const int col = (bz & 15) * 16 + (bx & 15);
+            if (git.value().surf[col] != kPave) continue;        // the paving was hidden under a road or a square — no slab
+            const int y0 = git.value().top[col] + 1;
+            // NOTE: no colMin/railColsAll guards — the yard rails and the station raise them over whole platforms
+            // while the row above their paving stays free (rails that really lie on this row are caught below).
+            if (colWater.contains(ck)) continue;                 // water over the paving — no slab
+            int yTop = y0;
+            quint16 cur = store.get(bx, yTop, bz);
+            if (cur != IdAir && !isVegBlockId(cur))
+            {   // something stands on this ground row: when the ground was dug down for an underground hall or a
+                // tunnel, its old surface was restored over the ceiling as paving — the slab belongs there (a request)
+                int ry = 0;
+                for (int yy = y0 + 32; yy > y0; --yy)   // from the top: the restored surface is the highest one
+                {
+                    if (store.get(bx, yy, bz) != kPave) continue;
+                    const quint16 ab = store.get(bx, yy + 1, bz);
+                    const quint16 bl = store.get(bx, yy - 1, bz);
+                    if ((ab == IdAir || isVegBlockId(ab)) && bl != IdAir) { ry = yy; break; }   // paving over solid fill, not a lone block in a shaft
+                }
+                if (!ry) continue;                               // a real obstacle (a post, a rail) — the slab gives up
+                yTop = ry + 1;
+            }
+            cur = store.get(bx, yTop, bz);
+            if (cur != IdAir)
+            {
+                if (!isVegBlockId(cur)) continue;                        // should not happen: guarded above
+                store.erase(bx, yTop, bz);
+                const quint16 up = store.get(bx, yTop + 1, bz);
+                if (up && isVegBlockId(up)) store.erase(bx, yTop + 1, bz);   // tall grass — both of its rows
+            }
+            store.set(bx, yTop, bz, kSlab);
+            ++nSlab;
+        }
+        char sbuf[96];
+        snprintf(sbuf, sizeof sbuf, "3.576 platform slabs: %d of %d columns", nSlab, int(platformCols.size()));
+        tmcStepLog(sbuf);
     }
 
     lap("before 4.");

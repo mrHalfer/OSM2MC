@@ -5,6 +5,22 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.3.26.11052] — 2026-11-05
+
+### Added
+
+- Three screenshots in the README galleries: street infrastructure at sunset, a creepy cemetery, a metro station hall.
+
+### Changed
+
+- Cemeteries: about 1.5x fewer stone crosses and jack o'lanterns — the paths between the graves are wider now.
+- Cemeteries: buried chests under the old graves are twice as common; buried ones hold expensive loot in every fifth chest (the rest — middling), ground chests mostly cheap loot with some middling.
+
+### Fixed
+
+- Railway platforms: the stone-brick half slabs now cover the whole platform polygon, not only its rim; the slabs also follow the paving restored above underground halls and tunnels (where rails or the station really cross the platform the slab still gives up its cell).
+- Cemeteries: the whole grave kit — the gravestone and cross rows, the stone crosses, pumpkins, monsters and grave trees — no longer spawns on paved roadways, parking lots and station squares, including the roads that run through the cemetery polygon.
+
 ## [1.3.26.11051] — 2026-11-05
 
 ### Added
@@ -226,7 +242,7 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ### Added
 - The look of a dome follows `roof:colour` / `roof:material`: the concrete of the nearest colour; a spire only on yellow/gold (gold block), blue (lapis block), light blue (diamond block), red (redstone block) and black (coal block) domes. A glass dome (`roof:material=glass`) is a transparent hemisphere with the ceiling under it cut out, so the upper floor is seen through it.
-- A gallery of screenshots in the READMEs (`images/shots/`, 18 pictures 1600×800 with 400×200 previews).
+- A gallery of screenshots in the READMEs (`images/shots/`, 21 pictures 1600×800 with 400×200 previews).
 
 ### Changed
 - Buildings with the glass material: the walls are concrete (the floors, the roof, the foundation and the inner partitions too), and the windows are the panoramic ones, as in the shopping malls.
