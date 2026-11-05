@@ -18,14 +18,15 @@ cl /c %CXXFLAGS% /Foanvil.obj "%ROOT%\export\anvil.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fobuildingmerge.obj "%ROOT%\export\buildingmerge.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foground.obj "%ROOT%\export\ground.cpp" || goto :fail
 cl /c %CXXFLAGS% /Focaveset.obj "%ROOT%\export\caveset.cpp" || goto :fail
+cl /c %CXXFLAGS% /Fofacade.obj "%ROOT%\export\facade.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fogeom.obj "%ROOT%\export\geom.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fosites.obj "%ROOT%\export\sites.cpp" || goto :fail
 cl /c %CXXFLAGS% /Folairset.obj "%ROOT%\export\lairset.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fopaledonor.obj "%ROOT%\export\paledonor.cpp" || goto :fail
 cl /c %CXXFLAGS% /Forails.obj "%ROOT%\export\rails.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fomcworldexporter.obj "%ROOT%\export\mcworldexporter.cpp" || goto :fail
-cl %CXXFLAGS% /Fomc_export_test.obj /Fe:mc_export_test.exe "%~dp0mc_export_test.cpp" mcworldexporter.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
-cl %CXXFLAGS% /Fomc_scene_run.obj /Fe:mc_scene_run.exe "%~dp0mc_scene_run.cpp" mcworldexporter.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
+cl %CXXFLAGS% /Fomc_export_test.obj /Fe:mc_export_test.exe "%~dp0mc_export_test.cpp" mcworldexporter.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj facade.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
+cl %CXXFLAGS% /Fomc_scene_run.obj /Fe:mc_scene_run.exe "%~dp0mc_scene_run.cpp" mcworldexporter.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj facade.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
 popd
 rem Export templates (caves, lairs, pale forest, wrecks ...) must lie next to the exe
 copy /y "%ROOT%\resources\templates\*.bin" "%OUT%\" >nul

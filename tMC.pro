@@ -69,6 +69,7 @@ HEADERS += \
     export/blocks.h \
     export/buildingmerge.h \
     export/colkey.h \
+    export/facade.h \
     export/voxelstore.h \
     export/caveset.h \
     export/geom.h \
@@ -127,6 +128,7 @@ SOURCES += \
     export/blocks.cpp \
     export/buildingmerge.cpp \
     export/caveset.cpp \
+    export/facade.cpp \
     export/geom.cpp \
     export/ground.cpp \
     export/lairset.cpp \
