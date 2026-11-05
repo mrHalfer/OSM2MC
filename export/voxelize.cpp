@@ -105,6 +105,8 @@ private:
     void calcPatch();
     // Places the entrances (doors, buttons, plates) and marks forcedWall.
     void buildEntrances();
+    // Cobwebs in windowless buildings and the interior lining (grid 4) pass.
+    void buildLining();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -784,26 +786,8 @@ void ObjectVoxelizer::buildEntrances()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::buildLining()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
-    calcFloors();
-
-    calcPatch();
-    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
-    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
-    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
-    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
-    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
-    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
-
-    buildEntrances();
-    buildWalls();
     // Dark buildings without a single window: cobwebs in the upper corners of rooms (at the ceiling, where at least two walls meet).
     if (nWindows == 0 && obj.closed && sx >= 5 && sz >= 5 && sy >= 4)
     {
@@ -863,6 +847,29 @@ int ObjectVoxelizer::run()
             ++added;
         }
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
+
+    calcPatch();
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+
+    buildEntrances();
+    buildWalls();
+    buildLining();
     // Inter-floor stairs (a user request, globally for multi-storey buildings). The "head-on" criterion:
     // we scan the cavity of the 1st floor row by row — where a flight window fits
     // (storyP+1) x 2..3 blocks (the very "patch of ~6x10") — we put a staircase there; in LARGE
