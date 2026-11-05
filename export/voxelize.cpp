@@ -70,6 +70,10 @@ private:
     bool buildGrid();
     // The structural material (foundation/slabs/roof rows) for the wall row ry.
     quint16 structFor(int ry) const;
+    // The interior of a closed mesh: a 3D flood fill of the outer air; the cells it
+    // did not reach are the body; a merged complex removes the inner walls; the deeper
+    // body cells stay air, the 2-block shell becomes the lining (grid 4).
+    void floodFillBody();
 };
 
 ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
@@ -201,11 +205,8 @@ bool ObjectVoxelizer::buildGrid()
 quint16 ObjectVoxelizer::structFor(int ry) const
 { return (structId && (ry <= rowLo + 1 || ry >= rowHi - 1)) ? structId : quint16(0); }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::floodFillBody()
 {
-    if (!buildGrid())
-        return 0;
-
     // The interior of a closed mesh: a 3D flood fill of the outer air from the extent boundary; the cells
     // it did not reach are the body of the object.
     if (obj.closed && vol <= 8ll * 1024 * 1024)
@@ -299,6 +300,14 @@ int ObjectVoxelizer::run()
         for (int c : skin)
             grid[c] = char(4);                                // 4 = the inner lining (written)
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
 
     auto addVoxel = [&](int bx, int by, int bz, quint16 vid = 0)
     {
