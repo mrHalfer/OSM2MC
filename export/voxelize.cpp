@@ -74,6 +74,12 @@ private:
     bool priv = false, shedThin = false, lowF = false, thinW = false, wide2 = false;
     bool lair = false;                                          // the bandit lair roll outcome
 
+    // Counters and marks of the building passes.
+    int added = 0;                                              // the written blocks (the return value)
+    int nWindows = 0;                                           // the windows (0 - cobwebs inside)
+    QVector<qint64> entranceKeys;                               // the entrance cells (furniture keeps out)
+    QSet<int> forcedWall;                                       // the outer cells where a window is forbidden
+
     // Rasterizes the mesh into the grid and picks the private-house material.
     // Returns false when the object must be skipped (empty mesh, a huge extent).
     bool buildGrid();
@@ -88,6 +94,8 @@ private:
     // The window definition: 0 - not a window; else the offset of the "inner" wall
     // block behind the glass (-1 in X, -sxy in Z; positive values face the other way).
     int windowDir(int lx, int ly, int lz) const;
+    // Writes the wall patch and the windows into the store (entrances already marked).
+    void buildWalls();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -113,6 +121,13 @@ private:
         // colMin would have been raised to the torch tier, and a dirt/stone
         // column would have grown under an empty point (the same mechanism as the "armor" of L-shaped private-sector houses).
         store.set(bx, by - sink, bz, vid);
+    }
+
+    // The cell (lx,ly,lz) sits above a cavity (3) - the interior of the object.
+    bool interiorCol(int lx, int ly, int lz) const
+    {
+        const int c = lz * sxy + ly * sx + lx;
+        return grid[c - sx] == char(3) || grid[c - 2 * sx] == char(3);
     }
     // The facade-line hash for the lair roll and the mall mullion phase.
     static quint32 lineHash(qint64 k)
@@ -518,6 +533,58 @@ int ObjectVoxelizer::windowDir(int lx, int ly, int lz) const
                                                                   // the street into the wall thickness
 }
 
+void ObjectVoxelizer::buildWalls()
+{
+    nWindows = 0;                                     // windows in the building (without a single window — cobwebs inside)
+    for (int cell : surfaceCells)
+    {
+        if (grid[cell] == char(5)) continue;              // a pre-marked hole — we do not write it
+        const int lx = cell % sx;
+        const int ly = (cell / sx) % sy;
+        const int lz = cell / (sx * sy);
+        if (priv && lyHigh >= 0 && ly == lyHigh && interiorCol(lx, ly, lz))
+            continue;                                     // the private sector: we write the flat cap
+                                                          // only on the wall ring (the slopes hold onto it)
+        const int dir = forcedWall.contains(cell) ? 0 : windowDir(lx, ly, lz);   // there are no windows at an entrance
+        addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : IdGlass) : structFor(ly));
+        if (dir) ++nWindows;
+        if (dir)                                                // a window all the way through (a user request):
+        {                                                       // the second block of the two-layer wall behind the glass
+            const bool ok = (dir == 1 && lx + 1 < sx) || (dir == -1 && lx > 0)
+                         || (dir == sxy && lz + 1 < sz) || (dir == -sxy && lz > 0);
+            if (ok)
+            {
+                const int inner = cell + dir;
+                if (grid[inner] == char(4))
+                {
+                    grid[inner] = char(5);                      // 5 — a hole behind the glass (a skip in the lining)
+                    // A flower pot on the windowsill (a user request): with a 30% chance behind the
+                    // LOWER glass of the strip a flower_pot with a random flower appears — it is visible from
+                    // the street through the glass, it stands on the wall block of the row under the window. The exception is malls.
+                    // A holder is mandatory: the row under the hole must be written (4) or be blind (1).
+                    const quint32 hp = lineHash(pairKey(minx + lx, minz + lz) ^ (qint64(ly) << 32)
+                                                 ^ 0xF10E5ull);
+                    const int below = grid[inner - sx];         // ly>=1: the window is not in the bottom row
+                    // In a 2×2 window the windowsill is under the LEFT glass of the pair (a window = one planter, not
+                    // two; this also keeps the pot density from eating the "see-through" of the windows in the big-check).
+                    const int alongP = (dir == 1 || dir == -1) ? lz : lx;
+                    const bool potCol = !wide2 || ((((alongP % 4) + 4) % 4) == 1);
+                    if (!panor && !obj.lift && potCol && (hp % 100u) < 30u
+                        && (ly - lyLow - (lowF ? 1 : 2)) % storyP == 1  // the pot — under the LOWER glass of the strip
+                        && (below == char(4) || below == char(1)))
+                    {
+                        const int px = minx + lx + (dir == 1 ? 1 : dir == -1 ? -1 : 0);
+                        const int pz = minz + lz + (dir == sxy ? 1 : dir == -sxy ? -1 : 0);
+                        const int fl = int((hp >> 8) % quint32(kFlowersCount));
+                        addVoxel(px, miny + ly, pz, quint16(IdFlowerPotBase + fl));
+                    }
+                }
+            }
+        }
+        ++added;
+    }
+}
+
 int ObjectVoxelizer::run()
 {
     if (!buildGrid())
@@ -545,13 +612,7 @@ int ObjectVoxelizer::run()
     // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
     // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
     // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
-    const auto interiorCol = [&](int lx, int ly, int lz)      // the cell (lx,ly,lz) — is it above a cavity?
-    {
-        const int c = lz * sxy + ly * sx + lx;
-        return grid[c - sx] == char(3) || grid[c - 2 * sx] == char(3);
-    };
 
-    int added = 0;
     // ——— BUILDING ENTRANCES ———
     // Buildings (except elevator shafts LIFT=1 and sheds 44000000) get an entrance in the 1st-floor wall: a 1×2 opening through both
     // walls (the outer layer — a door, the inner one — emptiness). The entrance is MANDATORY: first we look for an ideal place (a flat
@@ -559,8 +620,6 @@ int ObjectVoxelizer::run()
     // one entrance, apartment buildings (44400000) — from 1 to 5 entrances along the facade length. Doors: 90% iron ("locked"),
     // 10% wooden of the wall color; malls and churches — double wooden ones; for large malls (a plan from 1200 m²) in front of the
     // doors there are stone pressure plates. The entrance cells go into doorCells: furniture does not grow in the passage.
-    QVector<qint64> entranceKeys;
-    QSet<int> forcedWall;                                     // the cells of the outer layer where a window is forbidden
     if (floors && obj.closed && storyP > 0 && !obj.lift && !noWin && !raisedObj
         && obj.kind == McWorldExporter::McObject::Building && lyHigh >= lyLow + 4)
     {
@@ -725,54 +784,7 @@ int ObjectVoxelizer::run()
             }
         }
     }
-    int nWindows = 0;                                     // windows in the building (without a single window — cobwebs inside)
-    for (int cell : surfaceCells)
-    {
-        if (grid[cell] == char(5)) continue;              // a pre-marked hole — we do not write it
-        const int lx = cell % sx;
-        const int ly = (cell / sx) % sy;
-        const int lz = cell / (sx * sy);
-        if (priv && lyHigh >= 0 && ly == lyHigh && interiorCol(lx, ly, lz))
-            continue;                                     // the private sector: we write the flat cap
-                                                          // only on the wall ring (the slopes hold onto it)
-        const int dir = forcedWall.contains(cell) ? 0 : windowDir(lx, ly, lz);   // there are no windows at an entrance
-        addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : IdGlass) : structFor(ly));
-        if (dir) ++nWindows;
-        if (dir)                                                // a window all the way through (a user request):
-        {                                                       // the second block of the two-layer wall behind the glass
-            const bool ok = (dir == 1 && lx + 1 < sx) || (dir == -1 && lx > 0)
-                         || (dir == sxy && lz + 1 < sz) || (dir == -sxy && lz > 0);
-            if (ok)
-            {
-                const int inner = cell + dir;
-                if (grid[inner] == char(4))
-                {
-                    grid[inner] = char(5);                      // 5 — a hole behind the glass (a skip in the lining)
-                    // A flower pot on the windowsill (a user request): with a 30% chance behind the
-                    // LOWER glass of the strip a flower_pot with a random flower appears — it is visible from
-                    // the street through the glass, it stands on the wall block of the row under the window. The exception is malls.
-                    // A holder is mandatory: the row under the hole must be written (4) or be blind (1).
-                    const quint32 hp = lineHash(pairKey(minx + lx, minz + lz) ^ (qint64(ly) << 32)
-                                                 ^ 0xF10E5ull);
-                    const int below = grid[inner - sx];         // ly>=1: the window is not in the bottom row
-                    // In a 2×2 window the windowsill is under the LEFT glass of the pair (a window = one planter, not
-                    // two; this also keeps the pot density from eating the "see-through" of the windows in the big-check).
-                    const int alongP = (dir == 1 || dir == -1) ? lz : lx;
-                    const bool potCol = !wide2 || ((((alongP % 4) + 4) % 4) == 1);
-                    if (!panor && !obj.lift && potCol && (hp % 100u) < 30u
-                        && (ly - lyLow - (lowF ? 1 : 2)) % storyP == 1  // the pot — under the LOWER glass of the strip
-                        && (below == char(4) || below == char(1)))
-                    {
-                        const int px = minx + lx + (dir == 1 ? 1 : dir == -1 ? -1 : 0);
-                        const int pz = minz + lz + (dir == sxy ? 1 : dir == -sxy ? -1 : 0);
-                        const int fl = int((hp >> 8) % quint32(kFlowersCount));
-                        addVoxel(px, miny + ly, pz, quint16(IdFlowerPotBase + fl));
-                    }
-                }
-            }
-        }
-        ++added;
-    }
+    buildWalls();
     // Dark buildings without a single window: cobwebs in the upper corners of rooms (at the ceiling, where at least two walls meet).
     if (nWindows == 0 && obj.closed && sx >= 5 && sz >= 5 && sy >= 4)
     {
