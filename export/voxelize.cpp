@@ -74,6 +74,32 @@ private:
     // did not reach are the body; a merged complex removes the inner walls; the deeper
     // body cells stay air, the 2-block shell becomes the lining (grid 4).
     void floodFillBody();
+    // Writes one block (with the foundation sink) and marks the object column.
+    void addVoxel(int bx, int by, int bz, quint16 vid = 0)
+    {
+        store.set(bx, by - sink, bz, vid ? vid : id);         // sink — the foundation: the lower courses go into the ground
+        if (raisedObj) return;                                // a floating part: it does not mark the column as a structure column
+        const qint64 ck = pairKey(bx, bz);
+        if (!obj.floatCols.isEmpty() && obj.floatCols.contains(ck)) return;       // a glued complex: under a raised part the ground does not rise
+        const int sy2 = by - sink;
+        auto it = colMin.find(ck);
+        if (it == colMin.end() || sy2 < it.value())
+            colMin[ck] = sy2;
+        if (colAnchor)                                        // the ORIGINAL (not sunk) bottom boundary —
+        {                                                     // we use it to check the ground level around the object
+            auto a = colAnchor->find(ck);
+            if (a == colAnchor->end() || by < a.value())
+                (*colAnchor)[ck] = by;
+        }
+    }
+    // Decor hanging at height on someone else's wall: writes the block only,
+    // without touching the ground column.
+    void addDecor(int bx, int by, int bz, quint16 vid)
+    {   // Decor hanging AT HEIGHT on someone else's wall (aviation beacons): it must NOT touch the ground column —
+        // colMin would have been raised to the torch tier, and a dirt/stone
+        // column would have grown under an empty point (the same mechanism as the "armor" of L-shaped private-sector houses).
+        store.set(bx, by - sink, bz, vid);
+    }
 };
 
 ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
@@ -309,29 +335,6 @@ int ObjectVoxelizer::run()
 
     floodFillBody();
 
-    auto addVoxel = [&](int bx, int by, int bz, quint16 vid = 0)
-    {
-        store.set(bx, by - sink, bz, vid ? vid : id);         // sink — the foundation: the lower courses go into the ground
-        if (raisedObj) return;                                // a floating part: it does not mark the column as a structure column
-        const qint64 ck = pairKey(bx, bz);
-        if (!obj.floatCols.isEmpty() && obj.floatCols.contains(ck)) return;       // a glued complex: under a raised part the ground does not rise
-        const int sy2 = by - sink;
-        auto it = colMin.find(ck);
-        if (it == colMin.end() || sy2 < it.value())
-            colMin[ck] = sy2;
-        if (colAnchor)                                        // the ORIGINAL (not sunk) bottom boundary —
-        {                                                     // we use it to check the ground level around the object
-            auto a = colAnchor->find(ck);
-            if (a == colAnchor->end() || by < a.value())
-                (*colAnchor)[ck] = by;
-        }
-    };
-    auto addDecor = [&](int bx, int by, int bz, quint16 vid)
-    {   // Decor hanging AT HEIGHT on someone else's wall (aviation beacons): it must NOT touch the ground column —
-        // colMin would have been raised to the torch tier, and a dirt/stone
-        // column would have grown under an empty point (the same mechanism as the "armor" of L-shaped private-sector houses).
-        store.set(bx, by - sink, bz, vid);
-    };
 
     // "Floors" and windows (bldpol only, a closed mesh — see floors): the floor height is preferably
     // 4 blocks of air + 1 block of slab; if with 5-6-block floors the same number fits as
