@@ -124,6 +124,8 @@ private:
     void buildGableRoof();
     // Torches and hanging lanterns on the inner walls of the floors.
     void buildLight();
+    // "Interiors" v2: furniture, paintings, mannequins, shelves, carpets.
+    void buildInteriors();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -1848,37 +1850,8 @@ void ObjectVoxelizer::buildLight()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::buildInteriors()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
-    calcFloors();
-
-    calcPatch();
-    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
-    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
-    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
-    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
-    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
-    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
-
-    buildEntrances();
-    buildWalls();
-    buildLining();
-    buildStairs();
-    buildSlabs();
-    buildCeiling();
-    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
-    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
-    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
-    buildAddressPlate();
-    buildPartitions();
-    buildGableRoof();
-    buildLight();
     // "Interiors" v2 (a request: "houses stopped being boxes"; edits after the first test:
     // the table top is a slab ON TOP of the fence (type=top: the bottom slab sank into the post —
     // a "half block in the center"); the chairs are turned: facing = AWAY from the table, the bottom to the table; no more
@@ -3805,6 +3778,40 @@ int ObjectVoxelizer::run()
                     }
         }
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
+
+    calcPatch();
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+
+    buildEntrances();
+    buildWalls();
+    buildLining();
+    buildStairs();
+    buildSlabs();
+    buildCeiling();
+    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
+    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
+    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
+    buildAddressPlate();
+    buildPartitions();
+    buildGableRoof();
+    buildLight();
+    buildInteriors();
     // THE LAIR BANNERS OUTSIDE: on each compass side one ominous banner on the wall of the 1st floor above the door row
     // (2–3 rows above the floor), not on a window, the cell outside is free; closer to the middle of the facade.
     if (lair && banners)
