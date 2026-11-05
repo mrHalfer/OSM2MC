@@ -79,6 +79,7 @@ HEADERS += \
     export/rails.h \
     export/sites.h \
     export/voxelize.h \
+    export/exportrun.h \
     export/mcworldexporter.h \
     export/format/bytes.h \
     export/format/nbtwriter.h \
@@ -137,6 +138,7 @@ SOURCES += \
     export/rails.cpp \
     export/sites.cpp \
     export/voxelize.cpp \
+    export/exportrun.cpp \
     export/format/bytes.cpp \
     core/heightraster.cpp
 
