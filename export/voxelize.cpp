@@ -80,6 +80,8 @@ private:
     QVector<qint64> entranceKeys;                               // the entrance cells (furniture keeps out)
     QSet<int> forcedWall;                                       // the outer cells where a window is forbidden
     QSet<ColKey> stairXZ;                                       // the cells (lx,lz) of flights and ladders: furniture is not placed in front of or under them
+    QSet<ColKey> doorCells;
+    QSet<ColKey> partSet;                 // the blocks of inter-room partitions — we hang paintings on them
 
     // The wall-patch extent (calcPatch): the facade rectangle and the ridge axis.
     int fx0 = 0, fx1 = -1, fz0 = 0, fz1 = -1;
@@ -114,6 +116,10 @@ private:
     void buildSlabs();
     // The plank ceiling over a one-storey private house (no inter-floor slab).
     void buildCeiling();
+    // The address plate candidates (one per compass side, chosen in Export()).
+    void buildAddressPlate();
+    // The room partitions (a guillotine cut of the cavity) and their door cells.
+    void buildPartitions();
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -147,6 +153,10 @@ private:
         const int c = lz * sxy + ly * sx + lx;
         return grid[c - sx] == char(3) || grid[c - 2 * sx] == char(3);
     }
+
+    // The key of a world cell in doorCells: (x+32768)<<29 | (z+32768)<<12 | y.
+    static qint64 dkey(int bx, int by, int bz)
+    { return (qint64(bx + 32768) << 29) | (qint64(bz + 32768) << 12) | qint64(by); };
     // The facade-line hash for the lair roll and the mall mullion phase.
     static quint32 lineHash(qint64 k)
     {   // the same mix as colHash in Export (there the lambda is local — here is our own)
@@ -1221,36 +1231,8 @@ void ObjectVoxelizer::buildCeiling()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::buildAddressPlate()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
-    calcFloors();
-
-    calcPatch();
-    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
-    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
-    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
-    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
-    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
-    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
-
-    buildEntrances();
-    buildWalls();
-    buildLining();
-    buildStairs();
-    buildSlabs();
-    buildCeiling();
-    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
-    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
-    auto dkey = [](int bx, int by, int bz)
-    { return (qint64(bx + 32768) << 29) | (qint64(bz + 32768) << 12) | qint64(by); };
-    QSet<ColKey> doorCells;
-    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
     // THE ADDRESS PLATE (a request): one candidate per compass side — a wall of the 1st floor at eye height, free outside,
     // not a window and not next to an entrance; closer to the middle of the facade. The needed side (the nearest to a road) is chosen in Export().
     if (signs && floors && obj.closed && storyP > 0 && !obj.lift && obj.kind == McWorldExporter::McObject::Building
@@ -1295,7 +1277,10 @@ int ObjectVoxelizer::run()
             if (sc.ok[0] || sc.ok[1] || sc.ok[2] || sc.ok[3]) signs->append(sc);
         }
     }
-    QSet<ColKey> partSet;                 // the blocks of inter-room partitions — we hang paintings on them
+}
+
+void ObjectVoxelizer::buildPartitions()
+{
     // Room partitions (a user request: "large buildings without walls inside — divide them
     // into spacious rooms with passages"). A guillotine cut of the set of cavity cells: the building is
     // a prism, the mask of the 1st floor suits all floors. Rooms of 100..300 cells; shopping malls
@@ -1605,6 +1590,37 @@ int ObjectVoxelizer::run()
             }
         }
     }
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
+
+    calcPatch();
+    // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
+    // the lining under it (lyHigh-1) in INTERIOR columns are not written — there is air up to the roof
+    // slopes (the 2nd floor = the whole remainder, including the attic). The wall ring keeps the full
+    // thickness up to the top (the gables/soffit attach to it as before). A column is "interior"
+    // if there is a cavity "3" under the cell (by the wall below there is always 1/4: a lining or a window hole).
+    // The floor = 1 block: the lining row of the slab (lyLow+1) is not written in the interior either.
+
+    buildEntrances();
+    buildWalls();
+    buildLining();
+    buildStairs();
+    buildSlabs();
+    buildCeiling();
+    // The cells of door openings of partitions (world) — the "Interiors" pass keeps its
+    // distance from them so that a cabinet does not grow in a doorway. The key: (x+32768)<<29 | (z+32768)<<12 | y.
+    for (qint64 ek : entranceKeys) doorCells.insert(ek);   // entrances: furniture/light do not grow in the passage
+    buildAddressPlate();
+    buildPartitions();
     // The gable roof of the private sector (a user request) for bldpol with the codes
     // 44400002 / 44400100 / 44400110: two slopes of oak half blocks (oak_slab, alternating
     // type=bottom/top: a rise of 0.5 block per column — "first a half block in the lower position,
