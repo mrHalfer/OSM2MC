@@ -65,6 +65,7 @@ HEADERS += \
     scene/modelbuilder.h \
     scene/modeldata.h \
     export/climate.h \
+    export/blocks.h \
     export/colkey.h \
     export/mcworldexporter.h \
     export/format/bytes.h \
@@ -112,6 +113,7 @@ SOURCES += \
     scene/mcscene.cpp \
     scene/modelbuilder.cpp \
     export/mcworldexporter.cpp \
+    export/blocks.cpp \
     export/format/bytes.cpp \
     core/heightraster.cpp
 
