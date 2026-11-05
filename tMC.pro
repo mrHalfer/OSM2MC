@@ -65,6 +65,7 @@ HEADERS += \
     scene/modelbuilder.h \
     scene/modeldata.h \
     export/climate.h \
+    export/colkey.h \
     export/mcworldexporter.h \
     export/format/bytes.h \
     export/format/nbtwriter.h \
