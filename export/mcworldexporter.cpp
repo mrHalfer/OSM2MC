@@ -377,11 +377,17 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
             futs << QtConcurrent::run(&voxPool, [j, &tf, cancel]()
             {
                 j->storyCounter = j->storyBase;
-                j->added = voxelizeObject(*j->o, tf, j->id, j->store, j->colMin, cancel, j->sink,
-                                          j->sink ? &j->colAnchor : nullptr, j->extraBlocks,
-                                          j->building, j->building ? &j->storyCounter : nullptr,
-                                          &j->chests, &j->paints, &j->mannequins, &j->spawners,
-                                          j->structId, j->woodSingle, j->privMode, &j->npcs, &j->frames, &j->basements, &j->signs, &j->banners, &j->zones, &j->islands, j->deepRole);
+                VoxelOut vo;
+                vo.colMin = &j->colMin;
+                if (j->sink) vo.colAnchor = &j->colAnchor;
+                vo.chests = &j->chests; vo.paints = &j->paints;
+                vo.mannequins = &j->mannequins; vo.spawners = &j->spawners;
+                if (j->building) vo.storyCounter = &j->storyCounter;
+                vo.npcs = &j->npcs; vo.frames = &j->frames; vo.basements = &j->basements;
+                vo.signs = &j->signs; vo.banners = &j->banners; vo.zones = &j->zones; vo.islands = &j->islands;
+                j->added = voxelizeObject(*j->o, tf, j->id, j->store, vo, cancel, j->sink,
+                                          j->extraBlocks, j->building,
+                                          j->structId, j->woodSingle, j->privMode, j->deepRole);
                 if (j->added > 0 && j->o->kind == McObject::Building && (j->o->code == 44312000 || j->o->code == 44313000 || j->o->code == 44315000))
                     decorateWalls(j->store, j->o->code, j->id);
             });
@@ -909,7 +915,9 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                 flushJobs();                                    // rails look into the store: buildings earlier — already in it
             VoxelStore tmp;
             QHash<ColKey, int> tmpMin;
-            const int added = voxelizeObject(o, tf, id, tmp, tmpMin, cancel);
+            VoxelOut vo;                                  // only colMin is collected here
+            vo.colMin = &tmpMin;
+            const int added = voxelizeObject(o, tf, id, tmp, vo, cancel);
             if (added == 0) { ++res.skippedCount; continue; }
             QHash<ColKey, int> topY;                          // column -> Y of the top cell of the strip
             for (auto cit = tmp.chunks.constBegin(); cit != tmp.chunks.constEnd(); ++cit)
@@ -1645,9 +1653,10 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
         VoxelStore tmp;
         QHash<ColKey, int> tmpMin, tmpAnchor;
         // sites (chests, villagers, basements…) are not needed for the shaft — nullptr: no chests and no entities inside the cut-off part
-        const int added = voxelizeObject(*lj.o, tf, lj.id, tmp, tmpMin, cancel, lj.sink, &tmpAnchor, lj.extra, true,
-                                         nullptr, nullptr, nullptr, nullptr, nullptr,
-                                         lj.structId, lj.woodSingle, lj.privMode, nullptr, nullptr, nullptr, nullptr);
+        VoxelOut vo;
+        vo.colMin = &tmpMin; vo.colAnchor = &tmpAnchor;
+        const int added = voxelizeObject(*lj.o, tf, lj.id, tmp, vo, cancel, lj.sink, lj.extra, true,
+                                         lj.structId, lj.woodSingle, lj.privMode);
         if (added == 0) { ++res.skippedCount; continue; }
         // the "host" top by columns: the highest non-empty block of the already written buildings
         QHash<ColKey, int> hostTop;

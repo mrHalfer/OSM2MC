@@ -11,18 +11,26 @@
 //! was skipped: an empty mesh or an extent beyond reason). colMin — the minimum voxel Y of the object per
 //! XZ column (for the subsequent ground fill), it is updated.
 int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransform& tf, quint16 id,
-                          VoxelStore& store, QHash<ColKey, int>& colMin, const std::atomic_bool* cancel,
-                          int sink, QHash<ColKey, int>* colAnchor, int extraBlocks,
-                          bool floors, int* storyCounter, QVector<ChestSite>* chests,
-                          QVector<PaintingSite>* paints,
-                          QVector<MannequinSite>* mannequins,
-                          QVector<SpawnerSite>* spawners,
-                          quint16 structId, bool woodSingle, int privMode,
-                          QVector<NpcSite>* npcs, QVector<FrameSite>* frames,
-                          QVector<BasementSite>* basements, QVector<SignCand>* signs,
-                          QVector<BannerSite>* banners, QVector<LairZone>* zones,
-                          QVector<IslandSite>* islands, int deepRole)
+                   VoxelStore& store, const VoxelOut& out, const std::atomic_bool* cancel,
+                   int sink, int extraBlocks, bool floors,
+                   quint16 structId, bool woodSingle, int privMode, int deepRole)
 {
+    // The outputs gathered into VoxelOut: the aliases keep the rest of the body
+    // exactly as it was with the old parameter list.
+    QHash<ColKey, int>& colMin = *out.colMin;         // mandatory at every call site
+    QHash<ColKey, int>* colAnchor = out.colAnchor;
+    QVector<ChestSite>* chests = out.chests;
+    QVector<PaintingSite>* paints = out.paints;
+    QVector<MannequinSite>* mannequins = out.mannequins;
+    QVector<SpawnerSite>* spawners = out.spawners;
+    int* storyCounter = out.storyCounter;
+    QVector<NpcSite>* npcs = out.npcs;
+    QVector<FrameSite>* frames = out.frames;
+    QVector<BasementSite>* basements = out.basements;
+    QVector<SignCand>* signs = out.signs;
+    QVector<BannerSite>* banners = out.banners;
+    QVector<LairZone>* zones = out.zones;
+    QVector<IslandSite>* islands = out.islands;
     const int nv = obj.vertices.size();
     if (nv < 3 || obj.indices.size() < 3)
         return 0;
