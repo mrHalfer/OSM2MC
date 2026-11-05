@@ -65,6 +65,15 @@ private:
     int volI = 0;
     int rowLo = 0, rowHi = -1;
 
+    // The facade profile (computed by calcFloors): floor rhythm and window flags.
+    int storyP = 0, nStories = 0, winDyMax = -1;                // the floor step, floors, top window row
+    int lyLow = 0, lyHigh = -1;                                 // the lowest/highest surface row
+    int sxy = 0;                                                // sx * sy (grid stride of one storey)
+    bool panor = false, glassMat = false, panoWin = false, bigWin = false, noWin = false;
+    bool office = false, resid = false, hospital = false;
+    bool priv = false, shedThin = false, lowF = false, thinW = false, wide2 = false;
+    bool lair = false;                                          // the bandit lair roll outcome
+
     // Rasterizes the mesh into the grid and picks the private-house material.
     // Returns false when the object must be skipped (empty mesh, a huge extent).
     bool buildGrid();
@@ -74,6 +83,11 @@ private:
     // did not reach are the body; a merged complex removes the inner walls; the deeper
     // body cells stay air, the 2-block shell becomes the lining (grid 4).
     void floodFillBody();
+    // Computes the floor rhythm, the facade flags, the lair roll (the old inline block).
+    void calcFloors();
+    // The window definition: 0 - not a window; else the offset of the "inner" wall
+    // block behind the glass (-1 in X, -sxy in Z; positive values face the other way).
+    int windowDir(int lx, int ly, int lz) const;
     // Writes one block (with the foundation sink) and marks the object column.
     void addVoxel(int bx, int by, int bz, quint16 vid = 0)
     {
@@ -99,6 +113,14 @@ private:
         // colMin would have been raised to the torch tier, and a dirt/stone
         // column would have grown under an empty point (the same mechanism as the "armor" of L-shaped private-sector houses).
         store.set(bx, by - sink, bz, vid);
+    }
+    // The facade-line hash for the lair roll and the mall mullion phase.
+    static quint32 lineHash(qint64 k)
+    {   // the same mix as colHash in Export (there the lambda is local — here is our own)
+        const qint32 x = keyFirst(k), z = keySecond(k);
+        quint32 h = quint32(x) * 374761393u + quint32(z) * 668265263u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        return h ^ (h >> 16);
     }
 };
 
@@ -328,67 +350,61 @@ void ObjectVoxelizer::floodFillBody()
     }
 }
 
-int ObjectVoxelizer::run()
+void ObjectVoxelizer::calcFloors()
 {
-    if (!buildGrid())
-        return 0;
-
-    floodFillBody();
-
-
     // "Floors" and windows (bldpol only, a closed mesh — see floors): the floor height is preferably
     // 4 blocks of air + 1 block of slab; if with 5-6-block floors the same number fits as
     // with 4, we stretch them (fill the volume, do not lose floors). The floor slabs — over the whole patch
     // inside the shell; the windows — 2-block strips with a 1-block inset from the floor/slab, every 4th
     // column of the facade, through the whole thickness of the wall (glass + a hole behind it).
-    int storyP = 0, nStories = 0, winDyMax = -1;                // the floor step (air + slab), the number of floors,
+    storyP = 0; nStories = 0; winDyMax = -1;                // the floor step (air + slab), the number of floors,
                                                                 // the top row of windows (the bottom of the roof lining)
-    int lyLow = sy, lyHigh = -1;
+    lyLow = sy; lyHigh = -1;
     // The flags of the window profile (needed both by the floor computation and by windowDir — declared before both).
     // The exception is shopping malls (CODE 44318000, a user request): they get "panoramic windows" —
     // a continuous strip of glass in bands of NOT LESS THAN 5 blocks in a row: a period of 6..9 columns, one column
     // of the period is a blind "mullion"; the mullion phase depends only on the facade line, so the mullions
     // stand vertically on all floors. We do not blind the corners — the strip wraps around the corner ("curved" windows
     // with an x/z offset of 1 block were allowed by the user).
-    const bool panor = (obj.code == 44318000);
+    panor = (obj.code == 44318000);
     // The material "glass": the walls are concrete (the inside is concrete too), and the windows are the PANORAMIC ones, as in the malls (only the windows, the rest of the mall logic is not touched).
-    const bool glassMat = (id == quint16(IdGlass));
+    glassMat = (id == quint16(IdGlass));
     if (glassMat) id = structId ? structId : nearestBlockId(obj.color);
-    const bool panoWin = panor || glassMat;
+    panoWin = panor || glassMat;
     // "Non-residential" buildings (a user request): WINDOWS 2×3 — a panel of 2 panes (4 blocks of width with
     // mullions), the strip height is 3 rows (an inset of 1 from the floor, the top flush with the slab). The codes: 44310000,
     // 44340000 and the series 44311000..44317000. SHOPPING MALLS (44318000) are NOT among them: the user
     // clarified that malls keep the FORMER panorama (strips of 5..8 with glazing around the corners).
     // For the 2×3 strip we fix the floor at 3+1 (shaft >= 4).
-    const bool bigWin = !glassMat && (obj.code == 44310000 || obj.code == 44340000
+    bigWin = !glassMat && (obj.code == 44310000 || obj.code == 44340000
                          || (obj.code >= 44311000 && obj.code <= 44317000 && obj.code % 1000 == 0));
     // Sheds and utility structures (CODE 44000000, a user request) — no windows at all.
-    const bool noWin = (obj.code == 44000000);
+    noWin = (obj.code == 44000000);
     // Non-residential "office" buildings (a request): general-purpose, administrative, educational, children's,
     // hospitals, scientific, cultural, museums (44310000..44317000, without malls 44318000 — they have their own line) and the church
     // 44319000. They are furnished like residential ones, but WITHOUT beds and WITHOUT mannequins, with desks/shelves/fittings.
-    const bool office = (obj.code >= 44310000 && obj.code <= 44317000 && obj.code % 1000 == 0)
+    office = (obj.code >= 44310000 && obj.code <= 44317000 && obj.code % 1000 == 0)
                         || obj.code == 44319000;
-    const bool resid = (obj.code == 44400000);    // multi-storey residential: carpets in compositions (runners, checkerboard, edging)
-    const bool hospital = (obj.code == 44314000);         // a "healthcare institution": beds, a doctor, patients
+    resid = (obj.code == 44400000);    // multi-storey residential: carpets in compositions (runners, checkerboard, edging)
+    hospital = (obj.code == 44314000);         // a "healthcare institution": beds, a doctor, patients
     // The private sector (the pitched-roof codes) — a common flag of ALL passes (a user request):
     // there is no flat roof at all (a foundation + walls), the 1-block floor slab is sunk by 1 block,
     // the 1st-floor room is 4 blocks, the 2nd floor = the whole remainder up to the slopes (with an attic), the inter-floor
     // flight is ordinary (oak). Declared before the floor computation — it is needed already there (and before wide2 —
     // the window profile looks at it too).
-    const bool priv = obj.kind == McWorldExporter::McObject::Building && obj.closed
+    priv = obj.kind == McWorldExporter::McObject::Building && obj.closed
                       && (obj.code == 44400002 || obj.code == 44400100 || obj.code == 44400110);
     // Sheds/utility structures (44000000, a request): the walls, floor and roof are ONE block (no lining), the foundation is 1 block (sink=1). The floor level,
     // as for the private sector, is one row lower (lowF): the walking row is lyLow+1.
-    const bool shedThin = obj.kind == McWorldExporter::McObject::Building && obj.closed && obj.code == 44000000;
-    const bool lowF = priv || shedThin;
-    const bool thinW = obj.lift || obj.thin;                     // small building parts: walls 1 block thick, like the elevator shafts (the floors and the roof stay)
+    shedThin = obj.kind == McWorldExporter::McObject::Building && obj.closed && obj.code == 44000000;
+    lowF = priv || shedThin;
+    thinW = obj.lift || obj.thin;                     // small building parts: walls 1 block thick, like the elevator shafts (the floors and the roof stay)
     // "Residential" (CODE 44400000, a user request): SQUARE 2×2 windows — two neighboring columns
     // of glass for the same 2 rows of height (rows 1..2 above the slab). The PRIVATE SECTOR is also 2×2
     // (a request: "windows 1×2 on the first floor and 1×1 in the attic — that is just ugly"): under a slope
     // the strip is cut by a row or two higher, 2×1 remains — the user allowed it. Other codes
     // (in no list) — ordinary narrow vertical 1×2. Sheds (noWin) — without windows.
-    const bool wide2 = (obj.code == 44400000) || priv;
+    wide2 = (obj.code == 44400000) || priv;
     if (floors && obj.closed)
     {
         for (int cell : surfaceCells)
@@ -419,22 +435,15 @@ int ObjectVoxelizer::run()
         }
         else storyP = storyH + 1;
     }
-    const int sxy = sx * sy;
+    sxy = sx * sy;
     // The window definition: 0 — not a window; otherwise — the offset of the "inner" wall block behind the glass
     // (±1 in X, ±sxy in Z). The window strips are on the 1st and 2nd blocks ABOVE the floor/slab (raised by a block from
     // the floor level, as the user asked — not flush with it), along the facade — every 4th column.
     // The 3×5 windows of "non-residential" (bigWin), the mall panorama (panor) and the square 2×2 of "residential" (wide2) have their own profiles below.
-    const auto lineHash = [](qint64 k) -> quint32
-    {   // the same mix as colHash in Export (there the lambda is local — here is our own)
-        const qint32 x = keyFirst(k), z = keySecond(k);
-        quint32 h = quint32(x) * 374761393u + quint32(z) * 668265263u;
-        h = (h ^ (h >> 13)) * 1274126177u;
-        return h ^ (h >> 16);
-    };
     // BANDIT LAIR (a request): industrial zone buildings (44340000) — 30%, multi-storey residential (44400000, floors >= 2) — 5%. In a lair on the outside
     // hang ominous banners, the interiors are camp-style (barrels, hay bales, chests with outpost loot, banners), raiders live inside.
     // A test hook: MCX_FORCE_LAIR=1 makes any such building a lair.
-    bool lair = false;
+    lair = false;
     if (floors && obj.closed && storyP > 0 && !obj.lift && obj.kind == McWorldExporter::McObject::Building)
     {
         const quint32 hl = lineHash(pairKey(minx, minz) ^ 0x1A1E5ull) % 100u;
@@ -444,7 +453,9 @@ int ObjectVoxelizer::run()
         else if (obj.code == 44340000) lair = force || hl < 30u;
         else if (obj.code == 44400000 && nStories >= 2) lair = force || hl < 5u;
     }
-    auto windowDir = [&](int lx, int ly, int lz) -> int
+}
+
+int ObjectVoxelizer::windowDir(int lx, int ly, int lz) const
     {
         if (noWin) return 0;                                    // a shed — no windows (a user request)
         if (storyP == 0 || ly >= lyHigh) return 0;              // the roof — not a facade
@@ -505,7 +516,17 @@ int ObjectVoxelizer::run()
                                                                   // columns), the others — a narrow 1×2 (one)
         return xw ? (xn ? 1 : -1) : (zn ? sxy : -sxy);           // the "inner" block behind the glass — FROM
                                                                   // the street into the wall thickness
-    };
+}
+
+int ObjectVoxelizer::run()
+{
+    if (!buildGrid())
+        return 0;
+
+    floodFillBody();
+
+
+    calcFloors();
 
     // The wall patch by surface cells — needed by the pitched roof (the roof used to compute it itself).
     int fx0 = sx, fx1 = -1, fz0 = sz, fz1 = -1;
