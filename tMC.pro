@@ -78,6 +78,7 @@ HEADERS += \
     export/paledonor.h \
     export/rails.h \
     export/sites.h \
+    export/voxelize.h \
     export/mcworldexporter.h \
     export/format/bytes.h \
     export/format/nbtwriter.h \
@@ -135,6 +136,7 @@ SOURCES += \
     export/paledonor.cpp \
     export/rails.cpp \
     export/sites.cpp \
+    export/voxelize.cpp \
     export/format/bytes.cpp \
     core/heightraster.cpp
 
