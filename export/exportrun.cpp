@@ -262,6 +262,9 @@ private:
     int nStations;
     QSet<ColKey> sprFill;
     quint16 birchLogRaw;
+    const int kZoneR = 18;                                       // the average radius of a ragged zone around a school / research institute / kindergarten (blocks from the walls; up to ×1.45 in the tongues), where the biome changes and trees grow
+    const int kZoneMax = 27;                                     // the cell scan reach (kZoneR × 1.45 with a margin)
+    ZoneTrees zt;
     int vegCols;
     QVector<BellSite> bellSites;
     QVector<SignSite> signSites;
@@ -341,6 +344,29 @@ private:
     void buildStreetFurniture();
     // Villages (beginStep 10): squares with bells, address plates, signposts, basements.
     void buildVillages();
+
+    // 3.5 Vegetation (trees, flora, swamp/cemetery plots, islands).
+    bool buildVegetation();
+    // 3.51 User tree rules and 3.586 aquatic fauna.
+    void buildUserTrees();
+    // 3.55 Forest treasures.
+    bool buildForestTreasures();
+
+    // Tree-planting helpers of 3.5 (the former run() lambdas).
+    bool zoneSkip(int bx, int bz);
+    void zoneRemap(quint16& log, quint16& leaf);
+    bool plantSpruceCone(int bx, int bz, int y0, int h, int R);
+    void vineColumn(int x, int z, int yBottom, int win, quint16 leafId = quint16(IdJungleLeaves));
+    void jungleCrownVines(int bx, int bz, int yBottom, int R, quint16 leafId = quint16(IdJungleLeaves));
+    bool plantSwampOak(int bx, int bz, int y0, int h, quint32 hh);
+    bool plantBroad(int bx, int bz, int y0, int h, quint16 logId, quint16 leafId);
+    bool plantDarkOak(int bx, int bz, int y0, int h, quint32 hh);
+    bool plantSized(int bx, int bz, int y0, int h, int R, quint16 logId, quint16 leafId);
+    bool plantSpruce(int bx, int bz, int y0, int h, int R);
+    bool plantJungleBig(int bx, int bz, int y0, quint32 hh);
+    bool plantBigOak(int bx, int bz, int y0, quint32 hh);
+    bool plantPalm(int bx, int bz, int y0, quint32 hh);
+    void plantPaleTree(int bx, int bz, int y0, int h, quint32 hh);
 };
 
 ExportRun::ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
@@ -4590,6 +4616,1646 @@ void ExportRun::buildVillages()
 
 }
 
+bool ExportRun::buildVegetation()
+{
+    // 3.5 Vegetation — after the ground (the surface height is needed). Trees — roughly every 25th
+    // column of the "spot" (a deterministic hash — a forest without clearings and without rows), the grass is denser.
+    // Nothing is planted on the occupied columns (structures).
+    // Spruce: a spruce_log trunk (2×2 for big ones), bare at the bottom, then needle tiers from top to bottom with a radius from 0 (the top) to R; even tiers are narrower than
+    // odd ones — like a real spruce. The needles cover the trunk up to the very top. The crown must not go beyond the chunks with ground.
+    sprFill = QSet<ColKey>(fillChunks.constBegin(), fillChunks.constEnd());
+    // Tree species by the climate zone: "oak" and "birch" in the planting code are replaced with the trunk+leaves pairs of the zone, the spruce cone — with a big broadleaf tree
+    // where there are no conifers; density — the share of plantings that remain (in the desert and tundra trees are rare)
+    birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
+    zt = ZoneTrees{ IdOakLog, IdOakLeaves, birchLogRaw, IdBirchLeaves, 100, true };
+    {
+        const quint16 aca = quint16(IdPaletteStart + paletteIndexOf("minecraft:acacia_log"));
+        const quint16 jng = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
+        switch (g_zone)
+        {
+        case Climate::Boreal:        zt.oakLog = birchLogRaw; zt.oakLeaf = IdBirchLeaves; break;
+        case Climate::Tundra:        zt.oakLog = birchLogRaw; zt.oakLeaf = IdBirchLeaves; zt.density = 30; break;
+        case Climate::Steppe:        zt.density = 35; zt.cone = false; break;
+        case Climate::Mediterranean: zt.birchLog = IdOakLog; zt.birchLeaf = IdOakLeaves; zt.density = 60; zt.cone = false; break;
+        case Climate::Desert:        zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 8, false }; break;
+        case Climate::Savanna:       zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 35, false }; break;
+        case Climate::Tropical:      zt = ZoneTrees{ jng, IdJungleLeaves, jng, IdJungleLeaves, 100, false, true }; break;
+        case Climate::Monsoon:       zt.birchLog = IdOakLog; zt.birchLeaf = IdOakLeaves; zt.density = 60; zt.cone = false; zt.palmShare = 80; break;   // oaks and palms, no conifers
+        case Climate::SemiArid:      zt = ZoneTrees{ IdOakLog, IdOakLeaves, IdOakLog, IdOakLeaves, 30, false, false, 50 }; break;   // the Gulf coast: sparse oaks and palms on sand, cacti on the open lands
+        case Climate::Rainforest:    zt.bigOakShare = 35; break;   // the Pacific Northwest: every third tree in broadleaf forests is a big oak with branches
+        case Climate::DarkForest:    { const quint16 dko = quint16(IdPaletteStart + paletteIndexOf("minecraft:dark_oak_log"));
+                                       zt = ZoneTrees{ dko, IdDarkOakLeaves, dko, IdDarkOakLeaves, 100, false }; } break;   // Hokkaido and Colchis: every tree is a dark oak, the spruce sites grow big broadleaf ones instead of cones
+        default: break;
+        }
+    }
+    // Vines (like the game's jungle ones): a vine can stand in the crown itself (replacing a leaf),
+    // hang a thread of 1..5 blocks under a crown column, poke above the crown and grow along the trunk.
+    // The block is saved WITHOUT properties (as in a real world: the game connects the faces itself)
+    // Swamp oak (ground under a source with the "swamp" effect, e.g. mrspol wetland): a 1×1 oak trunk of 5..8, a wide flat crown of oak leaves with VINES
+    // hanging from it, a couple of gnarled branches. The species is independent of the climate zone — a swamp is a swamp.
+    // A broadleaf tree (birch etc.): a 1×1 trunk of the given block, a "diamond" crown of radius 2 of the given leaves; the crown does not go beyond the chunks with ground
+    // A dark oak (a cemetery, a request): a trunk and a dense wide flat-topped crown, as the game's dark forests.
+    // A tree of arbitrary size: a trunk of height h, a spherical crown of radius R (1..3) with cut corners — for intra-block greenery of different sizes
+    // Spruce: in zones with conifers — a cone, in the others (steppe, desert, tropics…) — a big broadleaf tree of the zone instead of it
+    // A big jungle tree (like the game's one): a 2×2 trunk 10..16, a wide crown over the trunk top
+    // and 2..3 side branches with leaf caps at 60% of the height; vines hang under the crown rims
+    // A big oak (temperate rainforest): a 2×2 trunk 8..12 tall, a wide round crown (the ordinary oak's
+    // "diamond" scaled up) and 2..3 bare branches under its edge — an ordinary oak is shorter and has none
+    // A palm (monsoon zones): a slim bare trunk of jungle logs, a crown of arching diagonal
+    // "arms" with hanging tips and a small cap on the top (like adventure-map palms in the game)
+    // Pale oak: a 2×2 trunk of height h, a "cap" crown of radius 3, moss hanging under the crown edge, a "creaking heart" in the trunk
+    vegCols = 0;
+    for (int fidx = 0; fidx < forests.size(); ++fidx)
+    {
+        const VegSite& site = forests[fidx];
+        const bool pale = (fidx == paleIdx);
+        // A 6×6 grid (~2.8% of the columns, like the former ~2.5%): in every cell one hash-shifted place, inside
+        // the forest — a tree. The work is of the order of the number of bbox cells, not the number of forest columns (tens of millions).
+        const int G = site.dense ? 8 : 6;                // yards (OSM): an 8×8 grid (it was 4×4: the crowns of neighboring trees merged into a solid canopy over the whole yard)
+        // The grid is clamped to the export rectangle: an OSM forest polygon can be many times wider
+        // than the world (a park strip with a bbox of 11 km used to cost the whole grid over its bbox).
+        const int vgX0 = std::max(site.minX, (rcx0 - rectM) * 16), vgX1 = std::min(site.maxX, (rcx1 + rectM + 1) * 16 - 1);
+        const int vgZ0 = std::max(site.minZ, (rcz0 - rectM) * 16), vgZ1 = std::min(site.maxZ, (rcz1 + rectM + 1) * 16 - 1);
+        const int gx0 = int(std::floor(double(vgX0) / G)), gx1 = int(std::floor(double(vgX1) / G));
+        const int gz0 = int(std::floor(double(vgZ0) / G)), gz1 = int(std::floor(double(vgZ1) / G));
+        for (int gx = gx0; gx <= gx1; ++gx)
+        for (int gz = gz0; gz <= gz1; ++gz)
+        {
+            if ((++vegCols & 0x3FF) == 0 && cancel && cancel->load())
+            {
+                res.cancelled = true;
+                res.error = QObject::tr("Export cancelled.");
+                return false;
+            }
+            if (progress && (vegCols & 0xFFFF) == 0)
+                progress(std::min(vegCols, vegCells), vegCells, 4);                  // the "trees in forests" stage
+            const quint32 hc = colHash(pairKey(gx, gz) ^ 0x7EEDull);
+            if (site.dense && (hc >> 20) % 10u == 0u) continue;                          // yards: every tenth place stays empty (so the trees stand in groups with clearings)
+            const int tx = gx * G + int(hc % G), tz = gz * G + int((hc >> 8) % G);
+            if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
+            if (!spansContain(site.spans, tx, tz)) continue;
+            const qint64 ck = pairKey(tx, tz);
+            if (colWater.contains(ck)) continue;               // we do not grow on water
+            if (noTreePadCols.contains(ck)) continue;          // the reserved spots (apiaries, farms, objects from points)
+            if (colMin.contains(ck)) continue;                 // a structure column — the forest does not climb into the house
+                                                               // (after the floor was sunk by 1 block the slab
+                                                               // stopped being an obstacle for y0)
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const int y0 = surfaceTop(ck) + 1;
+            if (y0 + site.treeH + 2 > 255) continue;
+            if (store.get(bx, y0, bz) != IdAir) continue;
+            if (pale && paleDonorUsed)
+            {   // trees were carried together with the donor terrain; in the fringe at the forest border and in the ring around the mansion (there the terrain is mixed with the ground) we plant procedural ones
+                const auto pcit = paleCol.constFind(ck);
+                if (pcit != paleCol.constEnd() && pcit->pid < 0 && pcit->w >= 235 && pcit->surf != 0) continue;
+            }
+            if (paleDonorUsed && !pale && spansContain(forests[paleIdx].spans, tx, tz)) continue;
+            if (!patchCols.isEmpty() && patchCols.contains(pairKey(tx, tz))) continue;      // outposts/camps: trees do not climb into the structures   // other (overlapping) forests do not plant extra trees into the Pale Garden
+            if (pale)
+            {   // pale oak: taller than usual (6..9), 2×2 — free neighboring columns are needed
+                const quint32 hp = colHash(ck ^ 0x9A1Eull);
+                const int hh = 6 + int(hp % 4u);
+                if (y0 + hh + 4 > 255) continue;
+                if (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))) continue;
+                // the 2x2 trunk must not stand half in a drawn pond (the anchor was checked above)
+                if (colWater.contains(pairKey(bx + 1, bz)) || colWater.contains(pairKey(bx, bz + 1)) || colWater.contains(pairKey(bx + 1, bz + 1))) continue;
+                if (!spansContain(site.spans, bx + 1, bz + 1)) continue;
+                plantPaleTree(bx, bz, y0, hh, hp >> 4);
+                continue;
+            }
+            if (cemeteryCols.contains(ck))
+            {   // a cemetery (csrpol 53510000, landuse=cemetery): whatever forest was planned here becomes a dense
+                // grove of dark oaks (a user request) — the dark forest look, independent of the climate zone
+                const quint32 hc = colHash(ck ^ 0x0CE51ull);
+                if (hc % 100u >= 85u) continue;                                // ~85% of the grid cells are planted
+                const int h = 7 + int(hc % 4u);                                // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
+                if (y0 + h + 4 > 255) continue;
+                plantDarkOak(bx, bz, y0, h, hc);
+                continue;
+            }
+            if (swampCols.contains(ck))
+            {   // the swamp biome (a layer with the "swamp" effect lies over this spot): whatever forest grows
+                // here — a park, a yard or an ordinary one — becomes a grove of swamp oaks with vines, independent
+                // of the climate zone; rarer than an ordinary forest, with clearings between the trees
+                const quint32 hs = colHash(ck ^ 0x2F8C3ull);
+                if (hs % 100u >= 50u) continue;                                // ~50% of the grid cells are planted
+                const int h = 5 + int(hs % 4u);                                // trunks 5..8
+                if (y0 + h + 4 > 255) continue;
+                plantSwampOak(bx, bz, y0, h, hs);
+                continue;
+            }
+            if (site.park)
+            {   // a park: mixed trees (oak 40%, birch 35%, spruce 25%) and not frequent — about 24% of the cells of the 6×6 grid (≈ 1 tree per 135 m²)
+                const quint32 hr = colHash(ck ^ 0x9A4Bull);
+                if (hr % 100u >= 24u) continue;                                    // 24% of the cells (was 16%): in parks there are 1.5 times more trees
+                if (zt.palmShare)
+                {   // a palm park (monsoon and semi-arid): the zone's share is palms, the rest are oaks (no birches and no spruces)
+                    if (colHash(ck ^ 0x3C77ull) % 100u < quint32(zt.palmShare) && plantPalm(bx, bz, y0, colHash(ck ^ 0x5F13ull))) continue;
+                    const int h = 5 + int((hr >> 16) % 3u);
+                    if (y0 + h + 4 > 255) continue;
+                    plantBroad(bx, bz, y0, h, IdOakLog, IdOakLeaves);
+                    continue;
+                }
+                const quint32 cls = (hr >> 8) % 100u;
+                if (cls < 40)
+                {   // oak — as in ordinary forests
+                    const int h = 5 + int((hr >> 16) % 3u);
+                    if (y0 + h + 4 > 255) continue;
+                    plantBroad(bx, bz, y0, h, IdOakLog, IdOakLeaves);
+                }
+                else if (cls < 75)
+                {   // birch: thinner and taller than the oak
+                    const int h = 6 + int((hr >> 16) % 4u);
+                    if (y0 + h + 4 > 255) continue;
+                    plantBroad(bx, bz, y0, h, quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")), IdBirchLeaves);
+                }
+                else
+                {   // a medium-sized spruce
+                    const int hs = 9 + int((hr >> 16) % 5u);
+                    if (y0 + hs + 3 > 255) continue;
+                    plantSpruce(bx, bz, y0, hs, 3);
+                }
+                continue;
+            }
+            if (site.intra && !site.dense && colHash(ck ^ 0x1A7Bull) % 3u == 0u) continue;       // intra-block vegetation (vgbpol): 1.5 times rarer (OSM yards — without thinning)
+            if (site.intra)
+            {   // trees of different sizes: small (trunk 3–4, crown 1), medium (5–6, crown 2), big (7–9, crown 3); oak and birch mixed
+                const quint32 hz = colHash(ck ^ 0x51ABEull);
+                const int roll = int(hz % 100u);
+                const int R = roll < 30 ? 1 : (roll < 75 ? 2 : 3);
+                const int h = R == 1 ? 3 + int((hz >> 8) % 2u) : (R == 2 ? 5 + int((hz >> 8) % 2u) : 7 + int((hz >> 8) % 3u));
+                if (y0 + h + 4 > 255) continue;
+                const bool birch = ((hz >> 16) % 100u) < 35u;
+                plantSized(bx, bz, y0, h, R, birch ? quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")) : quint16(IdOakLog), birch ? quint16(IdBirchLeaves) : quint16(IdOakLeaves));
+                continue;
+            }
+            if (zt.palmShare)                                                 // a palm forest (monsoon and semi-arid): the zone's share is palms, the rest are oaks (no spruces and no birches there)
+            {
+                if (zoneSkip(bx, bz)) continue;
+                if (colHash(ck ^ 0x8D27ull) % 100u < quint32(zt.palmShare) && plantPalm(bx, bz, y0, colHash(ck ^ 0x60C5ull))) continue;
+            }
+            if (site.spruce && !zt.jungle && !zt.palmShare)
+            {   // spruces of different sizes, MUCH rarer than oaks: some cells of the grid are empty, big and giant ones are a rarity
+                // (a tropical forest is a jungle: dense, every fifth tree big — it must not be thinned as a spruce one)
+                const quint32 hr = colHash(ck ^ 0x5B0Eull);
+                if (hr % 100u >= 38u) continue;                                      // ~38% of the cells of the 6×6 grid
+                const quint32 cls = (hr >> 8) % 100u;
+                int hs, R;
+                if (cls < 50)      { hs = 9 + int((hr >> 16) % 5u);   R = 3; }       // ordinary 9..13
+                else if (cls < 75) { hs = 14 + int((hr >> 16) % 6u);  R = 4; }       // taller 14..19
+                else if (cls < 93) { hs = 20 + int((hr >> 16) % 8u);  R = 5; }       // big 20..27, a 2×2 trunk
+                else               { hs = 30 + int((hr >> 16) % 11u); R = 7; }       // a giant 30..40, a 2×2 trunk
+                if (y0 + hs + 3 > 255) continue;
+                if (R >= 5 && (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))
+                               || !spansContain(site.spans, bx + 1, bz) || !spansContain(site.spans, bx, bz + 1) || !spansContain(site.spans, bx + 1, bz + 1))) continue;
+                plantSpruce(bx, bz, y0, hs, R);
+                continue;
+            }
+            if (zoneSkip(bx, bz)) continue;
+            if (zt.jungle)
+            {   // a jungle forest (like the game's one): one in five — a big 2×2 tree with branches
+                // (where the 2×2 is free), the rest are thin trunks taller than the ordinary oak
+                const quint32 hj = colHash(ck ^ 0x3ADE11ull);
+                if (hj % 5u == 0u
+                    && !colMin.contains(pairKey(bx + 1, bz)) && !colMin.contains(pairKey(bx, bz + 1)) && !colMin.contains(pairKey(bx + 1, bz + 1))
+                    && !colWater.contains(pairKey(bx + 1, bz)) && !colWater.contains(pairKey(bx, bz + 1)) && !colWater.contains(pairKey(bx + 1, bz + 1))
+                    && spansContain(site.spans, bx + 1, bz) && spansContain(site.spans, bx, bz + 1) && spansContain(site.spans, bx + 1, bz + 1)
+                    && plantJungleBig(bx, bz, y0, hj))
+                    continue;
+                if (y0 + site.treeH + 6 > 255) continue;
+                plantBroad(bx, bz, y0, site.treeH + int(hj % 4u), IdOakLog, IdOakLeaves);   // the zone remap turns it into a jungle one with vines
+                continue;
+            }
+            if (zt.bigOakShare && colHash(ck ^ 0x2A17Cull) % 100u < quint32(zt.bigOakShare)
+                && !colMin.contains(pairKey(bx + 1, bz)) && !colMin.contains(pairKey(bx, bz + 1)) && !colMin.contains(pairKey(bx + 1, bz + 1))
+                && !colWater.contains(pairKey(bx + 1, bz)) && !colWater.contains(pairKey(bx, bz + 1)) && !colWater.contains(pairKey(bx + 1, bz + 1))
+                && spansContain(site.spans, bx + 1, bz) && spansContain(site.spans, bx, bz + 1) && spansContain(site.spans, bx + 1, bz + 1)
+                && plantBigOak(bx, bz, y0, colHash(ck ^ 0x73F91ull)))
+                continue;                                                     // a temperate rainforest: every third broadleaf tree is a big oak (where the 2×2 is free)
+            const int h = site.treeH - int(colHash(ck ^ 0x5EEDull) % 2u);   // trunks of different heights
+            for (int dy = 0; dy < h; ++dy)
+                if (store.get(bx, y0 + dy, bz) == IdAir)
+                    store.set(bx, y0 + dy, bz, zt.oakLog);
+            const int topTree = y0 + h - 1;                   // the crown — a "diamond" of oak, only through the air
+            for (int dy = -2; dy <= 1; ++dy)
+            {
+                const int r = (dy == 1) ? 1 : 2;
+                for (int dx = -r; dx <= r; ++dx)
+                    for (int dz = -r; dz <= r; ++dz)
+                    {
+                        if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;   // the top — a cross
+                        if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;   // without the far corners
+                        const int x = bx + dx, y = topTree + dy, z = bz + dz;
+                        if (store.get(x, y, z) == IdAir)
+                            store.set(x, y, z, zt.oakLeaf);
+                    }
+            }
+        }
+    }
+    if (paleIdx >= 0 && paleDonorUsed && !heartsByChunk.isEmpty())
+    {   // CREAKING HEARTS — rare and spaced apart (horror, not a "wild run"): the extra ones (closer than 32 blocks to an already kept one) become a log again,
+        // and where there is no heart at all within a radius of 50 blocks, a new one is added into a suitable trunk (not closer than 50 to the others).
+        constexpr double kMinD = 32.0, kGapD = 50.0;
+        QVector<QPoint3> all;
+        for (auto it = heartsByChunk.constBegin(); it != heartsByChunk.constEnd(); ++it) all += it.value();
+        std::sort(all.begin(), all.end(), [&](const QPoint3& a, const QPoint3& b)
+        { const quint32 ha = colHash(pairKey(a.x, a.z) ^ 0x4E1ull), hb = colHash(pairKey(b.x, b.z) ^ 0x4E1ull); return ha != hb ? ha < hb : (a.x != b.x ? a.x < b.x : a.z < b.z); });
+        QVector<QPoint3> kept;
+        auto nearKept = [&](int x, int z, double d)
+        { for (const QPoint3& q : kept) if (std::hypot(double(q.x - x), double(q.z - z)) < d) return true; return false; };
+        int nDemoted = 0;
+        QHash<ColKey, QVector<QPoint3>> newHearts;
+        for (const QPoint3& h : all)
+        {
+            if (!nearKept(h.x, h.z, kMinD)) { kept.append(h); newHearts[pairKey(h.x >> 4, h.z >> 4)].append(h); continue; }
+            const quint16 cur = store.get(h.x, h.y, h.z);
+            store.set(h.x, h.y, h.z, cur == quint16(IdCreakingHeart) ? quint16(IdPaleLog) : paleDonor.logId);
+            ++nDemoted;
+        }
+        // adding: pale oak trunks at a height of 4 above the ground (donor) — candidates on a 6×6 grid, in the "hash" order
+        int nAdded = 0;
+        if (paleDonor.heartId)
+        {
+            QVector<QPoint3> cands;
+            for (auto pit = paleCol.constBegin(); pit != paleCol.constEnd(); ++pit)
+            {
+                const int x = keyFirst(pit.key()), z = keySecond(pit.key());
+                if (((x * 7 + z * 13) % 5) != 0) continue;
+                const auto cc = pit;
+                if (cc->pid >= 0 || cc->w < 235) continue;
+                const int y = cc->top + 4;
+                if (store.get(x, y, z) == paleDonor.logId) cands.append(QPoint3{ x, y, z });
+            }
+            std::sort(cands.begin(), cands.end(), [&](const QPoint3& a, const QPoint3& b)
+            { const quint32 ha = colHash(pairKey(a.x, a.z) ^ 0x4E2ull), hb = colHash(pairKey(b.x, b.z) ^ 0x4E2ull); return ha != hb ? ha < hb : (a.x != b.x ? a.x < b.x : a.z < b.z); });
+            for (const QPoint3& c : cands)
+            {
+                if (nearKept(c.x, c.z, kGapD)) continue;
+                store.set(c.x, c.y, c.z, paleDonor.heartId);
+                kept.append(c);
+                newHearts[pairKey(c.x >> 4, c.z >> 4)].append(c);
+                ++nAdded;
+            }
+        }
+        heartsByChunk = newHearts;
+        res.lairInfo += QObject::tr("; creaking hearts: %1 (extra removed %2, added %3)").arg(kept.size()).arg(nDemoted).arg(nAdded);
+    }
+    if (paleIdx >= 0 && !paleDonorUsed)
+    {   // the Pale Garden litter: moss blocks instead of turf, a carpet of pale moss, rare eyeblossoms
+        const VegSite& ps = forests[paleIdx];
+        for (const ColSpan& c : ps.spans)
+            for (int z = c.z0; z <= c.z1; ++z)
+            {
+                const qint64 ck = pairKey(c.x, z);
+                if (colWater.contains(ck) || colMin.contains(ck) || colWool.contains(ck)) continue;
+                const quint32 hq = colHash(ck ^ 0xB1EDull);
+                const auto git = ground.find(pairKey(c.x >> 4, z >> 4));
+                if (git == ground.end()) continue;
+                const int col = (z & 15) * 16 + (c.x & 15);
+                if (git->wd[col] > 0) continue;
+                if (hq % 100u < 14u) git->surf[col] = quint16(IdPaleMossBlock);
+                const int top = git->top[col];
+                if (store.get(c.x, top + 1, z) != IdAir) continue;
+                const quint32 r2 = (hq >> 8) % 1000u;
+                if (r2 < 330) store.set(c.x, top + 1, z, IdPaleMossCarpet);
+                else if (r2 < 345) store.set(c.x, top + 1, z, (hq >> 20) & 1u ? quint16(IdEyeOpen) : quint16(IdEyeClosed));
+            }
+    }
+    // FLOATING ISLANDS above kindergartens: a "cloud" rounded lower part (calcite/white concrete), turf on top, a lake flush with the ground,
+    // slime at the shore, tropics (jungle trees, bamboo, reeds, ferns, lily pads), slimes. There are no rims — slimes sometimes fall.
+    for (const IslandSite& is : islandSites)
+    {
+        if (is.kind != 2) continue;
+        int y0 = std::min(surfaceTop(pairKey(is.cx, is.cz)), 255) + 70 + int(is.hash % 16u);   // high above the park: 70–85 blocks above the ground
+        if ((y0 & 15) == 15) ++y0;                                         // the lake and lily pads (a block above the water) are not cut by a section border
+        const int D = std::max(5, std::min(11, std::min(is.rx, is.rz) / 3));   // the "bowl" depth: thin, does not reach the buildings
+        if (y0 + 14 > 300) continue;
+        const quint16 calcite = quint16(IdPaletteStart + paletteIndexOf("minecraft:calcite"));
+        const quint16 white = quint16(IdPaletteStart + paletteIndexOf("minecraft:diorite"));
+        const quint16 sandB = quint16(IdPaletteStart + paletteIndexOf("minecraft:sand"));
+        const quint16 slime = quint16(IdPaletteStart + paletteIndexOf("minecraft:slime_block"));
+        const quint16 jungleLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
+        const quint16 bamboo = quint16(IdPaletteStart + paletteIndexOf("minecraft:bamboo"));
+        const quint16 cane = quint16(IdPaletteStart + paletteIndexOf("minecraft:sugar_cane"));
+        const quint16 fern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern"));
+        const quint16 lily = quint16(IdPaletteStart + paletteIndexOf("minecraft:lily_pad"));
+        const double ph = double(is.hash % 628u) / 100.0;
+        // the lake: an ellipse offset from the center
+        const double lcx = std::sin(ph) * is.rx * 0.18, lcz = std::cos(ph) * is.rz * 0.18;
+        const double lrx = std::max(4.0, is.rx * 0.30), lrz = std::max(4.0, is.rz * 0.26);
+        auto lakeD = [&](int dx, int dz) { const double a = (dx - lcx) / lrx, b = (dz - lcz) / lrz; return a * a + b * b; };   // <=1 inside
+        auto colGround = [&](int x, int z) { return ground.contains(pairKey(x >> 4, z >> 4)); };
+        auto hashAt = [&](int x, int z, quint32 salt) { return colHash(pairKey(x, z) ^ (qint64(is.hash) << 8) ^ salt); };
+        QVector<QPoint> land;                                              // land cells (for trees/slimes)
+        QHash<ColKey, int> topAt;
+        for (int dz = -is.rz; dz <= is.rz; ++dz)
+            for (int dx = -is.rx; dx <= is.rx; ++dx)
+            {
+                const double u = double(dx) / is.rx, v = double(dz) / is.rz;
+                const double edge = 0.12 * std::sin(dx * 0.31 + ph) + 0.10 * std::cos(dz * 0.27) + 0.06 * std::sin((dx + dz) * 0.19);
+                const double r = std::sqrt(u * u + v * v) + edge;
+                if (r > 1.0) continue;
+                const int x = is.cx + dx, z = is.cz + dz;
+                if (!colGround(x, z)) continue;
+                const bool nearLake = lakeD(dx, dz) <= 3.2;
+                int top = y0;
+                if (!nearLake && r > 0.15)                                  // soft mounds far from the lake
+                    top = y0 + int(std::lround(1.1 * std::sin(dx * 0.23 + ph) * std::cos(dz * 0.19 - ph)));
+                const int depth = 2 + int(D * std::sqrt(std::max(0.0, 1.0 - r * r)));    // a rounded "bowl"
+                for (int y = top - depth; y <= top; ++y)
+                {
+                    const int d = top - y;
+                    quint16 id;
+                    if (d == 0) id = IdGrass;
+                    else if (d <= 2) id = IdDirt;
+                    else id = (((dx * 7 + dz * 13 + y * 5) & 7) == 0) ? white : calcite;
+                    store.set(x, y, z, id);
+                }
+                topAt.insert(pairKey(x, z), top);
+                // the lake is flush: water on the three top layers, the bottom — sand
+                if (lakeD(dx, dz) <= 1.0 && r < 0.8)
+                {
+                    store.set(x, top, z, IdWater);
+                    store.set(x, top - 1, z, IdWater);
+                    store.set(x, top - 2, z, IdWater);
+                    store.set(x, top - 3, z, sandB);
+                    if (hashAt(x, z, 0x11A1u) % 100u < 9u) store.set(x, top + 1, z, lily);
+                }
+                else
+                    land.append(QPoint(x, z));
+            }
+        // slime at the shore, reeds near the water, ferns/flowers
+        for (const QPoint& c : land)
+        {
+            const int top = topAt.value(pairKey(c.x(), c.y()));
+            const int dx = c.x() - is.cx, dz = c.y() - is.cz;
+            const double ld = lakeD(dx, dz);
+            const quint32 hq = hashAt(c.x(), c.y(), 0x5A1Eu);
+            if (ld <= 1.7 && hq % 100u < 38u) { store.set(c.x(), top, c.y(), slime); continue; }        // the shore is partly slimy
+            if (ld <= 1.7 && hq % 100u < 60u && store.get(c.x(), top, c.y()) == IdGrass)
+            {   // reeds near the water: 2–3 cells
+                const int h = 2 + int((hq >> 8) % 2u);
+                for (int k = 1; k <= h; ++k) store.set(c.x(), top + k, c.y(), cane);
+                continue;
+            }
+            if (ld > 1.7 && hq % 100u < 14u) store.set(c.x(), top + 1, c.y(), fern);
+            else if (ld > 1.7 && hq % 100u < 17u) store.set(c.x(), top + 1, c.y(), quint16(IdFlowerBase + int((hq >> 10) % quint32(kFlowersCount))));
+        }
+        // slime clumps on land (2×2)
+        for (int k = 0; k < 4; ++k)
+        {
+            const quint32 hk = is.hash * 2654435761u + quint32(k) * 40503u;
+            if (land.isEmpty()) break;
+            const QPoint c = land[int(hk % quint32(land.size()))];
+            for (int dz = 0; dz <= 1; ++dz)
+                for (int dx = 0; dx <= 1; ++dx)
+                {
+                    const qint64 key = pairKey(c.x() + dx, c.y() + dz);
+                    if (topAt.contains(key) && store.get(c.x() + dx, topAt.value(key), c.y() + dz) == IdGrass)
+                        store.set(c.x() + dx, topAt.value(key), c.y() + dz, slime);
+                }
+        }
+        // jungle trees and bamboo
+        const int nTrees = std::max(5, std::min(22, int(land.size()) / 90));
+        for (int t = 0; t < nTrees && !land.isEmpty(); ++t)
+        {
+            const quint32 ht = is.hash * 1103515245u + quint32(t) * 12345u + 7u;
+            const QPoint c = land[int((ht >> 4) % quint32(land.size()))];
+            const int dx = c.x() - is.cx, dz = c.y() - is.cz;
+            if (lakeD(dx, dz) <= 2.4) continue;
+            const int top = topAt.value(pairKey(c.x(), c.y()));
+            if (store.get(c.x(), top, c.y()) != IdGrass || store.get(c.x(), top + 1, c.y()) != IdAir) continue;
+            const int h = 5 + int((ht >> 12) % 4u);
+            for (int k = 1; k <= h; ++k) store.set(c.x(), top + k, c.y(), jungleLog);
+            for (int dy = -2; dy <= 1; ++dy)
+            {
+                const int rr = (dy == 1) ? 1 : (dy == 0 ? 3 : 2);
+                for (int ex = -rr; ex <= rr; ++ex)
+                    for (int ez = -rr; ez <= rr; ++ez)
+                    {
+                        if (std::abs(ex) == rr && std::abs(ez) == rr && rr > 1) continue;
+                        if (store.get(c.x() + ex, top + h + dy, c.y() + ez) == IdAir)
+                            store.set(c.x() + ex, top + h + dy, c.y() + ez, IdJungleLeaves);
+                    }
+            }
+            jungleCrownVines(c.x(), c.y(), top + h - 2, 3);             // vines over the whole crown (the game's jungle look)
+        }
+        for (int g = 0; g < 7 && !land.isEmpty(); ++g)
+        {   // bamboo groves
+            const quint32 hg = is.hash * 2246822519u + quint32(g) * 3266489917u + 3u;
+            const QPoint c = land[int((hg >> 3) % quint32(land.size()))];
+            if (lakeD(c.x() - is.cx, c.y() - is.cz) <= 2.0) continue;
+            const int n = 3 + int((hg >> 20) % 4u);
+            for (int q = 0; q < n; ++q)
+            {
+                const int bx = c.x() + int((hg >> (q * 3)) % 5u) - 2, bz = c.y() + int((hg >> (q * 3 + 1)) % 5u) - 2;
+                const qint64 key = pairKey(bx, bz);
+                if (!topAt.contains(key)) continue;
+                const int top = topAt.value(key);
+                if (store.get(bx, top, bz) != IdGrass || store.get(bx, top + 1, bz) != IdAir) continue;
+                const int h = 4 + int((hg >> (q + 8)) % 6u);
+                for (int k = 1; k <= h; ++k) store.set(bx, top + k, bz, bamboo);
+            }
+        }
+        // slimes: up to 8 of different sizes on land
+        for (int sl = 0; sl < 8 && !land.isEmpty(); ++sl)
+        {
+            const quint32 hs = is.hash * 668265263u + quint32(sl) * 374761393u + 11u;
+            const QPoint c = land[int((hs >> 3) % quint32(land.size()))];
+            const int top = topAt.value(pairKey(c.x(), c.y()));
+            if (store.get(c.x(), top + 1, c.y()) != IdAir) continue;
+            NpcSite m; m.kind = 4; m.variant = 8; m.level = int((hs >> 10) % 3u);
+            m.x = c.x(); m.z = c.y(); m.y = top + 1; m.yaw = int((hs >> 14) % 4u) * 90;
+            npcs.append(m);
+        }
+        // Lamps on the ground under the island (it casts a shadow on the park): two oval rings of glowing tiles flush with the ground
+        // (glowstone instead of turf), on every third one — a low lamp post; in the center — a tall stand with a lantern. The rings are slightly wider than the island.
+        {
+            const quint16 glow = quint16(IdPaletteStart + paletteIndexOf("minecraft:glowstone"));
+            auto groundCol = [&](int x, int z, int& top) -> GroundChunk*
+            {
+                const qint64 ck = pairKey(x, z);
+                if (colWater.contains(ck) || colMin.contains(ck) || colWool.contains(ck) || roadCols.contains(ck)) return nullptr;
+                auto git = ground.find(pairKey(x >> 4, z >> 4));
+                if (git == ground.end()) return nullptr;
+                const int col = (z & 15) * 16 + (x & 15);
+                if (git->wd[col] > 0) return nullptr;
+                top = git->top[col];
+                return &git.value();
+            };
+            auto lampPost = [&](int x, int z, int top, int fences)
+            {
+                bool free = true;
+                for (int dy = 1; dy <= fences + 2 && free; ++dy) if (store.get(x, top + dy, z) != IdAir) free = false;
+                if (!free) return;
+                store.set(x, top + 1, z, IdCobbleWall);
+                for (int dy = 2; dy <= fences + 1; ++dy) store.set(x, top + dy, z, IdFence);
+                store.set(x, top + fences + 2, z, IdLanternStanding);
+            };
+            const double ringK[2] = { 1.12, 0.62 };
+            for (int ri = 0; ri < 2; ++ri)
+            {
+                const double rxr = is.rx * ringK[ri], rzr = is.rz * ringK[ri];
+                const int nSeg = std::max(12, int(std::lround(2.0 * 3.14159265 * 0.5 * (rxr + rzr) / 2.0)));        // a tile every ~2 blocks
+                QSet<ColKey> done;
+                for (int t = 0; t < nSeg; ++t)
+                {
+                    const double a = 2.0 * 3.14159265 * t / nSeg;
+                    const int x = is.cx + int(std::lround(std::cos(a) * rxr)), z = is.cz + int(std::lround(std::sin(a) * rzr));
+                    if (done.contains(pairKey(x, z))) continue;
+                    done.insert(pairKey(x, z));
+                    int top = 0;
+                    GroundChunk* g = groundCol(x, z, top);
+                    if (!g) continue;
+                    g->surf[(z & 15) * 16 + (x & 15)] = glow;
+                    if (t % 3 == 0) lampPost(x + (std::cos(a) >= 0 ? 1 : -1), z, top, 3);                   // a post next to the tile, outside the ring
+                }
+            }
+            int topC = 0;
+            if (GroundChunk* gc = groundCol(is.cx, is.cz, topC))
+            {
+                Q_UNUSED(gc);
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        int tp = 0;
+                        if (GroundChunk* g2 = groundCol(is.cx + dx, is.cz + dz, tp)) g2->surf[((is.cz + dz) & 15) * 16 + ((is.cx + dx) & 15)] = glow;
+                    }
+                lampPost(is.cx, is.cz, topC, 5);                                                              // the central tall stand
+            }
+        }
+    }
+    // Swamp biome (sources with the "swamp" effect, e.g. mrspol): what the biome does BY ITSELF. Forests under
+    // the contour already became swamp-oak groves in the forest loop; here the OPEN swamp ground gets rare oaks
+    // (sparser than forest), and mushrooms/ferns/dead branches as the ground flora. Water, roads and built-up
+    // columns under the contour are left alone — the biome is an overlay, not an owner of the land.
+    if (!swampCols.isEmpty())
+    {
+        const quint16 qFern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern")),
+                    qDb = quint16(IdPaletteStart + paletteIndexOf("minecraft:dead_bush")),
+                    qMushB = quint16(IdPaletteStart + paletteIndexOf("minecraft:brown_mushroom")),
+                    qMushR = quint16(IdPaletteStart + paletteIndexOf("minecraft:red_mushroom"));
+        auto floor6 = [](int v) { return v >= 0 ? v / 6 : -((-v + 5) / 6); };   // cell of the same 6×6 grid as the forest loop
+        QSet<ColKey> cells;
+        for (ColKey ck : swampCols)
+            cells.insert(pairKey(floor6(keyFirst(ck)), floor6(keySecond(ck))));
+        int nSwampTrees = 0;
+        for (ColKey cell : cells)
+        {
+            const quint32 hs = colHash(cell ^ 0x2F8C3ull);
+            if (hs % 100u >= 40u) continue;                                    // open swamp — rare trees (~40% of cells)
+            const int tx = keyFirst(cell) * 6 + int(hs % 6u), tz = keySecond(cell) * 6 + int((hs >> 8) % 6u);
+            const ColKey ck = pairKey(tx, tz);
+            if (!swampCols.contains(ck)) continue;                             // the tree spot fell outside the contour
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(tx, y0, tz) != IdAir) continue;                      // something already stands here
+            const int h = 5 + int(hs % 4u);
+            if (y0 + h + 4 > 255) continue;
+            plantSwampOak(tx, tz, y0, h, hs);
+            ++nSwampTrees;
+        }
+        for (ColKey ck : swampCols)
+        {
+            const quint32 hd = colHash(ck ^ 0x77AC11ull);
+            if (hd % 100u >= 7u) continue;                                     // flora on ~7% of the columns
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck)) continue;
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(bx, y0, bz) != IdAir) continue;                      // not on a trunk or an object
+            const quint32 r = (hd >> 8) % 100u;
+            store.set(bx, y0, bz, r < 40u ? qDb : (r < 58u ? qMushB : (r < 76u ? qMushR : qFern)));
+        }
+        tmcStepLog(QString("3.5 swamp biome: %1 columns, %2 open-ground oaks").arg(swampCols.size()).arg(nSwampTrees).toUtf8().constData());
+    }
+    // Cemeteries (csrpol 53510000, a user request): the dark-forest plot of the dead. Forests under the contour
+    // already became dark-oak groves in the forest loop; the OPEN cemetery ground gets dense dark oaks (a 5x5 grid),
+    // stone crosses between them (a 3x3 grid), a lit jack o'lantern on a fence post by some crosses, rare carved
+    // pumpkins, wandering monsters (zombies, skeletons, spiders, witches) and rare loot chests (middling often,
+    // expensive rarely). Water, roads and built-up columns stay alone — an overlay, not an owner of the land.
+    if (!cemeteryCols.isEmpty())
+    {
+        const quint16 qPumpkin = quint16(IdPaletteStart + paletteIndexOf("minecraft:carved_pumpkin")),
+                    qStoneC = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone"));
+        auto floorC5 = [](int v) { return v >= 0 ? v / 5 : -((-v + 4) / 5); };
+        auto floorC3 = [](int v) { return v >= 0 ? v / 3 : -((-v + 2) / 3); };
+        auto floorC6 = [](int v) { return v >= 0 ? v / 6 : -((-v + 5) / 6); };
+        auto floorC9 = [](int v) { return v >= 0 ? v / 9 : -((-v + 8) / 9); };
+        int nCemTrees = 0, nCross = 0, nJack = 0, nPumpkin = 0, nCemMob = 0, nCemChest = 0;
+        QSet<ColKey> cells5;
+        for (ColKey ck : cemeteryCols)
+            cells5.insert(pairKey(floorC5(keyFirst(ck)), floorC5(keySecond(ck))));
+        for (ColKey cell : cells5)
+        {   // dark oaks on the open ground — quite dense: ~70% of the 5x5 cells
+            const quint32 hs = colHash(cell ^ 0x0CE117ull);
+            if (hs % 100u >= 70u) continue;
+            const int tx = keyFirst(cell) * 5 + int(hs % 5u), tz = keySecond(cell) * 5 + int((hs >> 8) % 5u);
+            const ColKey ck = pairKey(tx, tz);
+            if (!cemeteryCols.contains(ck)) continue;                            // the tree spot fell outside the contour
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)
+                || colWool.contains(ck)) continue;                     // paved squares and roadways are no place for a grave tree (a request)
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(tx, y0, tz) != IdAir) continue;                        // something already stands here
+            const int h = 7 + int(hs % 4u);                                   // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
+            if (y0 + h + 4 > 255) continue;
+            plantDarkOak(tx, tz, y0, h, hs);
+            ++nCemTrees;
+        }
+        QSet<ColKey> cells3;
+        for (ColKey ck : cemeteryCols)
+            cells3.insert(pairKey(floorC3(keyFirst(ck)), floorC3(keySecond(ck))));
+        for (ColKey cell : cells3)
+        {   // stone crosses — ~17% of the 3x3 cells (a request: ~1.5x fewer, so the paths between the graves are wider);
+            // the whole cross must stand in the air
+            const quint32 hc = colHash(cell ^ 0xC83C11ull);
+            if (hc % 100u >= 17u) continue;
+            const int tx = keyFirst(cell) * 3 + int(hc % 3u), tz = keySecond(cell) * 3 + int((hc >> 8) % 3u);
+            const ColKey ck = pairKey(tx, tz);
+            if (!cemeteryCols.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
+                || colWool.contains(ck)) continue;                                 // no crosses on roadways and paved squares (a request)
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(tx, y0, tz) != IdAir || store.get(tx, y0 + 1, tz) != IdAir || store.get(tx, y0 + 2, tz) != IdAir
+                || store.get(tx - 1, y0 + 2, tz) != IdAir || store.get(tx + 1, y0 + 2, tz) != IdAir) continue;
+            if (roadCols.contains(pairKey(tx - 1, tz)) || roadCols.contains(pairKey(tx + 1, tz))
+                || colWool.contains(pairKey(tx - 1, tz)) || colWool.contains(pairKey(tx + 1, tz))) continue;   // nor may the crossbar hang over one (a request)
+            store.set(tx, y0, tz, qStoneC);                          // a stone base
+            store.set(tx, y0 + 1, tz, IdCobbleWall);                 // the upright
+            store.set(tx, y0 + 2, tz, IdCobbleWall);
+            store.set(tx - 1, y0 + 2, tz, IdCobbleWall);             // the crossbar
+            store.set(tx + 1, y0 + 2, tz, IdCobbleWall);
+            ++nCross;
+            if (hc % 100u >= 6u) continue;                            // a jack o'lantern by ~6% of the cells (kept proportional to the rarer crosses)
+            const int side = ((hc >> 10) & 1u) ? 1 : -1;
+            const int px = tx + side * 2;
+            const ColKey pk = pairKey(px, tz);
+            if (colWater.contains(pk) || roadCols.contains(pk) || colMin.contains(pk) || railColsAll.contains(pk)
+                || colWool.contains(pk)
+                || store.get(px, y0, tz) != IdAir || store.get(px, y0 + 1, tz) != IdAir) continue;
+            store.set(px, y0, tz, IdFence);                          // a fence post (no connections)
+            store.set(px, y0 + 1, tz, quint16(IdJackLanternBase + int((hc >> 12) % 4u)));   // the lit face looks by hash
+            ++nJack;
+        }
+        for (ColKey ck : cemeteryCols)
+        {   // carved pumpkins dot the grass (~0.75% of the columns — a request: four times rarer)
+            const quint32 hp = colHash(ck ^ 0x9AB1CEull);
+            if (hp % 400u >= 3u) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || colWool.contains(ck)) continue;
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(bx, y0, bz) != IdAir) continue;
+            store.set(bx, y0, bz, qPumpkin);
+            ++nPumpkin;
+        }
+        QSet<ColKey> cells6;
+        for (ColKey ck : cemeteryCols)
+            cells6.insert(pairKey(floorC6(keyFirst(ck)), floorC6(keySecond(ck))));
+        for (ColKey cell : cells6)
+        {   // the monsters of the graveyard — a 6x6 grid, ~45% of the cells: a zombie, a skeleton, a spider or a witch
+            const quint32 hm = colHash(cell ^ 0x4045E7ull);
+            if (hm % 100u >= 45u) continue;
+            const int mx = keyFirst(cell) * 6 + int(hm % 6u), mz = keySecond(cell) * 6 + int((hm >> 8) % 6u);
+            const ColKey ck = pairKey(mx, mz);
+            if (!cemeteryCols.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
+                || colWool.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(mx, y0, mz) != IdAir || store.get(mx, y0 + 1, mz) != IdAir) continue;   // the body needs two rows
+            NpcSite ms;
+            ms.kind = 4; ms.variant = int((hm >> 16) % 4u);          // 0 zombie, 1 skeleton, 2 spider, 3 witch
+            ms.x = mx; ms.y = y0; ms.z = mz; ms.yaw = int((hm >> 4) % 4u) * 90;
+            npcs.append(ms);
+            ++nCemMob;
+        }
+        QSet<ColKey> cells9;
+        for (ColKey ck : cemeteryCols)
+            cells9.insert(pairKey(floorC9(keyFirst(ck)), floorC9(keySecond(ck))));
+        for (ColKey cell : cells9)
+        {   // the loot of the old graves — a 9x9 grid; buried graves twice as often as the ground ones (a request):
+            // a chest standing on the ground OR buried under a grave (the chest lies in the dug row of the old
+            // surface under a turf cover with a headstone — the lid is blocked, the treasure must be dug out).
+            // Buried: 20% expensive, 80% middling; ground chests: 80% cheap, 20% middling (a request).
+            const quint32 hl = colHash(cell ^ 0x51E9Cull);
+            const bool wantBuried = (hl & 1u) != 0;                 // half of the candidates ask for a buried grave
+            if (hl % 1000u >= (wantBuried ? 130u : 65u)) continue;  // buried ones twice as often (a request), the ground ones as before
+            const int tx = keyFirst(cell) * 9 + int(hl % 9u), tz = keySecond(cell) * 9 + int((hl >> 8) % 9u);
+            const ColKey ck = pairKey(tx, tz);
+            if (!cemeteryCols.contains(ck)) continue;
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
+                || colWool.contains(ck)) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(tx, y0, tz) != IdAir || store.get(tx, y0 + 1, tz) != IdAir) continue;
+            bool buried = false;
+            if (wantBuried)
+            {   // a buried grave: dig one row of the column (the writer builds it from `top`), the chest at the
+                // old surface level, a turf block covers it from above, a cobblestone wall marks the grave
+                const auto git = ground.find(pairKey(tx >> 4, tz >> 4));
+                const int T = y0 - 1;
+                if (git != ground.end())
+                {
+                    const int col = (tz & 15) * 16 + (tx & 15);
+                    if (int(git.value().top[col]) == T && store.get(tx, T, tz) == IdAir)
+                    {
+                        git.value().top[col] = qint16(T - 1);
+                        store.set(tx, T, tz, IdChest);
+                        chests << ChestSite{ tx, T, tz, pickChestLoot(hl >> 4, 0, 80) };   // 80% middling, 20% expensive
+                        store.set(tx, T + 1, tz, IdGrass);
+                        store.set(tx, T + 2, tz, IdCobbleWall);
+                        buried = true;
+                    }
+                }
+            }
+            if (!buried)
+            {
+                store.set(tx, y0, tz, IdChest);
+                chests << ChestSite{ tx, y0, tz, pickChestLoot(hl >> 4, 80, 20) };   // 80% cheap, 20% middling (a request)
+            }
+            ++nCemChest;
+        }
+        char cbuf[192];
+        snprintf(cbuf, sizeof cbuf, "3.5 cemeteries: %d columns, %d dark oaks, %d crosses, %d jack o'lanterns, %d pumpkins, %d monsters, %d chests",
+                 int(cemeteryCols.size()), nCemTrees, nCross, nJack, nPumpkin, nCemMob, nCemChest);
+        tmcStepLog(cbuf);
+    }
+    return true;
+}
+
+void ExportRun::buildUserTrees()
+{
+    // 3.51 Tree planting by the user's rules (three rules):
+    //   (1) columns inside the fill WITHOUT objects and vector coverage (just terrain) —
+    //       single trees: a 32×32 grid, in a cell a point center + hash jitter ±1 — neighbors
+    //       by cells do not come closer than 30 blocks (32−1−1); the hash gate lets 3 cells
+    //       out of 4 pass — a sparse forest, not rows;
+    //   (2) giant fields (ripe wheat, >100000 m²) — GROUPS of 2-3 trees nearby,
+    //       a 44×44 grid: the group spread ≤5 + jitter ≤1 ⇒ between groups also ≥30;
+    //   (3) "tall grass" (tall_grass, ≥50000 m²) — single trees, as in rule (1).
+    // A buffer of ±3 columns from structures/roads/tracks/sites/water/forest spots (including lamps —
+    // they are 1 column from the road): trees do not climb onto anything; a trunk is written only when ALL
+    // its cells are air (unlike a forest spot, where a skipped bottom one is allowed), the crown —
+    // only through the air. Before the grass is scattered: the grass looks at the store air and will not climb into the trunk.
+    {
+        // ATTENTION: fillChunks are the keys of CHUNKS (store.chunks), not columns!
+        const QSet<ColKey> fillChunkSet(fillChunks.constBegin(), fillChunks.constEnd());
+        auto inFill = [&](qint64 ck)
+        { return fillChunkSet.contains(pairKey(keyFirst(ck) >> 4, keySecond(ck) >> 4)); };
+        auto flat5 = [&](qint64 ck)
+        {   // the center and the 4 neighbors — one surface height (we do not put a tree on a slope)
+            const int y = surfaceTop(ck);
+            return std::abs(y - surfaceTop(pairKey(keyFirst(ck) + 1, keySecond(ck)))) <= 1
+                && std::abs(y - surfaceTop(pairKey(keyFirst(ck) - 1, keySecond(ck)))) <= 1
+                && std::abs(y - surfaceTop(pairKey(keyFirst(ck), keySecond(ck) + 1))) <= 1
+                && std::abs(y - surfaceTop(pairKey(keyFirst(ck), keySecond(ck) - 1))) <= 1;
+        };
+        const quint16 birchLogS = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
+        auto plantTree = [&](qint64 ck, int h, bool birch = false) -> bool
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            // The crown (±2) must not stick out of the fill: otherwise the chunk will be written without ground
+            // ("GROUND FAIL" in verify, holes along the chunk grid in the game).
+            for (int sx = -2; sx <= 2; sx += 4)
+                for (int sz = -2; sz <= 2; sz += 4)
+                    if (!fillChunkSet.contains(pairKey((bx + sx) >> 4, (bz + sz) >> 4)))
+                        return false;
+            const int y0 = surfaceTop(ck) + 1;
+            if (y0 + h + 3 > 255) return false;
+            for (int dy = 0; dy < h; ++dy)
+                if (store.get(bx, y0 + dy, bz) != IdAir) return false;    // not a single foreign stump in the trunk
+            if ((g_zone == Climate::Desert || g_zone == Climate::SemiArid) && colHash(ck ^ 0x7C31ull) % 100u < (g_zone == Climate::Desert ? 45u : 30u))   // cacti dot the desert and semi-arid open lands (the trees there stay rare)
+            {
+                const int hc = 1 + int(colHash(ck ^ 0x40A5ull) % 3u);               // 1..3 blocks tall (as in the game)
+                if (y0 + hc <= 254)
+                    for (int dy = 0; dy < hc; ++dy)
+                        store.set(bx, y0 + dy, bz, quint16(IdPaletteStart + paletteIndexOf("minecraft:cactus")));
+                return true;
+            }
+            if ((g_zone == Climate::Desert || g_zone == Climate::SemiArid) && colHash(ck ^ 0x9E77ull) % 100u < 20u)   // dry bushes speckle the same open lands between the cacti
+            {
+                store.set(bx, y0, bz, quint16(IdPaletteStart + paletteIndexOf("minecraft:dead_bush")));
+                return true;
+            }
+            if (zoneSkip(bx, bz)) return true;
+            if (zt.jungle)
+            {   // big jungle trees grow on the empty lands too: every fifth tree (busyNear already
+                // cleared a 7×7 buffer around the trunk, plantJungleBig checks the crown chunks itself)
+                const quint32 hj = colHash(ck ^ 0x3ADE11ull);
+                if (hj % 5u == 0u && plantJungleBig(bx, bz, y0, hj)) return true;
+            }
+            if (g_zone == Climate::Tundra && colHash(ck ^ 0x51A7ull) % 100u < 50u)   // the tundra: half of the empty-land trees are spruces, the rest are birches
+            {
+                const int hs = 6 + int(colHash(ck ^ 0x2B19ull) % 6u);                // 6..11 — hardy short firs
+                if (plantSpruce(bx, bz, y0, hs, hs >= 8 ? 3 : 2)) return true;       // no room for the cone — a birch grows then
+            }
+            if (zt.palmShare && colHash(ck ^ 0x49F1ull) % 100u < quint32(zt.palmShare))   // palm open lands (monsoon and semi-arid): the zone's share is palms, the rest are oaks
+            {
+                if (plantPalm(bx, bz, y0, colHash(ck ^ 0x27A9ull))) return true;
+            }
+            const quint16 tLog = birch ? zt.birchLog : zt.oakLog, tLeaf = birch ? zt.birchLeaf : zt.oakLeaf;
+            for (int dy = 0; dy < h; ++dy)
+                store.set(bx, y0 + dy, bz, tLog);
+            const int topTree = y0 + h - 1;                              // the "diamond" crown, only air
+            for (int dy = -2; dy <= 1; ++dy)
+            {
+                const int r = (dy == 1) ? 1 : 2;
+                for (int dx = -r; dx <= r; ++dx)
+                    for (int dz = -r; dz <= r; ++dz)
+                    {
+                        if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                        if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;
+                        if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
+                            store.set(bx + dx, topTree + dy, bz + dz, tLeaf);
+                    }
+            }
+            if (zt.jungle) jungleCrownVines(bx, bz, topTree - 2, 2);   // the jungle trees of the fields/meadows — with vines too
+            return true;
+        };
+        QVector<ColSpan> allForest;                                      // the whole forest — merged segments
+        for (const VegSite& s : forests) allForest += s.spans;
+        allForest = mergeSpans(allForest);
+        auto busyNear = [&](qint64 ck, bool plantsToo)                   // a "built-up/covered" 7×7 square?
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            for (int dz = -3; dz <= 3; ++dz)
+                for (int dx = -3; dx <= 3; ++dx)
+                {
+                    const qint64 nk = pairKey(bx + dx, bz + dz);
+                    if (colMin.contains(nk) || roadCols.contains(nk) || railColsAll.contains(nk)
+                        || colWool.contains(nk) || colWater.contains(nk) || noTreePadCols.contains(nk) || spansContain(allForest, bx + dx, bz + dz)
+                        || (plantsToo && colPlant.contains(nk)))
+                        return true;
+                }
+            return false;
+        };
+        // — (1)+(3): a 32×32 grid over the whole fill (the noise world apron is also an "empty place").
+        // The grid cells are derived from the chunk coordinates (a chunk covers a 32 grid in no more than 2×2 cells).
+        // A 14×14 grid (was 24×24: three times more trees), ~48% of the cells are occupied, the point in a cell is random over the whole cell (a margin of 2): the density is 1.5 times higher than the former one (32×32, 3 of 4),
+        // and the rows disappear; ~35% of the trees are birches.
+        constexpr int kGrid = 14;
+        auto fdivG = [](int v, int d) { return v >= 0 ? v / d : -((-v + d - 1) / d); };
+        QSet<ColKey> cells32;
+        cells32.reserve(qsizetype(fillChunkSet.size()) * 4);
+        for (qint64 ck : fillChunks)
+        {
+            const int cx = keyFirst(ck), cz = keySecond(ck);
+            const int x0 = fdivG(cx << 4, kGrid), x1 = fdivG((cx << 4) + 15, kGrid);   // the cells by X for this chunk
+            const int z0 = fdivG(cz << 4, kGrid), z1 = fdivG((cz << 4) + 15, kGrid);
+            cells32.insert(pairKey(x0, z0));
+            cells32.insert(pairKey(x1, z0));
+            cells32.insert(pairKey(x0, z1));
+            cells32.insert(pairKey(x1, z1));
+        }
+        for (qint64 cj : cells32)
+        {
+            const quint32 hh = colHash(cj ^ 0x7EE5ull);
+            if (hh % 100u >= 26u) continue;                                    // ~26% of the cells (was 63%, 48%, 36%: the single trees on empty lands were too frequent)
+            const quint32 hp = colHash(cj ^ 0x51D7ull);
+            const qint64 ck = pairKey(int(keyFirst(cj)) * kGrid + 2 + int(hp % quint32(kGrid - 4)),
+                                      int(keySecond(cj)) * kGrid + 2 + int((hp >> 10) % quint32(kGrid - 4)));
+            if (!inFill(ck) || !flat5(ck)) continue;
+            const int h = 5 + int(colHash(ck ^ 0x116ull) % 3u);              // trunks 5..7
+            const bool birch = (hp >> 20) % 100u < 35u;
+            if (colPlant.value(ck, 0) == quint16(IdTallGrass))               // (3) tall grass
+            {
+                if (!busyNear(ck, false)) plantTree(ck, h, birch);
+            }
+            else if (!busyNear(ck, true)) plantTree(ck, h, birch);           // (1) clean terrain
+        }
+        // — (2): wheat fields, groups of 2-3 trees per 44×44 cell.
+        auto fdiv = [](int v, int d) { return v >= 0 ? v / d : -((-v + d - 1) / d); };
+        QSet<ColKey> cells44;
+        for (auto it = colPlant.constBegin(); it != colPlant.constEnd(); ++it)
+            if (it.value() == quint16(IdWheat))
+                cells44.insert(pairKey(fdiv(keyFirst(it.key()), 44), fdiv(keySecond(it.key()), 44)));
+        static const int kGroupOff[2][2] = { { 3, 2 }, { -3, 4 } };
+        for (qint64 cj : cells44)
+        {
+            const quint32 hh = colHash(cj ^ 0x94D3ull);
+            if (hh % 4u == 0u) continue;                                     // glades without a group
+            const qint64 ck = pairKey(keyFirst(cj) * 44 + 22 + int(hh % 3u) - 1,
+                                      keySecond(cj) * 44 + 22 + int((hh >> 2) % 3u) - 1);
+            if (colPlant.value(ck, 0) != quint16(IdWheat) || !flat5(ck)
+                || busyNear(ck, false))
+                continue;
+            const int n = 2 + int(hh >> 4) % 2;                              // 2-3 trees in a group
+            int got = plantTree(ck, 5 + int(colHash(ck ^ 0x116ull) % 3u)) ? 1 : 0;
+            for (int g = 0; g < 2 && got < n; ++g)
+            {
+                const qint64 mk = pairKey(keyFirst(ck) + kGroupOff[g][0], keySecond(ck) + kGroupOff[g][1]);
+                if (colPlant.value(mk, 0) != quint16(IdWheat) || !flat5(mk)
+                    || busyNear(mk, false))
+                    continue;
+                if (plantTree(mk, 5 + int(colHash(mk ^ 0x116ull) % 3u))) ++got;
+            }
+        }
+    }
+
+    // — trees around schools (birches, the birch_forest biome) and kindergartens (multicolored poplars, the dappled_forest biome): a 9×9 grid, ~35% of the cells (crowns do not form a solid canopy),
+    // within kZoneR of the walls, not on structures/roads/water/forests/lawns (a buffer of ±3, like the other trees).
+    {
+        const QSet<ColKey> zoneFill(fillChunks.constBegin(), fillChunks.constEnd());
+        QVector<ColSpan> forestAll;
+        for (const VegSite& vs2 : forests) forestAll += vs2.spans;
+        forestAll = mergeSpans(forestAll);
+        auto busy = [&](qint64 ck)
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            for (int dz = -3; dz <= 3; ++dz)
+                for (int dx = -3; dx <= 3; ++dx)
+                {
+                    const qint64 nk = pairKey(bx + dx, bz + dz);
+                    if (colMin.contains(nk) || roadCols.contains(nk) || railColsAll.contains(nk) || colWool.contains(nk) || colWater.contains(nk)
+                        || colPlant.contains(nk) || spansContain(forestAll, bx + dx, bz + dz))
+                        return true;
+                }
+            return false;
+        };
+        const quint16 birchLog = zt.birchLog, birchLeaf = zt.birchLeaf;   // the monsoon zone remaps the school birches into oaks
+        const quint16 poplarLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:poplar_log"));
+        for (const IslandSite& is : islandSites)
+        {
+            if (is.kind == 2) continue;
+            const int x0 = is.cx - is.rx - kZoneMax, x1 = is.cx + is.rx + kZoneMax, z0 = is.cz - is.rz - kZoneMax, z1 = is.cz + is.rz + kZoneMax;
+            for (int gz = z0 / 9 - 1; gz <= z1 / 9 + 1; ++gz)
+                for (int gx = x0 / 9 - 1; gx <= x1 / 9 + 1; ++gx)
+                {
+                    const quint32 hh = colHash(pairKey(gx, gz) ^ (is.kind ? 0xB1C4ull : 0xD4F9ull));
+                    if (hh % 100u >= 35u) continue;
+                    const int bx = gx * 9 + int((hh >> 8) % 7u), bz = gz * 9 + int((hh >> 14) % 7u);
+                    const int dxo = std::max(0, std::abs(bx - is.cx) - is.rx), dzo = std::max(0, std::abs(bz - is.cz) - is.rz);
+                    Q_UNUSED(dxo); Q_UNUSED(dzo);
+                    if (!zoneInside(is, bx, bz, kZoneR)) continue;
+                    const qint64 ck = pairKey(bx, bz);
+                    if (busy(ck)) continue;
+                    if (!zoneFill.contains(pairKey(bx >> 4, bz >> 4))) continue;
+                    bool crownOk = true;
+                    for (int sx2 = -3; sx2 <= 3 && crownOk; sx2 += 6)
+                        for (int sz2 = -3; sz2 <= 3; sz2 += 6)
+                            if (!zoneFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) { crownOk = false; break; }
+                    if (!crownOk) continue;
+                    const int y0 = surfaceTop(ck) + 1;
+                    const int h = 5 + int(colHash(ck ^ 0x1B1Eull) % 5u);                       // trunk 5..9
+                    if (y0 + h + 4 > 255) continue;
+                    bool free = true;
+                    for (int dy = 0; dy < h && free; ++dy) if (store.get(bx, y0 + dy, bz) != IdAir) free = false;
+                    if (!free) continue;
+                    const quint16 log = is.kind == 1 ? birchLog : poplarLog;
+                    quint16 leaf = birchLeaf;
+                    if (is.kind == 0)
+                    {
+                        static const quint16 kPop[3] = { IdRedPoplarLeaves, IdOrangePoplarLeaves, IdYellowPoplarLeaves };
+                        leaf = kPop[(hh >> 20) % 3u];                                          // every tree has its own color
+                    }
+                    for (int dy = 0; dy < h; ++dy) store.set(bx, y0 + dy, bz, log);
+                    const int topTree = y0 + h - 1;
+                    for (int dy = -2; dy <= 1; ++dy)
+                    {
+                    const int r = (dy == 1) ? 1 : (is.kind == 0 && dy <= -1 ? 3 : 2);     // poplar: a wider crown
+                        for (int dx = -r; dx <= r; ++dx)
+                            for (int dz = -r; dz <= r; ++dz)
+                            {
+                                if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                                if (dy != 1 && std::abs(dx) == r && std::abs(dz) == r && r >= 2) continue;
+                                if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
+                                    store.set(bx + dx, topTree + dy, bz + dz, leaf);
+                            }
+                    }
+                }
+        }
+    }
+
+    // FLORA AND FAUNA OF FOREST BIOMES (as in the game): by 4×4 biome cells — ferns, flowers, berry bushes (taiga), leaf litter (dappled forest),
+    // flower forest — dense flowers; animals in groups (wolves/foxes/rabbits in the taiga, sheep/pigs/chickens/cows in the others, bees among flowers).
+    // Not on roads/sites/water/lawns and only where it is free above the ground.
+    {
+        const quint16 fern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern"));
+        const quint16 berry = quint16(IdPaletteStart + paletteIndexOf("minecraft:sweet_berry_bush"));
+        const quint16 brownM = quint16(IdPaletteStart + paletteIndexOf("minecraft:brown_mushroom"));
+        const quint16 redM = quint16(IdPaletteStart + paletteIndexOf("minecraft:red_mushroom"));
+        static const char* const kAnimTaiga[] = { "wolf", "wolf", "wolf", "fox", "fox", "rabbit", "rabbit", "sheep", "pig", "chicken" };
+        static const char* const kAnimForest[] = { "sheep", "sheep", "pig", "pig", "chicken", "chicken", "cow", "cow", "rabbit", "fox", "wolf" };
+        static const char* const kAnimDappled[] = { "fox", "fox", "sheep", "pig", "chicken", "cow", "rabbit", "rabbit" };
+        static const char* const kAnimFlower[] = { "rabbit", "rabbit", "rabbit", "sheep", "pig", "cow", "chicken", "bee", "bee" };
+        int nAnimals = 0;
+        QVector<qint64> cellKeys;
+        cellKeys.reserve(biomeCells.size());
+        for (auto bit = biomeCells.constBegin(); bit != biomeCells.constEnd(); ++bit)
+            if (bit.value() != 1 && bit.value() != 7) cellKeys.append(bit.key());   // the Pale Garden (1) is already carried over from the donor; the meadow (7) — without animals
+        if (g_zone == Climate::Steppe || g_zone == Climate::Mediterranean || g_zone == Climate::Desert || g_zone == Climate::Savanna || g_zone == Climate::SemiArid || g_zone == Climate::Tundra)
+            cellKeys.clear();                                                       // ferns, berry bushes and "forest" animals — not for dry and cold zones
+        std::sort(cellKeys.begin(), cellKeys.end());
+        for (qint64 ckc : cellKeys)
+        {
+            const int v = biomeCells.value(ckc);
+            const int x4 = keyFirst(ckc), z4 = keySecond(ckc);
+            for (int lz = 0; lz < 4; ++lz)
+                for (int lx = 0; lx < 4; ++lx)
+                {
+                    const int x = x4 * 4 + lx, z = z4 * 4 + lz;
+                    const qint64 ck = pairKey(x, z);
+                    const quint32 hq = colHash(ck ^ 0xF10A5ull);
+                    const int r = int(hq % 1000u);
+                    quint16 put = 0;
+                    if (v == 2)                                                   // taiga: ferns, berry bushes, mushrooms
+                    {
+                        if (r < 80) put = fern; else if (r < 98) put = berry; else if (r < 104) put = (hq >> 12) & 1u ? brownM : redM;
+                        else if (r < 108) put = quint16(IdFlowerBase + int((hq >> 14) % 2u ? 1 : 0));
+                    }
+                    else if (v == 3)                                              // forest: ferns, flowers at the edges, mushrooms
+                    {
+                        if (r < 40) put = fern; else if (r < 55) put = quint16(IdFlowerBase + int((hq >> 14) % 2u)); else if (r < 59) put = (hq >> 12) & 1u ? brownM : redM;
+                    }
+                    else if (v == 4)                                              // birch forest: rare flowers, ferns
+                    {
+                        if (r < 25) put = fern; else if (r < 55) put = quint16(IdFlowerBase + int((hq >> 14) % 4u));
+                    }
+                    else if (v == 5)                                              // dappled forest: leaf litter, mushrooms, ferns
+                    {
+                        if (r < 220) put = IdLeafLitter; else if (r < 240) put = fern; else if (r < 246) put = (hq >> 12) & 1u ? brownM : redM;
+                    }
+                    else if (v == 6)                                              // flower forest: dense flowers of all kinds
+                    {
+                        if (r < 300) put = quint16(IdFlowerBase + int((hq >> 14) % quint32(kFlowersCount))); else if (r < 320) put = fern;
+                    }
+                    if (!put) continue;                                           // a plant appears rarely — the expensive occupancy checks are made only for them
+                    if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck) || patchCols.contains(ck)) continue;
+                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                    if (git == ground.constEnd()) continue;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0 || git->surf[col] != quint16(IdGrass)) continue;
+                    const int top = git->top[col];
+                    if (store.get(x, top + 1, z) != IdAir) continue;
+                    store.set(x, top + 1, z, put);
+                }
+            // animals: per 4×4 cell ~2% chance of a group (on average one brood per ~800 m²); the cap per export — 700 animals
+            const quint32 hc = colHash(ckc ^ 0xA21E5ull);
+            if (nAnimals >= 700 || hc % 1000u >= 22u) continue;
+            const char* sp = v == 2 ? kAnimTaiga[(hc >> 10) % 10u] : v == 5 ? kAnimDappled[(hc >> 10) % 8u] : v == 6 ? kAnimFlower[(hc >> 10) % 9u] : kAnimForest[(hc >> 10) % 11u];
+            const int grp = (QLatin1String(sp) == QLatin1String("wolf")) ? 3 : (QLatin1String(sp) == QLatin1String("bee") ? 2 : 1 + int((hc >> 20) % 3u));
+            for (int g = 0; g < grp; ++g)
+            {
+                const int x = x4 * 4 + int((hc >> (4 * g)) % 4u), z = z4 * 4 + int((hc >> (4 * g + 2)) % 4u);
+                const qint64 ck = pairKey(x, z);
+                if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)) continue;
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd() || git->wd[(z & 15) * 16 + (x & 15)] > 0) continue;
+                const int top = git->top[(z & 15) * 16 + (x & 15)];
+                if (store.get(x, top + 1, z) != IdAir || store.get(x, top + 2, z) != IdAir) continue;
+                NpcSite a;
+                a.kind = 5; a.animal = QStringLiteral("minecraft:") + QLatin1String(sp);
+                a.x = x; a.z = z; a.y = top + 1 + (QLatin1String(sp) == QLatin1String("bee") ? 2 : 0); a.yaw = int((hc >> 24) % 4u) * 90;
+                npcs.append(a);
+                ++nAnimals;
+            }
+        }
+        if (nAnimals > 0) res.lairInfo += QObject::tr("; animals in forests: %1").arg(nAnimals);
+    }
+
+    // 3.586 AQUATIC FAUNA: fish live in the water as REAL entities (like the animals in the forest), they are not spawner-born.
+    // Lakes and areal rivers (hdrlin lines, pools, canals and ditches are not collected) hold fish only where the body really
+    // has spots deeper than 3 blocks after the smoothing — a puddle stays empty. Species by the climate zone; squid add to the
+    // largest bodies (from ~0.3 km²), axolotls add to bodies next to parks. The count grows with the area, capped per body.
+    if (!waterBodies.isEmpty())
+    {
+        // the park columns with a 64-block margin (chunk cells) — a lake near a park gets axolotls
+        QSet<ColKey> parkCells;
+        for (const auto& fs : forests)
+            if (fs.park)
+                for (int zc = (fs.minZ >> 4) - 4; zc <= ((fs.maxZ >> 4) + 4); ++zc)
+                    for (int xc = (fs.minX >> 4) - 4; xc <= ((fs.maxX >> 4) + 4); ++xc)
+                        parkCells.insert(pairKey(xc, zc));
+        const bool coldZone = (g_zone == Climate::Tundra || g_zone == Climate::Boreal);
+        const bool warmZone = (g_zone == Climate::Desert || g_zone == Climate::Savanna || g_zone == Climate::Tropical
+                               || g_zone == Climate::Monsoon || g_zone == Climate::SemiArid);
+        int nFauna = 0;
+        for (const WaterBodyRec& wb : waterBodies)
+        {
+            if (wb.d <= 3 || nFauna >= 600) continue;                     // shallower than 3 blocks by the contour — a puddle
+            // the samples that stayed deeper than 3 blocks after the smoothing, and the park proximity
+            QVector<qint64> deep; deep.reserve(64);
+            bool parkNear = false;
+            for (const qint64 ck : wb.samples)
+            {
+                const int x = keyFirst(ck), z = keySecond(ck);
+                if (!parkNear && parkCells.contains(pairKey(x >> 4, z >> 4))) parkNear = true;
+                if (deep.size() >= 64) continue;
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git != ground.constEnd() && git->wd[(z & 15) * 16 + (x & 15)] > 3) deep.append(ck);
+            }
+            if (deep.isEmpty()) continue;                                 // the smoothing made the whole body shallow — a puddle after all
+            const quint32 h0 = colHash(wb.seed);
+            const char* sp; int fishVariant = 0;
+            if (coldZone) sp = "minecraft:salmon";                                            // cold waters — salmon
+            else if (warmZone && (h0 % 100u) >= 15u) { sp = "minecraft:tropical_fish"; fishVariant = int(h0 & 0xffff); }
+            else if (warmZone) sp = "minecraft:pufferfish";                                   // warm waters — a tropical fish school, a pufferfish is rare
+            else sp = "minecraft:cod";                                                        // the rest — cod
+            // ~1 fish per 2000 m², at least two in a body, at most 12 (a cap so that a reservoir does not explode the entities file)
+            const int nFish = std::min(12, std::max(2, int(wb.nCols / 2000) + 1));
+            for (int k = 0; k < nFish && nFauna < 600; ++k)
+            {
+                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(k) * 0x9E3779B97F4A7C15ull)));
+                const qint64 ck = deep[h % quint32(deep.size())];
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd()) continue;
+                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
+                if (wd <= 3) continue;
+                NpcSite f; f.kind = 5; f.animal = QLatin1String(sp); f.variant = fishVariant;
+                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;              // the bottom of the water body
+                f.yoff = std::min(3.0, double(wd) - 1.0);                                     // in the water, closer to the bottom
+                f.yaw = int((h >> 20) % 4u) * 90;
+                npcs.append(f); ++nFauna;
+            }
+            // squid — only in quite large lakes and big rivers
+            const int nSquid = wb.nCols >= 1500000 ? 4 : (wb.nCols >= 300000 ? 2 : 0);
+            for (int k = 0; k < nSquid && nFauna < 600; ++k)
+            {
+                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(1000 + k) * 0x9E3779B97F4A7C15ull)));
+                const qint64 ck = deep[h % quint32(deep.size())];
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd()) continue;
+                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
+                if (wd <= 3) continue;
+                NpcSite f; f.kind = 5; f.animal = QLatin1String("minecraft:squid");
+                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;
+                f.yoff = std::min(3.0, double(wd) - 1.0);
+                npcs.append(f); ++nFauna;
+            }
+            // axolotls — a lake near a park (they fight with fish in the game — the balance is the game's own business)
+            if (parkNear) for (int k = 0; k < 2 && nFauna < 600; ++k)
+            {
+                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(2000 + k) * 0x9E3779B97F4A7C15ull)));
+                const qint64 ck = deep[h % quint32(deep.size())];
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd()) continue;
+                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
+                if (wd <= 3) continue;
+                NpcSite f; f.kind = 5; f.animal = QLatin1String("minecraft:axolotl"); f.variant = int(h >> 8);
+                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;
+                f.yoff = std::min(3.0, double(wd) - 1.0);
+                npcs.append(f); ++nFauna;
+            }
+        }
+        if (nFauna > 0) res.lairInfo += QObject::tr("; aquatic fauna: %1").arg(nFauna);
+    }
+
+    for (auto pit = colPlant.constBegin(); pit != colPlant.constEnd(); ++pit)
+    {
+        const qint64 ck = pit.key();
+        const quint16 pid = pit.value();
+        // A wheat field — a dense planting in every column (so that it reads as a field, not as sparse
+        // bushes); the other grass — a dense lawn, but not solid.
+        if (pid != quint16(IdWheat) && colHash(ck) % 2u != 0u) continue;
+        if (colWater.contains(ck)) continue;                   // we do not grow on water
+        if (colWool.contains(ck) || roadCols.contains(ck)) continue;   // on roads, parking lots and sites (concrete/wool) grass and flowers do not grow
+        const int bx = keyFirst(ck), bz = keySecond(ck);
+        {   // grass does not grow on a sandy shore
+            const auto gps = ground.constFind(pairKey(bx >> 4, bz >> 4));
+            if (gps != ground.constEnd() && g_sandId && gps->surf[(bz & 15) * 16 + (bx & 15)] == g_sandId) continue;
+        }
+        const int y = surfaceTop(ck) + 1;
+        if (y > 254) continue;
+        // Flowers on grass polygons "without height" (user request): about 1 column
+        // out of 24 instead of grass, a random kind. Wheat fields — skipped (there is a crop already).
+        if (pid == quint16(IdGrassPlant) || pid == quint16(IdTallGrass))
+        {
+            const quint32 hf = colHash(ck ^ 0xBEEF1ull);
+            if (hf % 24u == 0u)
+            {
+                if (store.get(bx, y, bz) == IdAir)
+                    store.set(bx, y, bz,
+                              quint16(IdFlowerBase + int((hf >> 8) % quint32(kFlowersCount))));
+                continue;
+            }
+        }
+        if (pid == quint16(IdTallGrass))
+        {   // the grown grass is two blocks tall: without the top half the game will break the bottom one on update
+            if (store.get(bx, y, bz) == IdAir && store.get(bx, y + 1, bz) == IdAir)
+            {
+                store.set(bx, y, bz, IdTallGrass);
+                store.set(bx, y + 1, bz, IdTallGrassUpper);
+            }
+        }
+        else if (store.get(bx, y, bz) == IdAir)
+        {
+            if (pid == quint16(IdWheat))
+            {   // wheat grows on plowed soil, not on turf; on special tiles (the island lamps) we do not plant
+                const auto gp2 = ground.find(pairKey(bx >> 4, bz >> 4));
+                if (gp2 != ground.end())
+                {
+                    quint16& sf = gp2->surf[(bz & 15) * 16 + (bx & 15)];
+                    if (sf != g_zoneSurface) continue;
+                    sf = IdFarmland;
+                }
+            }
+            store.set(bx, y, bz, pid);
+        }
+    }
+
+}
+
+bool ExportRun::buildForestTreasures()
+{
+    // 3.55 "Forest treasures" (user requests): in random places of forest spots (~1/384 of the columns)
+    // a SINGLE chest stands on the ground (double ones — only urban), NOT CLOSER THAN 30 BLOCKS to each
+    // other inside a polygon (the radius by the Euclidean metric). We place them BEFORE the grass is scattered — the grass
+    // will not climb into the chest.
+    {
+        int fsCols = 0;
+        for (int fiC = 0; fiC < forests.size(); ++fiC)
+        {
+            const VegSite& site = forests[fiC];
+            const bool paleF = (fiC == paleIdx);                // Pale Garden: about 2.5 times more chests (a grid of 12, radius 18) and often expensive
+            const int tRad = paleF ? 18 : 30;                   // the mutual distance of the treasures inside one polygon
+            QHash<qint64, QVector<QPoint>> near;                // the treasures of THIS polygon bucketed by
+            auto clash = [&](int bx, int bz)                    //   the radius: the old linear scan of ALL
+            {   // 3x3 buckets around the candidate, the exact metric inside them (a forest of tens of
+                //   thousands of treasures made that scan the slowest loop of the whole export)
+                for (int ax = -1; ax <= 1; ++ax)
+                    for (int az = -1; az <= 1; ++az)
+                    {
+                        const auto it = near.constFind(pairKey(bx / tRad + ax, bz / tRad + az));
+                        if (it == near.constEnd()) continue;
+                        for (const QPoint& p : *it)
+                        {
+                            const long long dx = p.x() - bx, dz = p.y() - bz;
+                            if (dx * dx + dz * dz < tRad * tRad) return true;
+                        }
+                    }
+                return false;
+            };
+            // a 20×20 grid (~1/400 of the columns, like the former 1/384): one hash-shifted place per cell
+            const int G = paleF ? 12 : 20;
+            // the grid is clamped to the export rectangle (a forest polygon can be many times wider than the world)
+            const int vgX0 = std::max(site.minX, (rcx0 - rectM) * 16), vgX1 = std::min(site.maxX, (rcx1 + rectM + 1) * 16 - 1);
+            const int vgZ0 = std::max(site.minZ, (rcz0 - rectM) * 16), vgZ1 = std::min(site.maxZ, (rcz1 + rectM + 1) * 16 - 1);
+            const int gx0 = int(std::floor(double(vgX0) / G)), gx1 = int(std::floor(double(vgX1) / G));
+            const int gz0 = int(std::floor(double(vgZ0) / G)), gz1 = int(std::floor(double(vgZ1) / G));
+            for (int gx = gx0; gx <= gx1; ++gx)
+            for (int gz = gz0; gz <= gz1; ++gz)
+            {
+                if ((++fsCols & 0x3FF) == 0 && cancel && cancel->load())
+                {
+                    res.cancelled = true;
+                    res.error = QObject::tr("Export cancelled.");
+                    return false;
+                }
+                const quint32 hc = colHash(pairKey(gx, gz) ^ 0xC0FFEEull);
+                const int tx = gx * G + int(hc % G), tz = gz * G + int((hc >> 8) % G);
+                if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
+                if (!spansContain(site.spans, tx, tz)) continue;
+                if (!ground.contains(pairKey(tx >> 4, tz >> 4))) continue;    // outside the written ground — there is no surface to stand a treasure on
+                const qint64 ck = pairKey(tx, tz);
+                if (colWater.contains(ck) || colMin.contains(ck)) continue;   // on water/under buildings — skipped
+                const int bx = keyFirst(ck), bz = keySecond(ck);
+                if (clash(bx, bz)) continue;                                  // a treasure stands closer than the radius
+                const int y = surfaceTop(ck) + 1;
+                if (y > 254) continue;
+                if (paleF && patchCols.contains(ck)) continue;                // not inside the mansion / a patch
+                {
+                    const quint16 here = store.get(bx, y, bz);
+                    if (paleF && (here == IdPaleMossCarpet || here == IdLeafLitter || here == IdGrassPlant || here == IdTallGrass))
+                        store.erase(bx, y, bz);                                   // the chest displaces the forest litter
+                    else if (here != IdAir) continue;                             // the place is already taken by a tree/planting
+                }
+                store.set(bx, y, bz, IdChest);
+                if (paleF)
+                {   // Pale Garden: 35% expensive (mansion/pyramid/outpost/sunken treasure), 25% medium, the rest everyday
+                    const quint32 hq = colHash(ck ^ 0x51ull);
+                    const int rich = kChestLootCount - 3;                         // woodland_mansion
+                    int tbl;
+                    if ((hq >> 8) % 100u < 12u) tbl = rich;                       // every eighth treasure — as in the mansion
+                    else tbl = pickChestLoot(hq, 40, 25);
+                    chests.append(ChestSite{ bx, y, bz, tbl });
+                }
+                else
+                    chests.append(ChestSite{ bx, y, bz, pickChestLoot(colHash(ck ^ 0x51ull), 85, 15) });   // treasures in forests — without the expensive ones
+                near[pairKey(bx / tRad, bz / tRad)].append(QPoint(bx, bz));
+            }
+        }
+    }
+
+    return true;
+}
+
+bool ExportRun::zoneSkip(int bx, int bz)
+{
+    return zt.density < 100 && colHash(pairKey(bx, bz) ^ 0xD3E5ull) % 100u >= quint32(zt.density);
+}
+
+void ExportRun::zoneRemap(quint16& log, quint16& leaf)
+{
+    if (log == quint16(IdOakLog)) { log = zt.oakLog; leaf = zt.oakLeaf; }
+    else if (log == birchLogRaw) { log = zt.birchLog; leaf = zt.birchLeaf; }
+}
+
+bool ExportRun::plantSpruceCone(int bx, int bz, int y0, int h, int R)
+{
+    const bool wide = R >= 5;                                              // big spruces — a 2×2 trunk
+    const int x1 = bx + (wide ? 1 : 0), z1 = bz + (wide ? 1 : 0);
+    for (int cxk = (bx - R) >> 4; cxk <= ((x1 + R) >> 4); ++cxk)
+        for (int czk = (bz - R) >> 4; czk <= ((z1 + R) >> 4); ++czk)
+            if (!sprFill.contains(pairKey(cxk, czk))) return false;
+    const quint16 sprLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:spruce_log"));
+    const int bare = std::max(2, h / 5);                                   // the bare trunk at the bottom
+    for (int dy = 0; dy < h; ++dy)
+        for (int x = bx; x <= x1; ++x)
+            for (int z = bz; z <= z1; ++z)
+                if (store.get(x, y0 + dy, z) == IdAir) store.set(x, y0 + dy, z, sprLog);
+    const int n = h - bare + 1;                                            // needle tiers (the top one — above the trunk)
+    const int topY = y0 + h;                                               // the top: a block above the trunk
+    for (int k = 0; k < n; ++k)
+    {
+        int r = (k == 0) ? 0 : std::max(1, (R * k + n - 2) / std::max(1, n - 1));
+        if (k >= 2 && (k & 1)) r = std::max(1, r - 1);                     // odd tiers are narrower — "skirts"
+        if (k == 1) r = 1;
+        const int y = topY - k;
+        const double lim = (r + (wide ? 0.75 : 0.25)) * (r + (wide ? 0.75 : 0.25));
+        for (int dx = -r; dx <= r + (wide ? 1 : 0); ++dx)
+            for (int dz = -r; dz <= r + (wide ? 1 : 0); ++dz)
+            {
+                const double fx = wide ? dx - 0.5 : double(dx), fz = wide ? dz - 0.5 : double(dz);      // the crown center — the trunk center
+                if (fx * fx + fz * fz > lim) continue;
+                const int x = bx + dx, z = bz + dz;
+                if (store.get(x, y, z) == IdAir) store.set(x, y, z, IdSpruceLeaves);
+            }
+    }
+    return true;
+}
+
+void ExportRun::vineColumn(int x, int z, int yBottom, int win, quint16 leafId)
+{
+    const quint32 hr = colHash(pairKey(x, z) ^ 0x2ADEull);
+    int yTopC = -9999;
+    for (int y = yBottom + win; y >= yBottom; --y)
+        if (store.get(x, y, z) == leafId) { yTopC = y; break; }
+    if (yTopC < yBottom) return;                                   // the column has no crown (a trunk, an air gap)
+    const int roll = int(hr % 100u);
+    if (roll < 62) return;                                         // ~3 of 5 columns stay plain leaves
+    if (roll >= 84 && yTopC > yBottom && store.get(x, yTopC + 1, z) == IdAir)
+        store.set(x, yTopC + 1, z, IdVine);                        // a vine pokes above the crown
+    if (roll >= 76 && store.get(x, yBottom, z) == leafId)
+        store.set(x, yBottom, z, IdVine);                          // the vine stands IN the crown (a replaced leaf)
+    const int len = roll < 70 ? 1 + int((hr >> 8) % 2u) : 1 + int((hr >> 8) % 5u);
+    for (int k = 0; k < len; ++k)
+    {
+        const int y = yBottom - 1 - k;
+        if (store.get(x, y, z) != IdAir || store.get(x, y + 1, z) == IdAir) break;
+        store.set(x, y, z, IdVine);                                // the hanging thread under the column
+    }
+}
+
+void ExportRun::jungleCrownVines(int bx, int bz, int yBottom, int R, quint16 leafId)
+{
+    for (int dx = -R; dx <= R; ++dx)
+        for (int dz = -R; dz <= R; ++dz)
+        {
+            if (std::abs(dx) == R && std::abs(dz) == R) continue;
+            if (!dx && !dz) continue;                              // the trunk column (vines near it — below)
+            vineColumn(bx + dx, bz + dz, yBottom, R + 2, leafId);
+        }
+    static const int kT[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+    for (const auto& t : kT)                                       // a vine against the trunk, inside the crown
+        if (colHash(pairKey(bx + t[0], bz + t[1]) ^ 0x51DEull) % 100u < 18u && store.get(bx + t[0], yBottom, bz + t[1]) == leafId)
+            store.set(bx + t[0], yBottom, bz + t[1], IdVine);
+}
+
+bool ExportRun::plantSwampOak(int bx, int bz, int y0, int h, quint32 hh)
+{
+    for (int sx2 = -3; sx2 <= 3; sx2 += 6)
+        for (int sz2 = -3; sz2 <= 3; sz2 += 6)
+            if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
+    for (int dy = 0; dy < h; ++dy)
+        if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, IdOakLog);
+    const int topTree = y0 + h - 1;
+    static const int kR[4] = { 1, 2, 3, 2 };                       // crown layers topTree+1 .. topTree-2: a flat bottom
+    for (int li = 0; li < 4; ++li)
+    {
+        const int dy = 1 - li, r = kR[li];
+        for (int dx = -r; dx <= r; ++dx)
+            for (int dz = -r; dz <= r; ++dz)
+            {
+                if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                if (dy == -1 && std::abs(dx) == 3 && std::abs(dz) == 3) continue;   // no far corners at the bottom
+                if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
+                    store.set(bx + dx, topTree + dy, bz + dz, IdOakLeaves);
+            }
+    }
+    if (hh % 3u == 0u)
+    {   // a gnarled branch — a stump sticking out sideways
+        static const int kA[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+        const auto& a = kA[(hh >> 8) % 4u];
+        const int by = y0 + h - 3 + int((hh >> 10) % 2u);
+        if (store.get(bx + a[0], by, bz + a[1]) == IdAir) store.set(bx + a[0], by, bz + a[1], IdOakLog);
+    }
+    jungleCrownVines(bx, bz, topTree - 2, 2, IdOakLeaves);         // the vines hang from the lowest layer of the crown
+    return true;
+}
+
+bool ExportRun::plantBroad(int bx, int bz, int y0, int h, quint16 logId, quint16 leafId)
+{
+    if (zoneSkip(bx, bz)) return true;
+    zoneRemap(logId, leafId);
+    for (int sx2 = -2; sx2 <= 2; sx2 += 4)
+        for (int sz2 = -2; sz2 <= 2; sz2 += 4)
+            if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
+    for (int dy = 0; dy < h; ++dy)
+        if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, logId);
+    const int topTree = y0 + h - 1;
+    for (int dy = -2; dy <= 1; ++dy)
+    {
+        const int r = (dy == 1) ? 1 : 2;
+        for (int dx = -r; dx <= r; ++dx)
+            for (int dz = -r; dz <= r; ++dz)
+            {
+                if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;
+                if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir) store.set(bx + dx, topTree + dy, bz + dz, leafId);
+            }
+    }
+    if (zt.jungle) jungleCrownVines(bx, bz, topTree - 2, 2);       // a jungle tree — a small one with vines (the game's look)
+    return true;
+}
+
+bool ExportRun::plantDarkOak(int bx, int bz, int y0, int h, quint32 hh)
+{
+    for (int sx2 = -3; sx2 <= 3; sx2 += 6)
+        for (int sz2 = -3; sz2 <= 3; sz2 += 6)
+            if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
+    const quint16 dLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:dark_oak_log"));
+    for (int dy = 0; dy < h; ++dy)
+        if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, dLog);
+    const int topTree = y0 + h - 1;
+    static const int kR[4] = { 2, 3, 3, 2 };                     // the crown layers topTree+1 .. topTree-2
+    for (int li = 0; li < 4; ++li)
+    {
+        const int dy = 1 - li, r = kR[li];
+        for (int dx = -r; dx <= r; ++dx)
+            for (int dz = -r; dz <= r; ++dz)
+            {
+                if (dy == 1 && std::abs(dx) + std::abs(dz) > 2) continue;            // a flat broad top
+                if (dy == -2 && std::abs(dx) == r && std::abs(dz) == r) continue;    // no far corners at the bottom
+                if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
+                    store.set(bx + dx, topTree + dy, bz + dz, IdDarkOakLeaves);
+            }
+    }
+    return true;
+}
+
+bool ExportRun::plantSized(int bx, int bz, int y0, int h, int R, quint16 logId, quint16 leafId)
+{
+    if (zoneSkip(bx, bz)) return true;
+    zoneRemap(logId, leafId);
+    for (int sx2 = -R; sx2 <= R; sx2 += 2 * R)
+        for (int sz2 = -R; sz2 <= R; sz2 += 2 * R)
+            if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
+    for (int dy = 0; dy < h; ++dy)
+        if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, logId);
+    const int topTree = y0 + h - 1;
+    for (int dy = -R; dy <= 1; ++dy)
+    {
+        const int r = (dy == 1) ? 1 : (dy == 0 ? std::max(1, R - 1) : R);
+        for (int dx = -r; dx <= r; ++dx)
+            for (int dz = -r; dz <= r; ++dz)
+            {
+                if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
+                if (dy != 1 && r >= 2 && std::abs(dx) == r && std::abs(dz) == r) continue;
+                if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir) store.set(bx + dx, topTree + dy, bz + dz, leafId);
+            }
+    }
+    if (zt.jungle && R >= 2) jungleCrownVines(bx, bz, topTree - R, R);
+    return true;
+}
+
+bool ExportRun::plantSpruce(int bx, int bz, int y0, int h, int R)
+{
+    if (zt.cone) return zoneSkip(bx, bz) ? true : plantSpruceCone(bx, bz, y0, h, R);
+    return plantSized(bx, bz, y0, std::max(4, std::min(h / 2 + 2, 9)), R >= 5 ? 3 : 2, zt.oakLog, zt.oakLeaf);   // the zone's own broadleaf (a dark forest grows dark oaks here)
+}
+
+bool ExportRun::plantJungleBig(int bx, int bz, int y0, quint32 hh)
+{
+    const int h = 10 + int(hh % 17u);                               // the trunk 10..26 — the tree up to ~32 blocks tall (as in the game)
+    if (y0 + h + 6 > 255) return false;
+    for (int cxk = (bx - 5) >> 4; cxk <= ((bx + 6) >> 4); ++cxk)   // the crown and the branches entirely inside the fill
+        for (int czk = (bz - 5) >> 4; czk <= ((bz + 6) >> 4); ++czk)
+            if (!sprFill.contains(pairKey(cxk, czk))) return false;
+    const quint16 jng = zt.oakLog, leaf = zt.oakLeaf;
+    for (int dy = 0; dy < h; ++dy)                                 // the trunk is written over decorative grass too
+        for (int dx = 0; dx <= 1; ++dx)
+            for (int dz = 0; dz <= 1; ++dz)
+                store.set(bx + dx, y0 + dy, bz + dz, jng);
+    const int topY = y0 + h;                                       // the crown around/over the trunk top (the trunk ends at topY - 1)
+    static const int kR[3] = { 5, 4, 3 };                          // a flat crown: 12 wide below, every layer 2 narrower (as in the game)
+    for (int li = 0; li < 3; ++li)
+    {
+        const int r = kR[li], lim = 4 * r - 4, y = topY - 1 + li;
+        for (int dx = -r; dx <= r + 1; ++dx)
+            for (int dz = -r; dz <= r + 1; ++dz)
+            {
+                if (std::abs(2 * dx - 1) + std::abs(2 * dz - 1) > lim) continue;   // rounding the corners (from the 2×2 center)
+                if (store.get(bx + dx, y, bz + dz) == IdAir)
+                    store.set(bx + dx, y, bz + dz, leaf);
+            }
+    }
+    for (int dx = -5; dx <= 6; ++dx)                               // vines along the whole skirt (as in the game)
+        for (int dz = -5; dz <= 6; ++dz)
+        {
+            if (std::abs(2 * dx - 1) + std::abs(2 * dz - 1) > 16) continue;
+            vineColumn(bx + dx, bz + dz, topY - 1, 3);
+        }
+    const int nBr = 2 + int((hh >> 8) % 2u);                       // 2..3 branches at ~60% of the height
+    static const int kDir[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
+    for (int b = 0; b < nBr; ++b)
+    {
+        const int d = (int(hh >> 12) + b * 2 + (b == 2 ? 1 : 0)) % 4;
+        const int ax = kDir[d][0], az = kDir[d][1];
+        const int pb = int((hh >> (16 + b * 3)) % 2u);             // which of the two trunk columns the branch grows from
+        const int yB = y0 + int(h * 3 / 5) + int((hh >> (22 + b * 2)) % 3u) - 1;
+        int sxp, szp;                                              // the first branch block next to the trunk
+        if (ax) { sxp = ax > 0 ? bx + 2 : bx - 1; szp = bz + pb; }
+        else    { szp = az > 0 ? bz + 2 : bz - 1; sxp = bx + pb; }
+        for (int i = 0; i < 2; ++i)                                // the branch's own trunk (2 blocks)
+        {
+            const int x = sxp + ax * i, z = szp + az * i;
+            if (store.get(x, yB, z) == IdAir) store.set(x, yB, z, jng);
+        }
+        const int tx = sxp + ax, tz = szp + az;                    // the tip: a 3×3 cap and its dome
+        for (int ex = -1; ex <= 1; ++ex)
+            for (int ez = -1; ez <= 1; ++ez)
+            {
+                if (store.get(tx + ex, yB, tz + ez) == IdAir)
+                    store.set(tx + ex, yB, tz + ez, leaf);
+                if ((ex == 1 || ex == -1) && (ez == 1 || ez == -1)) continue;
+                if (store.get(tx + ex, yB + 1, tz + ez) == IdAir)
+                    store.set(tx + ex, yB + 1, tz + ez, leaf);
+            }
+        for (int ex = -1; ex <= 1; ++ex)                            // vines on the cap columns
+            for (int ez = -1; ez <= 1; ++ez)
+                if (ex || ez) vineColumn(tx + ex, tz + ez, yB, 1);
+    }
+    return true;
+}
+
+bool ExportRun::plantBigOak(int bx, int bz, int y0, quint32 hh)
+{
+    const int h = 8 + int(hh % 5u);                                        // trunk 8..12 (an ordinary oak is 5..7)
+    if (y0 + h + 4 > 255) return false;
+    for (int cxk = (bx - 4) >> 4; cxk <= ((bx + 5) >> 4); ++cxk)           // the crown and the branches entirely inside the fill
+        for (int czk = (bz - 4) >> 4; czk <= ((bz + 5) >> 4); ++czk)
+            if (!sprFill.contains(pairKey(cxk, czk))) return false;
+    const quint16 log = zt.oakLog, leaf = zt.oakLeaf;
+    for (int dy = 0; dy < h; ++dy)
+        for (int dx = 0; dx <= 1; ++dx)
+            for (int dz = 0; dz <= 1; ++dz)
+                store.set(bx + dx, y0 + dy, bz + dz, log);
+    const int topTree = y0 + h - 1;
+    static const int kR[4] = { 4, 4, 3, 1 };                               // the crown layers from the bottom skirt up
+    for (int li = 0; li < 4; ++li)
+    {
+        const int r = kR[li], y = topTree + li - 2;
+        for (int dx = -r; dx <= r + 1; ++dx)
+            for (int dz = -r; dz <= r + 1; ++dz)
+            {
+                const double fx = dx - 0.5, fz = dz - 0.5;
+                if (fx * fx + fz * fz > (r + 0.6) * (r + 0.6)) continue;   // rounding the corners (from the 2×2 center)
+                if (store.get(bx + dx, y, bz + dz) == IdAir)
+                    store.set(bx + dx, y, bz + dz, leaf);
+            }
+    }
+    const int nBr = 2 + int((hh >> 8) % 2u);                               // 2..3 bare branches under the crown skirt
+    static const int kDir[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
+    for (int b = 0; b < nBr; ++b)
+    {
+        const int d = (int(hh >> 12) + b * 2 + (b == 2 ? 1 : 0)) % 4;
+        const int ax = kDir[d][0], az = kDir[d][1];
+        const int pb = int((hh >> (16 + b * 3)) % 2u);                     // which of the two trunk columns the branch grows from
+        const int yB = y0 + h - 5 + int((hh >> (22 + b * 2)) % 2u);
+        int sxp, szp;
+        if (ax) { sxp = ax > 0 ? bx + 2 : bx - 1; szp = bz + pb; }
+        else    { szp = az > 0 ? bz + 2 : bz - 1; sxp = bx + pb; }
+        for (int i = 0; i < 2; ++i)                                        // the branch itself (2 blocks)
+        {
+            const int x = sxp + ax * i, z = szp + az * i;
+            if (store.get(x, yB, z) == IdAir) store.set(x, yB, z, log);
+        }
+        const int tx = sxp + ax * 2, tz = szp + az * 2;                    // the tip: a leaf cap tucked under the crown
+        for (int ex = -1; ex <= 1; ++ex)
+            for (int ez = -1; ez <= 1; ++ez)
+                if ((ex || ez) && store.get(tx + ex, yB + 1, tz + ez) == IdAir)
+                    store.set(tx + ex, yB + 1, tz + ez, leaf);
+    }
+    return true;
+}
+
+bool ExportRun::plantPalm(int bx, int bz, int y0, quint32 hh)
+{
+    const int h = 7 + int(hh % 10u);                                  // trunk 7..16 (the tallest ones are 1.5 times taller than the shortest)
+    if (y0 + h + 2 > 255) return false;
+    for (int sx = -4; sx <= 4; sx += 8)                               // the crown reach (±4) entirely inside the fill
+        for (int sz = -4; sz <= 4; sz += 8)
+            if (!sprFill.contains(pairKey((bx + sx) >> 4, (bz + sz) >> 4))) return false;
+    const quint16 pLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
+    for (int dy = 0; dy < h; ++dy)                                    // the trunk over decorative grass too
+        store.set(bx, y0 + dy, bz, pLog);
+    auto leaf = [&](int x, int y, int z)
+    { if (store.get(x, y, z) == IdAir) store.set(x, y, z, IdJungleLeaves); };
+    const int topY = y0 + h - 1;
+    const int kLen = 2 + int((hh >> 8) % 2u);                         // the arms 2..3 blocks long
+    static const int kAx[4] = { 1, 1, -1, -1 }, kAz[4] = { 1, -1, 1, -1 };
+    for (int a = 0; a < 4; ++a)
+    {
+        for (int k = 1; k <= kLen; ++k)
+            leaf(bx + kAx[a] * k, topY, bz + kAz[a] * k);
+        leaf(bx + kAx[a] * (kLen + 1), topY - 1, bz + kAz[a] * (kLen + 1));   // the tip hangs down
+    }
+    static const int kSx[4] = { 1, -1, 0, 0 }, kSz[4] = { 0, 0, 1, -1 };
+    for (int a = 0; a < 4; ++a)                                       // short side leafs along the axes
+        leaf(bx + kSx[a], topY, bz + kSz[a]);
+    leaf(bx, topY + 1, bz);                                           // a small cap over the trunk top
+    return true;
+}
+
+void ExportRun::plantPaleTree(int bx, int bz, int y0, int h, quint32 hh)
+{
+    for (int cxk = (bx - 4) >> 4; cxk <= ((bx + 5) >> 4); ++cxk)             // the crown (up to 4 blocks from the 2×2 trunk) entirely inside the fill
+        for (int czk = (bz - 4) >> 4; czk <= ((bz + 5) >> 4); ++czk)
+            if (!sprFill.contains(pairKey(cxk, czk))) return;
+    bool trunkOk = true;                                                      // the trunk entirely of pale oak (the neighbor's leaves do not interfere)
+    for (int dy = 0; dy < h; ++dy)
+        for (int dx = 0; dx <= 1; ++dx)
+            for (int dz = 0; dz <= 1; ++dz)
+            {
+                const quint16 old = store.get(bx + dx, y0 + dy, bz + dz);
+                if (old == IdAir || old == IdPaleLeaves || old == IdOakLeaves || old == IdPaleHangingMoss || old == IdPaleMossCarpet)
+                    store.set(bx + dx, y0 + dy, bz + dz, IdPaleLog);
+                else if (old != IdPaleLog) trunkOk = false;
+            }
+    if (trunkOk && hh % 100u < 16u && h >= 4)
+    {
+        store.set(bx, y0 + 2, bz, IdCreakingHeart);                          // the "heart": around it a trunk of pale oak
+        heartsByChunk[pairKey(bx >> 4, bz >> 4)].append(QPoint3{ bx, y0 + 2, bz });
+    }
+    const int topTree = y0 + h - 1;
+    static const int kR[4] = { 3, 3, 2, 1 };                                 // the crown layers from top to bottom from topTree-2 to topTree+1
+    for (int li = 0; li < 4; ++li)
+    {
+        const int dy = li - 2, r = kR[li];
+        for (int dx = -r; dx <= r + 1; ++dx)
+            for (int dz = -r; dz <= r + 1; ++dz)
+            {
+                const double fx = dx - 0.5, fz = dz - 0.5;
+                if (fx * fx + fz * fz > (r + 0.7) * (r + 0.7)) continue;
+                const int x = bx + dx, y = topTree + dy, z = bz + dz;
+                if (store.get(x, y, z) != IdAir) continue;
+                store.set(x, y, z, IdPaleLeaves);
+                if (li == 0 && ((x * 7 + z * 13 + int(hh)) & 3) == 0 && store.get(x, y - 1, z) == IdAir)
+                    store.set(x, y - 1, z, IdPaleHangingMoss);               // moss hangs from the lowest layer of the crown
+            }
+    }
+}
+
 McWorldExporter::Result ExportRun::run()
 {
     legacy = (format == Format::Legacy121x);
@@ -6895,8 +8561,6 @@ McWorldExporter::Result ExportRun::run()
             for (const ColSpan& c : forests[fi].spans)
                 for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
                     biomeCells.insert(pairKey(c.x >> 2, z4), quint8(forests[fi].park ? 6 : 3));   // a park — flower_forest (a flowery forest), other forests — forest
-    constexpr int kZoneR = 18;                                       // the average radius of a ragged zone around a school / research institute / kindergarten (blocks from the walls; up to ×1.45 in the tongues), where the biome changes and trees grow
-    constexpr int kZoneMax = 27;                                     // the cell scan reach (kZoneR × 1.45 with a margin)
     for (const IslandSite& is : islandSites)
         if (is.kind != 2)
         for (int z4 = (is.cz - is.rz - kZoneMax) >> 2; z4 <= ((is.cz + is.rz + kZoneMax) >> 2); ++z4)
@@ -9057,1619 +10721,13 @@ McWorldExporter::Result ExportRun::run()
     }
     lap("before 3.5");
     beginStep(4, vegCells);
-    // 3.5 Vegetation — after the ground (the surface height is needed). Trees — roughly every 25th
-    // column of the "spot" (a deterministic hash — a forest without clearings and without rows), the grass is denser.
-    // Nothing is planted on the occupied columns (structures).
-    // Spruce: a spruce_log trunk (2×2 for big ones), bare at the bottom, then needle tiers from top to bottom with a radius from 0 (the top) to R; even tiers are narrower than
-    // odd ones — like a real spruce. The needles cover the trunk up to the very top. The crown must not go beyond the chunks with ground.
-    sprFill = QSet<ColKey>(fillChunks.constBegin(), fillChunks.constEnd());
-    // Tree species by the climate zone: "oak" and "birch" in the planting code are replaced with the trunk+leaves pairs of the zone, the spruce cone — with a big broadleaf tree
-    // where there are no conifers; density — the share of plantings that remain (in the desert and tundra trees are rare)
-    birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
-    ZoneTrees zt{ IdOakLog, IdOakLeaves, birchLogRaw, IdBirchLeaves, 100, true };
-    {
-        const quint16 aca = quint16(IdPaletteStart + paletteIndexOf("minecraft:acacia_log"));
-        const quint16 jng = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
-        switch (g_zone)
-        {
-        case Climate::Boreal:        zt.oakLog = birchLogRaw; zt.oakLeaf = IdBirchLeaves; break;
-        case Climate::Tundra:        zt.oakLog = birchLogRaw; zt.oakLeaf = IdBirchLeaves; zt.density = 30; break;
-        case Climate::Steppe:        zt.density = 35; zt.cone = false; break;
-        case Climate::Mediterranean: zt.birchLog = IdOakLog; zt.birchLeaf = IdOakLeaves; zt.density = 60; zt.cone = false; break;
-        case Climate::Desert:        zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 8, false }; break;
-        case Climate::Savanna:       zt = ZoneTrees{ aca, IdAcaciaLeaves, aca, IdAcaciaLeaves, 35, false }; break;
-        case Climate::Tropical:      zt = ZoneTrees{ jng, IdJungleLeaves, jng, IdJungleLeaves, 100, false, true }; break;
-        case Climate::Monsoon:       zt.birchLog = IdOakLog; zt.birchLeaf = IdOakLeaves; zt.density = 60; zt.cone = false; zt.palmShare = 80; break;   // oaks and palms, no conifers
-        case Climate::SemiArid:      zt = ZoneTrees{ IdOakLog, IdOakLeaves, IdOakLog, IdOakLeaves, 30, false, false, 50 }; break;   // the Gulf coast: sparse oaks and palms on sand, cacti on the open lands
-        case Climate::Rainforest:    zt.bigOakShare = 35; break;   // the Pacific Northwest: every third tree in broadleaf forests is a big oak with branches
-        case Climate::DarkForest:    { const quint16 dko = quint16(IdPaletteStart + paletteIndexOf("minecraft:dark_oak_log"));
-                                       zt = ZoneTrees{ dko, IdDarkOakLeaves, dko, IdDarkOakLeaves, 100, false }; } break;   // Hokkaido and Colchis: every tree is a dark oak, the spruce sites grow big broadleaf ones instead of cones
-        default: break;
-        }
-    }
-    auto zoneSkip = [&](int bx, int bz) { return zt.density < 100 && colHash(pairKey(bx, bz) ^ 0xD3E5ull) % 100u >= quint32(zt.density); };
-    auto zoneRemap = [&](quint16& log, quint16& leaf)
-    {
-        if (log == quint16(IdOakLog)) { log = zt.oakLog; leaf = zt.oakLeaf; }
-        else if (log == birchLogRaw) { log = zt.birchLog; leaf = zt.birchLeaf; }
-    };
-    auto plantSpruceCone = [&](int bx, int bz, int y0, int h, int R) -> bool
-    {
-        const bool wide = R >= 5;                                              // big spruces — a 2×2 trunk
-        const int x1 = bx + (wide ? 1 : 0), z1 = bz + (wide ? 1 : 0);
-        for (int cxk = (bx - R) >> 4; cxk <= ((x1 + R) >> 4); ++cxk)
-            for (int czk = (bz - R) >> 4; czk <= ((z1 + R) >> 4); ++czk)
-                if (!sprFill.contains(pairKey(cxk, czk))) return false;
-        const quint16 sprLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:spruce_log"));
-        const int bare = std::max(2, h / 5);                                   // the bare trunk at the bottom
-        for (int dy = 0; dy < h; ++dy)
-            for (int x = bx; x <= x1; ++x)
-                for (int z = bz; z <= z1; ++z)
-                    if (store.get(x, y0 + dy, z) == IdAir) store.set(x, y0 + dy, z, sprLog);
-        const int n = h - bare + 1;                                            // needle tiers (the top one — above the trunk)
-        const int topY = y0 + h;                                               // the top: a block above the trunk
-        for (int k = 0; k < n; ++k)
-        {
-            int r = (k == 0) ? 0 : std::max(1, (R * k + n - 2) / std::max(1, n - 1));
-            if (k >= 2 && (k & 1)) r = std::max(1, r - 1);                     // odd tiers are narrower — "skirts"
-            if (k == 1) r = 1;
-            const int y = topY - k;
-            const double lim = (r + (wide ? 0.75 : 0.25)) * (r + (wide ? 0.75 : 0.25));
-            for (int dx = -r; dx <= r + (wide ? 1 : 0); ++dx)
-                for (int dz = -r; dz <= r + (wide ? 1 : 0); ++dz)
-                {
-                    const double fx = wide ? dx - 0.5 : double(dx), fz = wide ? dz - 0.5 : double(dz);      // the crown center — the trunk center
-                    if (fx * fx + fz * fz > lim) continue;
-                    const int x = bx + dx, z = bz + dz;
-                    if (store.get(x, y, z) == IdAir) store.set(x, y, z, IdSpruceLeaves);
-                }
-        }
-        return true;
-    };
-    // Vines (like the game's jungle ones): a vine can stand in the crown itself (replacing a leaf),
-    // hang a thread of 1..5 blocks under a crown column, poke above the crown and grow along the trunk.
-    // The block is saved WITHOUT properties (as in a real world: the game connects the faces itself)
-    auto vineColumn = [&](int x, int z, int yBottom, int win, quint16 leafId = quint16(IdJungleLeaves))
-    {   // one crown column: the crown fills [yBottom, yBottom+win], decorate the column by its hash
-        const quint32 hr = colHash(pairKey(x, z) ^ 0x2ADEull);
-        int yTopC = -9999;
-        for (int y = yBottom + win; y >= yBottom; --y)
-            if (store.get(x, y, z) == leafId) { yTopC = y; break; }
-        if (yTopC < yBottom) return;                                   // the column has no crown (a trunk, an air gap)
-        const int roll = int(hr % 100u);
-        if (roll < 62) return;                                         // ~3 of 5 columns stay plain leaves
-        if (roll >= 84 && yTopC > yBottom && store.get(x, yTopC + 1, z) == IdAir)
-            store.set(x, yTopC + 1, z, IdVine);                        // a vine pokes above the crown
-        if (roll >= 76 && store.get(x, yBottom, z) == leafId)
-            store.set(x, yBottom, z, IdVine);                          // the vine stands IN the crown (a replaced leaf)
-        const int len = roll < 70 ? 1 + int((hr >> 8) % 2u) : 1 + int((hr >> 8) % 5u);
-        for (int k = 0; k < len; ++k)
-        {
-            const int y = yBottom - 1 - k;
-            if (store.get(x, y, z) != IdAir || store.get(x, y + 1, z) == IdAir) break;
-            store.set(x, y, z, IdVine);                                // the hanging thread under the column
-        }
-    };
-    auto jungleCrownVines = [&](int bx, int bz, int yBottom, int R, quint16 leafId = quint16(IdJungleLeaves))
-    {   // the crown of a 1×1 trunk (the far corners cut): every column of the lower layer is a candidate
-        for (int dx = -R; dx <= R; ++dx)
-            for (int dz = -R; dz <= R; ++dz)
-            {
-                if (std::abs(dx) == R && std::abs(dz) == R) continue;
-                if (!dx && !dz) continue;                              // the trunk column (vines near it — below)
-                vineColumn(bx + dx, bz + dz, yBottom, R + 2, leafId);
-            }
-        static const int kT[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
-        for (const auto& t : kT)                                       // a vine against the trunk, inside the crown
-            if (colHash(pairKey(bx + t[0], bz + t[1]) ^ 0x51DEull) % 100u < 18u && store.get(bx + t[0], yBottom, bz + t[1]) == leafId)
-                store.set(bx + t[0], yBottom, bz + t[1], IdVine);
-    };
-    // Swamp oak (ground under a source with the "swamp" effect, e.g. mrspol wetland): a 1×1 oak trunk of 5..8, a wide flat crown of oak leaves with VINES
-    // hanging from it, a couple of gnarled branches. The species is independent of the climate zone — a swamp is a swamp.
-    auto plantSwampOak = [&](int bx, int bz, int y0, int h, quint32 hh) -> bool
-    {
-        for (int sx2 = -3; sx2 <= 3; sx2 += 6)
-            for (int sz2 = -3; sz2 <= 3; sz2 += 6)
-                if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
-        for (int dy = 0; dy < h; ++dy)
-            if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, IdOakLog);
-        const int topTree = y0 + h - 1;
-        static const int kR[4] = { 1, 2, 3, 2 };                       // crown layers topTree+1 .. topTree-2: a flat bottom
-        for (int li = 0; li < 4; ++li)
-        {
-            const int dy = 1 - li, r = kR[li];
-            for (int dx = -r; dx <= r; ++dx)
-                for (int dz = -r; dz <= r; ++dz)
-                {
-                    if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
-                    if (dy == -1 && std::abs(dx) == 3 && std::abs(dz) == 3) continue;   // no far corners at the bottom
-                    if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
-                        store.set(bx + dx, topTree + dy, bz + dz, IdOakLeaves);
-                }
-        }
-        if (hh % 3u == 0u)
-        {   // a gnarled branch — a stump sticking out sideways
-            static const int kA[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
-            const auto& a = kA[(hh >> 8) % 4u];
-            const int by = y0 + h - 3 + int((hh >> 10) % 2u);
-            if (store.get(bx + a[0], by, bz + a[1]) == IdAir) store.set(bx + a[0], by, bz + a[1], IdOakLog);
-        }
-        jungleCrownVines(bx, bz, topTree - 2, 2, IdOakLeaves);         // the vines hang from the lowest layer of the crown
-        return true;
-    };
-    // A broadleaf tree (birch etc.): a 1×1 trunk of the given block, a "diamond" crown of radius 2 of the given leaves; the crown does not go beyond the chunks with ground
-    auto plantBroad = [&](int bx, int bz, int y0, int h, quint16 logId, quint16 leafId) -> bool
-    {
-        if (zoneSkip(bx, bz)) return true;
-        zoneRemap(logId, leafId);
-        for (int sx2 = -2; sx2 <= 2; sx2 += 4)
-            for (int sz2 = -2; sz2 <= 2; sz2 += 4)
-                if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
-        for (int dy = 0; dy < h; ++dy)
-            if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, logId);
-        const int topTree = y0 + h - 1;
-        for (int dy = -2; dy <= 1; ++dy)
-        {
-            const int r = (dy == 1) ? 1 : 2;
-            for (int dx = -r; dx <= r; ++dx)
-                for (int dz = -r; dz <= r; ++dz)
-                {
-                    if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
-                    if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;
-                    if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir) store.set(bx + dx, topTree + dy, bz + dz, leafId);
-                }
-        }
-        if (zt.jungle) jungleCrownVines(bx, bz, topTree - 2, 2);       // a jungle tree — a small one with vines (the game's look)
-        return true;
-    };
-    // A dark oak (a cemetery, a request): a trunk and a dense wide flat-topped crown, as the game's dark forests.
-    auto plantDarkOak = [&](int bx, int bz, int y0, int h, quint32 hh) -> bool
-    {
-        for (int sx2 = -3; sx2 <= 3; sx2 += 6)
-            for (int sz2 = -3; sz2 <= 3; sz2 += 6)
-                if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
-        const quint16 dLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:dark_oak_log"));
-        for (int dy = 0; dy < h; ++dy)
-            if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, dLog);
-        const int topTree = y0 + h - 1;
-        static const int kR[4] = { 2, 3, 3, 2 };                     // the crown layers topTree+1 .. topTree-2
-        for (int li = 0; li < 4; ++li)
-        {
-            const int dy = 1 - li, r = kR[li];
-            for (int dx = -r; dx <= r; ++dx)
-                for (int dz = -r; dz <= r; ++dz)
-                {
-                    if (dy == 1 && std::abs(dx) + std::abs(dz) > 2) continue;            // a flat broad top
-                    if (dy == -2 && std::abs(dx) == r && std::abs(dz) == r) continue;    // no far corners at the bottom
-                    if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
-                        store.set(bx + dx, topTree + dy, bz + dz, IdDarkOakLeaves);
-                }
-        }
-        return true;
-    };
-    // A tree of arbitrary size: a trunk of height h, a spherical crown of radius R (1..3) with cut corners — for intra-block greenery of different sizes
-    auto plantSized = [&](int bx, int bz, int y0, int h, int R, quint16 logId, quint16 leafId) -> bool
-    {
-        if (zoneSkip(bx, bz)) return true;
-        zoneRemap(logId, leafId);
-        for (int sx2 = -R; sx2 <= R; sx2 += 2 * R)
-            for (int sz2 = -R; sz2 <= R; sz2 += 2 * R)
-                if (!sprFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) return false;
-        for (int dy = 0; dy < h; ++dy)
-            if (store.get(bx, y0 + dy, bz) == IdAir) store.set(bx, y0 + dy, bz, logId);
-        const int topTree = y0 + h - 1;
-        for (int dy = -R; dy <= 1; ++dy)
-        {
-            const int r = (dy == 1) ? 1 : (dy == 0 ? std::max(1, R - 1) : R);
-            for (int dx = -r; dx <= r; ++dx)
-                for (int dz = -r; dz <= r; ++dz)
-                {
-                    if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
-                    if (dy != 1 && r >= 2 && std::abs(dx) == r && std::abs(dz) == r) continue;
-                    if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir) store.set(bx + dx, topTree + dy, bz + dz, leafId);
-                }
-        }
-        if (zt.jungle && R >= 2) jungleCrownVines(bx, bz, topTree - R, R);
-        return true;
-    };
-    // Spruce: in zones with conifers — a cone, in the others (steppe, desert, tropics…) — a big broadleaf tree of the zone instead of it
-    auto plantSpruce = [&](int bx, int bz, int y0, int h, int R) -> bool
-    {
-        if (zt.cone) return zoneSkip(bx, bz) ? true : plantSpruceCone(bx, bz, y0, h, R);
-        return plantSized(bx, bz, y0, std::max(4, std::min(h / 2 + 2, 9)), R >= 5 ? 3 : 2, zt.oakLog, zt.oakLeaf);   // the zone's own broadleaf (a dark forest grows dark oaks here)
-    };
-    // A big jungle tree (like the game's one): a 2×2 trunk 10..16, a wide crown over the trunk top
-    // and 2..3 side branches with leaf caps at 60% of the height; vines hang under the crown rims
-    auto plantJungleBig = [&](int bx, int bz, int y0, quint32 hh) -> bool
-    {
-        const int h = 10 + int(hh % 17u);                               // the trunk 10..26 — the tree up to ~32 blocks tall (as in the game)
-        if (y0 + h + 6 > 255) return false;
-        for (int cxk = (bx - 5) >> 4; cxk <= ((bx + 6) >> 4); ++cxk)   // the crown and the branches entirely inside the fill
-            for (int czk = (bz - 5) >> 4; czk <= ((bz + 6) >> 4); ++czk)
-                if (!sprFill.contains(pairKey(cxk, czk))) return false;
-        const quint16 jng = zt.oakLog, leaf = zt.oakLeaf;
-        for (int dy = 0; dy < h; ++dy)                                 // the trunk is written over decorative grass too
-            for (int dx = 0; dx <= 1; ++dx)
-                for (int dz = 0; dz <= 1; ++dz)
-                    store.set(bx + dx, y0 + dy, bz + dz, jng);
-        const int topY = y0 + h;                                       // the crown around/over the trunk top (the trunk ends at topY - 1)
-        static const int kR[3] = { 5, 4, 3 };                          // a flat crown: 12 wide below, every layer 2 narrower (as in the game)
-        for (int li = 0; li < 3; ++li)
-        {
-            const int r = kR[li], lim = 4 * r - 4, y = topY - 1 + li;
-            for (int dx = -r; dx <= r + 1; ++dx)
-                for (int dz = -r; dz <= r + 1; ++dz)
-                {
-                    if (std::abs(2 * dx - 1) + std::abs(2 * dz - 1) > lim) continue;   // rounding the corners (from the 2×2 center)
-                    if (store.get(bx + dx, y, bz + dz) == IdAir)
-                        store.set(bx + dx, y, bz + dz, leaf);
-                }
-        }
-        for (int dx = -5; dx <= 6; ++dx)                               // vines along the whole skirt (as in the game)
-            for (int dz = -5; dz <= 6; ++dz)
-            {
-                if (std::abs(2 * dx - 1) + std::abs(2 * dz - 1) > 16) continue;
-                vineColumn(bx + dx, bz + dz, topY - 1, 3);
-            }
-        const int nBr = 2 + int((hh >> 8) % 2u);                       // 2..3 branches at ~60% of the height
-        static const int kDir[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
-        for (int b = 0; b < nBr; ++b)
-        {
-            const int d = (int(hh >> 12) + b * 2 + (b == 2 ? 1 : 0)) % 4;
-            const int ax = kDir[d][0], az = kDir[d][1];
-            const int pb = int((hh >> (16 + b * 3)) % 2u);             // which of the two trunk columns the branch grows from
-            const int yB = y0 + int(h * 3 / 5) + int((hh >> (22 + b * 2)) % 3u) - 1;
-            int sxp, szp;                                              // the first branch block next to the trunk
-            if (ax) { sxp = ax > 0 ? bx + 2 : bx - 1; szp = bz + pb; }
-            else    { szp = az > 0 ? bz + 2 : bz - 1; sxp = bx + pb; }
-            for (int i = 0; i < 2; ++i)                                // the branch's own trunk (2 blocks)
-            {
-                const int x = sxp + ax * i, z = szp + az * i;
-                if (store.get(x, yB, z) == IdAir) store.set(x, yB, z, jng);
-            }
-            const int tx = sxp + ax, tz = szp + az;                    // the tip: a 3×3 cap and its dome
-            for (int ex = -1; ex <= 1; ++ex)
-                for (int ez = -1; ez <= 1; ++ez)
-                {
-                    if (store.get(tx + ex, yB, tz + ez) == IdAir)
-                        store.set(tx + ex, yB, tz + ez, leaf);
-                    if ((ex == 1 || ex == -1) && (ez == 1 || ez == -1)) continue;
-                    if (store.get(tx + ex, yB + 1, tz + ez) == IdAir)
-                        store.set(tx + ex, yB + 1, tz + ez, leaf);
-                }
-            for (int ex = -1; ex <= 1; ++ex)                            // vines on the cap columns
-                for (int ez = -1; ez <= 1; ++ez)
-                    if (ex || ez) vineColumn(tx + ex, tz + ez, yB, 1);
-        }
-        return true;
-    };
-    // A big oak (temperate rainforest): a 2×2 trunk 8..12 tall, a wide round crown (the ordinary oak's
-    // "diamond" scaled up) and 2..3 bare branches under its edge — an ordinary oak is shorter and has none
-    auto plantBigOak = [&](int bx, int bz, int y0, quint32 hh) -> bool
-    {
-        const int h = 8 + int(hh % 5u);                                        // trunk 8..12 (an ordinary oak is 5..7)
-        if (y0 + h + 4 > 255) return false;
-        for (int cxk = (bx - 4) >> 4; cxk <= ((bx + 5) >> 4); ++cxk)           // the crown and the branches entirely inside the fill
-            for (int czk = (bz - 4) >> 4; czk <= ((bz + 5) >> 4); ++czk)
-                if (!sprFill.contains(pairKey(cxk, czk))) return false;
-        const quint16 log = zt.oakLog, leaf = zt.oakLeaf;
-        for (int dy = 0; dy < h; ++dy)
-            for (int dx = 0; dx <= 1; ++dx)
-                for (int dz = 0; dz <= 1; ++dz)
-                    store.set(bx + dx, y0 + dy, bz + dz, log);
-        const int topTree = y0 + h - 1;
-        static const int kR[4] = { 4, 4, 3, 1 };                               // the crown layers from the bottom skirt up
-        for (int li = 0; li < 4; ++li)
-        {
-            const int r = kR[li], y = topTree + li - 2;
-            for (int dx = -r; dx <= r + 1; ++dx)
-                for (int dz = -r; dz <= r + 1; ++dz)
-                {
-                    const double fx = dx - 0.5, fz = dz - 0.5;
-                    if (fx * fx + fz * fz > (r + 0.6) * (r + 0.6)) continue;   // rounding the corners (from the 2×2 center)
-                    if (store.get(bx + dx, y, bz + dz) == IdAir)
-                        store.set(bx + dx, y, bz + dz, leaf);
-                }
-        }
-        const int nBr = 2 + int((hh >> 8) % 2u);                               // 2..3 bare branches under the crown skirt
-        static const int kDir[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
-        for (int b = 0; b < nBr; ++b)
-        {
-            const int d = (int(hh >> 12) + b * 2 + (b == 2 ? 1 : 0)) % 4;
-            const int ax = kDir[d][0], az = kDir[d][1];
-            const int pb = int((hh >> (16 + b * 3)) % 2u);                     // which of the two trunk columns the branch grows from
-            const int yB = y0 + h - 5 + int((hh >> (22 + b * 2)) % 2u);
-            int sxp, szp;
-            if (ax) { sxp = ax > 0 ? bx + 2 : bx - 1; szp = bz + pb; }
-            else    { szp = az > 0 ? bz + 2 : bz - 1; sxp = bx + pb; }
-            for (int i = 0; i < 2; ++i)                                        // the branch itself (2 blocks)
-            {
-                const int x = sxp + ax * i, z = szp + az * i;
-                if (store.get(x, yB, z) == IdAir) store.set(x, yB, z, log);
-            }
-            const int tx = sxp + ax * 2, tz = szp + az * 2;                    // the tip: a leaf cap tucked under the crown
-            for (int ex = -1; ex <= 1; ++ex)
-                for (int ez = -1; ez <= 1; ++ez)
-                    if ((ex || ez) && store.get(tx + ex, yB + 1, tz + ez) == IdAir)
-                        store.set(tx + ex, yB + 1, tz + ez, leaf);
-        }
-        return true;
-    };
-    // A palm (monsoon zones): a slim bare trunk of jungle logs, a crown of arching diagonal
-    // "arms" with hanging tips and a small cap on the top (like adventure-map palms in the game)
-    auto plantPalm = [&](int bx, int bz, int y0, quint32 hh) -> bool
-    {
-        const int h = 7 + int(hh % 10u);                                  // trunk 7..16 (the tallest ones are 1.5 times taller than the shortest)
-        if (y0 + h + 2 > 255) return false;
-        for (int sx = -4; sx <= 4; sx += 8)                               // the crown reach (±4) entirely inside the fill
-            for (int sz = -4; sz <= 4; sz += 8)
-                if (!sprFill.contains(pairKey((bx + sx) >> 4, (bz + sz) >> 4))) return false;
-        const quint16 pLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
-        for (int dy = 0; dy < h; ++dy)                                    // the trunk over decorative grass too
-            store.set(bx, y0 + dy, bz, pLog);
-        auto leaf = [&](int x, int y, int z)
-        { if (store.get(x, y, z) == IdAir) store.set(x, y, z, IdJungleLeaves); };
-        const int topY = y0 + h - 1;
-        const int kLen = 2 + int((hh >> 8) % 2u);                         // the arms 2..3 blocks long
-        static const int kAx[4] = { 1, 1, -1, -1 }, kAz[4] = { 1, -1, 1, -1 };
-        for (int a = 0; a < 4; ++a)
-        {
-            for (int k = 1; k <= kLen; ++k)
-                leaf(bx + kAx[a] * k, topY, bz + kAz[a] * k);
-            leaf(bx + kAx[a] * (kLen + 1), topY - 1, bz + kAz[a] * (kLen + 1));   // the tip hangs down
-        }
-        static const int kSx[4] = { 1, -1, 0, 0 }, kSz[4] = { 0, 0, 1, -1 };
-        for (int a = 0; a < 4; ++a)                                       // short side leafs along the axes
-            leaf(bx + kSx[a], topY, bz + kSz[a]);
-        leaf(bx, topY + 1, bz);                                           // a small cap over the trunk top
-        return true;
-    };
-    // Pale oak: a 2×2 trunk of height h, a "cap" crown of radius 3, moss hanging under the crown edge, a "creaking heart" in the trunk
-    auto plantPaleTree = [&](int bx, int bz, int y0, int h, quint32 hh)
-    {
-        for (int cxk = (bx - 4) >> 4; cxk <= ((bx + 5) >> 4); ++cxk)             // the crown (up to 4 blocks from the 2×2 trunk) entirely inside the fill
-            for (int czk = (bz - 4) >> 4; czk <= ((bz + 5) >> 4); ++czk)
-                if (!sprFill.contains(pairKey(cxk, czk))) return;
-        bool trunkOk = true;                                                      // the trunk entirely of pale oak (the neighbor's leaves do not interfere)
-        for (int dy = 0; dy < h; ++dy)
-            for (int dx = 0; dx <= 1; ++dx)
-                for (int dz = 0; dz <= 1; ++dz)
-                {
-                    const quint16 old = store.get(bx + dx, y0 + dy, bz + dz);
-                    if (old == IdAir || old == IdPaleLeaves || old == IdOakLeaves || old == IdPaleHangingMoss || old == IdPaleMossCarpet)
-                        store.set(bx + dx, y0 + dy, bz + dz, IdPaleLog);
-                    else if (old != IdPaleLog) trunkOk = false;
-                }
-        if (trunkOk && hh % 100u < 16u && h >= 4)
-        {
-            store.set(bx, y0 + 2, bz, IdCreakingHeart);                          // the "heart": around it a trunk of pale oak
-            heartsByChunk[pairKey(bx >> 4, bz >> 4)].append(QPoint3{ bx, y0 + 2, bz });
-        }
-        const int topTree = y0 + h - 1;
-        static const int kR[4] = { 3, 3, 2, 1 };                                 // the crown layers from top to bottom from topTree-2 to topTree+1
-        for (int li = 0; li < 4; ++li)
-        {
-            const int dy = li - 2, r = kR[li];
-            for (int dx = -r; dx <= r + 1; ++dx)
-                for (int dz = -r; dz <= r + 1; ++dz)
-                {
-                    const double fx = dx - 0.5, fz = dz - 0.5;
-                    if (fx * fx + fz * fz > (r + 0.7) * (r + 0.7)) continue;
-                    const int x = bx + dx, y = topTree + dy, z = bz + dz;
-                    if (store.get(x, y, z) != IdAir) continue;
-                    store.set(x, y, z, IdPaleLeaves);
-                    if (li == 0 && ((x * 7 + z * 13 + int(hh)) & 3) == 0 && store.get(x, y - 1, z) == IdAir)
-                        store.set(x, y - 1, z, IdPaleHangingMoss);               // moss hangs from the lowest layer of the crown
-                }
-        }
-    };
-    vegCols = 0;
-    for (int fidx = 0; fidx < forests.size(); ++fidx)
-    {
-        const VegSite& site = forests[fidx];
-        const bool pale = (fidx == paleIdx);
-        // A 6×6 grid (~2.8% of the columns, like the former ~2.5%): in every cell one hash-shifted place, inside
-        // the forest — a tree. The work is of the order of the number of bbox cells, not the number of forest columns (tens of millions).
-        const int G = site.dense ? 8 : 6;                // yards (OSM): an 8×8 grid (it was 4×4: the crowns of neighboring trees merged into a solid canopy over the whole yard)
-        // The grid is clamped to the export rectangle: an OSM forest polygon can be many times wider
-        // than the world (a park strip with a bbox of 11 km used to cost the whole grid over its bbox).
-        const int vgX0 = std::max(site.minX, (rcx0 - rectM) * 16), vgX1 = std::min(site.maxX, (rcx1 + rectM + 1) * 16 - 1);
-        const int vgZ0 = std::max(site.minZ, (rcz0 - rectM) * 16), vgZ1 = std::min(site.maxZ, (rcz1 + rectM + 1) * 16 - 1);
-        const int gx0 = int(std::floor(double(vgX0) / G)), gx1 = int(std::floor(double(vgX1) / G));
-        const int gz0 = int(std::floor(double(vgZ0) / G)), gz1 = int(std::floor(double(vgZ1) / G));
-        for (int gx = gx0; gx <= gx1; ++gx)
-        for (int gz = gz0; gz <= gz1; ++gz)
-        {
-            if ((++vegCols & 0x3FF) == 0 && cancel && cancel->load())
-            {
-                res.cancelled = true;
-                res.error = QObject::tr("Export cancelled.");
-                return res;
-            }
-            if (progress && (vegCols & 0xFFFF) == 0)
-                progress(std::min(vegCols, vegCells), vegCells, 4);                  // the "trees in forests" stage
-            const quint32 hc = colHash(pairKey(gx, gz) ^ 0x7EEDull);
-            if (site.dense && (hc >> 20) % 10u == 0u) continue;                          // yards: every tenth place stays empty (so the trees stand in groups with clearings)
-            const int tx = gx * G + int(hc % G), tz = gz * G + int((hc >> 8) % G);
-            if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
-            if (!spansContain(site.spans, tx, tz)) continue;
-            const qint64 ck = pairKey(tx, tz);
-            if (colWater.contains(ck)) continue;               // we do not grow on water
-            if (noTreePadCols.contains(ck)) continue;          // the reserved spots (apiaries, farms, objects from points)
-            if (colMin.contains(ck)) continue;                 // a structure column — the forest does not climb into the house
-                                                               // (after the floor was sunk by 1 block the slab
-                                                               // stopped being an obstacle for y0)
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            const int y0 = surfaceTop(ck) + 1;
-            if (y0 + site.treeH + 2 > 255) continue;
-            if (store.get(bx, y0, bz) != IdAir) continue;
-            if (pale && paleDonorUsed)
-            {   // trees were carried together with the donor terrain; in the fringe at the forest border and in the ring around the mansion (there the terrain is mixed with the ground) we plant procedural ones
-                const auto pcit = paleCol.constFind(ck);
-                if (pcit != paleCol.constEnd() && pcit->pid < 0 && pcit->w >= 235 && pcit->surf != 0) continue;
-            }
-            if (paleDonorUsed && !pale && spansContain(forests[paleIdx].spans, tx, tz)) continue;
-            if (!patchCols.isEmpty() && patchCols.contains(pairKey(tx, tz))) continue;      // outposts/camps: trees do not climb into the structures   // other (overlapping) forests do not plant extra trees into the Pale Garden
-            if (pale)
-            {   // pale oak: taller than usual (6..9), 2×2 — free neighboring columns are needed
-                const quint32 hp = colHash(ck ^ 0x9A1Eull);
-                const int hh = 6 + int(hp % 4u);
-                if (y0 + hh + 4 > 255) continue;
-                if (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))) continue;
-                // the 2x2 trunk must not stand half in a drawn pond (the anchor was checked above)
-                if (colWater.contains(pairKey(bx + 1, bz)) || colWater.contains(pairKey(bx, bz + 1)) || colWater.contains(pairKey(bx + 1, bz + 1))) continue;
-                if (!spansContain(site.spans, bx + 1, bz + 1)) continue;
-                plantPaleTree(bx, bz, y0, hh, hp >> 4);
-                continue;
-            }
-            if (cemeteryCols.contains(ck))
-            {   // a cemetery (csrpol 53510000, landuse=cemetery): whatever forest was planned here becomes a dense
-                // grove of dark oaks (a user request) — the dark forest look, independent of the climate zone
-                const quint32 hc = colHash(ck ^ 0x0CE51ull);
-                if (hc % 100u >= 85u) continue;                                // ~85% of the grid cells are planted
-                const int h = 7 + int(hc % 4u);                                // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
-                if (y0 + h + 4 > 255) continue;
-                plantDarkOak(bx, bz, y0, h, hc);
-                continue;
-            }
-            if (swampCols.contains(ck))
-            {   // the swamp biome (a layer with the "swamp" effect lies over this spot): whatever forest grows
-                // here — a park, a yard or an ordinary one — becomes a grove of swamp oaks with vines, independent
-                // of the climate zone; rarer than an ordinary forest, with clearings between the trees
-                const quint32 hs = colHash(ck ^ 0x2F8C3ull);
-                if (hs % 100u >= 50u) continue;                                // ~50% of the grid cells are planted
-                const int h = 5 + int(hs % 4u);                                // trunks 5..8
-                if (y0 + h + 4 > 255) continue;
-                plantSwampOak(bx, bz, y0, h, hs);
-                continue;
-            }
-            if (site.park)
-            {   // a park: mixed trees (oak 40%, birch 35%, spruce 25%) and not frequent — about 24% of the cells of the 6×6 grid (≈ 1 tree per 135 m²)
-                const quint32 hr = colHash(ck ^ 0x9A4Bull);
-                if (hr % 100u >= 24u) continue;                                    // 24% of the cells (was 16%): in parks there are 1.5 times more trees
-                if (zt.palmShare)
-                {   // a palm park (monsoon and semi-arid): the zone's share is palms, the rest are oaks (no birches and no spruces)
-                    if (colHash(ck ^ 0x3C77ull) % 100u < quint32(zt.palmShare) && plantPalm(bx, bz, y0, colHash(ck ^ 0x5F13ull))) continue;
-                    const int h = 5 + int((hr >> 16) % 3u);
-                    if (y0 + h + 4 > 255) continue;
-                    plantBroad(bx, bz, y0, h, IdOakLog, IdOakLeaves);
-                    continue;
-                }
-                const quint32 cls = (hr >> 8) % 100u;
-                if (cls < 40)
-                {   // oak — as in ordinary forests
-                    const int h = 5 + int((hr >> 16) % 3u);
-                    if (y0 + h + 4 > 255) continue;
-                    plantBroad(bx, bz, y0, h, IdOakLog, IdOakLeaves);
-                }
-                else if (cls < 75)
-                {   // birch: thinner and taller than the oak
-                    const int h = 6 + int((hr >> 16) % 4u);
-                    if (y0 + h + 4 > 255) continue;
-                    plantBroad(bx, bz, y0, h, quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")), IdBirchLeaves);
-                }
-                else
-                {   // a medium-sized spruce
-                    const int hs = 9 + int((hr >> 16) % 5u);
-                    if (y0 + hs + 3 > 255) continue;
-                    plantSpruce(bx, bz, y0, hs, 3);
-                }
-                continue;
-            }
-            if (site.intra && !site.dense && colHash(ck ^ 0x1A7Bull) % 3u == 0u) continue;       // intra-block vegetation (vgbpol): 1.5 times rarer (OSM yards — without thinning)
-            if (site.intra)
-            {   // trees of different sizes: small (trunk 3–4, crown 1), medium (5–6, crown 2), big (7–9, crown 3); oak and birch mixed
-                const quint32 hz = colHash(ck ^ 0x51ABEull);
-                const int roll = int(hz % 100u);
-                const int R = roll < 30 ? 1 : (roll < 75 ? 2 : 3);
-                const int h = R == 1 ? 3 + int((hz >> 8) % 2u) : (R == 2 ? 5 + int((hz >> 8) % 2u) : 7 + int((hz >> 8) % 3u));
-                if (y0 + h + 4 > 255) continue;
-                const bool birch = ((hz >> 16) % 100u) < 35u;
-                plantSized(bx, bz, y0, h, R, birch ? quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")) : quint16(IdOakLog), birch ? quint16(IdBirchLeaves) : quint16(IdOakLeaves));
-                continue;
-            }
-            if (zt.palmShare)                                                 // a palm forest (monsoon and semi-arid): the zone's share is palms, the rest are oaks (no spruces and no birches there)
-            {
-                if (zoneSkip(bx, bz)) continue;
-                if (colHash(ck ^ 0x8D27ull) % 100u < quint32(zt.palmShare) && plantPalm(bx, bz, y0, colHash(ck ^ 0x60C5ull))) continue;
-            }
-            if (site.spruce && !zt.jungle && !zt.palmShare)
-            {   // spruces of different sizes, MUCH rarer than oaks: some cells of the grid are empty, big and giant ones are a rarity
-                // (a tropical forest is a jungle: dense, every fifth tree big — it must not be thinned as a spruce one)
-                const quint32 hr = colHash(ck ^ 0x5B0Eull);
-                if (hr % 100u >= 38u) continue;                                      // ~38% of the cells of the 6×6 grid
-                const quint32 cls = (hr >> 8) % 100u;
-                int hs, R;
-                if (cls < 50)      { hs = 9 + int((hr >> 16) % 5u);   R = 3; }       // ordinary 9..13
-                else if (cls < 75) { hs = 14 + int((hr >> 16) % 6u);  R = 4; }       // taller 14..19
-                else if (cls < 93) { hs = 20 + int((hr >> 16) % 8u);  R = 5; }       // big 20..27, a 2×2 trunk
-                else               { hs = 30 + int((hr >> 16) % 11u); R = 7; }       // a giant 30..40, a 2×2 trunk
-                if (y0 + hs + 3 > 255) continue;
-                if (R >= 5 && (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))
-                               || !spansContain(site.spans, bx + 1, bz) || !spansContain(site.spans, bx, bz + 1) || !spansContain(site.spans, bx + 1, bz + 1))) continue;
-                plantSpruce(bx, bz, y0, hs, R);
-                continue;
-            }
-            if (zoneSkip(bx, bz)) continue;
-            if (zt.jungle)
-            {   // a jungle forest (like the game's one): one in five — a big 2×2 tree with branches
-                // (where the 2×2 is free), the rest are thin trunks taller than the ordinary oak
-                const quint32 hj = colHash(ck ^ 0x3ADE11ull);
-                if (hj % 5u == 0u
-                    && !colMin.contains(pairKey(bx + 1, bz)) && !colMin.contains(pairKey(bx, bz + 1)) && !colMin.contains(pairKey(bx + 1, bz + 1))
-                    && !colWater.contains(pairKey(bx + 1, bz)) && !colWater.contains(pairKey(bx, bz + 1)) && !colWater.contains(pairKey(bx + 1, bz + 1))
-                    && spansContain(site.spans, bx + 1, bz) && spansContain(site.spans, bx, bz + 1) && spansContain(site.spans, bx + 1, bz + 1)
-                    && plantJungleBig(bx, bz, y0, hj))
-                    continue;
-                if (y0 + site.treeH + 6 > 255) continue;
-                plantBroad(bx, bz, y0, site.treeH + int(hj % 4u), IdOakLog, IdOakLeaves);   // the zone remap turns it into a jungle one with vines
-                continue;
-            }
-            if (zt.bigOakShare && colHash(ck ^ 0x2A17Cull) % 100u < quint32(zt.bigOakShare)
-                && !colMin.contains(pairKey(bx + 1, bz)) && !colMin.contains(pairKey(bx, bz + 1)) && !colMin.contains(pairKey(bx + 1, bz + 1))
-                && !colWater.contains(pairKey(bx + 1, bz)) && !colWater.contains(pairKey(bx, bz + 1)) && !colWater.contains(pairKey(bx + 1, bz + 1))
-                && spansContain(site.spans, bx + 1, bz) && spansContain(site.spans, bx, bz + 1) && spansContain(site.spans, bx + 1, bz + 1)
-                && plantBigOak(bx, bz, y0, colHash(ck ^ 0x73F91ull)))
-                continue;                                                     // a temperate rainforest: every third broadleaf tree is a big oak (where the 2×2 is free)
-            const int h = site.treeH - int(colHash(ck ^ 0x5EEDull) % 2u);   // trunks of different heights
-            for (int dy = 0; dy < h; ++dy)
-                if (store.get(bx, y0 + dy, bz) == IdAir)
-                    store.set(bx, y0 + dy, bz, zt.oakLog);
-            const int topTree = y0 + h - 1;                   // the crown — a "diamond" of oak, only through the air
-            for (int dy = -2; dy <= 1; ++dy)
-            {
-                const int r = (dy == 1) ? 1 : 2;
-                for (int dx = -r; dx <= r; ++dx)
-                    for (int dz = -r; dz <= r; ++dz)
-                    {
-                        if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;   // the top — a cross
-                        if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;   // without the far corners
-                        const int x = bx + dx, y = topTree + dy, z = bz + dz;
-                        if (store.get(x, y, z) == IdAir)
-                            store.set(x, y, z, zt.oakLeaf);
-                    }
-            }
-        }
-    }
-    if (paleIdx >= 0 && paleDonorUsed && !heartsByChunk.isEmpty())
-    {   // CREAKING HEARTS — rare and spaced apart (horror, not a "wild run"): the extra ones (closer than 32 blocks to an already kept one) become a log again,
-        // and where there is no heart at all within a radius of 50 blocks, a new one is added into a suitable trunk (not closer than 50 to the others).
-        constexpr double kMinD = 32.0, kGapD = 50.0;
-        QVector<QPoint3> all;
-        for (auto it = heartsByChunk.constBegin(); it != heartsByChunk.constEnd(); ++it) all += it.value();
-        std::sort(all.begin(), all.end(), [&](const QPoint3& a, const QPoint3& b)
-        { const quint32 ha = colHash(pairKey(a.x, a.z) ^ 0x4E1ull), hb = colHash(pairKey(b.x, b.z) ^ 0x4E1ull); return ha != hb ? ha < hb : (a.x != b.x ? a.x < b.x : a.z < b.z); });
-        QVector<QPoint3> kept;
-        auto nearKept = [&](int x, int z, double d)
-        { for (const QPoint3& q : kept) if (std::hypot(double(q.x - x), double(q.z - z)) < d) return true; return false; };
-        int nDemoted = 0;
-        QHash<ColKey, QVector<QPoint3>> newHearts;
-        for (const QPoint3& h : all)
-        {
-            if (!nearKept(h.x, h.z, kMinD)) { kept.append(h); newHearts[pairKey(h.x >> 4, h.z >> 4)].append(h); continue; }
-            const quint16 cur = store.get(h.x, h.y, h.z);
-            store.set(h.x, h.y, h.z, cur == quint16(IdCreakingHeart) ? quint16(IdPaleLog) : paleDonor.logId);
-            ++nDemoted;
-        }
-        // adding: pale oak trunks at a height of 4 above the ground (donor) — candidates on a 6×6 grid, in the "hash" order
-        int nAdded = 0;
-        if (paleDonor.heartId)
-        {
-            QVector<QPoint3> cands;
-            for (auto pit = paleCol.constBegin(); pit != paleCol.constEnd(); ++pit)
-            {
-                const int x = keyFirst(pit.key()), z = keySecond(pit.key());
-                if (((x * 7 + z * 13) % 5) != 0) continue;
-                const auto cc = pit;
-                if (cc->pid >= 0 || cc->w < 235) continue;
-                const int y = cc->top + 4;
-                if (store.get(x, y, z) == paleDonor.logId) cands.append(QPoint3{ x, y, z });
-            }
-            std::sort(cands.begin(), cands.end(), [&](const QPoint3& a, const QPoint3& b)
-            { const quint32 ha = colHash(pairKey(a.x, a.z) ^ 0x4E2ull), hb = colHash(pairKey(b.x, b.z) ^ 0x4E2ull); return ha != hb ? ha < hb : (a.x != b.x ? a.x < b.x : a.z < b.z); });
-            for (const QPoint3& c : cands)
-            {
-                if (nearKept(c.x, c.z, kGapD)) continue;
-                store.set(c.x, c.y, c.z, paleDonor.heartId);
-                kept.append(c);
-                newHearts[pairKey(c.x >> 4, c.z >> 4)].append(c);
-                ++nAdded;
-            }
-        }
-        heartsByChunk = newHearts;
-        res.lairInfo += QObject::tr("; creaking hearts: %1 (extra removed %2, added %3)").arg(kept.size()).arg(nDemoted).arg(nAdded);
-    }
-    if (paleIdx >= 0 && !paleDonorUsed)
-    {   // the Pale Garden litter: moss blocks instead of turf, a carpet of pale moss, rare eyeblossoms
-        const VegSite& ps = forests[paleIdx];
-        for (const ColSpan& c : ps.spans)
-            for (int z = c.z0; z <= c.z1; ++z)
-            {
-                const qint64 ck = pairKey(c.x, z);
-                if (colWater.contains(ck) || colMin.contains(ck) || colWool.contains(ck)) continue;
-                const quint32 hq = colHash(ck ^ 0xB1EDull);
-                const auto git = ground.find(pairKey(c.x >> 4, z >> 4));
-                if (git == ground.end()) continue;
-                const int col = (z & 15) * 16 + (c.x & 15);
-                if (git->wd[col] > 0) continue;
-                if (hq % 100u < 14u) git->surf[col] = quint16(IdPaleMossBlock);
-                const int top = git->top[col];
-                if (store.get(c.x, top + 1, z) != IdAir) continue;
-                const quint32 r2 = (hq >> 8) % 1000u;
-                if (r2 < 330) store.set(c.x, top + 1, z, IdPaleMossCarpet);
-                else if (r2 < 345) store.set(c.x, top + 1, z, (hq >> 20) & 1u ? quint16(IdEyeOpen) : quint16(IdEyeClosed));
-            }
-    }
-    // FLOATING ISLANDS above kindergartens: a "cloud" rounded lower part (calcite/white concrete), turf on top, a lake flush with the ground,
-    // slime at the shore, tropics (jungle trees, bamboo, reeds, ferns, lily pads), slimes. There are no rims — slimes sometimes fall.
-    for (const IslandSite& is : islandSites)
-    {
-        if (is.kind != 2) continue;
-        int y0 = std::min(surfaceTop(pairKey(is.cx, is.cz)), 255) + 70 + int(is.hash % 16u);   // high above the park: 70–85 blocks above the ground
-        if ((y0 & 15) == 15) ++y0;                                         // the lake and lily pads (a block above the water) are not cut by a section border
-        const int D = std::max(5, std::min(11, std::min(is.rx, is.rz) / 3));   // the "bowl" depth: thin, does not reach the buildings
-        if (y0 + 14 > 300) continue;
-        const quint16 calcite = quint16(IdPaletteStart + paletteIndexOf("minecraft:calcite"));
-        const quint16 white = quint16(IdPaletteStart + paletteIndexOf("minecraft:diorite"));
-        const quint16 sandB = quint16(IdPaletteStart + paletteIndexOf("minecraft:sand"));
-        const quint16 slime = quint16(IdPaletteStart + paletteIndexOf("minecraft:slime_block"));
-        const quint16 jungleLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:jungle_log"));
-        const quint16 bamboo = quint16(IdPaletteStart + paletteIndexOf("minecraft:bamboo"));
-        const quint16 cane = quint16(IdPaletteStart + paletteIndexOf("minecraft:sugar_cane"));
-        const quint16 fern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern"));
-        const quint16 lily = quint16(IdPaletteStart + paletteIndexOf("minecraft:lily_pad"));
-        const double ph = double(is.hash % 628u) / 100.0;
-        // the lake: an ellipse offset from the center
-        const double lcx = std::sin(ph) * is.rx * 0.18, lcz = std::cos(ph) * is.rz * 0.18;
-        const double lrx = std::max(4.0, is.rx * 0.30), lrz = std::max(4.0, is.rz * 0.26);
-        auto lakeD = [&](int dx, int dz) { const double a = (dx - lcx) / lrx, b = (dz - lcz) / lrz; return a * a + b * b; };   // <=1 inside
-        auto colGround = [&](int x, int z) { return ground.contains(pairKey(x >> 4, z >> 4)); };
-        auto hashAt = [&](int x, int z, quint32 salt) { return colHash(pairKey(x, z) ^ (qint64(is.hash) << 8) ^ salt); };
-        QVector<QPoint> land;                                              // land cells (for trees/slimes)
-        QHash<ColKey, int> topAt;
-        for (int dz = -is.rz; dz <= is.rz; ++dz)
-            for (int dx = -is.rx; dx <= is.rx; ++dx)
-            {
-                const double u = double(dx) / is.rx, v = double(dz) / is.rz;
-                const double edge = 0.12 * std::sin(dx * 0.31 + ph) + 0.10 * std::cos(dz * 0.27) + 0.06 * std::sin((dx + dz) * 0.19);
-                const double r = std::sqrt(u * u + v * v) + edge;
-                if (r > 1.0) continue;
-                const int x = is.cx + dx, z = is.cz + dz;
-                if (!colGround(x, z)) continue;
-                const bool nearLake = lakeD(dx, dz) <= 3.2;
-                int top = y0;
-                if (!nearLake && r > 0.15)                                  // soft mounds far from the lake
-                    top = y0 + int(std::lround(1.1 * std::sin(dx * 0.23 + ph) * std::cos(dz * 0.19 - ph)));
-                const int depth = 2 + int(D * std::sqrt(std::max(0.0, 1.0 - r * r)));    // a rounded "bowl"
-                for (int y = top - depth; y <= top; ++y)
-                {
-                    const int d = top - y;
-                    quint16 id;
-                    if (d == 0) id = IdGrass;
-                    else if (d <= 2) id = IdDirt;
-                    else id = (((dx * 7 + dz * 13 + y * 5) & 7) == 0) ? white : calcite;
-                    store.set(x, y, z, id);
-                }
-                topAt.insert(pairKey(x, z), top);
-                // the lake is flush: water on the three top layers, the bottom — sand
-                if (lakeD(dx, dz) <= 1.0 && r < 0.8)
-                {
-                    store.set(x, top, z, IdWater);
-                    store.set(x, top - 1, z, IdWater);
-                    store.set(x, top - 2, z, IdWater);
-                    store.set(x, top - 3, z, sandB);
-                    if (hashAt(x, z, 0x11A1u) % 100u < 9u) store.set(x, top + 1, z, lily);
-                }
-                else
-                    land.append(QPoint(x, z));
-            }
-        // slime at the shore, reeds near the water, ferns/flowers
-        for (const QPoint& c : land)
-        {
-            const int top = topAt.value(pairKey(c.x(), c.y()));
-            const int dx = c.x() - is.cx, dz = c.y() - is.cz;
-            const double ld = lakeD(dx, dz);
-            const quint32 hq = hashAt(c.x(), c.y(), 0x5A1Eu);
-            if (ld <= 1.7 && hq % 100u < 38u) { store.set(c.x(), top, c.y(), slime); continue; }        // the shore is partly slimy
-            if (ld <= 1.7 && hq % 100u < 60u && store.get(c.x(), top, c.y()) == IdGrass)
-            {   // reeds near the water: 2–3 cells
-                const int h = 2 + int((hq >> 8) % 2u);
-                for (int k = 1; k <= h; ++k) store.set(c.x(), top + k, c.y(), cane);
-                continue;
-            }
-            if (ld > 1.7 && hq % 100u < 14u) store.set(c.x(), top + 1, c.y(), fern);
-            else if (ld > 1.7 && hq % 100u < 17u) store.set(c.x(), top + 1, c.y(), quint16(IdFlowerBase + int((hq >> 10) % quint32(kFlowersCount))));
-        }
-        // slime clumps on land (2×2)
-        for (int k = 0; k < 4; ++k)
-        {
-            const quint32 hk = is.hash * 2654435761u + quint32(k) * 40503u;
-            if (land.isEmpty()) break;
-            const QPoint c = land[int(hk % quint32(land.size()))];
-            for (int dz = 0; dz <= 1; ++dz)
-                for (int dx = 0; dx <= 1; ++dx)
-                {
-                    const qint64 key = pairKey(c.x() + dx, c.y() + dz);
-                    if (topAt.contains(key) && store.get(c.x() + dx, topAt.value(key), c.y() + dz) == IdGrass)
-                        store.set(c.x() + dx, topAt.value(key), c.y() + dz, slime);
-                }
-        }
-        // jungle trees and bamboo
-        const int nTrees = std::max(5, std::min(22, int(land.size()) / 90));
-        for (int t = 0; t < nTrees && !land.isEmpty(); ++t)
-        {
-            const quint32 ht = is.hash * 1103515245u + quint32(t) * 12345u + 7u;
-            const QPoint c = land[int((ht >> 4) % quint32(land.size()))];
-            const int dx = c.x() - is.cx, dz = c.y() - is.cz;
-            if (lakeD(dx, dz) <= 2.4) continue;
-            const int top = topAt.value(pairKey(c.x(), c.y()));
-            if (store.get(c.x(), top, c.y()) != IdGrass || store.get(c.x(), top + 1, c.y()) != IdAir) continue;
-            const int h = 5 + int((ht >> 12) % 4u);
-            for (int k = 1; k <= h; ++k) store.set(c.x(), top + k, c.y(), jungleLog);
-            for (int dy = -2; dy <= 1; ++dy)
-            {
-                const int rr = (dy == 1) ? 1 : (dy == 0 ? 3 : 2);
-                for (int ex = -rr; ex <= rr; ++ex)
-                    for (int ez = -rr; ez <= rr; ++ez)
-                    {
-                        if (std::abs(ex) == rr && std::abs(ez) == rr && rr > 1) continue;
-                        if (store.get(c.x() + ex, top + h + dy, c.y() + ez) == IdAir)
-                            store.set(c.x() + ex, top + h + dy, c.y() + ez, IdJungleLeaves);
-                    }
-            }
-            jungleCrownVines(c.x(), c.y(), top + h - 2, 3);             // vines over the whole crown (the game's jungle look)
-        }
-        for (int g = 0; g < 7 && !land.isEmpty(); ++g)
-        {   // bamboo groves
-            const quint32 hg = is.hash * 2246822519u + quint32(g) * 3266489917u + 3u;
-            const QPoint c = land[int((hg >> 3) % quint32(land.size()))];
-            if (lakeD(c.x() - is.cx, c.y() - is.cz) <= 2.0) continue;
-            const int n = 3 + int((hg >> 20) % 4u);
-            for (int q = 0; q < n; ++q)
-            {
-                const int bx = c.x() + int((hg >> (q * 3)) % 5u) - 2, bz = c.y() + int((hg >> (q * 3 + 1)) % 5u) - 2;
-                const qint64 key = pairKey(bx, bz);
-                if (!topAt.contains(key)) continue;
-                const int top = topAt.value(key);
-                if (store.get(bx, top, bz) != IdGrass || store.get(bx, top + 1, bz) != IdAir) continue;
-                const int h = 4 + int((hg >> (q + 8)) % 6u);
-                for (int k = 1; k <= h; ++k) store.set(bx, top + k, bz, bamboo);
-            }
-        }
-        // slimes: up to 8 of different sizes on land
-        for (int sl = 0; sl < 8 && !land.isEmpty(); ++sl)
-        {
-            const quint32 hs = is.hash * 668265263u + quint32(sl) * 374761393u + 11u;
-            const QPoint c = land[int((hs >> 3) % quint32(land.size()))];
-            const int top = topAt.value(pairKey(c.x(), c.y()));
-            if (store.get(c.x(), top + 1, c.y()) != IdAir) continue;
-            NpcSite m; m.kind = 4; m.variant = 8; m.level = int((hs >> 10) % 3u);
-            m.x = c.x(); m.z = c.y(); m.y = top + 1; m.yaw = int((hs >> 14) % 4u) * 90;
-            npcs.append(m);
-        }
-        // Lamps on the ground under the island (it casts a shadow on the park): two oval rings of glowing tiles flush with the ground
-        // (glowstone instead of turf), on every third one — a low lamp post; in the center — a tall stand with a lantern. The rings are slightly wider than the island.
-        {
-            const quint16 glow = quint16(IdPaletteStart + paletteIndexOf("minecraft:glowstone"));
-            auto groundCol = [&](int x, int z, int& top) -> GroundChunk*
-            {
-                const qint64 ck = pairKey(x, z);
-                if (colWater.contains(ck) || colMin.contains(ck) || colWool.contains(ck) || roadCols.contains(ck)) return nullptr;
-                auto git = ground.find(pairKey(x >> 4, z >> 4));
-                if (git == ground.end()) return nullptr;
-                const int col = (z & 15) * 16 + (x & 15);
-                if (git->wd[col] > 0) return nullptr;
-                top = git->top[col];
-                return &git.value();
-            };
-            auto lampPost = [&](int x, int z, int top, int fences)
-            {
-                bool free = true;
-                for (int dy = 1; dy <= fences + 2 && free; ++dy) if (store.get(x, top + dy, z) != IdAir) free = false;
-                if (!free) return;
-                store.set(x, top + 1, z, IdCobbleWall);
-                for (int dy = 2; dy <= fences + 1; ++dy) store.set(x, top + dy, z, IdFence);
-                store.set(x, top + fences + 2, z, IdLanternStanding);
-            };
-            const double ringK[2] = { 1.12, 0.62 };
-            for (int ri = 0; ri < 2; ++ri)
-            {
-                const double rxr = is.rx * ringK[ri], rzr = is.rz * ringK[ri];
-                const int nSeg = std::max(12, int(std::lround(2.0 * 3.14159265 * 0.5 * (rxr + rzr) / 2.0)));        // a tile every ~2 blocks
-                QSet<ColKey> done;
-                for (int t = 0; t < nSeg; ++t)
-                {
-                    const double a = 2.0 * 3.14159265 * t / nSeg;
-                    const int x = is.cx + int(std::lround(std::cos(a) * rxr)), z = is.cz + int(std::lround(std::sin(a) * rzr));
-                    if (done.contains(pairKey(x, z))) continue;
-                    done.insert(pairKey(x, z));
-                    int top = 0;
-                    GroundChunk* g = groundCol(x, z, top);
-                    if (!g) continue;
-                    g->surf[(z & 15) * 16 + (x & 15)] = glow;
-                    if (t % 3 == 0) lampPost(x + (std::cos(a) >= 0 ? 1 : -1), z, top, 3);                   // a post next to the tile, outside the ring
-                }
-            }
-            int topC = 0;
-            if (GroundChunk* gc = groundCol(is.cx, is.cz, topC))
-            {
-                Q_UNUSED(gc);
-                for (int dz = -1; dz <= 1; ++dz)
-                    for (int dx = -1; dx <= 1; ++dx)
-                    {
-                        int tp = 0;
-                        if (GroundChunk* g2 = groundCol(is.cx + dx, is.cz + dz, tp)) g2->surf[((is.cz + dz) & 15) * 16 + ((is.cx + dx) & 15)] = glow;
-                    }
-                lampPost(is.cx, is.cz, topC, 5);                                                              // the central tall stand
-            }
-        }
-    }
-    // Swamp biome (sources with the "swamp" effect, e.g. mrspol): what the biome does BY ITSELF. Forests under
-    // the contour already became swamp-oak groves in the forest loop; here the OPEN swamp ground gets rare oaks
-    // (sparser than forest), and mushrooms/ferns/dead branches as the ground flora. Water, roads and built-up
-    // columns under the contour are left alone — the biome is an overlay, not an owner of the land.
-    if (!swampCols.isEmpty())
-    {
-        const quint16 qFern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern")),
-                    qDb = quint16(IdPaletteStart + paletteIndexOf("minecraft:dead_bush")),
-                    qMushB = quint16(IdPaletteStart + paletteIndexOf("minecraft:brown_mushroom")),
-                    qMushR = quint16(IdPaletteStart + paletteIndexOf("minecraft:red_mushroom"));
-        auto floor6 = [](int v) { return v >= 0 ? v / 6 : -((-v + 5) / 6); };   // cell of the same 6×6 grid as the forest loop
-        QSet<ColKey> cells;
-        for (ColKey ck : swampCols)
-            cells.insert(pairKey(floor6(keyFirst(ck)), floor6(keySecond(ck))));
-        int nSwampTrees = 0;
-        for (ColKey cell : cells)
-        {
-            const quint32 hs = colHash(cell ^ 0x2F8C3ull);
-            if (hs % 100u >= 40u) continue;                                    // open swamp — rare trees (~40% of cells)
-            const int tx = keyFirst(cell) * 6 + int(hs % 6u), tz = keySecond(cell) * 6 + int((hs >> 8) % 6u);
-            const ColKey ck = pairKey(tx, tz);
-            if (!swampCols.contains(ck)) continue;                             // the tree spot fell outside the contour
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)) continue;
-            const int y0 = surfaceTop(ck) + 1;
-            if (store.get(tx, y0, tz) != IdAir) continue;                      // something already stands here
-            const int h = 5 + int(hs % 4u);
-            if (y0 + h + 4 > 255) continue;
-            plantSwampOak(tx, tz, y0, h, hs);
-            ++nSwampTrees;
-        }
-        for (ColKey ck : swampCols)
-        {
-            const quint32 hd = colHash(ck ^ 0x77AC11ull);
-            if (hd % 100u >= 7u) continue;                                     // flora on ~7% of the columns
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck)) continue;
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            const int y0 = surfaceTop(ck) + 1;
-            if (store.get(bx, y0, bz) != IdAir) continue;                      // not on a trunk or an object
-            const quint32 r = (hd >> 8) % 100u;
-            store.set(bx, y0, bz, r < 40u ? qDb : (r < 58u ? qMushB : (r < 76u ? qMushR : qFern)));
-        }
-        tmcStepLog(QString("3.5 swamp biome: %1 columns, %2 open-ground oaks").arg(swampCols.size()).arg(nSwampTrees).toUtf8().constData());
-    }
-    // Cemeteries (csrpol 53510000, a user request): the dark-forest plot of the dead. Forests under the contour
-    // already became dark-oak groves in the forest loop; the OPEN cemetery ground gets dense dark oaks (a 5x5 grid),
-    // stone crosses between them (a 3x3 grid), a lit jack o'lantern on a fence post by some crosses, rare carved
-    // pumpkins, wandering monsters (zombies, skeletons, spiders, witches) and rare loot chests (middling often,
-    // expensive rarely). Water, roads and built-up columns stay alone — an overlay, not an owner of the land.
-    if (!cemeteryCols.isEmpty())
-    {
-        const quint16 qPumpkin = quint16(IdPaletteStart + paletteIndexOf("minecraft:carved_pumpkin")),
-                    qStoneC = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone"));
-        auto floorC5 = [](int v) { return v >= 0 ? v / 5 : -((-v + 4) / 5); };
-        auto floorC3 = [](int v) { return v >= 0 ? v / 3 : -((-v + 2) / 3); };
-        auto floorC6 = [](int v) { return v >= 0 ? v / 6 : -((-v + 5) / 6); };
-        auto floorC9 = [](int v) { return v >= 0 ? v / 9 : -((-v + 8) / 9); };
-        int nCemTrees = 0, nCross = 0, nJack = 0, nPumpkin = 0, nCemMob = 0, nCemChest = 0;
-        QSet<ColKey> cells5;
-        for (ColKey ck : cemeteryCols)
-            cells5.insert(pairKey(floorC5(keyFirst(ck)), floorC5(keySecond(ck))));
-        for (ColKey cell : cells5)
-        {   // dark oaks on the open ground — quite dense: ~70% of the 5x5 cells
-            const quint32 hs = colHash(cell ^ 0x0CE117ull);
-            if (hs % 100u >= 70u) continue;
-            const int tx = keyFirst(cell) * 5 + int(hs % 5u), tz = keySecond(cell) * 5 + int((hs >> 8) % 5u);
-            const ColKey ck = pairKey(tx, tz);
-            if (!cemeteryCols.contains(ck)) continue;                            // the tree spot fell outside the contour
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)
-                || colWool.contains(ck)) continue;                     // paved squares and roadways are no place for a grave tree (a request)
-            const int y0 = surfaceTop(ck) + 1;
-            if (store.get(tx, y0, tz) != IdAir) continue;                        // something already stands here
-            const int h = 7 + int(hs % 4u);                                   // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
-            if (y0 + h + 4 > 255) continue;
-            plantDarkOak(tx, tz, y0, h, hs);
-            ++nCemTrees;
-        }
-        QSet<ColKey> cells3;
-        for (ColKey ck : cemeteryCols)
-            cells3.insert(pairKey(floorC3(keyFirst(ck)), floorC3(keySecond(ck))));
-        for (ColKey cell : cells3)
-        {   // stone crosses — ~17% of the 3x3 cells (a request: ~1.5x fewer, so the paths between the graves are wider);
-            // the whole cross must stand in the air
-            const quint32 hc = colHash(cell ^ 0xC83C11ull);
-            if (hc % 100u >= 17u) continue;
-            const int tx = keyFirst(cell) * 3 + int(hc % 3u), tz = keySecond(cell) * 3 + int((hc >> 8) % 3u);
-            const ColKey ck = pairKey(tx, tz);
-            if (!cemeteryCols.contains(ck)) continue;
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
-                || colWool.contains(ck)) continue;                                 // no crosses on roadways and paved squares (a request)
-            const int y0 = surfaceTop(ck) + 1;
-            if (store.get(tx, y0, tz) != IdAir || store.get(tx, y0 + 1, tz) != IdAir || store.get(tx, y0 + 2, tz) != IdAir
-                || store.get(tx - 1, y0 + 2, tz) != IdAir || store.get(tx + 1, y0 + 2, tz) != IdAir) continue;
-            if (roadCols.contains(pairKey(tx - 1, tz)) || roadCols.contains(pairKey(tx + 1, tz))
-                || colWool.contains(pairKey(tx - 1, tz)) || colWool.contains(pairKey(tx + 1, tz))) continue;   // nor may the crossbar hang over one (a request)
-            store.set(tx, y0, tz, qStoneC);                          // a stone base
-            store.set(tx, y0 + 1, tz, IdCobbleWall);                 // the upright
-            store.set(tx, y0 + 2, tz, IdCobbleWall);
-            store.set(tx - 1, y0 + 2, tz, IdCobbleWall);             // the crossbar
-            store.set(tx + 1, y0 + 2, tz, IdCobbleWall);
-            ++nCross;
-            if (hc % 100u >= 6u) continue;                            // a jack o'lantern by ~6% of the cells (kept proportional to the rarer crosses)
-            const int side = ((hc >> 10) & 1u) ? 1 : -1;
-            const int px = tx + side * 2;
-            const ColKey pk = pairKey(px, tz);
-            if (colWater.contains(pk) || roadCols.contains(pk) || colMin.contains(pk) || railColsAll.contains(pk)
-                || colWool.contains(pk)
-                || store.get(px, y0, tz) != IdAir || store.get(px, y0 + 1, tz) != IdAir) continue;
-            store.set(px, y0, tz, IdFence);                          // a fence post (no connections)
-            store.set(px, y0 + 1, tz, quint16(IdJackLanternBase + int((hc >> 12) % 4u)));   // the lit face looks by hash
-            ++nJack;
-        }
-        for (ColKey ck : cemeteryCols)
-        {   // carved pumpkins dot the grass (~0.75% of the columns — a request: four times rarer)
-            const quint32 hp = colHash(ck ^ 0x9AB1CEull);
-            if (hp % 400u >= 3u) continue;
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || colWool.contains(ck)) continue;
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            const int y0 = surfaceTop(ck) + 1;
-            if (store.get(bx, y0, bz) != IdAir) continue;
-            store.set(bx, y0, bz, qPumpkin);
-            ++nPumpkin;
-        }
-        QSet<ColKey> cells6;
-        for (ColKey ck : cemeteryCols)
-            cells6.insert(pairKey(floorC6(keyFirst(ck)), floorC6(keySecond(ck))));
-        for (ColKey cell : cells6)
-        {   // the monsters of the graveyard — a 6x6 grid, ~45% of the cells: a zombie, a skeleton, a spider or a witch
-            const quint32 hm = colHash(cell ^ 0x4045E7ull);
-            if (hm % 100u >= 45u) continue;
-            const int mx = keyFirst(cell) * 6 + int(hm % 6u), mz = keySecond(cell) * 6 + int((hm >> 8) % 6u);
-            const ColKey ck = pairKey(mx, mz);
-            if (!cemeteryCols.contains(ck)) continue;
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
-                || colWool.contains(ck)) continue;
-            const int y0 = surfaceTop(ck) + 1;
-            if (store.get(mx, y0, mz) != IdAir || store.get(mx, y0 + 1, mz) != IdAir) continue;   // the body needs two rows
-            NpcSite ms;
-            ms.kind = 4; ms.variant = int((hm >> 16) % 4u);          // 0 zombie, 1 skeleton, 2 spider, 3 witch
-            ms.x = mx; ms.y = y0; ms.z = mz; ms.yaw = int((hm >> 4) % 4u) * 90;
-            npcs.append(ms);
-            ++nCemMob;
-        }
-        QSet<ColKey> cells9;
-        for (ColKey ck : cemeteryCols)
-            cells9.insert(pairKey(floorC9(keyFirst(ck)), floorC9(keySecond(ck))));
-        for (ColKey cell : cells9)
-        {   // the loot of the old graves — a 9x9 grid; buried graves twice as often as the ground ones (a request):
-            // a chest standing on the ground OR buried under a grave (the chest lies in the dug row of the old
-            // surface under a turf cover with a headstone — the lid is blocked, the treasure must be dug out).
-            // Buried: 20% expensive, 80% middling; ground chests: 80% cheap, 20% middling (a request).
-            const quint32 hl = colHash(cell ^ 0x51E9Cull);
-            const bool wantBuried = (hl & 1u) != 0;                 // half of the candidates ask for a buried grave
-            if (hl % 1000u >= (wantBuried ? 130u : 65u)) continue;  // buried ones twice as often (a request), the ground ones as before
-            const int tx = keyFirst(cell) * 9 + int(hl % 9u), tz = keySecond(cell) * 9 + int((hl >> 8) % 9u);
-            const ColKey ck = pairKey(tx, tz);
-            if (!cemeteryCols.contains(ck)) continue;
-            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || railColsAll.contains(ck)
-                || colWool.contains(ck)) continue;
-            const int y0 = surfaceTop(ck) + 1;
-            if (store.get(tx, y0, tz) != IdAir || store.get(tx, y0 + 1, tz) != IdAir) continue;
-            bool buried = false;
-            if (wantBuried)
-            {   // a buried grave: dig one row of the column (the writer builds it from `top`), the chest at the
-                // old surface level, a turf block covers it from above, a cobblestone wall marks the grave
-                const auto git = ground.find(pairKey(tx >> 4, tz >> 4));
-                const int T = y0 - 1;
-                if (git != ground.end())
-                {
-                    const int col = (tz & 15) * 16 + (tx & 15);
-                    if (int(git.value().top[col]) == T && store.get(tx, T, tz) == IdAir)
-                    {
-                        git.value().top[col] = qint16(T - 1);
-                        store.set(tx, T, tz, IdChest);
-                        chests << ChestSite{ tx, T, tz, pickChestLoot(hl >> 4, 0, 80) };   // 80% middling, 20% expensive
-                        store.set(tx, T + 1, tz, IdGrass);
-                        store.set(tx, T + 2, tz, IdCobbleWall);
-                        buried = true;
-                    }
-                }
-            }
-            if (!buried)
-            {
-                store.set(tx, y0, tz, IdChest);
-                chests << ChestSite{ tx, y0, tz, pickChestLoot(hl >> 4, 80, 20) };   // 80% cheap, 20% middling (a request)
-            }
-            ++nCemChest;
-        }
-        char cbuf[192];
-        snprintf(cbuf, sizeof cbuf, "3.5 cemeteries: %d columns, %d dark oaks, %d crosses, %d jack o'lanterns, %d pumpkins, %d monsters, %d chests",
-                 int(cemeteryCols.size()), nCemTrees, nCross, nJack, nPumpkin, nCemMob, nCemChest);
-        tmcStepLog(cbuf);
-    }
+    if (!buildVegetation()) return res;
     lap("before 3.51");
     beginStep(5);
-    // 3.51 Tree planting by the user's rules (three rules):
-    //   (1) columns inside the fill WITHOUT objects and vector coverage (just terrain) —
-    //       single trees: a 32×32 grid, in a cell a point center + hash jitter ±1 — neighbors
-    //       by cells do not come closer than 30 blocks (32−1−1); the hash gate lets 3 cells
-    //       out of 4 pass — a sparse forest, not rows;
-    //   (2) giant fields (ripe wheat, >100000 m²) — GROUPS of 2-3 trees nearby,
-    //       a 44×44 grid: the group spread ≤5 + jitter ≤1 ⇒ between groups also ≥30;
-    //   (3) "tall grass" (tall_grass, ≥50000 m²) — single trees, as in rule (1).
-    // A buffer of ±3 columns from structures/roads/tracks/sites/water/forest spots (including lamps —
-    // they are 1 column from the road): trees do not climb onto anything; a trunk is written only when ALL
-    // its cells are air (unlike a forest spot, where a skipped bottom one is allowed), the crown —
-    // only through the air. Before the grass is scattered: the grass looks at the store air and will not climb into the trunk.
-    {
-        // ATTENTION: fillChunks are the keys of CHUNKS (store.chunks), not columns!
-        const QSet<ColKey> fillChunkSet(fillChunks.constBegin(), fillChunks.constEnd());
-        auto inFill = [&](qint64 ck)
-        { return fillChunkSet.contains(pairKey(keyFirst(ck) >> 4, keySecond(ck) >> 4)); };
-        auto flat5 = [&](qint64 ck)
-        {   // the center and the 4 neighbors — one surface height (we do not put a tree on a slope)
-            const int y = surfaceTop(ck);
-            return std::abs(y - surfaceTop(pairKey(keyFirst(ck) + 1, keySecond(ck)))) <= 1
-                && std::abs(y - surfaceTop(pairKey(keyFirst(ck) - 1, keySecond(ck)))) <= 1
-                && std::abs(y - surfaceTop(pairKey(keyFirst(ck), keySecond(ck) + 1))) <= 1
-                && std::abs(y - surfaceTop(pairKey(keyFirst(ck), keySecond(ck) - 1))) <= 1;
-        };
-        const quint16 birchLogS = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
-        auto plantTree = [&](qint64 ck, int h, bool birch = false) -> bool
-        {
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            // The crown (±2) must not stick out of the fill: otherwise the chunk will be written without ground
-            // ("GROUND FAIL" in verify, holes along the chunk grid in the game).
-            for (int sx = -2; sx <= 2; sx += 4)
-                for (int sz = -2; sz <= 2; sz += 4)
-                    if (!fillChunkSet.contains(pairKey((bx + sx) >> 4, (bz + sz) >> 4)))
-                        return false;
-            const int y0 = surfaceTop(ck) + 1;
-            if (y0 + h + 3 > 255) return false;
-            for (int dy = 0; dy < h; ++dy)
-                if (store.get(bx, y0 + dy, bz) != IdAir) return false;    // not a single foreign stump in the trunk
-            if ((g_zone == Climate::Desert || g_zone == Climate::SemiArid) && colHash(ck ^ 0x7C31ull) % 100u < (g_zone == Climate::Desert ? 45u : 30u))   // cacti dot the desert and semi-arid open lands (the trees there stay rare)
-            {
-                const int hc = 1 + int(colHash(ck ^ 0x40A5ull) % 3u);               // 1..3 blocks tall (as in the game)
-                if (y0 + hc <= 254)
-                    for (int dy = 0; dy < hc; ++dy)
-                        store.set(bx, y0 + dy, bz, quint16(IdPaletteStart + paletteIndexOf("minecraft:cactus")));
-                return true;
-            }
-            if ((g_zone == Climate::Desert || g_zone == Climate::SemiArid) && colHash(ck ^ 0x9E77ull) % 100u < 20u)   // dry bushes speckle the same open lands between the cacti
-            {
-                store.set(bx, y0, bz, quint16(IdPaletteStart + paletteIndexOf("minecraft:dead_bush")));
-                return true;
-            }
-            if (zoneSkip(bx, bz)) return true;
-            if (zt.jungle)
-            {   // big jungle trees grow on the empty lands too: every fifth tree (busyNear already
-                // cleared a 7×7 buffer around the trunk, plantJungleBig checks the crown chunks itself)
-                const quint32 hj = colHash(ck ^ 0x3ADE11ull);
-                if (hj % 5u == 0u && plantJungleBig(bx, bz, y0, hj)) return true;
-            }
-            if (g_zone == Climate::Tundra && colHash(ck ^ 0x51A7ull) % 100u < 50u)   // the tundra: half of the empty-land trees are spruces, the rest are birches
-            {
-                const int hs = 6 + int(colHash(ck ^ 0x2B19ull) % 6u);                // 6..11 — hardy short firs
-                if (plantSpruce(bx, bz, y0, hs, hs >= 8 ? 3 : 2)) return true;       // no room for the cone — a birch grows then
-            }
-            if (zt.palmShare && colHash(ck ^ 0x49F1ull) % 100u < quint32(zt.palmShare))   // palm open lands (monsoon and semi-arid): the zone's share is palms, the rest are oaks
-            {
-                if (plantPalm(bx, bz, y0, colHash(ck ^ 0x27A9ull))) return true;
-            }
-            const quint16 tLog = birch ? zt.birchLog : zt.oakLog, tLeaf = birch ? zt.birchLeaf : zt.oakLeaf;
-            for (int dy = 0; dy < h; ++dy)
-                store.set(bx, y0 + dy, bz, tLog);
-            const int topTree = y0 + h - 1;                              // the "diamond" crown, only air
-            for (int dy = -2; dy <= 1; ++dy)
-            {
-                const int r = (dy == 1) ? 1 : 2;
-                for (int dx = -r; dx <= r; ++dx)
-                    for (int dz = -r; dz <= r; ++dz)
-                    {
-                        if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
-                        if (dy != 1 && std::abs(dx) == 2 && std::abs(dz) == 2) continue;
-                        if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
-                            store.set(bx + dx, topTree + dy, bz + dz, tLeaf);
-                    }
-            }
-            if (zt.jungle) jungleCrownVines(bx, bz, topTree - 2, 2);   // the jungle trees of the fields/meadows — with vines too
-            return true;
-        };
-        QVector<ColSpan> allForest;                                      // the whole forest — merged segments
-        for (const VegSite& s : forests) allForest += s.spans;
-        allForest = mergeSpans(allForest);
-        auto busyNear = [&](qint64 ck, bool plantsToo)                   // a "built-up/covered" 7×7 square?
-        {
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            for (int dz = -3; dz <= 3; ++dz)
-                for (int dx = -3; dx <= 3; ++dx)
-                {
-                    const qint64 nk = pairKey(bx + dx, bz + dz);
-                    if (colMin.contains(nk) || roadCols.contains(nk) || railColsAll.contains(nk)
-                        || colWool.contains(nk) || colWater.contains(nk) || noTreePadCols.contains(nk) || spansContain(allForest, bx + dx, bz + dz)
-                        || (plantsToo && colPlant.contains(nk)))
-                        return true;
-                }
-            return false;
-        };
-        // — (1)+(3): a 32×32 grid over the whole fill (the noise world apron is also an "empty place").
-        // The grid cells are derived from the chunk coordinates (a chunk covers a 32 grid in no more than 2×2 cells).
-        // A 14×14 grid (was 24×24: three times more trees), ~48% of the cells are occupied, the point in a cell is random over the whole cell (a margin of 2): the density is 1.5 times higher than the former one (32×32, 3 of 4),
-        // and the rows disappear; ~35% of the trees are birches.
-        constexpr int kGrid = 14;
-        auto fdivG = [](int v, int d) { return v >= 0 ? v / d : -((-v + d - 1) / d); };
-        QSet<ColKey> cells32;
-        cells32.reserve(qsizetype(fillChunkSet.size()) * 4);
-        for (qint64 ck : fillChunks)
-        {
-            const int cx = keyFirst(ck), cz = keySecond(ck);
-            const int x0 = fdivG(cx << 4, kGrid), x1 = fdivG((cx << 4) + 15, kGrid);   // the cells by X for this chunk
-            const int z0 = fdivG(cz << 4, kGrid), z1 = fdivG((cz << 4) + 15, kGrid);
-            cells32.insert(pairKey(x0, z0));
-            cells32.insert(pairKey(x1, z0));
-            cells32.insert(pairKey(x0, z1));
-            cells32.insert(pairKey(x1, z1));
-        }
-        for (qint64 cj : cells32)
-        {
-            const quint32 hh = colHash(cj ^ 0x7EE5ull);
-            if (hh % 100u >= 26u) continue;                                    // ~26% of the cells (was 63%, 48%, 36%: the single trees on empty lands were too frequent)
-            const quint32 hp = colHash(cj ^ 0x51D7ull);
-            const qint64 ck = pairKey(int(keyFirst(cj)) * kGrid + 2 + int(hp % quint32(kGrid - 4)),
-                                      int(keySecond(cj)) * kGrid + 2 + int((hp >> 10) % quint32(kGrid - 4)));
-            if (!inFill(ck) || !flat5(ck)) continue;
-            const int h = 5 + int(colHash(ck ^ 0x116ull) % 3u);              // trunks 5..7
-            const bool birch = (hp >> 20) % 100u < 35u;
-            if (colPlant.value(ck, 0) == quint16(IdTallGrass))               // (3) tall grass
-            {
-                if (!busyNear(ck, false)) plantTree(ck, h, birch);
-            }
-            else if (!busyNear(ck, true)) plantTree(ck, h, birch);           // (1) clean terrain
-        }
-        // — (2): wheat fields, groups of 2-3 trees per 44×44 cell.
-        auto fdiv = [](int v, int d) { return v >= 0 ? v / d : -((-v + d - 1) / d); };
-        QSet<ColKey> cells44;
-        for (auto it = colPlant.constBegin(); it != colPlant.constEnd(); ++it)
-            if (it.value() == quint16(IdWheat))
-                cells44.insert(pairKey(fdiv(keyFirst(it.key()), 44), fdiv(keySecond(it.key()), 44)));
-        static const int kGroupOff[2][2] = { { 3, 2 }, { -3, 4 } };
-        for (qint64 cj : cells44)
-        {
-            const quint32 hh = colHash(cj ^ 0x94D3ull);
-            if (hh % 4u == 0u) continue;                                     // glades without a group
-            const qint64 ck = pairKey(keyFirst(cj) * 44 + 22 + int(hh % 3u) - 1,
-                                      keySecond(cj) * 44 + 22 + int((hh >> 2) % 3u) - 1);
-            if (colPlant.value(ck, 0) != quint16(IdWheat) || !flat5(ck)
-                || busyNear(ck, false))
-                continue;
-            const int n = 2 + int(hh >> 4) % 2;                              // 2-3 trees in a group
-            int got = plantTree(ck, 5 + int(colHash(ck ^ 0x116ull) % 3u)) ? 1 : 0;
-            for (int g = 0; g < 2 && got < n; ++g)
-            {
-                const qint64 mk = pairKey(keyFirst(ck) + kGroupOff[g][0], keySecond(ck) + kGroupOff[g][1]);
-                if (colPlant.value(mk, 0) != quint16(IdWheat) || !flat5(mk)
-                    || busyNear(mk, false))
-                    continue;
-                if (plantTree(mk, 5 + int(colHash(mk ^ 0x116ull) % 3u))) ++got;
-            }
-        }
-    }
-
-    // — trees around schools (birches, the birch_forest biome) and kindergartens (multicolored poplars, the dappled_forest biome): a 9×9 grid, ~35% of the cells (crowns do not form a solid canopy),
-    // within kZoneR of the walls, not on structures/roads/water/forests/lawns (a buffer of ±3, like the other trees).
-    {
-        const QSet<ColKey> zoneFill(fillChunks.constBegin(), fillChunks.constEnd());
-        QVector<ColSpan> forestAll;
-        for (const VegSite& vs2 : forests) forestAll += vs2.spans;
-        forestAll = mergeSpans(forestAll);
-        auto busy = [&](qint64 ck)
-        {
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            for (int dz = -3; dz <= 3; ++dz)
-                for (int dx = -3; dx <= 3; ++dx)
-                {
-                    const qint64 nk = pairKey(bx + dx, bz + dz);
-                    if (colMin.contains(nk) || roadCols.contains(nk) || railColsAll.contains(nk) || colWool.contains(nk) || colWater.contains(nk)
-                        || colPlant.contains(nk) || spansContain(forestAll, bx + dx, bz + dz))
-                        return true;
-                }
-            return false;
-        };
-        const quint16 birchLog = zt.birchLog, birchLeaf = zt.birchLeaf;   // the monsoon zone remaps the school birches into oaks
-        const quint16 poplarLog = quint16(IdPaletteStart + paletteIndexOf("minecraft:poplar_log"));
-        for (const IslandSite& is : islandSites)
-        {
-            if (is.kind == 2) continue;
-            const int x0 = is.cx - is.rx - kZoneMax, x1 = is.cx + is.rx + kZoneMax, z0 = is.cz - is.rz - kZoneMax, z1 = is.cz + is.rz + kZoneMax;
-            for (int gz = z0 / 9 - 1; gz <= z1 / 9 + 1; ++gz)
-                for (int gx = x0 / 9 - 1; gx <= x1 / 9 + 1; ++gx)
-                {
-                    const quint32 hh = colHash(pairKey(gx, gz) ^ (is.kind ? 0xB1C4ull : 0xD4F9ull));
-                    if (hh % 100u >= 35u) continue;
-                    const int bx = gx * 9 + int((hh >> 8) % 7u), bz = gz * 9 + int((hh >> 14) % 7u);
-                    const int dxo = std::max(0, std::abs(bx - is.cx) - is.rx), dzo = std::max(0, std::abs(bz - is.cz) - is.rz);
-                    Q_UNUSED(dxo); Q_UNUSED(dzo);
-                    if (!zoneInside(is, bx, bz, kZoneR)) continue;
-                    const qint64 ck = pairKey(bx, bz);
-                    if (busy(ck)) continue;
-                    if (!zoneFill.contains(pairKey(bx >> 4, bz >> 4))) continue;
-                    bool crownOk = true;
-                    for (int sx2 = -3; sx2 <= 3 && crownOk; sx2 += 6)
-                        for (int sz2 = -3; sz2 <= 3; sz2 += 6)
-                            if (!zoneFill.contains(pairKey((bx + sx2) >> 4, (bz + sz2) >> 4))) { crownOk = false; break; }
-                    if (!crownOk) continue;
-                    const int y0 = surfaceTop(ck) + 1;
-                    const int h = 5 + int(colHash(ck ^ 0x1B1Eull) % 5u);                       // trunk 5..9
-                    if (y0 + h + 4 > 255) continue;
-                    bool free = true;
-                    for (int dy = 0; dy < h && free; ++dy) if (store.get(bx, y0 + dy, bz) != IdAir) free = false;
-                    if (!free) continue;
-                    const quint16 log = is.kind == 1 ? birchLog : poplarLog;
-                    quint16 leaf = birchLeaf;
-                    if (is.kind == 0)
-                    {
-                        static const quint16 kPop[3] = { IdRedPoplarLeaves, IdOrangePoplarLeaves, IdYellowPoplarLeaves };
-                        leaf = kPop[(hh >> 20) % 3u];                                          // every tree has its own color
-                    }
-                    for (int dy = 0; dy < h; ++dy) store.set(bx, y0 + dy, bz, log);
-                    const int topTree = y0 + h - 1;
-                    for (int dy = -2; dy <= 1; ++dy)
-                    {
-                    const int r = (dy == 1) ? 1 : (is.kind == 0 && dy <= -1 ? 3 : 2);     // poplar: a wider crown
-                        for (int dx = -r; dx <= r; ++dx)
-                            for (int dz = -r; dz <= r; ++dz)
-                            {
-                                if (dy == 1 && std::abs(dx) + std::abs(dz) > 1) continue;
-                                if (dy != 1 && std::abs(dx) == r && std::abs(dz) == r && r >= 2) continue;
-                                if (store.get(bx + dx, topTree + dy, bz + dz) == IdAir)
-                                    store.set(bx + dx, topTree + dy, bz + dz, leaf);
-                            }
-                    }
-                }
-        }
-    }
-
-    // FLORA AND FAUNA OF FOREST BIOMES (as in the game): by 4×4 biome cells — ferns, flowers, berry bushes (taiga), leaf litter (dappled forest),
-    // flower forest — dense flowers; animals in groups (wolves/foxes/rabbits in the taiga, sheep/pigs/chickens/cows in the others, bees among flowers).
-    // Not on roads/sites/water/lawns and only where it is free above the ground.
-    {
-        const quint16 fern = quint16(IdPaletteStart + paletteIndexOf("minecraft:fern"));
-        const quint16 berry = quint16(IdPaletteStart + paletteIndexOf("minecraft:sweet_berry_bush"));
-        const quint16 brownM = quint16(IdPaletteStart + paletteIndexOf("minecraft:brown_mushroom"));
-        const quint16 redM = quint16(IdPaletteStart + paletteIndexOf("minecraft:red_mushroom"));
-        static const char* const kAnimTaiga[] = { "wolf", "wolf", "wolf", "fox", "fox", "rabbit", "rabbit", "sheep", "pig", "chicken" };
-        static const char* const kAnimForest[] = { "sheep", "sheep", "pig", "pig", "chicken", "chicken", "cow", "cow", "rabbit", "fox", "wolf" };
-        static const char* const kAnimDappled[] = { "fox", "fox", "sheep", "pig", "chicken", "cow", "rabbit", "rabbit" };
-        static const char* const kAnimFlower[] = { "rabbit", "rabbit", "rabbit", "sheep", "pig", "cow", "chicken", "bee", "bee" };
-        int nAnimals = 0;
-        QVector<qint64> cellKeys;
-        cellKeys.reserve(biomeCells.size());
-        for (auto bit = biomeCells.constBegin(); bit != biomeCells.constEnd(); ++bit)
-            if (bit.value() != 1 && bit.value() != 7) cellKeys.append(bit.key());   // the Pale Garden (1) is already carried over from the donor; the meadow (7) — without animals
-        if (g_zone == Climate::Steppe || g_zone == Climate::Mediterranean || g_zone == Climate::Desert || g_zone == Climate::Savanna || g_zone == Climate::SemiArid || g_zone == Climate::Tundra)
-            cellKeys.clear();                                                       // ferns, berry bushes and "forest" animals — not for dry and cold zones
-        std::sort(cellKeys.begin(), cellKeys.end());
-        for (qint64 ckc : cellKeys)
-        {
-            const int v = biomeCells.value(ckc);
-            const int x4 = keyFirst(ckc), z4 = keySecond(ckc);
-            for (int lz = 0; lz < 4; ++lz)
-                for (int lx = 0; lx < 4; ++lx)
-                {
-                    const int x = x4 * 4 + lx, z = z4 * 4 + lz;
-                    const qint64 ck = pairKey(x, z);
-                    const quint32 hq = colHash(ck ^ 0xF10A5ull);
-                    const int r = int(hq % 1000u);
-                    quint16 put = 0;
-                    if (v == 2)                                                   // taiga: ferns, berry bushes, mushrooms
-                    {
-                        if (r < 80) put = fern; else if (r < 98) put = berry; else if (r < 104) put = (hq >> 12) & 1u ? brownM : redM;
-                        else if (r < 108) put = quint16(IdFlowerBase + int((hq >> 14) % 2u ? 1 : 0));
-                    }
-                    else if (v == 3)                                              // forest: ferns, flowers at the edges, mushrooms
-                    {
-                        if (r < 40) put = fern; else if (r < 55) put = quint16(IdFlowerBase + int((hq >> 14) % 2u)); else if (r < 59) put = (hq >> 12) & 1u ? brownM : redM;
-                    }
-                    else if (v == 4)                                              // birch forest: rare flowers, ferns
-                    {
-                        if (r < 25) put = fern; else if (r < 55) put = quint16(IdFlowerBase + int((hq >> 14) % 4u));
-                    }
-                    else if (v == 5)                                              // dappled forest: leaf litter, mushrooms, ferns
-                    {
-                        if (r < 220) put = IdLeafLitter; else if (r < 240) put = fern; else if (r < 246) put = (hq >> 12) & 1u ? brownM : redM;
-                    }
-                    else if (v == 6)                                              // flower forest: dense flowers of all kinds
-                    {
-                        if (r < 300) put = quint16(IdFlowerBase + int((hq >> 14) % quint32(kFlowersCount))); else if (r < 320) put = fern;
-                    }
-                    if (!put) continue;                                           // a plant appears rarely — the expensive occupancy checks are made only for them
-                    if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck) || patchCols.contains(ck)) continue;
-                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                    if (git == ground.constEnd()) continue;
-                    const int col = (z & 15) * 16 + (x & 15);
-                    if (git->wd[col] > 0 || git->surf[col] != quint16(IdGrass)) continue;
-                    const int top = git->top[col];
-                    if (store.get(x, top + 1, z) != IdAir) continue;
-                    store.set(x, top + 1, z, put);
-                }
-            // animals: per 4×4 cell ~2% chance of a group (on average one brood per ~800 m²); the cap per export — 700 animals
-            const quint32 hc = colHash(ckc ^ 0xA21E5ull);
-            if (nAnimals >= 700 || hc % 1000u >= 22u) continue;
-            const char* sp = v == 2 ? kAnimTaiga[(hc >> 10) % 10u] : v == 5 ? kAnimDappled[(hc >> 10) % 8u] : v == 6 ? kAnimFlower[(hc >> 10) % 9u] : kAnimForest[(hc >> 10) % 11u];
-            const int grp = (QLatin1String(sp) == QLatin1String("wolf")) ? 3 : (QLatin1String(sp) == QLatin1String("bee") ? 2 : 1 + int((hc >> 20) % 3u));
-            for (int g = 0; g < grp; ++g)
-            {
-                const int x = x4 * 4 + int((hc >> (4 * g)) % 4u), z = z4 * 4 + int((hc >> (4 * g + 2)) % 4u);
-                const qint64 ck = pairKey(x, z);
-                if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)) continue;
-                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                if (git == ground.constEnd() || git->wd[(z & 15) * 16 + (x & 15)] > 0) continue;
-                const int top = git->top[(z & 15) * 16 + (x & 15)];
-                if (store.get(x, top + 1, z) != IdAir || store.get(x, top + 2, z) != IdAir) continue;
-                NpcSite a;
-                a.kind = 5; a.animal = QStringLiteral("minecraft:") + QLatin1String(sp);
-                a.x = x; a.z = z; a.y = top + 1 + (QLatin1String(sp) == QLatin1String("bee") ? 2 : 0); a.yaw = int((hc >> 24) % 4u) * 90;
-                npcs.append(a);
-                ++nAnimals;
-            }
-        }
-        if (nAnimals > 0) res.lairInfo += QObject::tr("; animals in forests: %1").arg(nAnimals);
-    }
-
-    // 3.586 AQUATIC FAUNA: fish live in the water as REAL entities (like the animals in the forest), they are not spawner-born.
-    // Lakes and areal rivers (hdrlin lines, pools, canals and ditches are not collected) hold fish only where the body really
-    // has spots deeper than 3 blocks after the smoothing — a puddle stays empty. Species by the climate zone; squid add to the
-    // largest bodies (from ~0.3 km²), axolotls add to bodies next to parks. The count grows with the area, capped per body.
-    if (!waterBodies.isEmpty())
-    {
-        // the park columns with a 64-block margin (chunk cells) — a lake near a park gets axolotls
-        QSet<ColKey> parkCells;
-        for (const auto& fs : forests)
-            if (fs.park)
-                for (int zc = (fs.minZ >> 4) - 4; zc <= ((fs.maxZ >> 4) + 4); ++zc)
-                    for (int xc = (fs.minX >> 4) - 4; xc <= ((fs.maxX >> 4) + 4); ++xc)
-                        parkCells.insert(pairKey(xc, zc));
-        const bool coldZone = (g_zone == Climate::Tundra || g_zone == Climate::Boreal);
-        const bool warmZone = (g_zone == Climate::Desert || g_zone == Climate::Savanna || g_zone == Climate::Tropical
-                               || g_zone == Climate::Monsoon || g_zone == Climate::SemiArid);
-        int nFauna = 0;
-        for (const WaterBodyRec& wb : waterBodies)
-        {
-            if (wb.d <= 3 || nFauna >= 600) continue;                     // shallower than 3 blocks by the contour — a puddle
-            // the samples that stayed deeper than 3 blocks after the smoothing, and the park proximity
-            QVector<qint64> deep; deep.reserve(64);
-            bool parkNear = false;
-            for (const qint64 ck : wb.samples)
-            {
-                const int x = keyFirst(ck), z = keySecond(ck);
-                if (!parkNear && parkCells.contains(pairKey(x >> 4, z >> 4))) parkNear = true;
-                if (deep.size() >= 64) continue;
-                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                if (git != ground.constEnd() && git->wd[(z & 15) * 16 + (x & 15)] > 3) deep.append(ck);
-            }
-            if (deep.isEmpty()) continue;                                 // the smoothing made the whole body shallow — a puddle after all
-            const quint32 h0 = colHash(wb.seed);
-            const char* sp; int fishVariant = 0;
-            if (coldZone) sp = "minecraft:salmon";                                            // cold waters — salmon
-            else if (warmZone && (h0 % 100u) >= 15u) { sp = "minecraft:tropical_fish"; fishVariant = int(h0 & 0xffff); }
-            else if (warmZone) sp = "minecraft:pufferfish";                                   // warm waters — a tropical fish school, a pufferfish is rare
-            else sp = "minecraft:cod";                                                        // the rest — cod
-            // ~1 fish per 2000 m², at least two in a body, at most 12 (a cap so that a reservoir does not explode the entities file)
-            const int nFish = std::min(12, std::max(2, int(wb.nCols / 2000) + 1));
-            for (int k = 0; k < nFish && nFauna < 600; ++k)
-            {
-                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(k) * 0x9E3779B97F4A7C15ull)));
-                const qint64 ck = deep[h % quint32(deep.size())];
-                const int x = keyFirst(ck), z = keySecond(ck);
-                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                if (git == ground.constEnd()) continue;
-                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
-                if (wd <= 3) continue;
-                NpcSite f; f.kind = 5; f.animal = QLatin1String(sp); f.variant = fishVariant;
-                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;              // the bottom of the water body
-                f.yoff = std::min(3.0, double(wd) - 1.0);                                     // in the water, closer to the bottom
-                f.yaw = int((h >> 20) % 4u) * 90;
-                npcs.append(f); ++nFauna;
-            }
-            // squid — only in quite large lakes and big rivers
-            const int nSquid = wb.nCols >= 1500000 ? 4 : (wb.nCols >= 300000 ? 2 : 0);
-            for (int k = 0; k < nSquid && nFauna < 600; ++k)
-            {
-                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(1000 + k) * 0x9E3779B97F4A7C15ull)));
-                const qint64 ck = deep[h % quint32(deep.size())];
-                const int x = keyFirst(ck), z = keySecond(ck);
-                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                if (git == ground.constEnd()) continue;
-                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
-                if (wd <= 3) continue;
-                NpcSite f; f.kind = 5; f.animal = QLatin1String("minecraft:squid");
-                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;
-                f.yoff = std::min(3.0, double(wd) - 1.0);
-                npcs.append(f); ++nFauna;
-            }
-            // axolotls — a lake near a park (they fight with fish in the game — the balance is the game's own business)
-            if (parkNear) for (int k = 0; k < 2 && nFauna < 600; ++k)
-            {
-                const quint32 h = colHash(qint64(quint64(wb.seed) ^ (quint64(2000 + k) * 0x9E3779B97F4A7C15ull)));
-                const qint64 ck = deep[h % quint32(deep.size())];
-                const int x = keyFirst(ck), z = keySecond(ck);
-                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                if (git == ground.constEnd()) continue;
-                const int wd = git->wd[(z & 15) * 16 + (x & 15)];
-                if (wd <= 3) continue;
-                NpcSite f; f.kind = 5; f.animal = QLatin1String("minecraft:axolotl"); f.variant = int(h >> 8);
-                f.x = x; f.z = z; f.y = git->top[(z & 15) * 16 + (x & 15)] - wd;
-                f.yoff = std::min(3.0, double(wd) - 1.0);
-                npcs.append(f); ++nFauna;
-            }
-        }
-        if (nFauna > 0) res.lairInfo += QObject::tr("; aquatic fauna: %1").arg(nFauna);
-    }
-
-    for (auto pit = colPlant.constBegin(); pit != colPlant.constEnd(); ++pit)
-    {
-        const qint64 ck = pit.key();
-        const quint16 pid = pit.value();
-        // A wheat field — a dense planting in every column (so that it reads as a field, not as sparse
-        // bushes); the other grass — a dense lawn, but not solid.
-        if (pid != quint16(IdWheat) && colHash(ck) % 2u != 0u) continue;
-        if (colWater.contains(ck)) continue;                   // we do not grow on water
-        if (colWool.contains(ck) || roadCols.contains(ck)) continue;   // on roads, parking lots and sites (concrete/wool) grass and flowers do not grow
-        const int bx = keyFirst(ck), bz = keySecond(ck);
-        {   // grass does not grow on a sandy shore
-            const auto gps = ground.constFind(pairKey(bx >> 4, bz >> 4));
-            if (gps != ground.constEnd() && g_sandId && gps->surf[(bz & 15) * 16 + (bx & 15)] == g_sandId) continue;
-        }
-        const int y = surfaceTop(ck) + 1;
-        if (y > 254) continue;
-        // Flowers on grass polygons "without height" (user request): about 1 column
-        // out of 24 instead of grass, a random kind. Wheat fields — skipped (there is a crop already).
-        if (pid == quint16(IdGrassPlant) || pid == quint16(IdTallGrass))
-        {
-            const quint32 hf = colHash(ck ^ 0xBEEF1ull);
-            if (hf % 24u == 0u)
-            {
-                if (store.get(bx, y, bz) == IdAir)
-                    store.set(bx, y, bz,
-                              quint16(IdFlowerBase + int((hf >> 8) % quint32(kFlowersCount))));
-                continue;
-            }
-        }
-        if (pid == quint16(IdTallGrass))
-        {   // the grown grass is two blocks tall: without the top half the game will break the bottom one on update
-            if (store.get(bx, y, bz) == IdAir && store.get(bx, y + 1, bz) == IdAir)
-            {
-                store.set(bx, y, bz, IdTallGrass);
-                store.set(bx, y + 1, bz, IdTallGrassUpper);
-            }
-        }
-        else if (store.get(bx, y, bz) == IdAir)
-        {
-            if (pid == quint16(IdWheat))
-            {   // wheat grows on plowed soil, not on turf; on special tiles (the island lamps) we do not plant
-                const auto gp2 = ground.find(pairKey(bx >> 4, bz >> 4));
-                if (gp2 != ground.end())
-                {
-                    quint16& sf = gp2->surf[(bz & 15) * 16 + (bx & 15)];
-                    if (sf != g_zoneSurface) continue;
-                    sf = IdFarmland;
-                }
-            }
-            store.set(bx, y, bz, pid);
-        }
-    }
-
+    buildUserTrees();
     lap("before 3.55");
     beginStep(6);
-    // 3.55 "Forest treasures" (user requests): in random places of forest spots (~1/384 of the columns)
-    // a SINGLE chest stands on the ground (double ones — only urban), NOT CLOSER THAN 30 BLOCKS to each
-    // other inside a polygon (the radius by the Euclidean metric). We place them BEFORE the grass is scattered — the grass
-    // will not climb into the chest.
-    {
-        int fsCols = 0;
-        for (int fiC = 0; fiC < forests.size(); ++fiC)
-        {
-            const VegSite& site = forests[fiC];
-            const bool paleF = (fiC == paleIdx);                // Pale Garden: about 2.5 times more chests (a grid of 12, radius 18) and often expensive
-            const int tRad = paleF ? 18 : 30;                   // the mutual distance of the treasures inside one polygon
-            QHash<qint64, QVector<QPoint>> near;                // the treasures of THIS polygon bucketed by
-            auto clash = [&](int bx, int bz)                    //   the radius: the old linear scan of ALL
-            {   // 3x3 buckets around the candidate, the exact metric inside them (a forest of tens of
-                //   thousands of treasures made that scan the slowest loop of the whole export)
-                for (int ax = -1; ax <= 1; ++ax)
-                    for (int az = -1; az <= 1; ++az)
-                    {
-                        const auto it = near.constFind(pairKey(bx / tRad + ax, bz / tRad + az));
-                        if (it == near.constEnd()) continue;
-                        for (const QPoint& p : *it)
-                        {
-                            const long long dx = p.x() - bx, dz = p.y() - bz;
-                            if (dx * dx + dz * dz < tRad * tRad) return true;
-                        }
-                    }
-                return false;
-            };
-            // a 20×20 grid (~1/400 of the columns, like the former 1/384): one hash-shifted place per cell
-            const int G = paleF ? 12 : 20;
-            // the grid is clamped to the export rectangle (a forest polygon can be many times wider than the world)
-            const int vgX0 = std::max(site.minX, (rcx0 - rectM) * 16), vgX1 = std::min(site.maxX, (rcx1 + rectM + 1) * 16 - 1);
-            const int vgZ0 = std::max(site.minZ, (rcz0 - rectM) * 16), vgZ1 = std::min(site.maxZ, (rcz1 + rectM + 1) * 16 - 1);
-            const int gx0 = int(std::floor(double(vgX0) / G)), gx1 = int(std::floor(double(vgX1) / G));
-            const int gz0 = int(std::floor(double(vgZ0) / G)), gz1 = int(std::floor(double(vgZ1) / G));
-            for (int gx = gx0; gx <= gx1; ++gx)
-            for (int gz = gz0; gz <= gz1; ++gz)
-            {
-                if ((++fsCols & 0x3FF) == 0 && cancel && cancel->load())
-                {
-                    res.cancelled = true;
-                    res.error = QObject::tr("Export cancelled.");
-                    return res;
-                }
-                const quint32 hc = colHash(pairKey(gx, gz) ^ 0xC0FFEEull);
-                const int tx = gx * G + int(hc % G), tz = gz * G + int((hc >> 8) % G);
-                if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
-                if (!spansContain(site.spans, tx, tz)) continue;
-                if (!ground.contains(pairKey(tx >> 4, tz >> 4))) continue;    // outside the written ground — there is no surface to stand a treasure on
-                const qint64 ck = pairKey(tx, tz);
-                if (colWater.contains(ck) || colMin.contains(ck)) continue;   // on water/under buildings — skipped
-                const int bx = keyFirst(ck), bz = keySecond(ck);
-                if (clash(bx, bz)) continue;                                  // a treasure stands closer than the radius
-                const int y = surfaceTop(ck) + 1;
-                if (y > 254) continue;
-                if (paleF && patchCols.contains(ck)) continue;                // not inside the mansion / a patch
-                {
-                    const quint16 here = store.get(bx, y, bz);
-                    if (paleF && (here == IdPaleMossCarpet || here == IdLeafLitter || here == IdGrassPlant || here == IdTallGrass))
-                        store.erase(bx, y, bz);                                   // the chest displaces the forest litter
-                    else if (here != IdAir) continue;                             // the place is already taken by a tree/planting
-                }
-                store.set(bx, y, bz, IdChest);
-                if (paleF)
-                {   // Pale Garden: 35% expensive (mansion/pyramid/outpost/sunken treasure), 25% medium, the rest everyday
-                    const quint32 hq = colHash(ck ^ 0x51ull);
-                    const int rich = kChestLootCount - 3;                         // woodland_mansion
-                    int tbl;
-                    if ((hq >> 8) % 100u < 12u) tbl = rich;                       // every eighth treasure — as in the mansion
-                    else tbl = pickChestLoot(hq, 40, 25);
-                    chests.append(ChestSite{ bx, y, bz, tbl });
-                }
-                else
-                    chests.append(ChestSite{ bx, y, bz, pickChestLoot(colHash(ck ^ 0x51ull), 85, 15) });   // treasures in forests — without the expensive ones
-                near[pairKey(bx / tRad, bz / tRad)].append(QPoint(bx, bz));
-            }
-        }
-    }
-
+    if (!buildForestTreasures()) return res;
     lap("before 3.57");
     beginStep(7);
     buildStreetFurniture();
