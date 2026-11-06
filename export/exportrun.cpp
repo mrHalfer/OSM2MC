@@ -309,6 +309,33 @@ private:
     bool assembleChunks();
     // 5. The save archive: level.dat, regions, entities, the datapack.
     bool writeZip();
+
+    // 3.576 Rail platforms stage (the former inline block).
+    void buildPointObjects();
+    // 3.576 Rail platforms stage (the former inline block).
+    void buildLateGroundFill();
+    // 3.576 Rail platforms stage (the former inline block).
+    void buildChamfer();
+    // 3.576 Rail platforms stage (the former inline block).
+    void connectFences();
+    // 3.576 Rail platforms stage (the former inline block).
+    bool buildTurf();
+    // 3.576 Rail platforms stage (the former inline block).
+    void buildEdgeFluids();
+    // 3.576 Rail platforms stage (the former inline block).
+    void buildPlatforms();
+
+    // Shared helpers of the stages (the former run() lambdas).
+    static quint32 colHash(qint64 k);
+    int addEmpty(int v, int x, int z);
+    int terrainTopBlock(int cx, int cz);
+    int groundTopCol(int x, int z);
+    int surfaceTop(qint64 ck);
+
+    // Shared helpers of the stages (the former run() lambdas).
+    GroundChunk makeGround(qint64 ckKey);
+    void assignCave(GroundChunk& g, qint64 ckKey);
+    bool inExportRect(int cx, int cz);
 };
 
 ExportRun::ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
@@ -740,6 +767,839 @@ bool ExportRun::writeZip()
     return true;
 }
 
+void ExportRun::buildPointObjects()
+{
+    // 3.575 Objects from points on the map (sources with a modelField, step 3.575): memorials and monuments,
+    // fountains, communication towers, waste bins, lighting masts, benches, sculptures and bus-stop shelters
+    // stand on the READY ground (after the street furniture; the
+    // trees were not planted around them — their columns were reserved in noTreePadCols). Which structure to build
+    // is decided by the model number from point_models.csv (the object's code from the modelField column);
+    // "atop a building" is the communication tower only (from its roof), the rest are skipped if a
+    // structure/water/roadway lies under the point. The variant of every object is a hash of its column.
+    {
+        if (!spots.isEmpty())
+        {
+            auto blk = [](const char* name) -> quint16
+            { return quint16(IdPaletteStart + paletteIndexOf(name)); };
+            const quint16 qStone = blk("minecraft:stone"), qCobb = blk("minecraft:cobblestone"),
+                        qMossy = blk("minecraft:mossy_cobblestone"), qSBrick = blk("minecraft:stone_bricks"),
+                        qBrick = blk("minecraft:bricks"), qPDsl = blk("minecraft:polished_deepslate"),
+                        qCDsl = blk("minecraft:cobbled_deepslate"), qPBlk = blk("minecraft:polished_blackstone"),
+                        qBlk = blk("minecraft:blackstone"), qGran = blk("minecraft:granite"),
+                        qDior = blk("minecraft:diorite"), qAnd = blk("minecraft:andesite"),
+                        qSmth = blk("minecraft:smooth_stone"), qGold = blk("minecraft:gold_block"),
+                        qQuartz = blk("minecraft:quartz_block"), qPCalc = blk("minecraft:polished_calcite"),
+                        qGlow = blk("minecraft:glowstone");
+            static const quint16 kStairs[4] = { IdStoneStairsN, IdStoneStairsE, IdStoneStairsS, IdStoneStairsW };
+            int nPlaced = 0, nSkipped = 0;
+            // Roadside greenery (leaves, plants, carpets, vines) does not forbid the install: it is
+            // sheared off inside the object footprint. A trunk (log) or anything built stays a blocker.
+            auto clearVeg = [&](int x0, int x1, int y0, int y1, int z0, int z1)
+            {
+                for (int x = x0; x <= x1; ++x)
+                    for (int z = z0; z <= z1; ++z)
+                        for (int y = y0; y <= y1; ++y)
+                        {
+                            const quint16 b = store.get(x, y, z);
+                            if (b && b != IdAir && isVegBlockId(b))
+                            {
+                                const QString bn = blockName(b);
+                                if (!bn.contains(QLatin1String("_log")) && !bn.contains(QLatin1String("stem")))
+                                    store.erase(x, y, z);
+                            }
+                        }
+            };
+            for (const SpotSite& sp : spots)
+            {
+                const qint64 ck = pairKey(sp.x, sp.z);
+                if (colWater.contains(ck) || roadCols.contains(ck)) { ++nSkipped; continue; }   // a pit/roadway under the object
+                const int gy = surfaceTop(ck) + 1;
+                if (gy + 40 > 255) continue;
+                // the highest solid non-vegetation block of the column: for a tower — the roof to grow from,
+                // for the others — the fact that something is already built here
+                int topSolid = -1;
+                for (int y = 255; y >= gy; --y)
+                {
+                    const quint16 b = store.get(sp.x, y, sp.z);
+                    if (b && !isVegBlockId(b)) { topSolid = y; break; }
+                }
+                const quint32 hsh = colHash(ck ^ 0x53507u);
+                switch (sp.model)
+                {
+                case kComposter:                                         // a waste bin — just a composter
+                    store.set(sp.x, gy, sp.z, IdComposter);
+                    ++nPlaced;
+                    break;
+                case kStatue:                                            // a MEMORIAL — a small statue (6 variants)
+                {
+                    if (topSolid >= gy) { ++nSkipped; break; }           // something is already built here
+                    const int cx = sp.x, cz = sp.z;
+                    switch (hsh % 6u)
+                    {
+                    case 0:                                              // an obelisk on a two-wide plinth
+                        store.set(cx, gy, cz, qMossy); store.set(cx + 1, gy, cz, qCobb);
+                        store.set(cx, gy, cz + 1, qCobb); store.set(cx + 1, gy, cz + 1, qMossy);
+                        store.set(cx, gy + 1, cz, qPDsl); store.set(cx, gy + 2, cz, qPDsl); store.set(cx, gy + 3, cz, qPDsl);
+                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
+                        break;
+                    case 1:                                              // a brick stele with a memorial plaque
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz) { store.set(cx + dx, gy, cz + dz, qBrick); store.set(cx + dx, gy + 1, cz + dz, qBrick); }
+                        store.set(cx, gy + 2, cz, qSBrick); store.set(cx, gy + 3, cz, qSBrick);
+                        store.set(cx, gy + 4, cz, IdPressurePlateStone);
+                        break;
+                    case 2:                                              // an eternal flame on a black post with corner fence posts
+                        store.set(cx, gy, cz, qPBlk); store.set(cx, gy + 1, cz, qPBlk);
+                        store.set(cx, gy + 2, cz, IdLanternStanding);
+                        store.set(cx - 1, gy, cz - 1, IdCobbleWall); store.set(cx + 1, gy, cz - 1, IdCobbleWall);
+                        store.set(cx - 1, gy, cz + 1, IdCobbleWall); store.set(cx + 1, gy, cz + 1, IdCobbleWall);
+                        break;
+                    case 3:                                              // a megalith: a boulder of mossy stone
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz)
+                            {
+                                const quint32 hb = colHash(pairKey(cx + dx, cz + dz) ^ 0x4EB01ull);
+                                const quint16 mb = hb % 3u == 0u ? qMossy : (hb % 3u == 1u ? qCobb : qAnd);
+                                store.set(cx + dx, gy, cz + dz, mb);
+                                if (hb % 7u < 3u) store.set(cx + dx, gy + 1, cz + dz, mb);
+                            }
+                        break;
+                    case 4:                                              // a broken column on a platform
+                        for (int dx = -1; dx <= 1; ++dx)
+                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qCobb);
+                        store.set(cx - 1, gy + 1, cz - 1, qSmth); store.set(cx + 1, gy + 1, cz - 1, qSmth);
+                        store.set(cx - 1, gy + 1, cz + 1, qSmth); store.set(cx + 1, gy + 1, cz + 1, qSmth);
+                        store.set(cx, gy + 1, cz, qSBrick); store.set(cx, gy + 2, cz, qSBrick); store.set(cx, gy + 3, cz, qSBrick);
+                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
+                        break;
+                    default:                                             // a shattered deepslate stele
+                        store.set(cx, gy, cz, qCDsl); store.set(cx + 1, gy, cz, qCDsl);
+                        store.set(cx, gy, cz + 1, qCDsl); store.set(cx + 1, gy, cz + 1, qCDsl);
+                        store.set(cx, gy + 1, cz, qBlk); store.set(cx, gy + 2, cz, qBlk);
+                        store.set(cx, gy + 3, cz, qCDsl);
+                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
+                        break;
+                    }
+                    ++nPlaced;
+                    break;
+                }
+                case kStele:                                             // a MONUMENT — a stele in several materials (3 variants)
+                {
+                    if (topSolid >= gy) { ++nSkipped; break; }
+                    const int cx = sp.x, cz = sp.z;
+                    switch (hsh % 3u)
+                    {
+                    case 0:                                              // a dark obelisk with a gilded top
+                        for (int dx = -1; dx <= 1; ++dx)
+                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qStone);
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy + 1, cz + dz, qPDsl);
+                        for (int dy = 2; dy <= 6; ++dy) store.set(cx, gy + dy, cz, qPBlk);
+                        store.set(cx, gy + 7, cz, qGold);
+                        break;
+                    case 1:                                              // a brick stele with an eternal flame (granite podium)
+                        for (int dx = -1; dx <= 1; ++dx)
+                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qGran);
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz)
+                                for (int dy = 1; dy <= 4; ++dy) store.set(cx + dx, gy + dy, cz + dz, qBrick);
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy + 5, cz + dz, qSBrick);
+                        store.set(cx, gy + 6, cz, IdLanternStanding);
+                        break;
+                    default:                                              // a stone-brick column with side walls on a diorite base
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qDior);
+                        for (int dy = 1; dy <= 6; ++dy) store.set(cx, gy + dy, cz, qSBrick);
+                        store.set(cx - 1, gy, cz, IdStoneBrickWall); store.set(cx - 1, gy + 1, cz, IdStoneBrickWall);
+                        store.set(cx + 2, gy, cz, IdStoneBrickWall); store.set(cx + 2, gy + 1, cz, IdStoneBrickWall);
+                        store.set(cx, gy + 7, cz, kStairs[(hsh >> 8) % 4u]);
+                        break;
+                    }
+                    ++nPlaced;
+                    break;
+                }
+                case kFountain:                                          // a FOUNTAIN: a stone ring, a pool, a post with water running down it
+                {
+                    if (topSolid >= gy) { ++nSkipped; break; }
+                    const int cx = sp.x, cz = sp.z;
+                    const bool mossyRim = (hsh >> 6) % 4u == 0u;         // an old weathered ring sometimes
+                    const quint16 ringMat = mossyRim ? qMossy : qSBrick;
+                    for (int dx = -2; dx <= 2; ++dx)
+                        for (int dz = -2; dz <= 2; ++dz)
+                        {
+                            const int r = std::max(std::abs(dx), std::abs(dz));
+                            if (r == 2) { store.set(cx + dx, gy, cz + dz, ringMat); store.set(cx + dx, gy + 1, cz + dz, ringMat); }
+                            else if (dx || dz) { store.set(cx + dx, gy, cz + dz, qStone); store.set(cx + dx, gy + 1, cz + dz, IdWater); }
+                        }
+                    store.set(cx, gy, cz, qStone); store.set(cx, gy + 1, cz, qSBrick); store.set(cx, gy + 2, cz, qSBrick);
+                    store.set(cx, gy + 3, cz, IdWater);                  // the source atop the post
+                    static const int kD4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                    for (const auto& d : kD4)                            // water STREAMS running down the post (level=8 — falling)
+                    {
+                        store.set(cx + d[0], gy + 3, cz + d[1], IdWaterFalling);
+                        store.set(cx + d[0], gy + 2, cz + d[1], IdWaterFalling);
+                    }
+                    ++nPlaced;
+                    break;
+                }
+                case kTower:                                             // a COMMUNICATION TOWER: an iron base, a spire of stone fence, 3 quartz blocks on top
+                {   // ~32 blocks above the ground; from the roof of a high building — a 6-block body + the antenna
+                    const int baseY = colMin.contains(ck) ? std::max(gy, topSolid + 1) : gy;
+                    const int above = baseY - gy;
+                    const int body = above >= 32 ? 6 : std::max(6, 32 - above - 4);
+                    if (baseY + body + 3 > 255) { ++nSkipped; break; }
+                    store.set(sp.x, baseY, sp.z, IdIronBlock);
+                    for (int dy = 1; dy <= body; ++dy) store.set(sp.x, baseY + dy, sp.z, IdCobbleWall);
+                    for (int dy = 1; dy <= 3; ++dy) store.set(sp.x, baseY + body + dy, sp.z, qQuartz);
+                    ++nPlaced;
+                    break;
+                }
+                case kLightPole:                                         // a LIGHTING MAST: polished calcite with glowstone lights
+                    if (topSolid >= gy) { ++nSkipped; break; }           // something is already built here
+                    for (int dy = 0; dy < 3; ++dy) store.set(sp.x, gy + dy, sp.z, qPCalc);
+                    store.set(sp.x, gy + 3, sp.z, qGlow);                // a request: 3 calcite, glowstone, 2 calcite, glowstone
+                    store.set(sp.x, gy + 4, sp.z, qPCalc);
+                    store.set(sp.x, gy + 5, sp.z, qPCalc);
+                    store.set(sp.x, gy + 6, sp.z, qGlow);
+                    ++nPlaced;
+                    break;
+                case kBench:                                             // a STREET BENCH — 2x1 oak stairs (a request)
+                {   // the bench axis is chosen by the column hash; the seat faces along it, the backrest on the side;
+                    // both cells must be free ground — no road, no water, no structure, nothing already built
+                    static const int kAx[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };   // N/E/S/W (kDirNames order)
+                    const int k = int(hsh % 4u);
+                    const int x2 = sp.x + kAx[k][0], z2 = sp.z + kAx[k][1];
+                    const qint64 ck2 = pairKey(x2, z2);
+                    const int gyB = std::max(gy, surfaceTop(ck2) + 1);   // the seat is level: the higher of the two columns
+                    clearVeg(std::min(sp.x, x2), std::max(sp.x, x2), gyB, gyB + 1,
+                             std::min(sp.z, z2), std::max(sp.z, z2));      // a leaf or a bush in the seat footprint is sheared
+                    if (colWater.contains(ck2) || roadCols.contains(ck2) || colMin.contains(ck2)
+                        || store.get(sp.x, gyB, sp.z) != IdAir || store.get(x2, gyB, z2) != IdAir
+                        || store.get(sp.x, gyB + 1, sp.z) != IdAir || store.get(x2, gyB + 1, z2) != IdAir)
+                    { ++nSkipped; break; }
+                    const quint16 st = quint16(IdStairsN + ((k + 1) & 3));   // the seat turned sideways to its axis
+                    store.set(sp.x, gyB, sp.z, st);
+                    store.set(x2, gyB, z2, st);
+                    ++nPlaced;
+                    break;
+                }
+                case kSculpture:                                         // a SMALL SCULPTURE (3 variants)
+                {
+                    const bool stand = (hsh % 3u) == 2u;                // the 2x2 variant shares one level floor
+                    int gyB = gy;
+                    if (stand)
+                        for (int dx = 0; dx <= 1; ++dx)
+                            for (int dz = 0; dz <= 1; ++dz)
+                                gyB = std::max(gyB, surfaceTop(pairKey(sp.x + dx, sp.z + dz)) + 1);
+                    clearVeg(sp.x, sp.x + 1, gyB, gyB + 3, sp.z, sp.z + 1);   // the widest variant is 2x2x4
+                    if (topSolid >= gy) { ++nSkipped; break; }
+                    if (!stand)
+                    {   // the 1x1 variants stand on the node column itself
+                        if (hsh % 3u == 0u)
+                        {   // a modernist: a dark stone mass on a diorite pedestal
+                            store.set(sp.x, gyB, sp.z, qDior); store.set(sp.x, gyB + 1, sp.z, qPDsl);
+                            store.set(sp.x, gyB + 2, sp.z, qBlk); store.set(sp.x, gyB + 3, sp.z, qPBlk);
+                        }
+                        else
+                        {   // a bust on a stone-brick column
+                            store.set(sp.x, gyB, sp.z, qSBrick); store.set(sp.x, gyB + 1, sp.z, qSBrick);
+                            store.set(sp.x, gyB + 2, sp.z, qSBrick); store.set(sp.x, gyB + 3, sp.z, qAnd);
+                        }
+                        ++nPlaced;
+                        break;
+                    }
+                    {   // a sculptor's stand: a cobble pedestal and a stone cutter; the whole 2x2 needs free
+                        // air above the level floor (a trunk in a corner blocks it)
+                        bool ok2 = true;
+                        for (int dx = 0; dx <= 1 && ok2; ++dx)
+                            for (int dz = 0; dz <= 1 && ok2; ++dz)
+                            {
+                                const qint64 bk = pairKey(sp.x + dx, sp.z + dz);
+                                if (colWater.contains(bk) || roadCols.contains(bk) || colMin.contains(bk)) ok2 = false;
+                                for (int dy = 0; dy <= 1 && ok2; ++dy)
+                                    if (store.get(sp.x + dx, gyB + dy, sp.z + dz) != IdAir) ok2 = false;
+                            }
+                        if (ok2)
+                        {
+                            for (int dx = 0; dx <= 1; ++dx)             // the pedestal, plinth-filled to the level floor
+                                for (int dz = 0; dz <= 1; ++dz)
+                                {
+                                    const int t0 = surfaceTop(pairKey(sp.x + dx, sp.z + dz));
+                                    for (int y = t0 + 1; y < gyB && t0 >= 0; ++y)
+                                        store.set(sp.x + dx, y, sp.z + dz, qCobb);
+                                    store.set(sp.x + dx, gyB, sp.z + dz, qCobb);
+                                }
+                            store.set(sp.x, gyB + 1, sp.z, qAnd);
+                            store.set(sp.x + 1, gyB + 1, sp.z + 1, qAnd);
+                            store.set(sp.x, gyB + 1, sp.z + 1, quint16(IdStonecutterBase + int((hsh >> 8) % 4u)));
+                            ++nPlaced;
+                        }
+                        else ++nSkipped;
+                    }
+                    break;
+                }
+                case kBusStop:                                           // a BUS STOP SHELTER: 5x3, the long side along the road (requests)
+                {   // the open side looks at the nearest MOTOR road (a ring up to 10 blocks; pedestrian and bike
+                    // paths do not count — a user request; an ordinary roadway is only a fallback), else by hash;
+                    // the shelter is shifted OFF the road — 2..3 blocks away from the node, the footprint must be free
+                    static const int kD[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };    // N/E/S/W (kDirNames order)
+                    int od = -1;
+                    for (int r = 1; r <= 10 && od < 0; ++r)
+                        for (int k = 0; k < 4 && od < 0; ++k)
+                            if (autoRoadCols.contains(pairKey(sp.x + kD[k][0] * r, sp.z + kD[k][1] * r))) od = k;
+                    for (int r = 1; r <= 10 && od < 0; ++r)               // no motor road near — any roadway will do
+                        for (int k = 0; k < 4 && od < 0; ++k)
+                            if (roadCols.contains(pairKey(sp.x + kD[k][0] * r, sp.z + kD[k][1] * r))) od = k;
+                    if (od < 0) od = int(hsh % 4u);
+                    const int rx = kD[od][0], rz = kD[od][1];             // the roadway direction (the open side faces it)
+                    const bool alongX = (rz != 0);                        // the road runs N/S — the 5-block side lies along X
+                    bool built = false;
+                    for (int sh = 2; sh <= 3 && !built; ++sh)
+                    {
+                        const int bx0 = sp.x - rx * sh, bz0 = sp.z - rz * sh;   // the box stands OFF the road, behind the node
+                        const int ax = alongX ? 2 : 1, az = alongX ? 1 : 2;     // 5 blocks along the road, 3 across it
+                        // the FLOOR IS THE GROUND SURFACE ITSELF (a request: flush, no raised plinth): the paving
+                        // replaces the turf of the highest footprint level, low columns are raised to it
+                        int gyB = gy - 1;
+                        bool have = true;
+                        for (int dx = -ax; dx <= ax && have; ++dx)
+                            for (int dz = -az; dz <= az && have; ++dz)
+                            {
+                                const qint64 bk = pairKey(bx0 + dx, bz0 + dz);
+                                if (colWater.contains(bk) || roadCols.contains(bk) || colMin.contains(bk)
+                                    || railColsAll.contains(bk)
+                                    || !ground.contains(pairKey((bx0 + dx) >> 4, (bz0 + dz) >> 4))) have = false;
+                            }
+                        if (have)
+                            for (int dx = -ax; dx <= ax; ++dx)            // the paving level — the highest column
+                                for (int dz = -az; dz <= az; ++dz)
+                                    gyB = std::max(gyB, surfaceTop(pairKey(bx0 + dx, bz0 + dz)));
+                        if (have)
+                            clearVeg(bx0 - ax, bx0 + ax, gyB, gyB + 4, bz0 - az, bz0 + az);   // leaves and bushes off the box
+                        bool free = have;
+                        for (int dx = -ax; dx <= ax && free; ++dx)
+                            for (int dz = -az; dz <= az && free; ++dz)
+                                for (int dy = 0; dy <= 4 && free; ++dy)
+                                    if (store.get(bx0 + dx, gyB + dy, bz0 + dz) != IdAir) free = false;
+                        if (!free) continue;
+                        for (int dx = -ax; dx <= ax; ++dx)                 // the floor: the paving replaces the surface
+                            for (int dz = -az; dz <= az; ++dz)             // block of the ground (flush join with the terrain)
+                            {
+                                GroundChunk& g = ground.find(pairKey((bx0 + dx) >> 4, (bz0 + dz) >> 4)).value();
+                                const int col = ((bz0 + dz) & 15) * 16 + ((bx0 + dx) & 15);
+                                g.top[col] = qint16(gyB);                  // level the whole footprint to the paving row
+                                g.surf[col] = qSmth;
+                            }
+                        for (int dx = -ax; dx <= ax; ++dx)                 // the walls: perimeter, the road side open
+                            for (int dz = -az; dz <= az; ++dz)
+                            {
+                                if (std::abs(dx) < ax && std::abs(dz) < az) continue;   // the interior row stays free
+                                if (dx * rx + dz * rz == 1) continue;      // the whole long side toward the road is open
+                                for (int dy = 1; dy <= 3; ++dy) store.set(bx0 + dx, gyB + dy, bz0 + dz, qSBrick);
+                            }
+                        for (int dx = -ax; dx <= ax; ++dx)                 // the flat roof
+                            for (int dz = -az; dz <= az; ++dz) store.set(bx0 + dx, gyB + 4, bz0 + dz, qSBrick);
+                        store.set(bx0, gyB + 3, bz0, IdLanternHung);       // a lamp under the roof
+                        built = true;
+                        ++nPlaced;
+                    }
+                    if (!built) ++nSkipped;
+                    break;
+                }
+                default:
+                    ++nSkipped;                                          // an unknown code — nothing is built
+                    break;
+                }
+            }
+            char buf[128];
+            snprintf(buf, sizeof buf, "3.575 point objects: placed %d, skipped %d", nPlaced, nSkipped);
+            tmcStepLog(buf);
+        }
+    }
+
+}
+
+void ExportRun::buildLateGroundFill()
+{
+    // 3.59 Extra ground fill for "late" chunks: the site fences (3.57) and lamp posts are written
+    // into the store AFTER the main fill and at the rectangle edge can create a chunk that did not
+    // get into fillChunks — such a chunk is still written (its blocks are in the store), but without ground: in the game
+    // a fence/post would hang above the abyss (verify "bad" columns). The same formulas as above.
+    for (const qint64 ckKey : store.chunks.keys())
+        if (!ground.contains(ckKey))
+        {
+            GroundChunk g = makeGround(ckKey);
+            assignCave(g, ckKey);
+            ground.insert(ckKey, g);
+        }
+
+}
+
+void ExportRun::buildChamfer()
+{
+    // 3.59b The "chamfer" of the junction with the game world (a user request instead of the "Ground up to the junction" choice
+    // removed from the dialog — the apron is now always off): instead of a sheer cliff the outer edge of
+    // our ground steps down toward the border — the column before the last one above the abyss goes down by 1,
+    // the outermost — by 2. Pond columns (wd>0) and columns with an object (a structure, a fence,
+    // a post, a planting — anything rising up to 7 blocks above the surface) are not lowered.
+    {
+        static const qint8 dX[4] = { -1, 1, 0, 0 }, dZ[4] = { 0, 0, -1, 1 };
+        for (auto git = ground.begin(); git != ground.end(); ++git)
+        {
+            GroundChunk& g = git.value();
+            const int cx = int(keyFirst(git.key())), cz = int(keySecond(git.key()));
+            QVector<quint8> drop(256, 0);
+            bool any = false;
+            for (int d = 0; d < 4; ++d)
+            {
+                if (ground.contains(pairKey(cx + int(dX[d]), cz + int(dZ[d])))
+                    || inExportRect(cx + int(dX[d]), cz + int(dZ[d])))
+                    continue;                                   // this side is not a joint
+                const bool neg = (dX[d] < 0) || (dZ[d] < 0);
+                // A ragged edge: the chamfer line is shifted inward by 0..3 blocks (noise along the edge by the world coordinate, a step of 3 blocks); the strip between the edge and the line
+                // stays lowered by 2, then steps 2 and 1. A column occupied by an object (except vegetation) is not lowered; vegetation is lowered together with the column.
+                for (int k = 0; k < 16; ++k)
+                {
+                    const int along = (d < 2) ? (cz << 4) + k : (cx << 4) + k;
+                    const int o = int(colHash(pairKey(along / 3, d + 77) ^ 0xFA5CAull) % 4u);
+                    for (int p = 0; p <= o + 1 && p < 16; ++p)
+                    {
+                        const int off = neg ? p : 15 - p;
+                        const int lx = (d < 2) ? off : k, lz = (d < 2) ? k : off;
+                        const int col = lz * 16 + lx;
+                        const quint8 want = quint8(p == o + 1 ? 1 : 2);
+                        if (drop[col] >= want || g.wd[col] > 0)
+                            continue;
+                        const int bx = (cx << 4) + lx, bz = (cz << 4) + lz;
+                        bool freeCol = true;                    // a column occupied by an object is not lowered (vegetation — it can be)
+                        for (int y = int(g.top[col]) - 3; y <= int(g.top[col]) + 7; ++y)
+                        {
+                            const quint16 sb = store.get(bx, y, bz);
+                            if (sb && !isVegBlockId(sb)) { freeCol = false; break; }
+                        }
+                        if (!freeCol)
+                            continue;
+                        const int delta = int(want) - int(drop[col]);                 // by how much more we lower (on a repeated pass over the column)
+                        for (int y = int(g.top[col]) + 1; y <= int(g.top[col]) + 24; ++y)   // vegetation goes down together with the ground
+                        {
+                            const quint16 sb = store.get(bx, y, bz);
+                            if (!sb) continue;
+                            store.erase(bx, y, bz);
+                            store.set(bx, y - delta, bz, sb);
+                        }
+                        drop[col] = qMax(drop[col], want);
+                        any = true;
+                    }
+                }
+            }
+            if (!any)
+                continue;
+            int sFloor = std::numeric_limits<int>::max();
+            for (int col = 0; col < 256; ++col)
+            {
+                if (drop[col])
+                    g.top[col] = qint16(int(g.top[col]) - drop[col]);
+                sFloor = std::min(sFloor, int(g.top[col]) - (g.wd[col] > 0 ? int(g.wd[col]) + 3 : 3));
+            }
+            g.stoneFloor = sFloor;
+            taperDrop.insert(git.key(), drop);
+        }
+    }
+
+}
+
+void ExportRun::connectFences()
+{
+    // 3.58 Fence connections: the fence connections are a PERSISTENT block state (Properties
+    // north/east/south/west), the client draws the arms by them, NOT by the neighboring blocks. Without the properties
+    // the world loads with "bare sticks", and only break+place recomputes them (a user remark).
+    // We write the connection bitmask into the fence id (blockProperties derives the palette properties from it).
+    {
+        auto connects = [](quint16 nid)
+        {   // a fence "absorbs": the same fence (already stamped), any gate and any full
+          // cube of the object palette (building walls). Plants, water, carpets, stone walls — no.
+            return (nid >= quint16(IdFence) && nid < quint16(IdFenceMax))
+                || (nid >= quint16(IdGateN) && nid <= quint16(IdGateW))
+                || (nid >= quint16(IdPaletteStart) && nid < quint16(IdPaletteStart) + kPaletteCount);
+        };
+        for (auto cit = store.chunks.begin(); cit != store.chunks.end(); ++cit)
+        {
+            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+            for (auto sit = cit->begin(); sit != cit->end(); ++sit)
+            {
+                const int by0 = sit.key() << 4;
+                QVector<quint16>& sec = sit.value();
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    if (sec[i] != quint16(IdFence)) continue;   // not a fence or already stamped
+                    const int x = bx0 + (i & 15), y = by0 + ((i >> 8) & 15), z = bz0 + ((i >> 4) & 15);
+                    int conn = 0;
+                    if (connects(store.get(x, y, z - 1))) conn |= 1;   // north = -Z
+                    if (connects(store.get(x + 1, y, z))) conn |= 2;   // east  = +X
+                    if (connects(store.get(x, y, z + 1))) conn |= 4;   // south = +Z
+                    if (connects(store.get(x - 1, y, z))) conn |= 8;   // west  = -X
+                    sec[i] = quint16(int(IdFence) + conn);
+                }
+            }
+        }
+    }
+
+    {   // 3.58b Connections of stone fences (parking lots): with the same ones, gates and full cubes of the object palette
+        auto connectsW = [](quint16 nid)
+        {
+            return (nid >= quint16(IdStoneFence) && nid < quint16(IdStoneFenceMax)) || nid == quint16(IdStoneBrickWall)
+                || (nid >= quint16(IdPaletteStart) && nid < quint16(IdPaletteStart) + kPaletteCount);
+        };
+        for (auto cit = store.chunks.begin(); cit != store.chunks.end(); ++cit)
+        {
+            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
+            for (auto sit = cit->begin(); sit != cit->end(); ++sit)
+            {
+                const int by0 = sit.key() << 4;
+                QVector<quint16>& sec = sit.value();
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    if (sec[i] != quint16(IdStoneFence)) continue;
+                    const int x = bx0 + (i & 15), y = by0 + ((i >> 8) & 15), z = bz0 + ((i >> 4) & 15);
+                    int conn = 0;
+                    if (connectsW(store.get(x, y, z - 1))) conn |= 1;
+                    if (connectsW(store.get(x + 1, y, z))) conn |= 2;
+                    if (connectsW(store.get(x, y, z + 1))) conn |= 4;
+                    if (connectsW(store.get(x - 1, y, z))) conn |= 8;
+                    sec[i] = quint16(int(IdStoneFence) + conn);
+                }
+            }
+        }
+    }
+}
+
+bool ExportRun::buildTurf()
+{
+    // 3.6 "Just turf": on empty grass columns (without objects, water and plantings) deterministically
+    // (~1/8 by the column hash) we plant short grass — otherwise the exported terrain looks
+    // bald and "smooth", as if paved.
+    {
+        // We count the candidates in parallel by chunk blocks (read only: ground/colMin/colWater/store), and write into the store
+        // AFTER — in one thread. The main thing: the "every 8th column" hash is checked FIRST — earlier for each
+        // of the 256 columns of a chunk two accesses to the huge colMin/colWater hashes were made (hundreds of millions of accesses,
+        // ~5 minutes on a big project), although only every eighth reached the work.
+        const QVector<qint64> fl(fillChunks.constBegin(), fillChunks.constEnd());
+        const int nF = fl.size();
+        constexpr int kBlk = 128;
+        struct Plant { int x, y, z; };
+        const int nBlk = (nF + kBlk - 1) / kBlk;
+        QVector<QVector<Plant>> outs(nBlk);
+        QThreadPool sodPool;
+        sodPool.setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
+        QVector<QFuture<void>> sf;
+        sf.reserve(nBlk);
+        for (int b = 0; b < nBlk; ++b)
+            sf << QtConcurrent::run(&sodPool, [&, b]()
+            {
+                const int c1 = std::min(nF, (b + 1) * kBlk);
+                for (int ci = b * kBlk; ci < c1; ++ci)
+                {
+                    if (cancel && cancel->load()) return;
+                    const qint64 ckKey = fl[ci];
+                    const auto git = ground.constFind(ckKey);          // the fill guaranteed the metadata
+                    if (git == ground.constEnd()) continue;
+                    const GroundChunk& g = git.value();
+                    const int bx0 = keyFirst(ckKey) << 4, bz0 = keySecond(ckKey) << 4;
+                    for (int lz = 0; lz < 16; ++lz)
+                        for (int lx = 0; lx < 16; ++lx)
+                        {
+                            const int cx = bx0 + lx, cz = bz0 + lz;
+                            const qint64 ck = pairKey(cx, cz);
+                            if (colHash(ck) % 8u != 0u) continue;                       // 7/8 of the columns — immediately skipped
+                            const int top = g.top[lz * 16 + lx];
+                            if (top > 254) continue;
+                            if (g.surf[lz * 16 + lx] != IdGrass) continue;              // wool/stone/paint — skipped
+                            if (colMin.contains(ck) || colWater.contains(ck)) continue; // under an object/water
+                            if (store.get(cx, top, cz) != IdAir) continue;              // the top block is occupied by an object
+                            if (store.get(cx, top + 1, cz) != IdAir) continue;          // already occupied by something
+                            outs[b].append(Plant{ cx, top + 1, cz });
+                        }
+                }
+            });
+        for (int b = 0; b < nBlk; ++b)
+        {
+            sf[b].waitForFinished();
+            if (progress && (b & 0x7) == 0)
+                progress(std::min((b + 1) * kBlk, nF), nF, 8);                              // the "grass (turf)" stage
+            if (cancel && cancel->load())
+            {
+                for (QFuture<void>& f : sf) f.waitForFinished();
+                res.cancelled = true;
+                res.error = QObject::tr("Export cancelled.");
+                return false;
+            }
+        }
+        for (const QVector<Plant>& v : outs)
+            for (const Plant& pl : v)
+                store.set(pl.x, pl.y, pl.z, IdGrassPlant);
+    }
+
+    return true;
+}
+
+void ExportRun::buildEdgeFluids()
+{
+    // 3.59c "Flowing out" on the chamfer (a user request — a living junction; what it floods/burns — does not matter):
+    // at hash places of the chamfer we write a water source (6..10 blocks) or lava (2..4) into the cells of the new
+    // surface. Water/lava without Properties — a full source (IdWater/IdLava), and when a chunk
+    // loads the game spreads it beyond our area, into the generated world. The points are deterministic
+    // (colHash by the world coordinates) — a repeated export of the same scene reproduces them.
+    // DISABLED (request: waterfalls and lava falls at the world edge only break integrity — we leave just the chamfer); enabled by MCX_EDGE_FLUIDS=1.
+    if (qEnvironmentVariableIsSet("MCX_EDGE_FLUIDS"))
+    {
+        static const qint8 dX[4] = { -1, 1, 0, 0 }, dZ[4] = { 0, 0, -1, 1 };
+        for (auto tit = taperDrop.constBegin(); tit != taperDrop.constEnd(); ++tit)
+        {
+            const int cx = int(keyFirst(tit.key())), cz = int(keySecond(tit.key()));
+            const QVector<quint8>& drop = tit.value();
+            for (int d = 0; d < 4; ++d)
+            {
+                if (ground.contains(pairKey(cx + int(dX[d]), cz + int(dZ[d])))
+                    || inExportRect(cx + int(dX[d]), cz + int(dZ[d])))
+                    continue;                                   // the side is not a junction
+                const bool neg = (dX[d] < 0) || (dZ[d] < 0);
+                const int off = neg ? 0 : 15;                   // the edge row of the chamfer
+                const int inX = -int(dX[d]), inZ = -int(dZ[d]); // inward — into our ground
+                for (int k0 = 0; k0 <= 12; k0 += 4)             // 4 candidates per chunk side
+                {
+                    const int lx0 = (d < 2) ? off : k0, lz0 = (d < 2) ? k0 : off;
+                    if (drop[lz0 * 16 + lx0] < 2)
+                        continue;                               // the chamfer did not lie here (an object/pond)
+                    const qint64 spot = pairKey((cx << 4) + lx0, (cz << 4) + lz0);
+                    if (colHash(spot ^ 0xFACADEull) % 48u != 0u)
+                        continue;                               // ~1 point per 48 edge columns
+                    const quint32 t = colHash(spot ^ 0x1BEEDull);
+                    const bool lava = (t % 4u) == 0u;           // 25% lava, 75% water
+                    const int n = lava ? 30 + int(t >> 8) % 21 : 150 + int(t >> 8) % 101; // lava 30..50 (as the water was), water 150..250 (was 6..10: ×25)
+                    const quint16 fid = lava ? IdLava : IdWater;
+                    // cells: from the edge inward (d=0..2), then the next "row" along the junction
+                    int placed = 0;
+                    for (int idx = 0; idx < n; ++idx)
+                    {
+                        const int r = idx / 3, din = idx % 3;   // r — along the junction (the long line), din=0 — the edge cell
+                        const int lx = lx0 + inX * din + (d < 2 ? 0 : r);
+                        const int lz = lz0 + inZ * din + (d < 2 ? r : 0);
+                        // the line goes along the junction and beyond the chunk border — we look for the neighboring chunk by ground
+                        const int bx = (cx << 4) + lx, bz = (cz << 4) + lz;
+                        const auto git = ground.constFind(pairKey(bx >> 4, bz >> 4));
+                        if (git == ground.constEnd())
+                            break;
+                        const GroundChunk& g = git.value();
+                        const int col = (bz & 15) * 16 + (bx & 15);
+                        if (g.wd[col] > 0)
+                            break;                              // we do not climb into ponds
+                        const int y = g.top[col];
+                        if (store.get(bx, y, bz) || store.get(bx, y + 1, bz))
+                            continue;                           // the cell is occupied — the source will go further
+                        store.set(bx, y, bz, fid);
+                        fluidsByChunk[pairKey(bx >> 4, bz >> 4)].append(FluidSite{ bx, y, bz, lava });
+                        ++placed;
+                    }
+                    Q_UNUSED(placed);
+                }
+            }
+        }
+    }
+
+}
+
+void ExportRun::buildPlatforms()
+{
+    // 3.576 Rail platforms (rdcpol 62134000): a stone brick half SLAB over the stone-brick paving
+    // (a user request: "the platform is raised by half a block"). Runs LAST — after every ground correction
+    // (3.59 adds the ground of the "late" chunks, 3.59b/c bevel the world edge): only here the full set of
+    // the saved columns and their true surfaces are known. The slab reads the ground chunk itself: its top row
+    // and the condition that the paving is still paving (not overwritten by a road or water). Where something
+    // solid already stands (a lamp post, a shelter) the slab gives up its cell (a request); low plants go first.
+    if (!platformCols.isEmpty())
+    {
+        const quint16 kSlab = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_brick_slab"));
+        const quint16 kPave = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+        int nSlab = 0;
+        for (const qint64 ck : platformCols)
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const auto git = ground.constFind(pairKey(bx >> 4, bz >> 4));
+            if (git == ground.constEnd()) continue;              // the platform crossed the world edge — no ground here
+            const int col = (bz & 15) * 16 + (bx & 15);
+            if (git.value().surf[col] != kPave) continue;        // the paving was hidden under a road or a square — no slab
+            const int y0 = git.value().top[col] + 1;
+            // NOTE: no colMin/railColsAll guards — the yard rails and the station raise them over whole platforms
+            // while the row above their paving stays free (rails that really lie on this row are caught below).
+            if (colWater.contains(ck)) continue;                 // water over the paving — no slab
+            int yTop = y0;
+            quint16 cur = store.get(bx, yTop, bz);
+            if (cur != IdAir && !isVegBlockId(cur))
+            {   // something stands on this ground row: when the ground was dug down for an underground hall or a
+                // tunnel, its old surface was restored over the ceiling as paving — the slab belongs there (a request)
+                int ry = 0;
+                for (int yy = y0 + 32; yy > y0; --yy)   // from the top: the restored surface is the highest one
+                {
+                    if (store.get(bx, yy, bz) != kPave) continue;
+                    const quint16 ab = store.get(bx, yy + 1, bz);
+                    const quint16 bl = store.get(bx, yy - 1, bz);
+                    if ((ab == IdAir || isVegBlockId(ab)) && bl != IdAir) { ry = yy; break; }   // paving over solid fill, not a lone block in a shaft
+                }
+                if (!ry) continue;                               // a real obstacle (a post, a rail) — the slab gives up
+                yTop = ry + 1;
+            }
+            cur = store.get(bx, yTop, bz);
+            if (cur != IdAir)
+            {
+                if (!isVegBlockId(cur)) continue;                        // should not happen: guarded above
+                store.erase(bx, yTop, bz);
+                const quint16 up = store.get(bx, yTop + 1, bz);
+                if (up && isVegBlockId(up)) store.erase(bx, yTop + 1, bz);   // tall grass — both of its rows
+            }
+            store.set(bx, yTop, bz, kSlab);
+            ++nSlab;
+        }
+        char sbuf[96];
+        snprintf(sbuf, sizeof sbuf, "3.576 platform slabs: %d of %d columns", nSlab, int(platformCols.size()));
+        tmcStepLog(sbuf);
+    }
+
+}
+
+quint32 ExportRun::colHash(qint64 k)
+{
+    const qint32 x = keyFirst(k), z = keySecond(k);
+    quint32 h = quint32(x) * 374761393u + quint32(z) * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return h ^ (h >> 16);
+}
+
+int ExportRun::addEmpty(int v, int x, int z)
+{
+    if (erW == 0) return v;
+    const int gx = x - erX0, gz = z - erZ0;
+    if (gx < 0 || gx >= erW || gz < 0 || gz >= erH) return v;
+    return std::max(0, std::min(255, v + int(emptyDelta[qsizetype(gz) * erW + gx])));
+}
+
+int ExportRun::terrainTopBlock(int cx, int cz)
+{
+    if (!hasTerrain) return std::numeric_limits<int>::min();
+    const double wx = (double(cx) + 0.5) / tf.sx + tf.cx0;       // blocks -> map units
+    const double wy = tf.cy0 - (double(cz) + 0.5) / tf.sz;
+    const double h = heightAt(wx, wy);
+    if (h <= -9998.0) return std::numeric_limits<int>::min();
+    return int(std::floor((h - tf.yBase) * tf.zScale + 1.0)) + yShift;
+}
+
+int ExportRun::groundTopCol(int x, int z)
+{
+    if (!paleCol.isEmpty())
+    {
+        const auto pit = paleCol.constFind(pairKey(x, z));
+        if (pit != paleCol.constEnd()) return pit->top;
+    }
+    const int t = terrainTopBlock(x, z);
+    if (t == std::numeric_limits<int>::min()) return addEmpty(genGroundTop, x, z);
+    const int cxk = x >> 4, czk = z >> 4;
+    const int d = std::max(std::max(rcx0 - cxk, cxk - rcx1), std::max(std::max(rcz0 - czk, czk - rcz1), 0));
+    if (d <= 0 || rectM <= 0) return addEmpty(std::max(0, std::min(t, 255)), x, z);
+    double u = std::min(1.0, double(d) / double(rectM));
+    u = u * u * (3.0 - 2.0 * u);
+    return std::max(0, std::min(255, int(std::lround(double(t) * (1.0 - u) + double(genGroundTop) * u))));
+}
+
+int ExportRun::surfaceTop(qint64 ck)
+{
+    int top = groundTopCol(keyFirst(ck), keySecond(ck));
+    const auto oit = colMin.constFind(ck);
+    if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)
+        top = std::max(top, oit.value() - 1);
+    return std::min(top, 255);
+}
+
+GroundChunk ExportRun::makeGround(qint64 ckKey)
+{
+    GroundChunk g;
+    g.top.resize(256); g.surf.resize(256); g.wd.resize(256); g.art.fill(0, 256);
+    int stoneFloor = std::numeric_limits<int>::max();
+    const int bx0 = keyFirst(ckKey) << 4, bz0 = keySecond(ckKey) << 4;
+    const bool hasMin = chunksMin.contains(ckKey), hasWool = chunksWool.contains(ckKey), hasWat = chunksWater.contains(ckKey),
+               hasBed = chunksBed.contains(ckKey);
+    for (int lz = 0; lz < 16; ++lz)
+        for (int lx = 0; lx < 16; ++lx)
+        {
+            const int cx = bx0 + lx, cz = bz0 + lz;
+            const qint64 ck = pairKey(cx, cz);
+            int top = groundTopCol(cx, cz);
+            if (hasMin)
+            {
+                const auto oit = colMin.constFind(ck);
+                if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)       // a body hanging higher than 3 blocks over the ground does not raise it
+                    top = std::max(top, oit.value() - 1);
+            }
+            if (top > 255) top = 255;
+            quint16 surface = g_zoneSurface;              // the top block of the column (turf or csrpol wool; sand in the desert, snow in the tundra)
+            const auto wit = hasWool ? colWool.constFind(ck) : colWool.constEnd();
+            if (wit != colWool.constEnd())
+                surface = wit.value();
+            else if (!paleCol.isEmpty())
+            {
+                const auto pit = paleCol.constFind(ck);
+                if (pit != paleCol.constEnd() && pit->surf) surface = pit->surf;
+            }
+            int wd = 0;                                   // the depth of the water pit (0 — land)
+            const auto witW = hasWat ? colWater.constFind(ck) : colWater.constEnd();
+            if (witW != colWater.constEnd())
+                wd = witW.value();                        // top>=0 always (median clamp), the pit does not go below -64
+            else if (surface == IdGrass && !colWater.isEmpty() && g_sandId)
+            {   // sandy shores (partially): a dry column near water (up to 2 blocks) — sand with a chance that falls with the distance
+                int nearD = 99;
+                if (sandGrid)
+                {
+                    const int gx = cx - snX0, gz = cz - snZ0;
+                    if (gx >= 0 && gx < snW && gz >= 0 && gz < snH && sandNear[gz * snW + gx]) nearD = sandNear[gz * snW + gx];
+                }
+                else
+                    for (int dz = -2; dz <= 2 && nearD > 1; ++dz)
+                        for (int dx = -2; dx <= 2; ++dx)
+                            if (colWater.contains(pairKey(cx + dx, cz + dz)) && !colWaterArt.contains(pairKey(cx + dx, cz + dz))) nearD = std::min(nearD, std::max(std::abs(dx), std::abs(dz)));
+                if (nearD <= 2)
+                {
+                    quint32 h = quint32(cx) * 374761393u ^ quint32(cz) * 668265263u ^ 0x5A4Du;
+                    h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+                    if (h % 100u < (nearD == 1 ? 70u : 35u)) surface = g_sandId;
+                }
+            }
+            const auto bit = hasBed ? railBedCols.constFind(ck) : railBedCols.constEnd();
+            if (bit != railBedCols.constEnd() && wit == colWool.constEnd() && witW == colWater.constEnd())
+                surface = bit.value();      // the track bed: the rails lie on stone/brick, not on turf
+                                            // (a road crossing or a water body wins over the bed)
+            const int col = lz * 16 + lx;
+            g.top[col] = qint16(top);
+            g.surf[col] = surface;
+            g.wd[col] = quint16(wd);
+            if (wd > 0 && colWaterArt.contains(ck)) g.art[col] = 1;
+            // below (inclusive) in all the columns there is guaranteed stone: water at wd>3
+            // reaches top-3 and deeper, the ground occupies top-2..top-1 (see groundBlockAt)
+            stoneFloor = std::min(stoneFloor, wd > 0 ? top - wd - 3 : top - 3);    // under the water body bottom — up to 3 blocks of sand, then stone (for artificial ones also with a margin)
+        }
+    g.stoneFloor = stoneFloor;
+    return g;
+}
+
+void ExportRun::assignCave(GroundChunk& g, qint64 ckKey)
+{
+    if (!caveSet.empty())
+        g.caveTpl = 0;          // the chunk underground is taken from the cave world by the chunk coordinates (CaveSet::get)
+}
+
+bool ExportRun::inExportRect(int cx, int cz)
+{
+    return cx >= rcx0 - rectM && cx <= rcx1 + rectM && cz >= rcz0 - rectM && cz <= rcz1 + rectM;
+}
+
 McWorldExporter::Result ExportRun::run()
 {
     legacy = (format == Format::Legacy121x);
@@ -875,13 +1735,6 @@ McWorldExporter::Result ExportRun::run()
     // "ate" the highway cells together with the marking lines.
     roadObjCounter = 0;
     storyCounter = 0;
-    auto colHash = [](qint64 k) -> quint32
-    {
-        const qint32 x = keyFirst(k), z = keySecond(k);
-        quint32 h = quint32(x) * 374761393u + quint32(z) * 668265263u;
-        h = (h ^ (h >> 13)) * 1274126177u;
-        return h ^ (h >> 16);
-    };
     // Parallel voxelization of buildings: each building is computed in a private store (VoxJob) in
     // a thread pool, then the results are MERGED into the common store strictly in the original object order —
     // the outcome does not depend on thread scheduling. The through floor counter (treasures/spawners) in a batch
@@ -2706,15 +3559,6 @@ McWorldExporter::Result ExportRun::run()
     yShift = 0;
                       // the lambda reads it by reference — the height survey goes before the raise, all the late
                       // calls (fill/vegetation) already get the shifted terrain.
-    auto terrainTopBlock = [&](int cx, int cz) -> int
-    {   // the terrain top in blocks (INT_MIN — there is no terrain at this point)
-        if (!hasTerrain) return std::numeric_limits<int>::min();
-        const double wx = (double(cx) + 0.5) / tf.sx + tf.cx0;       // blocks -> map units
-        const double wy = tf.cy0 - (double(cz) + 0.5) / tf.sz;
-        const double h = heightAt(wx, wy);
-        if (h <= -9998.0) return std::numeric_limits<int>::min();
-        return int(std::floor((h - tf.yBase) * tf.zScale + 1.0)) + yShift;
-    };
     for (auto tcIt = store.chunks.constBegin(); tcIt != store.chunks.constEnd(); ++tcIt) touchedChunks.append(tcIt.key());   // a snapshot: later sections are added to the existing chunks
     // "Full terrain" (user request, only for the "normal world"): if the crust stands only
     // under the object chunks, the city is a small clearing with a cliff along the perimeter. We cover with our
@@ -2757,8 +3601,6 @@ McWorldExporter::Result ExportRun::run()
         rcx1 = std::max(rcx1, keyFirst(ckKey)); rcz1 = std::max(rcz1, keySecond(ckKey));
     }
     rectM = world.normalSurroundings ? std::max(0, std::min(world.apronChunks, 64)) : 0;
-    auto inExportRect = [=](int cx, int cz)
-    { return cx >= rcx0 - rectM && cx <= rcx1 + rectM && cz >= rcz0 - rectM && cz <= rcz1 + rectM; };
     if (world.normalSurroundings)
     {
         const int M = std::max(0, std::min(world.apronChunks, 64)); // the apron, chunks (a setting in the dialog)
@@ -3118,29 +3960,6 @@ McWorldExporter::Result ExportRun::run()
     erZ0 = 0;
     erW = 0;
     erH = 0;
-    auto addEmpty = [&](int v, int x, int z) -> int
-    {
-        if (erW == 0) return v;
-        const int gx = x - erX0, gz = z - erZ0;
-        if (gx < 0 || gx >= erW || gz < 0 || gz >= erH) return v;
-        return std::max(0, std::min(255, v + int(emptyDelta[qsizetype(gz) * erW + gx])));
-    };
-    auto groundTopCol = [&](int x, int z) -> int
-    {
-        if (!paleCol.isEmpty())
-        {
-            const auto pit = paleCol.constFind(pairKey(x, z));
-            if (pit != paleCol.constEnd()) return pit->top;
-        }
-        const int t = terrainTopBlock(x, z);
-        if (t == std::numeric_limits<int>::min()) return addEmpty(genGroundTop, x, z);
-        const int cxk = x >> 4, czk = z >> 4;
-        const int d = std::max(std::max(rcx0 - cxk, cxk - rcx1), std::max(std::max(rcz0 - czk, czk - rcz1), 0));
-        if (d <= 0 || rectM <= 0) return addEmpty(std::max(0, std::min(t, 255)), x, z);
-        double u = std::min(1.0, double(d) / double(rectM));
-        u = u * u * (3.0 - 2.0 * u);
-        return std::max(0, std::min(255, int(std::lround(double(t) * (1.0 - u) + double(genGroundTop) * u))));
-    };
     // Columns where the relief is not made: buildings and water. Roads are NOT in this list: they follow the terrain (the marking is moved onto the final relief
     // before the ground fill, see "roads follow the relief" below), otherwise the road would be a flat trench cut through the hills of a forest.
     auto reliefBlocked = [&](qint64 ck) -> bool
@@ -3905,75 +4724,6 @@ McWorldExporter::Result ExportRun::run()
         addChunks(chunksBed, railBedCols);
     }
     ground.reserve(int(fillChunks.size()));
-    auto makeGround = [&](qint64 ckKey)
-    {
-        GroundChunk g;
-        g.top.resize(256); g.surf.resize(256); g.wd.resize(256); g.art.fill(0, 256);
-        int stoneFloor = std::numeric_limits<int>::max();
-        const int bx0 = keyFirst(ckKey) << 4, bz0 = keySecond(ckKey) << 4;
-        const bool hasMin = chunksMin.contains(ckKey), hasWool = chunksWool.contains(ckKey), hasWat = chunksWater.contains(ckKey),
-                   hasBed = chunksBed.contains(ckKey);
-        for (int lz = 0; lz < 16; ++lz)
-            for (int lx = 0; lx < 16; ++lx)
-            {
-                const int cx = bx0 + lx, cz = bz0 + lz;
-                const qint64 ck = pairKey(cx, cz);
-                int top = groundTopCol(cx, cz);
-                if (hasMin)
-                {
-                    const auto oit = colMin.constFind(ck);
-                    if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)       // a body hanging higher than 3 blocks over the ground does not raise it
-                        top = std::max(top, oit.value() - 1);
-                }
-                if (top > 255) top = 255;
-                quint16 surface = g_zoneSurface;              // the top block of the column (turf or csrpol wool; sand in the desert, snow in the tundra)
-                const auto wit = hasWool ? colWool.constFind(ck) : colWool.constEnd();
-                if (wit != colWool.constEnd())
-                    surface = wit.value();
-                else if (!paleCol.isEmpty())
-                {
-                    const auto pit = paleCol.constFind(ck);
-                    if (pit != paleCol.constEnd() && pit->surf) surface = pit->surf;
-                }
-                int wd = 0;                                   // the depth of the water pit (0 — land)
-                const auto witW = hasWat ? colWater.constFind(ck) : colWater.constEnd();
-                if (witW != colWater.constEnd())
-                    wd = witW.value();                        // top>=0 always (median clamp), the pit does not go below -64
-                else if (surface == IdGrass && !colWater.isEmpty() && g_sandId)
-                {   // sandy shores (partially): a dry column near water (up to 2 blocks) — sand with a chance that falls with the distance
-                    int nearD = 99;
-                    if (sandGrid)
-                    {
-                        const int gx = cx - snX0, gz = cz - snZ0;
-                        if (gx >= 0 && gx < snW && gz >= 0 && gz < snH && sandNear[gz * snW + gx]) nearD = sandNear[gz * snW + gx];
-                    }
-                    else
-                        for (int dz = -2; dz <= 2 && nearD > 1; ++dz)
-                            for (int dx = -2; dx <= 2; ++dx)
-                                if (colWater.contains(pairKey(cx + dx, cz + dz)) && !colWaterArt.contains(pairKey(cx + dx, cz + dz))) nearD = std::min(nearD, std::max(std::abs(dx), std::abs(dz)));
-                    if (nearD <= 2)
-                    {
-                        quint32 h = quint32(cx) * 374761393u ^ quint32(cz) * 668265263u ^ 0x5A4Du;
-                        h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
-                        if (h % 100u < (nearD == 1 ? 70u : 35u)) surface = g_sandId;
-                    }
-                }
-                const auto bit = hasBed ? railBedCols.constFind(ck) : railBedCols.constEnd();
-                if (bit != railBedCols.constEnd() && wit == colWool.constEnd() && witW == colWater.constEnd())
-                    surface = bit.value();      // the track bed: the rails lie on stone/brick, not on turf
-                                                // (a road crossing or a water body wins over the bed)
-                const int col = lz * 16 + lx;
-                g.top[col] = qint16(top);
-                g.surf[col] = surface;
-                g.wd[col] = quint16(wd);
-                if (wd > 0 && colWaterArt.contains(ck)) g.art[col] = 1;
-                // below (inclusive) in all the columns there is guaranteed stone: water at wd>3
-                // reaches top-3 and deeper, the ground occupies top-2..top-1 (see groundBlockAt)
-                stoneFloor = std::min(stoneFloor, wd > 0 ? top - wd - 3 : top - 3);    // under the water body bottom — up to 3 blocks of sand, then stone (for artificial ones also with a margin)
-            }
-        g.stoneFloor = stoneFloor;
-        return g;
-    };
     lap("g3 outposts/camps+makeGround setup");
     {   // ROADS FOLLOW THE RELIEF: the roadway marking (carpets) was laid at the level of the plane/terrain before the forest relief existed. Where the relief changed the ground
         // of a road column, the carpet is moved onto the new ground (top+1) and colMin follows it, so the road is not a trench cut through a hill and the ground is not
@@ -4001,11 +4751,6 @@ McWorldExporter::Result ExportRun::run()
     }
     // Caves: a chunk is deterministically assigned a template index (different chunks — different caves,
     // a repeat is allowed). Without the file (caveSet is empty) caveTpl stays -1 — the underground is solid rock.
-    auto assignCave = [&](GroundChunk& g, qint64 ckKey)
-    {
-        if (!caveSet.empty())
-            g.caveTpl = 0;          // the chunk underground is taken from the cave world by the chunk coordinates (CaveSet::get)
-    };
     {   // Ground fill: makeGround only reads the common maps, the chunks are independent — we compute in blocks
         // by threads (our own pool), then put into ground in order. Progress/cancel — from the main thread.
         const QVector<qint64> fl(fillChunks.constBegin(), fillChunks.constEnd());
@@ -5325,14 +6070,6 @@ McWorldExporter::Result ExportRun::run()
     // 3.5 Vegetation — after the ground (the surface height is needed). Trees — roughly every 25th
     // column of the "spot" (a deterministic hash — a forest without clearings and without rows), the grass is denser.
     // Nothing is planted on the occupied columns (structures).
-    auto surfaceTop = [&](qint64 ck) -> int
-    {
-        int top = groundTopCol(keyFirst(ck), keySecond(ck));
-        const auto oit = colMin.constFind(ck);
-        if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)
-            top = std::max(top, oit.value() - 1);
-        return std::min(top, 255);
-    };
     // Spruce: a spruce_log trunk (2×2 for big ones), bare at the bottom, then needle tiers from top to bottom with a radius from 0 (the top) to R; even tiers are narrower than
     // odd ones — like a real spruce. The needles cover the trunk up to the very top. The crown must not go beyond the chunks with ground.
     sprFill = QSet<ColKey>(fillChunks.constBegin(), fillChunks.constEnd());
@@ -9929,686 +10666,22 @@ McWorldExporter::Result ExportRun::run()
     }
 
     lap("before 3.575");
-    // 3.575 Objects from points on the map (sources with a modelField, step 3.575): memorials and monuments,
-    // fountains, communication towers, waste bins, lighting masts, benches, sculptures and bus-stop shelters
-    // stand on the READY ground (after the street furniture; the
-    // trees were not planted around them — their columns were reserved in noTreePadCols). Which structure to build
-    // is decided by the model number from point_models.csv (the object's code from the modelField column);
-    // "atop a building" is the communication tower only (from its roof), the rest are skipped if a
-    // structure/water/roadway lies under the point. The variant of every object is a hash of its column.
-    {
-        if (!spots.isEmpty())
-        {
-            auto blk = [](const char* name) -> quint16
-            { return quint16(IdPaletteStart + paletteIndexOf(name)); };
-            const quint16 qStone = blk("minecraft:stone"), qCobb = blk("minecraft:cobblestone"),
-                        qMossy = blk("minecraft:mossy_cobblestone"), qSBrick = blk("minecraft:stone_bricks"),
-                        qBrick = blk("minecraft:bricks"), qPDsl = blk("minecraft:polished_deepslate"),
-                        qCDsl = blk("minecraft:cobbled_deepslate"), qPBlk = blk("minecraft:polished_blackstone"),
-                        qBlk = blk("minecraft:blackstone"), qGran = blk("minecraft:granite"),
-                        qDior = blk("minecraft:diorite"), qAnd = blk("minecraft:andesite"),
-                        qSmth = blk("minecraft:smooth_stone"), qGold = blk("minecraft:gold_block"),
-                        qQuartz = blk("minecraft:quartz_block"), qPCalc = blk("minecraft:polished_calcite"),
-                        qGlow = blk("minecraft:glowstone");
-            static const quint16 kStairs[4] = { IdStoneStairsN, IdStoneStairsE, IdStoneStairsS, IdStoneStairsW };
-            int nPlaced = 0, nSkipped = 0;
-            // Roadside greenery (leaves, plants, carpets, vines) does not forbid the install: it is
-            // sheared off inside the object footprint. A trunk (log) or anything built stays a blocker.
-            auto clearVeg = [&](int x0, int x1, int y0, int y1, int z0, int z1)
-            {
-                for (int x = x0; x <= x1; ++x)
-                    for (int z = z0; z <= z1; ++z)
-                        for (int y = y0; y <= y1; ++y)
-                        {
-                            const quint16 b = store.get(x, y, z);
-                            if (b && b != IdAir && isVegBlockId(b))
-                            {
-                                const QString bn = blockName(b);
-                                if (!bn.contains(QLatin1String("_log")) && !bn.contains(QLatin1String("stem")))
-                                    store.erase(x, y, z);
-                            }
-                        }
-            };
-            for (const SpotSite& sp : spots)
-            {
-                const qint64 ck = pairKey(sp.x, sp.z);
-                if (colWater.contains(ck) || roadCols.contains(ck)) { ++nSkipped; continue; }   // a pit/roadway under the object
-                const int gy = surfaceTop(ck) + 1;
-                if (gy + 40 > 255) continue;
-                // the highest solid non-vegetation block of the column: for a tower — the roof to grow from,
-                // for the others — the fact that something is already built here
-                int topSolid = -1;
-                for (int y = 255; y >= gy; --y)
-                {
-                    const quint16 b = store.get(sp.x, y, sp.z);
-                    if (b && !isVegBlockId(b)) { topSolid = y; break; }
-                }
-                const quint32 hsh = colHash(ck ^ 0x53507u);
-                switch (sp.model)
-                {
-                case kComposter:                                         // a waste bin — just a composter
-                    store.set(sp.x, gy, sp.z, IdComposter);
-                    ++nPlaced;
-                    break;
-                case kStatue:                                            // a MEMORIAL — a small statue (6 variants)
-                {
-                    if (topSolid >= gy) { ++nSkipped; break; }           // something is already built here
-                    const int cx = sp.x, cz = sp.z;
-                    switch (hsh % 6u)
-                    {
-                    case 0:                                              // an obelisk on a two-wide plinth
-                        store.set(cx, gy, cz, qMossy); store.set(cx + 1, gy, cz, qCobb);
-                        store.set(cx, gy, cz + 1, qCobb); store.set(cx + 1, gy, cz + 1, qMossy);
-                        store.set(cx, gy + 1, cz, qPDsl); store.set(cx, gy + 2, cz, qPDsl); store.set(cx, gy + 3, cz, qPDsl);
-                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
-                        break;
-                    case 1:                                              // a brick stele with a memorial plaque
-                        for (int dx = 0; dx <= 1; ++dx)
-                            for (int dz = 0; dz <= 1; ++dz) { store.set(cx + dx, gy, cz + dz, qBrick); store.set(cx + dx, gy + 1, cz + dz, qBrick); }
-                        store.set(cx, gy + 2, cz, qSBrick); store.set(cx, gy + 3, cz, qSBrick);
-                        store.set(cx, gy + 4, cz, IdPressurePlateStone);
-                        break;
-                    case 2:                                              // an eternal flame on a black post with corner fence posts
-                        store.set(cx, gy, cz, qPBlk); store.set(cx, gy + 1, cz, qPBlk);
-                        store.set(cx, gy + 2, cz, IdLanternStanding);
-                        store.set(cx - 1, gy, cz - 1, IdCobbleWall); store.set(cx + 1, gy, cz - 1, IdCobbleWall);
-                        store.set(cx - 1, gy, cz + 1, IdCobbleWall); store.set(cx + 1, gy, cz + 1, IdCobbleWall);
-                        break;
-                    case 3:                                              // a megalith: a boulder of mossy stone
-                        for (int dx = 0; dx <= 1; ++dx)
-                            for (int dz = 0; dz <= 1; ++dz)
-                            {
-                                const quint32 hb = colHash(pairKey(cx + dx, cz + dz) ^ 0x4EB01ull);
-                                const quint16 mb = hb % 3u == 0u ? qMossy : (hb % 3u == 1u ? qCobb : qAnd);
-                                store.set(cx + dx, gy, cz + dz, mb);
-                                if (hb % 7u < 3u) store.set(cx + dx, gy + 1, cz + dz, mb);
-                            }
-                        break;
-                    case 4:                                              // a broken column on a platform
-                        for (int dx = -1; dx <= 1; ++dx)
-                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qCobb);
-                        store.set(cx - 1, gy + 1, cz - 1, qSmth); store.set(cx + 1, gy + 1, cz - 1, qSmth);
-                        store.set(cx - 1, gy + 1, cz + 1, qSmth); store.set(cx + 1, gy + 1, cz + 1, qSmth);
-                        store.set(cx, gy + 1, cz, qSBrick); store.set(cx, gy + 2, cz, qSBrick); store.set(cx, gy + 3, cz, qSBrick);
-                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
-                        break;
-                    default:                                             // a shattered deepslate stele
-                        store.set(cx, gy, cz, qCDsl); store.set(cx + 1, gy, cz, qCDsl);
-                        store.set(cx, gy, cz + 1, qCDsl); store.set(cx + 1, gy, cz + 1, qCDsl);
-                        store.set(cx, gy + 1, cz, qBlk); store.set(cx, gy + 2, cz, qBlk);
-                        store.set(cx, gy + 3, cz, qCDsl);
-                        store.set(cx, gy + 4, cz, kStairs[(hsh >> 8) % 4u]);
-                        break;
-                    }
-                    ++nPlaced;
-                    break;
-                }
-                case kStele:                                             // a MONUMENT — a stele in several materials (3 variants)
-                {
-                    if (topSolid >= gy) { ++nSkipped; break; }
-                    const int cx = sp.x, cz = sp.z;
-                    switch (hsh % 3u)
-                    {
-                    case 0:                                              // a dark obelisk with a gilded top
-                        for (int dx = -1; dx <= 1; ++dx)
-                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qStone);
-                        for (int dx = 0; dx <= 1; ++dx)
-                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy + 1, cz + dz, qPDsl);
-                        for (int dy = 2; dy <= 6; ++dy) store.set(cx, gy + dy, cz, qPBlk);
-                        store.set(cx, gy + 7, cz, qGold);
-                        break;
-                    case 1:                                              // a brick stele with an eternal flame (granite podium)
-                        for (int dx = -1; dx <= 1; ++dx)
-                            for (int dz = -1; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qGran);
-                        for (int dx = 0; dx <= 1; ++dx)
-                            for (int dz = 0; dz <= 1; ++dz)
-                                for (int dy = 1; dy <= 4; ++dy) store.set(cx + dx, gy + dy, cz + dz, qBrick);
-                        for (int dx = 0; dx <= 1; ++dx)
-                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy + 5, cz + dz, qSBrick);
-                        store.set(cx, gy + 6, cz, IdLanternStanding);
-                        break;
-                    default:                                              // a stone-brick column with side walls on a diorite base
-                        for (int dx = 0; dx <= 1; ++dx)
-                            for (int dz = 0; dz <= 1; ++dz) store.set(cx + dx, gy, cz + dz, qDior);
-                        for (int dy = 1; dy <= 6; ++dy) store.set(cx, gy + dy, cz, qSBrick);
-                        store.set(cx - 1, gy, cz, IdStoneBrickWall); store.set(cx - 1, gy + 1, cz, IdStoneBrickWall);
-                        store.set(cx + 2, gy, cz, IdStoneBrickWall); store.set(cx + 2, gy + 1, cz, IdStoneBrickWall);
-                        store.set(cx, gy + 7, cz, kStairs[(hsh >> 8) % 4u]);
-                        break;
-                    }
-                    ++nPlaced;
-                    break;
-                }
-                case kFountain:                                          // a FOUNTAIN: a stone ring, a pool, a post with water running down it
-                {
-                    if (topSolid >= gy) { ++nSkipped; break; }
-                    const int cx = sp.x, cz = sp.z;
-                    const bool mossyRim = (hsh >> 6) % 4u == 0u;         // an old weathered ring sometimes
-                    const quint16 ringMat = mossyRim ? qMossy : qSBrick;
-                    for (int dx = -2; dx <= 2; ++dx)
-                        for (int dz = -2; dz <= 2; ++dz)
-                        {
-                            const int r = std::max(std::abs(dx), std::abs(dz));
-                            if (r == 2) { store.set(cx + dx, gy, cz + dz, ringMat); store.set(cx + dx, gy + 1, cz + dz, ringMat); }
-                            else if (dx || dz) { store.set(cx + dx, gy, cz + dz, qStone); store.set(cx + dx, gy + 1, cz + dz, IdWater); }
-                        }
-                    store.set(cx, gy, cz, qStone); store.set(cx, gy + 1, cz, qSBrick); store.set(cx, gy + 2, cz, qSBrick);
-                    store.set(cx, gy + 3, cz, IdWater);                  // the source atop the post
-                    static const int kD4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
-                    for (const auto& d : kD4)                            // water STREAMS running down the post (level=8 — falling)
-                    {
-                        store.set(cx + d[0], gy + 3, cz + d[1], IdWaterFalling);
-                        store.set(cx + d[0], gy + 2, cz + d[1], IdWaterFalling);
-                    }
-                    ++nPlaced;
-                    break;
-                }
-                case kTower:                                             // a COMMUNICATION TOWER: an iron base, a spire of stone fence, 3 quartz blocks on top
-                {   // ~32 blocks above the ground; from the roof of a high building — a 6-block body + the antenna
-                    const int baseY = colMin.contains(ck) ? std::max(gy, topSolid + 1) : gy;
-                    const int above = baseY - gy;
-                    const int body = above >= 32 ? 6 : std::max(6, 32 - above - 4);
-                    if (baseY + body + 3 > 255) { ++nSkipped; break; }
-                    store.set(sp.x, baseY, sp.z, IdIronBlock);
-                    for (int dy = 1; dy <= body; ++dy) store.set(sp.x, baseY + dy, sp.z, IdCobbleWall);
-                    for (int dy = 1; dy <= 3; ++dy) store.set(sp.x, baseY + body + dy, sp.z, qQuartz);
-                    ++nPlaced;
-                    break;
-                }
-                case kLightPole:                                         // a LIGHTING MAST: polished calcite with glowstone lights
-                    if (topSolid >= gy) { ++nSkipped; break; }           // something is already built here
-                    for (int dy = 0; dy < 3; ++dy) store.set(sp.x, gy + dy, sp.z, qPCalc);
-                    store.set(sp.x, gy + 3, sp.z, qGlow);                // a request: 3 calcite, glowstone, 2 calcite, glowstone
-                    store.set(sp.x, gy + 4, sp.z, qPCalc);
-                    store.set(sp.x, gy + 5, sp.z, qPCalc);
-                    store.set(sp.x, gy + 6, sp.z, qGlow);
-                    ++nPlaced;
-                    break;
-                case kBench:                                             // a STREET BENCH — 2x1 oak stairs (a request)
-                {   // the bench axis is chosen by the column hash; the seat faces along it, the backrest on the side;
-                    // both cells must be free ground — no road, no water, no structure, nothing already built
-                    static const int kAx[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };   // N/E/S/W (kDirNames order)
-                    const int k = int(hsh % 4u);
-                    const int x2 = sp.x + kAx[k][0], z2 = sp.z + kAx[k][1];
-                    const qint64 ck2 = pairKey(x2, z2);
-                    const int gyB = std::max(gy, surfaceTop(ck2) + 1);   // the seat is level: the higher of the two columns
-                    clearVeg(std::min(sp.x, x2), std::max(sp.x, x2), gyB, gyB + 1,
-                             std::min(sp.z, z2), std::max(sp.z, z2));      // a leaf or a bush in the seat footprint is sheared
-                    if (colWater.contains(ck2) || roadCols.contains(ck2) || colMin.contains(ck2)
-                        || store.get(sp.x, gyB, sp.z) != IdAir || store.get(x2, gyB, z2) != IdAir
-                        || store.get(sp.x, gyB + 1, sp.z) != IdAir || store.get(x2, gyB + 1, z2) != IdAir)
-                    { ++nSkipped; break; }
-                    const quint16 st = quint16(IdStairsN + ((k + 1) & 3));   // the seat turned sideways to its axis
-                    store.set(sp.x, gyB, sp.z, st);
-                    store.set(x2, gyB, z2, st);
-                    ++nPlaced;
-                    break;
-                }
-                case kSculpture:                                         // a SMALL SCULPTURE (3 variants)
-                {
-                    const bool stand = (hsh % 3u) == 2u;                // the 2x2 variant shares one level floor
-                    int gyB = gy;
-                    if (stand)
-                        for (int dx = 0; dx <= 1; ++dx)
-                            for (int dz = 0; dz <= 1; ++dz)
-                                gyB = std::max(gyB, surfaceTop(pairKey(sp.x + dx, sp.z + dz)) + 1);
-                    clearVeg(sp.x, sp.x + 1, gyB, gyB + 3, sp.z, sp.z + 1);   // the widest variant is 2x2x4
-                    if (topSolid >= gy) { ++nSkipped; break; }
-                    if (!stand)
-                    {   // the 1x1 variants stand on the node column itself
-                        if (hsh % 3u == 0u)
-                        {   // a modernist: a dark stone mass on a diorite pedestal
-                            store.set(sp.x, gyB, sp.z, qDior); store.set(sp.x, gyB + 1, sp.z, qPDsl);
-                            store.set(sp.x, gyB + 2, sp.z, qBlk); store.set(sp.x, gyB + 3, sp.z, qPBlk);
-                        }
-                        else
-                        {   // a bust on a stone-brick column
-                            store.set(sp.x, gyB, sp.z, qSBrick); store.set(sp.x, gyB + 1, sp.z, qSBrick);
-                            store.set(sp.x, gyB + 2, sp.z, qSBrick); store.set(sp.x, gyB + 3, sp.z, qAnd);
-                        }
-                        ++nPlaced;
-                        break;
-                    }
-                    {   // a sculptor's stand: a cobble pedestal and a stone cutter; the whole 2x2 needs free
-                        // air above the level floor (a trunk in a corner blocks it)
-                        bool ok2 = true;
-                        for (int dx = 0; dx <= 1 && ok2; ++dx)
-                            for (int dz = 0; dz <= 1 && ok2; ++dz)
-                            {
-                                const qint64 bk = pairKey(sp.x + dx, sp.z + dz);
-                                if (colWater.contains(bk) || roadCols.contains(bk) || colMin.contains(bk)) ok2 = false;
-                                for (int dy = 0; dy <= 1 && ok2; ++dy)
-                                    if (store.get(sp.x + dx, gyB + dy, sp.z + dz) != IdAir) ok2 = false;
-                            }
-                        if (ok2)
-                        {
-                            for (int dx = 0; dx <= 1; ++dx)             // the pedestal, plinth-filled to the level floor
-                                for (int dz = 0; dz <= 1; ++dz)
-                                {
-                                    const int t0 = surfaceTop(pairKey(sp.x + dx, sp.z + dz));
-                                    for (int y = t0 + 1; y < gyB && t0 >= 0; ++y)
-                                        store.set(sp.x + dx, y, sp.z + dz, qCobb);
-                                    store.set(sp.x + dx, gyB, sp.z + dz, qCobb);
-                                }
-                            store.set(sp.x, gyB + 1, sp.z, qAnd);
-                            store.set(sp.x + 1, gyB + 1, sp.z + 1, qAnd);
-                            store.set(sp.x, gyB + 1, sp.z + 1, quint16(IdStonecutterBase + int((hsh >> 8) % 4u)));
-                            ++nPlaced;
-                        }
-                        else ++nSkipped;
-                    }
-                    break;
-                }
-                case kBusStop:                                           // a BUS STOP SHELTER: 5x3, the long side along the road (requests)
-                {   // the open side looks at the nearest MOTOR road (a ring up to 10 blocks; pedestrian and bike
-                    // paths do not count — a user request; an ordinary roadway is only a fallback), else by hash;
-                    // the shelter is shifted OFF the road — 2..3 blocks away from the node, the footprint must be free
-                    static const int kD[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };    // N/E/S/W (kDirNames order)
-                    int od = -1;
-                    for (int r = 1; r <= 10 && od < 0; ++r)
-                        for (int k = 0; k < 4 && od < 0; ++k)
-                            if (autoRoadCols.contains(pairKey(sp.x + kD[k][0] * r, sp.z + kD[k][1] * r))) od = k;
-                    for (int r = 1; r <= 10 && od < 0; ++r)               // no motor road near — any roadway will do
-                        for (int k = 0; k < 4 && od < 0; ++k)
-                            if (roadCols.contains(pairKey(sp.x + kD[k][0] * r, sp.z + kD[k][1] * r))) od = k;
-                    if (od < 0) od = int(hsh % 4u);
-                    const int rx = kD[od][0], rz = kD[od][1];             // the roadway direction (the open side faces it)
-                    const bool alongX = (rz != 0);                        // the road runs N/S — the 5-block side lies along X
-                    bool built = false;
-                    for (int sh = 2; sh <= 3 && !built; ++sh)
-                    {
-                        const int bx0 = sp.x - rx * sh, bz0 = sp.z - rz * sh;   // the box stands OFF the road, behind the node
-                        const int ax = alongX ? 2 : 1, az = alongX ? 1 : 2;     // 5 blocks along the road, 3 across it
-                        // the FLOOR IS THE GROUND SURFACE ITSELF (a request: flush, no raised plinth): the paving
-                        // replaces the turf of the highest footprint level, low columns are raised to it
-                        int gyB = gy - 1;
-                        bool have = true;
-                        for (int dx = -ax; dx <= ax && have; ++dx)
-                            for (int dz = -az; dz <= az && have; ++dz)
-                            {
-                                const qint64 bk = pairKey(bx0 + dx, bz0 + dz);
-                                if (colWater.contains(bk) || roadCols.contains(bk) || colMin.contains(bk)
-                                    || railColsAll.contains(bk)
-                                    || !ground.contains(pairKey((bx0 + dx) >> 4, (bz0 + dz) >> 4))) have = false;
-                            }
-                        if (have)
-                            for (int dx = -ax; dx <= ax; ++dx)            // the paving level — the highest column
-                                for (int dz = -az; dz <= az; ++dz)
-                                    gyB = std::max(gyB, surfaceTop(pairKey(bx0 + dx, bz0 + dz)));
-                        if (have)
-                            clearVeg(bx0 - ax, bx0 + ax, gyB, gyB + 4, bz0 - az, bz0 + az);   // leaves and bushes off the box
-                        bool free = have;
-                        for (int dx = -ax; dx <= ax && free; ++dx)
-                            for (int dz = -az; dz <= az && free; ++dz)
-                                for (int dy = 0; dy <= 4 && free; ++dy)
-                                    if (store.get(bx0 + dx, gyB + dy, bz0 + dz) != IdAir) free = false;
-                        if (!free) continue;
-                        for (int dx = -ax; dx <= ax; ++dx)                 // the floor: the paving replaces the surface
-                            for (int dz = -az; dz <= az; ++dz)             // block of the ground (flush join with the terrain)
-                            {
-                                GroundChunk& g = ground.find(pairKey((bx0 + dx) >> 4, (bz0 + dz) >> 4)).value();
-                                const int col = ((bz0 + dz) & 15) * 16 + ((bx0 + dx) & 15);
-                                g.top[col] = qint16(gyB);                  // level the whole footprint to the paving row
-                                g.surf[col] = qSmth;
-                            }
-                        for (int dx = -ax; dx <= ax; ++dx)                 // the walls: perimeter, the road side open
-                            for (int dz = -az; dz <= az; ++dz)
-                            {
-                                if (std::abs(dx) < ax && std::abs(dz) < az) continue;   // the interior row stays free
-                                if (dx * rx + dz * rz == 1) continue;      // the whole long side toward the road is open
-                                for (int dy = 1; dy <= 3; ++dy) store.set(bx0 + dx, gyB + dy, bz0 + dz, qSBrick);
-                            }
-                        for (int dx = -ax; dx <= ax; ++dx)                 // the flat roof
-                            for (int dz = -az; dz <= az; ++dz) store.set(bx0 + dx, gyB + 4, bz0 + dz, qSBrick);
-                        store.set(bx0, gyB + 3, bz0, IdLanternHung);       // a lamp under the roof
-                        built = true;
-                        ++nPlaced;
-                    }
-                    if (!built) ++nSkipped;
-                    break;
-                }
-                default:
-                    ++nSkipped;                                          // an unknown code — nothing is built
-                    break;
-                }
-            }
-            char buf[128];
-            snprintf(buf, sizeof buf, "3.575 point objects: placed %d, skipped %d", nPlaced, nSkipped);
-            tmcStepLog(buf);
-        }
-    }
-
+    buildPointObjects();
     lap("before 3.59");
     beginStep(9);
-    // 3.59 Extra ground fill for "late" chunks: the site fences (3.57) and lamp posts are written
-    // into the store AFTER the main fill and at the rectangle edge can create a chunk that did not
-    // get into fillChunks — such a chunk is still written (its blocks are in the store), but without ground: in the game
-    // a fence/post would hang above the abyss (verify "bad" columns). The same formulas as above.
-    for (const qint64 ckKey : store.chunks.keys())
-        if (!ground.contains(ckKey))
-        {
-            GroundChunk g = makeGround(ckKey);
-            assignCave(g, ckKey);
-            ground.insert(ckKey, g);
-        }
-
+    buildLateGroundFill();
     lap("before 3.59b");
-    // 3.59b The "chamfer" of the junction with the game world (a user request instead of the "Ground up to the junction" choice
-    // removed from the dialog — the apron is now always off): instead of a sheer cliff the outer edge of
-    // our ground steps down toward the border — the column before the last one above the abyss goes down by 1,
-    // the outermost — by 2. Pond columns (wd>0) and columns with an object (a structure, a fence,
-    // a post, a planting — anything rising up to 7 blocks above the surface) are not lowered.
-    {
-        static const qint8 dX[4] = { -1, 1, 0, 0 }, dZ[4] = { 0, 0, -1, 1 };
-        for (auto git = ground.begin(); git != ground.end(); ++git)
-        {
-            GroundChunk& g = git.value();
-            const int cx = int(keyFirst(git.key())), cz = int(keySecond(git.key()));
-            QVector<quint8> drop(256, 0);
-            bool any = false;
-            for (int d = 0; d < 4; ++d)
-            {
-                if (ground.contains(pairKey(cx + int(dX[d]), cz + int(dZ[d])))
-                    || inExportRect(cx + int(dX[d]), cz + int(dZ[d])))
-                    continue;                                   // this side is not a joint
-                const bool neg = (dX[d] < 0) || (dZ[d] < 0);
-                // A ragged edge: the chamfer line is shifted inward by 0..3 blocks (noise along the edge by the world coordinate, a step of 3 blocks); the strip between the edge and the line
-                // stays lowered by 2, then steps 2 and 1. A column occupied by an object (except vegetation) is not lowered; vegetation is lowered together with the column.
-                for (int k = 0; k < 16; ++k)
-                {
-                    const int along = (d < 2) ? (cz << 4) + k : (cx << 4) + k;
-                    const int o = int(colHash(pairKey(along / 3, d + 77) ^ 0xFA5CAull) % 4u);
-                    for (int p = 0; p <= o + 1 && p < 16; ++p)
-                    {
-                        const int off = neg ? p : 15 - p;
-                        const int lx = (d < 2) ? off : k, lz = (d < 2) ? k : off;
-                        const int col = lz * 16 + lx;
-                        const quint8 want = quint8(p == o + 1 ? 1 : 2);
-                        if (drop[col] >= want || g.wd[col] > 0)
-                            continue;
-                        const int bx = (cx << 4) + lx, bz = (cz << 4) + lz;
-                        bool freeCol = true;                    // a column occupied by an object is not lowered (vegetation — it can be)
-                        for (int y = int(g.top[col]) - 3; y <= int(g.top[col]) + 7; ++y)
-                        {
-                            const quint16 sb = store.get(bx, y, bz);
-                            if (sb && !isVegBlockId(sb)) { freeCol = false; break; }
-                        }
-                        if (!freeCol)
-                            continue;
-                        const int delta = int(want) - int(drop[col]);                 // by how much more we lower (on a repeated pass over the column)
-                        for (int y = int(g.top[col]) + 1; y <= int(g.top[col]) + 24; ++y)   // vegetation goes down together with the ground
-                        {
-                            const quint16 sb = store.get(bx, y, bz);
-                            if (!sb) continue;
-                            store.erase(bx, y, bz);
-                            store.set(bx, y - delta, bz, sb);
-                        }
-                        drop[col] = qMax(drop[col], want);
-                        any = true;
-                    }
-                }
-            }
-            if (!any)
-                continue;
-            int sFloor = std::numeric_limits<int>::max();
-            for (int col = 0; col < 256; ++col)
-            {
-                if (drop[col])
-                    g.top[col] = qint16(int(g.top[col]) - drop[col]);
-                sFloor = std::min(sFloor, int(g.top[col]) - (g.wd[col] > 0 ? int(g.wd[col]) + 3 : 3));
-            }
-            g.stoneFloor = sFloor;
-            taperDrop.insert(git.key(), drop);
-        }
-    }
-
+    buildChamfer();
     lap("before 3.58");
-    // 3.58 Fence connections: the fence connections are a PERSISTENT block state (Properties
-    // north/east/south/west), the client draws the arms by them, NOT by the neighboring blocks. Without the properties
-    // the world loads with "bare sticks", and only break+place recomputes them (a user remark).
-    // We write the connection bitmask into the fence id (blockProperties derives the palette properties from it).
-    {
-        auto connects = [](quint16 nid)
-        {   // a fence "absorbs": the same fence (already stamped), any gate and any full
-          // cube of the object palette (building walls). Plants, water, carpets, stone walls — no.
-            return (nid >= quint16(IdFence) && nid < quint16(IdFenceMax))
-                || (nid >= quint16(IdGateN) && nid <= quint16(IdGateW))
-                || (nid >= quint16(IdPaletteStart) && nid < quint16(IdPaletteStart) + kPaletteCount);
-        };
-        for (auto cit = store.chunks.begin(); cit != store.chunks.end(); ++cit)
-        {
-            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
-            for (auto sit = cit->begin(); sit != cit->end(); ++sit)
-            {
-                const int by0 = sit.key() << 4;
-                QVector<quint16>& sec = sit.value();
-                for (int i = 0; i < sec.size(); ++i)
-                {
-                    if (sec[i] != quint16(IdFence)) continue;   // not a fence or already stamped
-                    const int x = bx0 + (i & 15), y = by0 + ((i >> 8) & 15), z = bz0 + ((i >> 4) & 15);
-                    int conn = 0;
-                    if (connects(store.get(x, y, z - 1))) conn |= 1;   // north = -Z
-                    if (connects(store.get(x + 1, y, z))) conn |= 2;   // east  = +X
-                    if (connects(store.get(x, y, z + 1))) conn |= 4;   // south = +Z
-                    if (connects(store.get(x - 1, y, z))) conn |= 8;   // west  = -X
-                    sec[i] = quint16(int(IdFence) + conn);
-                }
-            }
-        }
-    }
-
-    {   // 3.58b Connections of stone fences (parking lots): with the same ones, gates and full cubes of the object palette
-        auto connectsW = [](quint16 nid)
-        {
-            return (nid >= quint16(IdStoneFence) && nid < quint16(IdStoneFenceMax)) || nid == quint16(IdStoneBrickWall)
-                || (nid >= quint16(IdPaletteStart) && nid < quint16(IdPaletteStart) + kPaletteCount);
-        };
-        for (auto cit = store.chunks.begin(); cit != store.chunks.end(); ++cit)
-        {
-            const int bx0 = keyFirst(cit.key()) << 4, bz0 = keySecond(cit.key()) << 4;
-            for (auto sit = cit->begin(); sit != cit->end(); ++sit)
-            {
-                const int by0 = sit.key() << 4;
-                QVector<quint16>& sec = sit.value();
-                for (int i = 0; i < sec.size(); ++i)
-                {
-                    if (sec[i] != quint16(IdStoneFence)) continue;
-                    const int x = bx0 + (i & 15), y = by0 + ((i >> 8) & 15), z = bz0 + ((i >> 4) & 15);
-                    int conn = 0;
-                    if (connectsW(store.get(x, y, z - 1))) conn |= 1;
-                    if (connectsW(store.get(x + 1, y, z))) conn |= 2;
-                    if (connectsW(store.get(x, y, z + 1))) conn |= 4;
-                    if (connectsW(store.get(x - 1, y, z))) conn |= 8;
-                    sec[i] = quint16(int(IdStoneFence) + conn);
-                }
-            }
-        }
-    }
+    connectFences();
     lap("before 3.6");
     beginStep(8);
-    // 3.6 "Just turf": on empty grass columns (without objects, water and plantings) deterministically
-    // (~1/8 by the column hash) we plant short grass — otherwise the exported terrain looks
-    // bald and "smooth", as if paved.
-    {
-        // We count the candidates in parallel by chunk blocks (read only: ground/colMin/colWater/store), and write into the store
-        // AFTER — in one thread. The main thing: the "every 8th column" hash is checked FIRST — earlier for each
-        // of the 256 columns of a chunk two accesses to the huge colMin/colWater hashes were made (hundreds of millions of accesses,
-        // ~5 minutes on a big project), although only every eighth reached the work.
-        const QVector<qint64> fl(fillChunks.constBegin(), fillChunks.constEnd());
-        const int nF = fl.size();
-        constexpr int kBlk = 128;
-        struct Plant { int x, y, z; };
-        const int nBlk = (nF + kBlk - 1) / kBlk;
-        QVector<QVector<Plant>> outs(nBlk);
-        QThreadPool sodPool;
-        sodPool.setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
-        QVector<QFuture<void>> sf;
-        sf.reserve(nBlk);
-        for (int b = 0; b < nBlk; ++b)
-            sf << QtConcurrent::run(&sodPool, [&, b]()
-            {
-                const int c1 = std::min(nF, (b + 1) * kBlk);
-                for (int ci = b * kBlk; ci < c1; ++ci)
-                {
-                    if (cancel && cancel->load()) return;
-                    const qint64 ckKey = fl[ci];
-                    const auto git = ground.constFind(ckKey);          // the fill guaranteed the metadata
-                    if (git == ground.constEnd()) continue;
-                    const GroundChunk& g = git.value();
-                    const int bx0 = keyFirst(ckKey) << 4, bz0 = keySecond(ckKey) << 4;
-                    for (int lz = 0; lz < 16; ++lz)
-                        for (int lx = 0; lx < 16; ++lx)
-                        {
-                            const int cx = bx0 + lx, cz = bz0 + lz;
-                            const qint64 ck = pairKey(cx, cz);
-                            if (colHash(ck) % 8u != 0u) continue;                       // 7/8 of the columns — immediately skipped
-                            const int top = g.top[lz * 16 + lx];
-                            if (top > 254) continue;
-                            if (g.surf[lz * 16 + lx] != IdGrass) continue;              // wool/stone/paint — skipped
-                            if (colMin.contains(ck) || colWater.contains(ck)) continue; // under an object/water
-                            if (store.get(cx, top, cz) != IdAir) continue;              // the top block is occupied by an object
-                            if (store.get(cx, top + 1, cz) != IdAir) continue;          // already occupied by something
-                            outs[b].append(Plant{ cx, top + 1, cz });
-                        }
-                }
-            });
-        for (int b = 0; b < nBlk; ++b)
-        {
-            sf[b].waitForFinished();
-            if (progress && (b & 0x7) == 0)
-                progress(std::min((b + 1) * kBlk, nF), nF, 8);                              // the "grass (turf)" stage
-            if (cancel && cancel->load())
-            {
-                for (QFuture<void>& f : sf) f.waitForFinished();
-                res.cancelled = true;
-                res.error = QObject::tr("Export cancelled.");
-                return res;
-            }
-        }
-        for (const QVector<Plant>& v : outs)
-            for (const Plant& pl : v)
-                store.set(pl.x, pl.y, pl.z, IdGrassPlant);
-    }
-
+    if (!buildTurf()) return res;
     lap("before 3.59c");
     beginStep(9);
-    // 3.59c "Flowing out" on the chamfer (a user request — a living junction; what it floods/burns — does not matter):
-    // at hash places of the chamfer we write a water source (6..10 blocks) or lava (2..4) into the cells of the new
-    // surface. Water/lava without Properties — a full source (IdWater/IdLava), and when a chunk
-    // loads the game spreads it beyond our area, into the generated world. The points are deterministic
-    // (colHash by the world coordinates) — a repeated export of the same scene reproduces them.
-    // DISABLED (request: waterfalls and lava falls at the world edge only break integrity — we leave just the chamfer); enabled by MCX_EDGE_FLUIDS=1.
-    if (qEnvironmentVariableIsSet("MCX_EDGE_FLUIDS"))
-    {
-        static const qint8 dX[4] = { -1, 1, 0, 0 }, dZ[4] = { 0, 0, -1, 1 };
-        for (auto tit = taperDrop.constBegin(); tit != taperDrop.constEnd(); ++tit)
-        {
-            const int cx = int(keyFirst(tit.key())), cz = int(keySecond(tit.key()));
-            const QVector<quint8>& drop = tit.value();
-            for (int d = 0; d < 4; ++d)
-            {
-                if (ground.contains(pairKey(cx + int(dX[d]), cz + int(dZ[d])))
-                    || inExportRect(cx + int(dX[d]), cz + int(dZ[d])))
-                    continue;                                   // the side is not a junction
-                const bool neg = (dX[d] < 0) || (dZ[d] < 0);
-                const int off = neg ? 0 : 15;                   // the edge row of the chamfer
-                const int inX = -int(dX[d]), inZ = -int(dZ[d]); // inward — into our ground
-                for (int k0 = 0; k0 <= 12; k0 += 4)             // 4 candidates per chunk side
-                {
-                    const int lx0 = (d < 2) ? off : k0, lz0 = (d < 2) ? k0 : off;
-                    if (drop[lz0 * 16 + lx0] < 2)
-                        continue;                               // the chamfer did not lie here (an object/pond)
-                    const qint64 spot = pairKey((cx << 4) + lx0, (cz << 4) + lz0);
-                    if (colHash(spot ^ 0xFACADEull) % 48u != 0u)
-                        continue;                               // ~1 point per 48 edge columns
-                    const quint32 t = colHash(spot ^ 0x1BEEDull);
-                    const bool lava = (t % 4u) == 0u;           // 25% lava, 75% water
-                    const int n = lava ? 30 + int(t >> 8) % 21 : 150 + int(t >> 8) % 101; // lava 30..50 (as the water was), water 150..250 (was 6..10: ×25)
-                    const quint16 fid = lava ? IdLava : IdWater;
-                    // cells: from the edge inward (d=0..2), then the next "row" along the junction
-                    int placed = 0;
-                    for (int idx = 0; idx < n; ++idx)
-                    {
-                        const int r = idx / 3, din = idx % 3;   // r — along the junction (the long line), din=0 — the edge cell
-                        const int lx = lx0 + inX * din + (d < 2 ? 0 : r);
-                        const int lz = lz0 + inZ * din + (d < 2 ? r : 0);
-                        // the line goes along the junction and beyond the chunk border — we look for the neighboring chunk by ground
-                        const int bx = (cx << 4) + lx, bz = (cz << 4) + lz;
-                        const auto git = ground.constFind(pairKey(bx >> 4, bz >> 4));
-                        if (git == ground.constEnd())
-                            break;
-                        const GroundChunk& g = git.value();
-                        const int col = (bz & 15) * 16 + (bx & 15);
-                        if (g.wd[col] > 0)
-                            break;                              // we do not climb into ponds
-                        const int y = g.top[col];
-                        if (store.get(bx, y, bz) || store.get(bx, y + 1, bz))
-                            continue;                           // the cell is occupied — the source will go further
-                        store.set(bx, y, bz, fid);
-                        fluidsByChunk[pairKey(bx >> 4, bz >> 4)].append(FluidSite{ bx, y, bz, lava });
-                        ++placed;
-                    }
-                    Q_UNUSED(placed);
-                }
-            }
-        }
-    }
-
+    buildEdgeFluids();
     lap("before 3.576");
-    // 3.576 Rail platforms (rdcpol 62134000): a stone brick half SLAB over the stone-brick paving
-    // (a user request: "the platform is raised by half a block"). Runs LAST — after every ground correction
-    // (3.59 adds the ground of the "late" chunks, 3.59b/c bevel the world edge): only here the full set of
-    // the saved columns and their true surfaces are known. The slab reads the ground chunk itself: its top row
-    // and the condition that the paving is still paving (not overwritten by a road or water). Where something
-    // solid already stands (a lamp post, a shelter) the slab gives up its cell (a request); low plants go first.
-    if (!platformCols.isEmpty())
-    {
-        const quint16 kSlab = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_brick_slab"));
-        const quint16 kPave = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
-        int nSlab = 0;
-        for (const qint64 ck : platformCols)
-        {
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            const auto git = ground.constFind(pairKey(bx >> 4, bz >> 4));
-            if (git == ground.constEnd()) continue;              // the platform crossed the world edge — no ground here
-            const int col = (bz & 15) * 16 + (bx & 15);
-            if (git.value().surf[col] != kPave) continue;        // the paving was hidden under a road or a square — no slab
-            const int y0 = git.value().top[col] + 1;
-            // NOTE: no colMin/railColsAll guards — the yard rails and the station raise them over whole platforms
-            // while the row above their paving stays free (rails that really lie on this row are caught below).
-            if (colWater.contains(ck)) continue;                 // water over the paving — no slab
-            int yTop = y0;
-            quint16 cur = store.get(bx, yTop, bz);
-            if (cur != IdAir && !isVegBlockId(cur))
-            {   // something stands on this ground row: when the ground was dug down for an underground hall or a
-                // tunnel, its old surface was restored over the ceiling as paving — the slab belongs there (a request)
-                int ry = 0;
-                for (int yy = y0 + 32; yy > y0; --yy)   // from the top: the restored surface is the highest one
-                {
-                    if (store.get(bx, yy, bz) != kPave) continue;
-                    const quint16 ab = store.get(bx, yy + 1, bz);
-                    const quint16 bl = store.get(bx, yy - 1, bz);
-                    if ((ab == IdAir || isVegBlockId(ab)) && bl != IdAir) { ry = yy; break; }   // paving over solid fill, not a lone block in a shaft
-                }
-                if (!ry) continue;                               // a real obstacle (a post, a rail) — the slab gives up
-                yTop = ry + 1;
-            }
-            cur = store.get(bx, yTop, bz);
-            if (cur != IdAir)
-            {
-                if (!isVegBlockId(cur)) continue;                        // should not happen: guarded above
-                store.erase(bx, yTop, bz);
-                const quint16 up = store.get(bx, yTop + 1, bz);
-                if (up && isVegBlockId(up)) store.erase(bx, yTop + 1, bz);   // tall grass — both of its rows
-            }
-            store.set(bx, yTop, bz, kSlab);
-            ++nSlab;
-        }
-        char sbuf[96];
-        snprintf(sbuf, sizeof sbuf, "3.576 platform slabs: %d of %d columns", nSlab, int(platformCols.size()));
-        tmcStepLog(sbuf);
-    }
-
+    buildPlatforms();
     lap("before 4.");
     tmcStepLog("post: chunk assembly start");
     if (!assembleChunks()) return res;
