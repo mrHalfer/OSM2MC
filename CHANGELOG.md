@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to OSMC.PRO are written here, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/);
+All notable changes to OSMC are written here, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/);
 versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEVELOPING.md](DEVELOPING.md)).
 
 ## [Unreleased]
@@ -8,7 +8,7 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ### Changed
 
-- The product is renamed to **OSMC.PRO** (https://osmc.pro) in the user interface, the window title,
+- The product is renamed to **OSMC** (https://osmc.pro) in the user interface, the window title,
   the dialogs, the application description, the classifier warnings, the Russian translation and the READMEs.
   Technical names (the executable, the project files, the settings) are unchanged.
 ## [1.3.26.11052] — 2026-11-05

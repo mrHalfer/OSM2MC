@@ -1,8 +1,8 @@
-# OSMC.PRO — your world in Minecraft
+# OSMC — your world in Minecraft
 
 **English** · [Русский](README.ru.md)
 
-With just a few clicks, OSMC.PRO turns a real map into a **Minecraft Java Edition** world, so you can walk through your own hometown, block by block. It works right out of the box: no extra dependencies, nothing to install.
+With just a few clicks, OSMC turns a real map into a **Minecraft Java Edition** world, so you can walk through your own hometown, block by block. It works right out of the box: no extra dependencies, nothing to install.
 
 ![The online map and the export boundary](images/online_en.png)
 
@@ -47,7 +47,7 @@ While the export runs, the log shows its progress; **Cancel** stops it. Only wha
 
 ## Gallery
 
-Pictures of a world made by OSMC.PRO (click a preview to open the full size).
+Pictures of a world made by OSMC (click a preview to open the full size).
 
 <table>
 <tr><td align="center" width="33%"><a href="images/shots/01_library.jpg"><img src="images/shots/thumbs/01_library.jpg" width="100%" alt="A library with bookshelves and reading tables"></a><br><sub>A library with bookshelves and reading tables</sub></td><td align="center" width="33%"><a href="images/shots/02_classroom.jpg"><img src="images/shots/thumbs/02_classroom.jpg" width="100%" alt="A classroom: desks and a blackboard"></a><br><sub>A classroom: desks and a blackboard</sub></td><td align="center" width="33%"><a href="images/shots/03_park.jpg"><img src="images/shots/thumbs/03_park.jpg" width="100%" alt="A park with a lake and an avenue"></a><br><sub>A park with a lake and an avenue</sub></td></tr>
@@ -62,7 +62,7 @@ Pictures of a world made by OSMC.PRO (click a preview to open the full size).
 ## Tips
 
 - Start with a small area (1–2 km²): an export takes minutes, while a big area takes much longer and needs more memory.
-- The result depends on how well the area is mapped in OpenStreetMap: heights, floors and building types appear only where mappers entered them; where they are missing, OSMC.PRO estimates them.
+- The result depends on how well the area is mapped in OpenStreetMap: heights, floors and building types appear only where mappers entered them; where they are missing, OSMC estimates them.
 - If you publish a world made from OpenStreetMap data (a server, a download), keep the attribution - see *License and data*.
 
 ## Command line (pro mode)
@@ -89,12 +89,12 @@ These files lie next to `tMC.exe` and can be edited with any text editor:
 
 ## License and data
 
-OSMC.PRO is free software under the **MIT license** (`LICENSE`); the third-party components shipped with it are listed in `THIRD_PARTY_NOTICES.md`.
+OSMC is free software under the **MIT license** (`LICENSE`); the third-party components shipped with it are listed in `THIRD_PARTY_NOTICES.md`.
 
 Map data © **OpenStreetMap contributors**, under the Open Database License (ODbL) - https://www.openstreetmap.org/copyright.
 **A world made from OSM data is a derived database: when you publish it (a server, a download), keep the attribution "Map data © OpenStreetMap contributors (ODbL)" and follow the ODbL.** The exported zip contains the file `ATTRIBUTION.txt` with this line.
 The online mode follows the OpenStreetMap usage policies: tiles are cached, searches go out at most once per second. Please do not abuse the public servers.
 
-Minecraft is a trademark of Mojang AB; OSMC.PRO is not affiliated with Mojang or Microsoft. The structure templates were cut out of a game world.
+Minecraft is a trademark of Mojang AB; OSMC is not affiliated with Mojang or Microsoft. The structure templates were cut out of a game world.
 
 Source code, issues and releases: https://github.com/mrHalfer/OSM2MC. How to build the program: [DEVELOPING.md](DEVELOPING.md).

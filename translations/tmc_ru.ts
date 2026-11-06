@@ -142,8 +142,8 @@
     <name>MainWindow</name>
     <message>
         <location filename="../app/mainwindow.ui" line="14"/>
-        <source>OSMC.PRO — export to Minecraft</source>
-        <translation>OSMC.PRO — экспорт в Minecraft</translation>
+        <source>OSMC — export to Minecraft</source>
+        <translation>OSMC — экспорт в Minecraft</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.ui" line="46"/>
@@ -154,8 +154,8 @@
         <location filename="../app/mainwindow.cpp" line="739"/>
         <location filename="../app/mainwindow.cpp" line="749"/>
         <location filename="../app/mainwindow.cpp" line="958"/>
-        <source>OSMC.PRO</source>
-        <translation>OSMC.PRO</translation>
+        <source>OSMC</source>
+        <translation>OSMC</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.ui" line="53"/>
@@ -654,8 +654,8 @@
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="687"/>
-        <source>This is not an OSMC.PRO project file: %1</source>
-        <translation>Это не файл проекта OSMC.PRO: %1</translation>
+        <source>This is not an OSMC project file: %1</source>
+        <translation>Это не файл проекта OSMC: %1</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="728"/>
@@ -670,8 +670,8 @@
     <message>
         <location filename="../app/mainwindow.cpp" line="736"/>
         <location filename="../app/mainwindow.cpp" line="745"/>
-        <source>OSMC.PRO project (*.tmc);;All files (*)</source>
-        <translation>Проект OSMC.PRO (*.tmc);;Все файлы (*)</translation>
+        <source>OSMC project (*.tmc);;All files (*)</source>
+        <translation>Проект OSMC (*.tmc);;Все файлы (*)</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="739"/>
@@ -1065,8 +1065,8 @@ to choose the spawn point.</source>
     <name>QObject</name>
     <message>
         <location filename="../app/main.cpp" line="77"/>
-        <source>OSMC.PRO — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world.</source>
-        <translation>OSMC.PRO — экспорт данных tqt (проект .tqt или shape-файлы папки) в мир Minecraft.</translation>
+        <source>OSMC — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world.</source>
+        <translation>OSMC — экспорт данных tqt (проект .tqt или shape-файлы папки) в мир Minecraft.</translation>
     </message>
     <message>
         <location filename="../app/main.cpp" line="81"/>
@@ -2174,8 +2174,8 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
     </message>
     <message>
         <location filename="../scene/mcscene.cpp" line="214"/>
-        <source>Layer &apos;%1&apos;: coloring by a classifier is not supported in OSMC.PRO — the default color is used</source>
-        <translation>Слой &apos;%1&apos;: раскраска по классификатору в OSMC.PRO не поддерживается — цвет по умолчанию</translation>
+        <source>Layer &apos;%1&apos;: coloring by a classifier is not supported in OSMC — the default color is used</source>
+        <translation>Слой &apos;%1&apos;: раскраска по классификатору в OSMC не поддерживается — цвет по умолчанию</translation>
     </message>
     <message>
         <location filename="../scene/mcscene.cpp" line="219"/>
@@ -2204,8 +2204,8 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
     </message>
     <message>
         <location filename="../scene/modelbuilder.cpp" line="1467"/>
-        <source>Layer &apos;%1&apos;: coloring by a classifier is not supported in OSMC.PRO — the default color is used.</source>
-        <translation>Слой &apos;%1&apos;: раскраска по классификатору в OSMC.PRO не поддерживается — используется цвет по умолчанию.</translation>
+        <source>Layer &apos;%1&apos;: coloring by a classifier is not supported in OSMC — the default color is used.</source>
+        <translation>Слой &apos;%1&apos;: раскраска по классификатору в OSMC не поддерживается — используется цвет по умолчанию.</translation>
     </message>
 </context>
 </TS>

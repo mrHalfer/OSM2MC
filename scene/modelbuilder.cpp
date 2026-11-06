@@ -1464,7 +1464,7 @@ QVector3D ModelBuilder::ResolveObjectColor(const ModelSettings::VectorSource& vs
         {   // coloring by a classifier is not supported in tMC (there is no classifier): the default color + one warning per layer
             if (warnings && classifierFallbackWarned && !*classifierFallbackWarned)
             {
-                *warnings << QObject::tr("Layer '%1': coloring by a classifier is not supported in OSMC.PRO — the default color is used.")
+                *warnings << QObject::tr("Layer '%1': coloring by a classifier is not supported in OSMC — the default color is used.")
                                  .arg(vs.layer ? vs.layer->name : QString());
                 *classifierFallbackWarned = true;
             }
