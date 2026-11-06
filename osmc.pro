@@ -16,10 +16,10 @@ INCLUDEPATH += .
 
 # GDAL: the headers and the import library gdal_i.lib are in third_party/gdal (the project builds out of the box); another GDAL can be used
 # through the GDAL_DIR environment variable (a directory with include and lib subfolders). The DLLs are needed only to run (see README).
-TMC_GDAL = $$(GDAL_DIR)
-isEmpty(TMC_GDAL): TMC_GDAL = $$PWD/third_party/gdal
-INCLUDEPATH += $$TMC_GDAL/include
-LIBS += $$TMC_GDAL/lib/gdal_i.lib
+OSMC_GDAL = $$(GDAL_DIR)
+isEmpty(OSMC_GDAL): OSMC_GDAL = $$PWD/third_party/gdal
+INCLUDEPATH += $$OSMC_GDAL/include
+LIBS += $$OSMC_GDAL/lib/gdal_i.lib
 # WinHTTP: online mode (OSM map tiles, search, data download) — HTTPS through the system certificates, no OpenSSL
 LIBS += winhttp.lib
 
@@ -151,4 +151,4 @@ for(f, TMC_RES): exists($$PWD/resources/$$f): QMAKE_POST_LINK += xcopy /Y /D /Q 
 QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/templates/*.bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)
 # The GDAL runtime (gdal.dll and its dependencies, gdal-data, projlib, gdalplugins) is not in the repository (about 100 MB): if it is put into <GDAL folder>/bin
 # (third_party/gdal/bin by default, see third_party/gdal/README.md), it is copied next to the exe too, so the program starts right from Qt Creator.
-exists($$TMC_GDAL/bin): QMAKE_POST_LINK += xcopy /E /Y /D /Q /I \"$$shell_path($$TMC_GDAL/bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)
+exists($$OSMC_GDAL/bin): QMAKE_POST_LINK += xcopy /E /Y /D /Q /I \"$$shell_path($$OSMC_GDAL/bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)

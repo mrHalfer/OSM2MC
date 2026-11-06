@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Common paths of the tMC tests. Everything lies inside tests (except the tMC build, Qt, GDAL and Java).
 
-The machine paths are taken from the environment variables QT_BIN, GDAL_BIN, TMC_EXE, JAVA, TMC_TEST_SHP
+The machine paths are taken from the environment variables QT_BIN, GDAL_BIN, OSMC_EXE, JAVA, TMC_TEST_SHP
 or from the optional file tests/local_config.json (not included in the repository) with the same keys."""
 import json, os, shutil
 
@@ -33,7 +33,7 @@ def _setting(key, default=''):
 QT_BIN = _setting('QT_BIN')
 _TP_GDAL_BIN = os.path.join(ROOT, 'third_party', 'gdal', 'bin')
 GDAL_BIN = _setting('GDAL_BIN') or (_TP_GDAL_BIN if os.path.isdir(_TP_GDAL_BIN) else '')        # the GDAL runtime from the project, if it was put there
-TMC_EXE = _setting('TMC_EXE') or shutil.which('osmc') or 'osmc.exe'
+OSMC_EXE = _setting('OSMC_EXE') or shutil.which('osmc') or 'osmc.exe'
 
 
 def find_java():

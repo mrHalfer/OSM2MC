@@ -6,14 +6,14 @@ import tcfg
 
 def run_tmc(args, log_path, env_extra=None, cwd=None, timeout=3600):
     """args — command-line arguments without --nogui/--log. Returns (exit code, log text, seconds)."""
-    if not os.path.exists(tcfg.TMC_EXE):
-        raise FileNotFoundError('no %s — build tMC (build.bat) or set TMC_EXE' % tcfg.TMC_EXE)
+    if not os.path.exists(tcfg.OSMC_EXE):
+        raise FileNotFoundError('no %s — build tMC (build.bat) or set OSMC_EXE' % tcfg.OSMC_EXE)
     env = tcfg.tool_env()
     env.update(env_extra or {})
     if os.path.exists(log_path):
         os.remove(log_path)
     t0 = time.time()
-    p = subprocess.run([tcfg.TMC_EXE] + list(args) + ['--nogui', '--lang', 'en', '--log', log_path],
+    p = subprocess.run([tcfg.OSMC_EXE] + list(args) + ['--nogui', '--lang', 'en', '--log', log_path],
                        cwd=cwd or tcfg.WORLDS, env=env, timeout=timeout,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     text = ''

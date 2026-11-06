@@ -1,6 +1,6 @@
 # Climate-zone regression: tiny two-building scenes at real city coordinates - prints the
 # "Climate zone:" line of every export and checks it against the expected Kooppen zone.
-# Usage: python check_zones.py          (the tMC exe comes from tcfg: TMC_EXE env or local_config.json)
+# Usage: python check_zones.py          (the tMC exe comes from tcfg: OSMC_EXE env or local_config.json)
 # The list covers the monsoon and semi-arid regions of 2026 plus three NOT controls.
 import math, os, subprocess, sys, tempfile
 import tcfg
@@ -52,8 +52,8 @@ CITIES = [
     ('Beijing (ctl)',    116.407, 39.904, 'NOT'),
 ]
 
-if not os.path.isfile(tcfg.TMC_EXE):
-    print('tMC exe not found:', tcfg.TMC_EXE, '- set TMC_EXE or tests/local_config.json')
+if not os.path.isfile(tcfg.OSMC_EXE):
+    print('tMC exe not found:', tcfg.OSMC_EXE, '- set OSMC_EXE or tests/local_config.json')
     sys.exit(77)
 out = tempfile.mkdtemp(prefix='zcheck')
 fails = 0
@@ -63,7 +63,7 @@ for name, lon, lat, want in CITIES:
         if os.path.exists(p):
             os.remove(p)
     scene(osm, lon, lat)
-    subprocess.run([tcfg.TMC_EXE, osm, '-o', zip_, '--caves', '0', '--nogui', '--lang', 'en', '--log', log],
+    subprocess.run([tcfg.OSMC_EXE, osm, '-o', zip_, '--caves', '0', '--nogui', '--lang', 'en', '--log', log],
                    check=True, env=tcfg.tool_env())
     zone = ''
     with open(log, encoding='utf-8', errors='replace') as f:

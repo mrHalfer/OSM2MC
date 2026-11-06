@@ -16,7 +16,7 @@ tests\
   servers\mc121\      сервер Minecraft 1.21.11
   worlds\             сгенерированные миры (zip), их логи, распакованные копии не хранятся
   build\              артефакты стенда (exe, obj)
-  local_config.json   необязательно, в репозиторий не входит: машинные пути (QT_BIN, GDAL_BIN, TMC_EXE, JAVA, TMC_TEST_SHP)
+  local_config.json   необязательно, в репозиторий не входит: машинные пути (QT_BIN, GDAL_BIN, OSMC_EXE, JAVA, TMC_TEST_SHP)
 ```
 
 ## Этапы `run_tests.py`
@@ -31,7 +31,7 @@ tests\
 Быстрый цикл при правке правил OSM: `py -3 run_tests.py osm`. Перед сдачей правок экспортёра — `py -3 run_tests.py all`.
 
 ## Требования
-- Собранный `osmc.exe` (`build.bat` в корне); путь — переменная `TMC_EXE`, ключ `local_config.json` или `osmc.exe` из `PATH`.
+- Собранный `osmc.exe` (`build.bat` в корне); путь — переменная `OSMC_EXE`, ключ `local_config.json` или `osmc.exe` из `PATH`.
 - Каталоги Qt и GDAL с DLL: `QT_BIN`, `GDAL_BIN` (переменные окружения или `local_config.json`); они добавляются в `PATH` запускаемых программ.
 - Java для серверов: `JAVA` (переменная или `local_config.json`), иначе `java` из `PATH`.
 - Серверы Minecraft (`server.jar`) в репозиторий не входят: положите их в `servers\mc26` и `servers\mc121` (условия EULA Mojang).

@@ -14,7 +14,7 @@ tests\
   servers\mc121\      the Minecraft 1.21.11 server
   worlds\             generated worlds (zip) and their logs; unpacked copies are not kept
   build\              harness artifacts (exe, obj)
-  local_config.json   optional, not in the repository: machine paths (QT_BIN, GDAL_BIN, TMC_EXE, JAVA, TMC_TEST_SHP)
+  local_config.json   optional, not in the repository: machine paths (QT_BIN, GDAL_BIN, OSMC_EXE, JAVA, TMC_TEST_SHP)
 ```
 
 The tests run `osmc.exe` with `--lang en`, so the log messages they match are the English ones.
@@ -32,7 +32,7 @@ A quick cycle while editing the OSM rules: `py -3 run_tests.py osm`. Before hand
 
 ## Requirements
 
-- A built `osmc.exe` (`build.bat` in the root); the path is the `TMC_EXE` variable, a `local_config.json` key, or `osmc.exe` from `PATH`.
+- A built `osmc.exe` (`build.bat` in the root); the path is the `OSMC_EXE` variable, a `local_config.json` key, or `osmc.exe` from `PATH`.
 - Qt and GDAL directories with DLLs: `QT_BIN`, `GDAL_BIN` (environment variables or `local_config.json`); they are added to the `PATH` of the programs that are started.
 - Java for the servers: `JAVA` (a variable or `local_config.json`), otherwise `java` from `PATH`.
 - The Minecraft servers (`server.jar`) are not in the repository: put them into `servers\mc26` and `servers\mc121` (the Mojang EULA).
