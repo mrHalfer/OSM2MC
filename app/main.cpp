@@ -74,7 +74,7 @@ int main(int argc, char* argv[])
     }
 
     QCommandLineParser p;
-    p.setApplicationDescription(QObject::tr("tMC — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world."));
+    p.setApplicationDescription(QObject::tr("OSMC.PRO — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world."));
     p.setSingleDashWordOptionMode(QCommandLineParser::ParseAsLongOptions);      // "-debug" as well as "--debug"
     p.addHelpOption();
     p.addVersionOption();
