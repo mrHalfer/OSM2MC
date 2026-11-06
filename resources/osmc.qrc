@@ -1,6 +1,6 @@
 <RCC>
     <qresource prefix="/style">
-        <file>tmc.qss</file>
+        <file>osmc.qss</file>
         <file>check.svg</file>
     </qresource>
 </RCC>

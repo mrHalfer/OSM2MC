@@ -1,5 +1,5 @@
 #pragma once
-// Window styling: the Fusion style, a palette and the resources/tmc.qss style sheet; light or dark theme following the Windows setting.
+// Window styling: the Fusion style, a palette and the resources/osmc.qss style sheet; light or dark theme following the Windows setting.
 #include <QColor>
 
 class QApplication;

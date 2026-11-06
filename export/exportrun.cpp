@@ -676,7 +676,7 @@ bool ExportRun::writeZip()
             addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/tpl_%1_%2.json").arg(tplInst[ti].id.section(QLatin1Char(':'), -1)).arg(ti), js);
         }
         addEntry(QStringLiteral("datapacks/tmc_lairs/pack.mcmeta"),
-                QByteArray("{\"pack\":{\"description\":\"tMC: strongholds, ancient cities and ruined portals located\",\"min_format\":82,\"max_format\":121}}"));
+                QByteArray("{\"pack\":{\"description\":\"OSMC: strongholds, ancient cities and ruined portals located\",\"min_format\":82,\"max_format\":121}}"));
         // ruined portals in forests: each gets its own structure_set with a salt at which the cell position coincides with the start chunk (/locate structure minecraft:ruined_portal)
         for (int pi = 0; pi < portalStarts.size(); ++pi)
         {

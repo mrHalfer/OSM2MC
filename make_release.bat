@@ -1,8 +1,8 @@
 @echo off
 setlocal
-rem Makes a ready-to-run release of tMC: builds it, collects everything it needs next to tMC.exe (Qt DLLs by windeployqt, the GDAL runtime from third_party\gdal\bin,
+rem Makes a ready-to-run release of OSMC: builds it, collects everything it needs next to OSMC.exe (Qt DLLs by windeployqt, the GDAL runtime from third_party\gdal\bin,
 rem the structure templates, the default settings and rules, the README files), checks that the result starts WITHOUT Qt and GDAL in PATH and packs it into a zip.
-rem Result: %TMC_BUILD%\package\tMC-<version>-win64.zip (the folder %TMC_BUILD%\package\tMC is the same thing unpacked).
+rem Result: %TMC_BUILD%\package\tMC-<version>-win64.zip (the folder %TMC_BUILD%\package\OSMC is the same thing unpacked).
 rem Needs the same tools as build.bat (VCVARS, QTDIR, TMC_BUILD may be set from outside) and the GDAL runtime in third_party\gdal\bin (see setup.bat).
 cd /d "%~dp0"
 set "ROOT=%~dp0"
@@ -16,7 +16,7 @@ if not exist "third_party\gdal\bin\gdal304.dll" (
 
 echo === 1/5 building ===
 call "%ROOT%build.bat"
-if not exist "%TMC_BUILD%\release\tMC.exe" (
+if not exist "%TMC_BUILD%\release\OSMC.exe" (
   echo The build failed, see %TMC_BUILD%\build_nmake.log
   exit /b 1
 )
@@ -28,14 +28,14 @@ if not defined QTDIR set "QTDIR=C:\Qt\5.15.2\msvc2019_64"
 call "%VCVARS%" x64 >nul
 
 set "VER=1.0"
-for /f "tokens=3" %%v in ('findstr /b /c:"    VERSION" "%ROOT%tMC.pro"') do set "VER=%%v"
+for /f "tokens=3" %%v in ('findstr /b /c:"    VERSION" "%ROOT%osmc.pro"') do set "VER=%%v"
 set "PKG=%TMC_BUILD%\package"
-set "DST=%PKG%\tMC"
+set "DST=%PKG%\OSMC"
 if exist "%DST%" rmdir /s /q "%DST%"
 mkdir "%DST%"
 
 echo === 2/5 collecting the files ===
-copy /y "%TMC_BUILD%\release\tMC.exe" "%DST%\" >nul
+copy /y "%TMC_BUILD%\release\OSMC.exe" "%DST%\" >nul
 for %%f in (default.t3d osm_rules.json heights.csv point_models.csv tmc_buildings.dat) do if exist "%ROOT%resources\%%f" copy /y "%ROOT%resources\%%f" "%DST%\" >nul
 copy /y "%ROOT%resources\templates\*.bin" "%DST%\" >nul
 xcopy /E /Y /Q /I "%ROOT%third_party\gdal\bin" "%DST%" >nul
@@ -43,7 +43,7 @@ for %%f in (README.md README.ru.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md) 
 if exist "%ROOT%images" (mkdir "%DST%\images" & copy /y "%ROOT%images\*.png" "%DST%\images\" >nul & xcopy /e /i /y /q "%ROOT%images\shots" "%DST%\images\shots" >nul)
 
 echo === 3/5 Qt libraries (windeployqt) ===
-"%QTDIR%\bin\windeployqt.exe" --release --no-translations --no-opengl-sw --no-system-d3d-compiler --compiler-runtime "%DST%\tMC.exe" >nul
+"%QTDIR%\bin\windeployqt.exe" --release --no-translations --no-opengl-sw --no-system-d3d-compiler --compiler-runtime "%DST%\OSMC.exe" >nul
 if errorlevel 1 (
   echo windeployqt failed
   exit /b 1
@@ -58,7 +58,7 @@ set "SAVEPATH=%PATH%"
 set "PATH=%SystemRoot%\System32;%SystemRoot%"
 set "TEST_LOG=%PKG%\smoke.log"
 if exist "%TEST_LOG%" del "%TEST_LOG%"
-"%DST%\tMC.exe" "%ROOT%tests\data\osm_buildings.osm" --dry-run --nogui --lang en --log "%TEST_LOG%"
+"%DST%\OSMC.exe" "%ROOT%tests\data\osm_buildings.osm" --dry-run --nogui --lang en --log "%TEST_LOG%"
 set "RC=%ERRORLEVEL%"
 set "PATH=%SAVEPATH%"
 if not "%RC%"=="0" (
@@ -69,7 +69,7 @@ findstr /c:"Dry run" "%TEST_LOG%" >nul || ( echo The check failed: no result in 
 echo     ok
 
 echo === 5/5 packing ===
-set "ZIP=%PKG%\tMC-%VER%-win64.zip"
+set "ZIP=%PKG%\OSMC-%VER%-win64.zip"
 if exist "%ZIP%" del "%ZIP%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%DST%' -DestinationPath '%ZIP%' -CompressionLevel Optimal"
 if errorlevel 1 ( echo packing failed & exit /b 1 )

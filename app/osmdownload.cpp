@@ -53,7 +53,7 @@ class OsmMerger
 public:
     explicit OsmMerger(const QString& outFile) : mOut(outFile)
     {
-        QDir().mkpath(QFileInfo(outFile).absolutePath());                   // the folder (for example Documents/tMC) may not exist yet
+        QDir().mkpath(QFileInfo(outFile).absolutePath());                   // the folder (for example Documents/OSMC) may not exist yet
         const char* ext[3] = { ".nodes.part", ".ways.part", ".rels.part" };
         for (int i = 0; i < 3; ++i)
         {
@@ -105,7 +105,7 @@ public:
         const QString tmp = mOut + QStringLiteral(".part");
         QFile out(tmp);
         if (!out.open(QIODevice::WriteOnly)) { *error = QObject::tr("Could not write the file: %1").arg(QDir::toNativeSeparators(mOut)); return false; }
-        out.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<osm version=\"0.6\" generator=\"tMC\">\n");
+        out.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<osm version=\"0.6\" generator=\"OSMC\">\n");
         for (int k = 0; k < 3; ++k)
         {
             std::sort(mIndex[k].begin(), mIndex[k].end(), [](const Entry& a, const Entry& b) { return a.id < b.id; });

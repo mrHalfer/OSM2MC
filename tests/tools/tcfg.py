@@ -33,7 +33,7 @@ def _setting(key, default=''):
 QT_BIN = _setting('QT_BIN')
 _TP_GDAL_BIN = os.path.join(ROOT, 'third_party', 'gdal', 'bin')
 GDAL_BIN = _setting('GDAL_BIN') or (_TP_GDAL_BIN if os.path.isdir(_TP_GDAL_BIN) else '')        # the GDAL runtime from the project, if it was put there
-TMC_EXE = _setting('TMC_EXE') or shutil.which('tMC') or 'tMC.exe'
+TMC_EXE = _setting('TMC_EXE') or shutil.which('OSMC') or 'OSMC.exe'
 
 
 def find_java():

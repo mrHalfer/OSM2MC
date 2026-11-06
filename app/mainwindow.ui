@@ -43,7 +43,7 @@
         <item>
          <widget class="QLabel" name="titleLabel">
           <property name="text">
-           <string>tMC</string>
+           <string>OSMC</string>
           </property>
          </widget>
         </item>

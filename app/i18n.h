@@ -1,5 +1,5 @@
 #pragma once
-// Interface language: the source strings are English; translations are embedded as :/i18n/tmc_ru.qm (Russian) and :/i18n/tmc_zh.qm (Chinese).
+// Interface language: the source strings are English; translations are embedded as :/i18n/osmc_ru.qm (Russian) and :/i18n/osmc_zh.qm (Chinese).
 // The choice is "auto" (follow the system language), "en", "ru" or "zh"; it is stored in QSettings and can be overridden by the --lang command-line key.
 #include <QString>
 

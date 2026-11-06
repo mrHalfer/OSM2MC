@@ -378,7 +378,7 @@ TmcRunOptions MainWindow::collect() const
 
 void MainWindow::browseProject()
 {
-    // without a chosen source the dialog opens in Documents\tMC (the folder is created on the first click)
+    // without a chosen source the dialog opens in Documents\OSMC (the folder is created on the first click)
     QString start = ui->sourceEdit->text();
     if (start.isEmpty())
     {
@@ -844,12 +844,12 @@ void MainWindow::retranslate()
     updateStageLabel();
 }
 
-//! Where to put the downloaded data: the folder of the chosen world file, otherwise "Documents\tMC"
+//! Where to put the downloaded data: the folder of the chosen world file, otherwise "Documents\OSMC"
 QString MainWindow::defaultOutputDir() const
 {
     const QString out = ui->outEdit->text().trimmed();
     if (!out.isEmpty()) return QFileInfo(out).absolutePath();
-    return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/tMC");
+    return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/OSMC");
 }
 
 //! Online: on the right the OSM map with search and boundary, on the left only the world file choice and the parameters; local: the usual data preview

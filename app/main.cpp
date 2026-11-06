@@ -63,7 +63,7 @@ int main(int argc, char* argv[])
     qSetGlobalQHashSeed(0);
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("EL-MODS MEDIA"));
-    QCoreApplication::setApplicationName(QStringLiteral("tMC"));
+    QCoreApplication::setApplicationName(QStringLiteral("OSMC"));
     QCoreApplication::setApplicationVersion(QStringLiteral("1.0"));
     setupGdalEnvironment();
     {   // the language must be known before any message is built: look for --lang in the raw arguments

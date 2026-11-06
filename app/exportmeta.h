@@ -12,7 +12,7 @@ struct TmcRunOptions;
 
 namespace TmcExportMeta
 {
-//! The program version from tMC.pro, e.g. "1.1.26.10305"
+//! The program version from osmc.pro, e.g. "1.1.26.10305"
 QString version();
 
 struct Params

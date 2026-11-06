@@ -187,7 +187,7 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     w.locateDatapack = opt.locateDatapack;
     if (TmcProject::isOsmFile(opt.source))
         w.attribution = QStringLiteral("Map data (c) OpenStreetMap contributors, Open Database License (ODbL) 1.0: https://www.openstreetmap.org/copyright\n"
-                                       "This world was made from OpenStreetMap data with tMC. If you publish it, keep this attribution and follow the ODbL.\n");
+                                       "This world was made from OpenStreetMap data with OSMC. If you publish it, keep this attribution and follow the ODbL.\n");
     w.strongholdChunk = opt.strongholdChunk;
     w.cityChunk = opt.cityChunk;
     w.paleForestChunk = opt.paleForestChunk;
@@ -275,7 +275,7 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     if (!opt.savesDir.isEmpty())
     {   // export setting: the world goes UNPACKED into the chosen saves folder (launcher, Modrinth/CurseForge instance), no zip
         QString base = project.projectBaseName();
-        if (base.isEmpty()) base = QStringLiteral("tmc_export");
+        if (base.isEmpty()) base = QStringLiteral("osmc_export");
         if (opt.format == McWorldExporter::Format::Legacy121x) base += QStringLiteral("_legacy");
         out = QDir(opt.savesDir).filePath(base);
         if (QFileInfo::exists(out))       // the same rule as for the zip: an existing save is not replaced, the new one gets the export date and time
@@ -285,7 +285,7 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     else if (out.isEmpty())
     {
         QString base = project.projectBaseName();
-        if (base.isEmpty()) base = QStringLiteral("tmc_export");
+        if (base.isEmpty()) base = QStringLiteral("osmc_export");
         if (opt.format == McWorldExporter::Format::Legacy121x) base += QStringLiteral("_legacy");
         // by default next to the source data: the folder of the project/OSM file or the chosen folder itself (no source — the current folder)
         const QFileInfo si(opt.source);

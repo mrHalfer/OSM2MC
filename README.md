@@ -8,7 +8,7 @@ With just a few clicks, OSMC turns a real map into a **Minecraft Java Edition** 
 
 ## Quick start
 
-1. Download the release and run `tMC.exe`. On the right you will find the online OpenStreetMap map with a search box that understands any place name in any language.
+1. Download the release and run `OSMC.exe`. On the right you will find the online OpenStreetMap map with a search box that understands any place name in any language.
 2. Press **Boundary** and outline the area you want with a polygon, up to **25 km²** (its size is shown in the corner of the map).
 3. Optionally, mark the **Spawn** point and the entrances to the **Stronghold**, the **Ancient City** and the **Pale Garden**.
 4. Press **Download the area**: the data is fetched from the OpenStreetMap servers and opens right in the window.
@@ -70,17 +70,17 @@ Pictures of a world made by OSMC (click a preview to open the full size).
 For scripts there is a mode without a window:
 
 ```
-tMC source.osm -o world.zip --nogui --log run.log
+osmc.exe source.osm -o world.zip --nogui --log run.log
 ```
 
 Main options: `--format 26|1.21`, `--flat`, `--seed N`, `--caves 0|1`, `--climate auto|temperate|boreal|tundra|steppe|mediterranean|desert|savanna|tropical|monsoon|semi-arid|rainforest|dark-forest`,
 `--clip "lon lat; lon lat; ..."` (export only this polygon), `--spawn-lonlat "lon lat"`, `--lang auto|en|ru`, `--theme auto|light|dark`,
-`--download-osm "lon lat; ..." -o area.osm` (download an area of up to 25 km² and exit), `--dry-run` (only load and classify the data). `tMC --help` lists everything.
+`--download-osm "lon lat; ..." -o area.osm` (download an area of up to 25 km² and exit), `--dry-run` (only load and classify the data). `OSMC --help` lists everything.
 A `.tmc` project file passed as the argument opens in the window.
 
 ## Tuning (for true gurus)
 
-These files lie next to `tMC.exe` and can be edited with any text editor:
+These files lie next to `OSMC.exe` and can be edited with any text editor:
 
 - **`osm_rules.json`** - which OpenStreetMap tags make which kind of object; the format is described inside the file (the `_help` section).
 - **`default.t3d`** - the 3D settings: materials, heights, the look of object types.
