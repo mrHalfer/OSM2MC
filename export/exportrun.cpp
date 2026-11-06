@@ -271,6 +271,7 @@ private:
     QHash<ColKey, QVector<SignSite>> signsByChunk;
     QHash<ColKey, QVector<quint8>> taperDrop;   // which columns got a chamfer — needed by pass 3.59c
     QHash<ColKey, RegionData> regions;
+    QPainterPath clipPath;                  // the world clip polygon of the chunk assembly
     QList<qint64> writeChunks;
     QSet<ColKey> writeSet;
     bool blendBorder;
@@ -303,6 +304,11 @@ private:
     int packTotal;
     int regDone;
     QByteArray zipData;
+
+    // 4. Chunks -> regions: the chunk NBT assembly (false - cancelled).
+    bool assembleChunks();
+    // 5. The save archive: level.dat, regions, entities, the datapack.
+    bool writeZip();
 };
 
 ExportRun::ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
@@ -316,6 +322,422 @@ ExportRun::ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
     : objectsIn(objectsIn_), heightAt(heightAt_), path(path_), levelName(levelName_),
       cancel(cancel_), format(format_), progress(progress_), world(world_)
 {
+}
+
+bool ExportRun::assembleChunks()
+{
+    // 4. chunks -> regions (r.<chunkX>>5>.<chunkZ>>5>.mca)
+    if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return false; }
+    // We write the chunks: all that got ground metadata (fillChunks = touched by objects + the apron/
+    // finishing of the rectangle in noise), plus the chunks where plantings were added after the fill
+    // (store.set creates new keys itself).
+    writeChunks = fillChunks;
+    {
+        const QSet<ColKey> inFill(fillChunks.constBegin(), fillChunks.constEnd());
+        for (auto it = store.chunks.constBegin(); it != store.chunks.constEnd(); ++it)
+            if (!inFill.contains(it.key())) writeChunks << it.key();   // e.g. a crown beyond the forest spot
+    }
+    // The polygon boundary: chunks that it does not touch are not written (neither blocks nor entities)
+    if (world.clipPolygon.size() >= 3)
+    {
+        QPolygonF poly;
+        for (const QPointF& p : world.clipPolygon) poly << QPointF(toBlockX(tf, p.x()), toBlockZ(tf, p.y()));
+        clipPath.addPolygon(poly);
+        clipPath.closeSubpath();
+        const int before = int(writeChunks.size());
+        const QSet<ColKey> allChunks(writeChunks.constBegin(), writeChunks.constEnd());
+        writeChunks.erase(std::remove_if(writeChunks.begin(), writeChunks.end(), [&](qint64 k)
+        { return !clipPath.intersects(QRectF(keyFirst(k) * 16.0, keySecond(k) * 16.0, 16.0, 16.0)); }), writeChunks.end());
+        {   // Buildings are filtered, not cut: a building that the boundary crosses stays whole, so all the chunks it occupies are written too (it would otherwise be sliced with no wall at the cut)
+            QSet<ColKey> have(writeChunks.constBegin(), writeChunks.constEnd());
+            int nWhole = 0;
+            for (const McObject& o : objects)
+            {
+                if (o.kind != McObject::Building || !o.closed || o.vertices.isEmpty()) continue;
+                double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+                for (const QVector3D& v : o.vertices)
+                {
+                    const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                    ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+                }
+                for (int cz = int(std::floor(az0)) >> 4; cz <= int(std::floor(az1)) >> 4; ++cz)
+                    for (int cx = int(std::floor(ax0)) >> 4; cx <= int(std::floor(ax1)) >> 4; ++cx)
+                    {
+                        const qint64 k = pairKey(cx, cz);
+                        if (allChunks.contains(k) && !have.contains(k)) { have.insert(k); writeChunks << k; ++nWhole; }
+                    }
+            }
+            // The same for lakes and ponds (not rivers and not big reservoirs): a water body cut by the boundary stays whole, otherwise half of it ends up without water
+            for (const McObject& o : objects)
+            {
+                if (o.kind != McObject::Water || o.linear || o.vertices.isEmpty()) continue;
+                double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+                for (const QVector3D& v : o.vertices)
+                {
+                    const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                    ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+                }
+                const int c0 = int(std::floor(ax0)) >> 4, c1 = int(std::floor(ax1)) >> 4, d0 = int(std::floor(az0)) >> 4, d1 = int(std::floor(az1)) >> 4;
+                if (qint64(c1 - c0 + 1) * (d1 - d0 + 1) > 10000) continue;           // a big reservoir (more than ~2.5 km² of the extent) is cut as before
+                for (int cz = d0; cz <= d1; ++cz)
+                    for (int cx = c0; cx <= c1; ++cx)
+                    {
+                        const qint64 k = pairKey(cx, cz);
+                        if (allChunks.contains(k) && !have.contains(k)) { have.insert(k); writeChunks << k; ++nWhole; }
+                    }
+            }
+            if (nWhole > 0) res.lairInfo += (res.lairInfo.isEmpty() ? QString() : QStringLiteral("; ")) + QObject::tr("chunks added so that the buildings and lakes on the boundary stay whole: %1").arg(nWhole);
+        }
+        res.lairInfo += (res.lairInfo.isEmpty() ? QString() : QStringLiteral("; "))
+            + QObject::tr("polygon boundary: %1 of %2 chunks written").arg(writeChunks.size()).arg(before);
+    }
+    // Smoothing the border with the unwritten world (only the noise surroundings): for chunks at the export edge we write blending_data. Disabled by MCX_NOBLEND=1 (for comparison).
+    writeSet = QSet<ColKey>(writeChunks.constBegin(), writeChunks.constEnd());
+    blendBorder = world.normalSurroundings && !qEnvironmentVariableIsSet("MCX_NOBLEND");
+    for (const ChestSite& cs : chests)
+        chestsByChunk[pairKey(cs.x >> 4, cs.z >> 4)].append(cs);
+    for (const PaintingSite& pt : paints)
+        paintsByChunk[pairKey(pt.x >> 4, pt.z >> 4)].append(pt);
+    for (const FrameSite& fr : frames)
+        frameByChunk[pairKey(fr.x >> 4, fr.z >> 4)].append(fr);
+    for (const NpcSite& ns : npcs)
+        npcByChunk[pairKey(ns.x >> 4, ns.z >> 4)].append(ns);
+    for (const MannequinSite& ms : mannequins)
+        menByChunk[pairKey(ms.x >> 4, ms.z >> 4)].append(ms);
+    for (const SpawnerSite& sp : spawners)
+        spawnByChunk[pairKey(sp.x >> 4, sp.z >> 4)].append(sp);
+    // The chunk assembly is completely independent (store/ground/chestsByChunk are only read), so it
+    // runs in several threads; the regions are then assembled sequentially in the SAME order —
+    // the archive stays deterministic.
+    chunkTotal = int(writeChunks.size());
+    chunkDone = 0;
+    buildAbort = false;
+    auto buildOne = [&](qint64 k) -> ChunkBuild
+    {
+        ChunkBuild cb;
+        if (buildAbort.load() || (cancel && cancel->load()))
+        {
+            buildAbort.store(true);                     // cancel — cooperative, we finish the threads to the end
+            return cb;
+        }
+        const int cx = keyFirst(k), cz = keySecond(k);
+        const auto sit = store.chunks.constFind(k);
+        if (sit != store.chunks.constEnd())
+        {   // the center of mass of the object blocks + the maximal height — the spawn is put above this point
+            for (auto ssit = sit->constBegin(); ssit != sit->constEnd(); ++ssit)
+            {
+                const int secBaseY = ssit.key() << 4;   // an arithmetic shift — correct for y<0 too
+                const QVector<quint16>& sec = *ssit;
+                for (int i = 0; i < sec.size(); ++i)
+                {
+                    const quint16 id = sec[i];
+                    if (id == IdAir) continue;
+                    ++cb.blocks;
+                    if (id < IdPaletteStart || id == IdWater) continue;   // water is landscape, not an "object"
+                    cb.sumX += double(cx * 16 + (i & 15));
+                    cb.sumZ += double(cz * 16 + ((i >> 4) & 15));
+                    const int y = secBaseY + ((i >> 8) & 15);
+                    if (y > cb.maxY) cb.maxY = y;
+                    ++cb.objBlocks;
+                }
+            }
+        }
+        cb.nbt = zlibStream(buildChunkNbt(cx, cz, sit == store.chunks.constEnd() ? noSections : sit.value(),
+                               format, chestsByChunk.value(pairKey(cx, cz)), ground.value(k),
+                               caveSet.empty() ? nullptr : &caveSet,
+                               QVector<PaintingSite>(),                        // paintings — in entities/, not in BE
+                               spawnByChunk.value(pairKey(cx, cz)),
+                               fluidsByChunk.value(pairKey(cx, cz)),
+                               signsByChunk.value(pairKey(cx, cz)),
+                               bellsByChunk.value(pairKey(cx, cz)),
+                               bannersByChunk.value(pairKey(cx, cz)),
+                               zonesByChunk.value(pairKey(cx, cz)),
+                               lairSet.empty() ? nullptr : &lairSet,
+                               biomeCells.isEmpty() ? nullptr : &biomeCells,
+                               extraBesByChunk.value(pairKey(cx, cz)),
+                               heartsByChunk.value(pairKey(cx, cz)),
+                               blendBorder && ((!writeSet.contains(pairKey(cx - 1, cz))) + (!writeSet.contains(pairKey(cx + 1, cz)))
+                                   + (!writeSet.contains(pairKey(cx, cz - 1))) + (!writeSet.contains(pairKey(cx, cz + 1))) > 0),
+                               portalsByChunk.value(pairKey(cx, cz)),
+                               paleUnder.isEmpty() ? nullptr : &paleUnder));   // the compression here, in parallel: earlier it went sequentially in the "zip writing"
+        const int done = chunkDone.fetch_add(1) + 1;
+        if (progress && (done % 16 == 0 || done >= chunkTotal))
+            progress(done, chunkTotal, 2);              // the "chunk assembly" phase
+        return cb;
+    };
+    // We divide the work into blocks of ~16 chunks: there are not thousands of tasks, the distribution over cores is even.
+    // Our own QThreadPool — we do not compete with the global application pool (the export itself runs in it).
+    QThreadPool pool;
+    cores = std::max(1, QThread::idealThreadCount());
+    pool.setMaxThreadCount(cores);
+    nBlocks = std::max(1, std::min((chunkTotal + 15) / 16, cores * 4));
+    per = (chunkTotal + nBlocks - 1) / nBlocks;
+    blockOut = QVector<QVector<ChunkBuild>>(nBlocks);
+    for (int b = 0; b < nBlocks; ++b)
+    {
+        const int lo = b * per, hi = std::min(chunkTotal, lo + per);
+        futs << QtConcurrent::run(&pool, [&, lo, hi, b]
+        {
+            QVector<ChunkBuild>& out = blockOut[b];
+            out.reserve(hi - lo);
+            for (int i = lo; i < hi; ++i) out << buildOne(writeChunks.at(i));
+        });
+    }
+    for (QFuture<void>& f : futs) f.waitForFinished();
+    if (buildAbort.load())
+    {
+        res.cancelled = true;
+        res.error = QObject::tr("Export cancelled.");
+        return false;
+    }
+    blockTotal = 0;
+    // The center of mass of the object blocks (id >= IdPaletteStart — concrete/brick; the ground is metadata, it
+    // never entered the center) + the maximal height: the spawn above this point, in the middle of the scene.
+    objCx = 0.0;
+    objCz = 0.0;
+    objCount = 0;
+    objMaxY = -64;
+    idx = 0;
+    for (int b = 0; b < nBlocks; ++b)
+        for (const ChunkBuild& cb : blockOut[b])
+        {
+            blockTotal += cb.blocks;
+            objCx += cb.sumX; objCz += cb.sumZ; objCount += cb.objBlocks;
+            if (cb.maxY > objMaxY) objMaxY = cb.maxY;
+            const qint64 k = writeChunks.at(idx++);
+            const int cx = keyFirst(k), cz = keySecond(k);
+            const qint64 rk = pairKey(cx >> 5, cz >> 5);
+            RegionData& rd = regions[rk];
+            rd.order << qMakePair(cx & 31, cz & 31);
+            rd.payload.insert(pairKey(cx & 31, cz & 31), cb.nbt);
+        }
+    res.blockCount = blockTotal;
+
+    spawnX = 0;
+    spawnY = 258;
+    spawnZ = 0;
+    // Spawn on the surface: the ground top of the column or the topmost block above it (the roof); if the column is occupied by a building — the nearest free one
+    // (a spiral up to 48 blocks), otherwise the player would appear on a roof or (with terrain) underground.
+    auto surfaceSpawn = [&](int x0, int z0, int& outX, int& outY, int& outZ) -> bool
+    {
+        for (int r = 0; r <= 48; ++r)
+            for (int dz = -r; dz <= r; ++dz)
+                for (int dx = -r; dx <= r; ++dx)
+                {
+                    if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                    const int x = x0 + dx, z = z0 + dz;
+                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                    if (git == ground.constEnd()) continue;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0) continue;                       // not into water
+                    const int top = git->top[col];
+                    bool free = true;
+                    for (int y = top + 1; y <= std::min(top + 12, 319) && free; ++y)
+                        if (store.get(x, y, z)) free = false;
+                    if (!free) continue;
+                    outX = x; outZ = z; outY = std::min(top + 2, 310);
+                    return true;
+                }
+        return false;
+    };
+    if (objCount > 0)
+    {
+        spawnX = int(std::llround(objCx / double(objCount)));
+        spawnZ = int(std::llround(objCz / double(objCount)));
+        spawnY = int(std::min<qint64>(objMaxY + 3, 310));   // a fallback: above the very top of the scene
+        surfaceSpawn(spawnX, spawnZ, spawnX, spawnY, spawnZ);
+    }
+    if (world.hasSpawnPoint)
+    {   // the spawn in the center of the view of the 3D window/map (if this column got into the export), not in the middle of the whole area
+        const int sx0 = int(std::floor(toBlockX(tf, world.spawnMapX))), sz0 = int(std::floor(toBlockZ(tf, world.spawnMapY)));
+        int nx = spawnX, ny = spawnY, nz = spawnZ;
+        if (surfaceSpawn(sx0, sz0, nx, ny, nz)) { spawnX = nx; spawnY = ny; spawnZ = nz; }
+    }
+
+    tmcStepLog("post: chunks assembled");
+    return true;
+}
+
+bool ExportRun::writeZip()
+{
+    // 5. The save zip archive. The 26.x layout: level.dat (+ the old one),
+    // data/minecraft/world_gen_settings.dat, chunks in dimensions/minecraft/overworld/region/.
+    // The legacy 1.21.x layout (as in a world created by the 1.21.11 client): level.dat (+ the old one, with
+    // WorldGenSettings inside), chunks in region/ in the root. The other state files (game_rules, weather,
+    // raids, DIM-1/DIM1, ...) are created by the game itself at the first opening — checked with vanilla servers.
+    if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return false; }
+    MiniDir dir(path);                          // unpackedFolder: the same entries become files under the world folder
+    auto addEntry = [&](const QString& name, const QByteArray& data)
+    { if (world.unpackedFolder) dir.add(name, data); else zip.add(name, data); };
+    levelDat = buildLevelDat(levelName, spawnX, spawnY, spawnZ, format, genGroundTop, world);
+    addEntry(QStringLiteral("level.dat"), levelDat);
+    addEntry(QStringLiteral("level.dat_old"), levelDat);
+    if (!legacy)
+        addEntry(QStringLiteral("data/minecraft/world_gen_settings.dat"), buildWorldGenSettings(genGroundTop, world));
+    // /locate and the Eye of Ender: our stronghold/city are written into chunks as "structure starts", but the game can find them by the placement grid
+    // only if the structure_set has a position exactly in this chunk. The datapack in the world ADDS (the vanilla ones are not touched) its own structure_set
+    // tmc:stronghold_here / tmc:ancient_city_here with the same structures: random_spread with a huge spacing (a 2048×2048 chunk cell) and a
+    // chosen salt so that the cell position coincides with the start chunk of our structure. /locate and the Eye of Ender collect the positions
+    // of all the structure sets, so they find both ours and the ordinary ones.
+    // real trial chambers and cities from the cave template: for /locate each instance gets its own structure_set (mineshafts are searched with the vanilla set: it checks every chunk)
+    if (!caveSet.empty() && !caveSet.tplStarts.isEmpty())
+    {
+        QVector<CaveSet::WorldStart> tmpWs;
+        for (const qint64 wk : writeChunks)
+        {
+            caveSet.startsAt(keyFirst(wk), keySecond(wk), tmpWs);
+            for (const CaveSet::WorldStart& ws : tmpWs)
+                if (ws.here && (ws.id == QLatin1String("minecraft:trial_chambers") || ws.id == QLatin1String("minecraft:ancient_city")))
+                    tplInst.append(TplInst{ ws.id, keyFirst(wk), keySecond(wk) });
+            if (tplInst.size() >= 120) break;
+        }
+    }
+    if (!world.attribution.isEmpty())
+        addEntry(QStringLiteral("ATTRIBUTION.txt"), world.attribution.toUtf8());       // Minecraft ignores unknown files in the save folder
+    if (!world.exportInfo.isEmpty())
+        addEntry(QStringLiteral("export_info.json"), world.exportInfo.toUtf8());       // the info about this export (app/exportmeta.h)
+    if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()))
+    {
+        for (int ti = 0; ti < tplInst.size(); ++ti)
+        {
+            const int salt = findPlacementSalt(qint64(world.seed), tplInst[ti].cx, tplInst[ti].cz, 2048);
+            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
+                                                 "\"structures\":[{\"structure\":\"%2\",\"weight\":1}]}").arg(salt).arg(tplInst[ti].id).toUtf8();
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/tpl_%1_%2.json").arg(tplInst[ti].id.section(QLatin1Char(':'), -1)).arg(ti), js);
+        }
+        addEntry(QStringLiteral("datapacks/tmc_lairs/pack.mcmeta"),
+                QByteArray("{\"pack\":{\"description\":\"tMC: strongholds, ancient cities and ruined portals located\",\"min_format\":82,\"max_format\":121}}"));
+        // ruined portals in forests: each gets its own structure_set with a salt at which the cell position coincides with the start chunk (/locate structure minecraft:ruined_portal)
+        for (int pi = 0; pi < portalStarts.size(); ++pi)
+        {
+            const int salt = findPlacementSalt(qint64(world.seed), portalStarts[pi].cx, portalStarts[pi].cz, 2048);
+            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
+                                                 "\"structures\":[{\"structure\":\"minecraft:ruined_portal\",\"weight\":1}]}").arg(salt).toUtf8();
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/ruined_portal_here_%1.json").arg(pi), js);
+        }
+        for (const LairPlace& pl : lairSet.placed)
+        {
+            const LairStruct& s = lairSet.st[pl.s];
+            const int scx = ((s.room[0] + pl.tx + s.room[3] + pl.tx) / 2) >> 4, scz = ((s.room[2] + pl.tz + s.room[5] + pl.tz) / 2) >> 4;   // as in LairSet::startsTouching
+            const int salt = findPlacementSalt(qint64(world.seed), scx, scz, 2048);
+            const bool city = (s.id == QLatin1String("ancient_city"));
+            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
+                                                 "\"structures\":[{\"structure\":\"minecraft:%2\",\"weight\":1}]}").arg(salt).arg(s.id).toUtf8();
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/%1.json")
+                        .arg(city ? QStringLiteral("ancient_city_here") : QStringLiteral("stronghold_here")), js);
+        }
+    }
+    regionDir = legacy ? QStringLiteral("region/")
+                                     : QStringLiteral("dimensions/minecraft/overworld/region/");
+    // We assemble the entities (mannequins, villagers, paintings, frames) into regions IN ADVANCE, so that the "packing" phase counter is one
+    // for everything: block regions + entity regions.
+    {
+        QSet<ColKey> entChunks;                                   // chunks where there is any entity at all
+        for (auto it = menByChunk.constBegin(); it != menByChunk.constEnd(); ++it) entChunks.insert(it.key());
+        for (auto it = npcByChunk.constBegin(); it != npcByChunk.constEnd(); ++it) entChunks.insert(it.key());
+        for (auto it = paintsByChunk.constBegin(); it != paintsByChunk.constEnd(); ++it) entChunks.insert(it.key());
+        for (auto it = frameByChunk.constBegin(); it != frameByChunk.constEnd(); ++it) entChunks.insert(it.key());
+        for (qint64 key : entChunks)
+        {
+            const int cx = keyFirst(key), cz = keySecond(key);
+            if (!clipPath.isEmpty() && !writeSet.contains(key)) continue;       // the chunk is outside the polygon boundary
+            RegionData& rd = eRegions[pairKey(cx >> 5, cz >> 5)];
+            const qint64 ck = pairKey(cx & 31, cz & 31);
+            if (!rd.payload.contains(ck))
+                rd.order << qMakePair(cx & 31, cz & 31);
+            rd.payload.insert(ck, buildEntityChunkNbt(cx, cz, menByChunk.value(key),
+                                                      format == McWorldExporter::Format::Legacy121x,
+                                                      npcByChunk.value(key), paintsByChunk.value(key), frameByChunk.value(key)));
+        }
+    }
+    tmcStepLog("post: entities assembled into regions");
+    regTotal = int(regions.size());
+    packTotal = regTotal + int(eRegions.size());
+    regDone = 0;
+    for (auto it = regions.constBegin(); it != regions.constEnd(); ++it)
+    {
+        if (progress && (regDone % 4 == 0 || regDone + 1 == regTotal))
+            progress(regDone, packTotal, 3);                      // the "packing regions into the zip" phase
+        ++regDone;
+        if (cancel && cancel->load())
+        {
+            res.cancelled = true;
+            res.error = QObject::tr("Export cancelled.");
+            return false;
+        }
+        const int rx = keyFirst(it.key()), rz = keySecond(it.key());
+        const QByteArray mca = buildRegionFile(it->order, it->payload, true);   // the chunks are already compressed
+        addEntry(regionDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz), mca);
+        ++res.regionCount;
+    }
+    tmcStepLog("post: block regions packed into the zip");
+    // 4b. entities/r.<rx>.<rz>.mca — display mannequins. Since 1.17 the server reads entities ONLY
+    // from here (the Entities tag in a region chunk is ignored — the smoke test showed it). The layout
+    // of both formats is the same, only the root differs: legacy — entities/ in the archive root,
+    // 26.x — dimensions/minecraft/overworld/entities/ (as in worlds created by servers).
+    {
+        const QString entDir = legacy ? QStringLiteral("entities/")
+                                      : QStringLiteral("dimensions/minecraft/overworld/entities/");
+        int eDone = 0;
+        for (auto it = eRegions.constBegin(); it != eRegions.constEnd(); ++it)
+        {
+            if (progress)
+                progress(regTotal + eDone, packTotal, 3);              // the same "packing" phase
+            ++eDone;
+            const int rx = keyFirst(it.key()), rz = keySecond(it.key());
+            addEntry(entDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz),
+                    buildRegionFile(it->order, it->payload));
+        }
+    }
+    tmcStepLog("post: entities packed");
+    if (world.unpackedFolder)
+    {   // files under the world folder — no archive, no zip limits
+        if (!dir.badWhy.isEmpty())
+        {
+            res.error = QObject::tr("Could not write the file %1: %2").arg(QDir::toNativeSeparators(dir.badFile), dir.badWhy);
+            return false;
+        }
+        if (progress) progress(0, 0, 11);
+        if (progress) progress(0, 0, 12);
+        tmcStepLog("post: world folder written");
+        res.ok = true;
+        res.zipBytes = qint64(dir.totalRaw);
+        return false;
+    }
+    // The limits of the classic zip (without zip64): offsets/sizes are uint32, the number of entries is uint16.
+    // For our format it is ~7000 region files — in reality there is never more, but an honest
+    // error is better than silently breaking the archive.
+    if (res.regionCount + 1 > 65534 || zip.totalBlob + 1024 * 1024 >= 0xFFFE0000ull)
+    {
+        res.error = QObject::tr("The scene is too big for a save zip archive (%1 region files, ~%2 MB). "
+                                "Export a smaller area.")
+                        .arg(res.regionCount)
+                        .arg(zip.totalBlob / (1024 * 1024));
+        return false;
+    }
+    if (progress) progress(0, 0, 11);                              // the "archive assembly" stage
+    zipData = zip.finish();
+
+    tmcStepLog("post: zip.finish() ready");
+    if (progress) progress(0, 0, 12);                              // the "writing the file to disk" stage
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        res.error = QObject::tr("Could not write the file %1: %2").arg(path, f.errorString());
+        return false;
+    }
+    if (f.write(zipData) != zipData.size())
+    {
+        res.error = QObject::tr("The file %1 was not written completely (quota/disk?).").arg(path);
+        f.close();
+        return false;
+    }
+    f.close();
+
+    tmcStepLog("post: file written");
+    res.ok = true;
+    res.zipBytes = zipData.size();
+    return true;
 }
 
 McWorldExporter::Result ExportRun::run()
@@ -10189,413 +10611,9 @@ McWorldExporter::Result ExportRun::run()
 
     lap("before 4.");
     tmcStepLog("post: chunk assembly start");
-    // 4. chunks -> regions (r.<chunkX>>5>.<chunkZ>>5>.mca)
-    if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
-    // We write the chunks: all that got ground metadata (fillChunks = touched by objects + the apron/
-    // finishing of the rectangle in noise), plus the chunks where plantings were added after the fill
-    // (store.set creates new keys itself).
-    writeChunks = fillChunks;
-    {
-        const QSet<ColKey> inFill(fillChunks.constBegin(), fillChunks.constEnd());
-        for (auto it = store.chunks.constBegin(); it != store.chunks.constEnd(); ++it)
-            if (!inFill.contains(it.key())) writeChunks << it.key();   // e.g. a crown beyond the forest spot
-    }
-    // The polygon boundary: chunks that it does not touch are not written (neither blocks nor entities)
-    QPainterPath clipPath;
-    if (world.clipPolygon.size() >= 3)
-    {
-        QPolygonF poly;
-        for (const QPointF& p : world.clipPolygon) poly << QPointF(toBlockX(tf, p.x()), toBlockZ(tf, p.y()));
-        clipPath.addPolygon(poly);
-        clipPath.closeSubpath();
-        const int before = int(writeChunks.size());
-        const QSet<ColKey> allChunks(writeChunks.constBegin(), writeChunks.constEnd());
-        writeChunks.erase(std::remove_if(writeChunks.begin(), writeChunks.end(), [&](qint64 k)
-        { return !clipPath.intersects(QRectF(keyFirst(k) * 16.0, keySecond(k) * 16.0, 16.0, 16.0)); }), writeChunks.end());
-        {   // Buildings are filtered, not cut: a building that the boundary crosses stays whole, so all the chunks it occupies are written too (it would otherwise be sliced with no wall at the cut)
-            QSet<ColKey> have(writeChunks.constBegin(), writeChunks.constEnd());
-            int nWhole = 0;
-            for (const McObject& o : objects)
-            {
-                if (o.kind != McObject::Building || !o.closed || o.vertices.isEmpty()) continue;
-                double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
-                for (const QVector3D& v : o.vertices)
-                {
-                    const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
-                    ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
-                }
-                for (int cz = int(std::floor(az0)) >> 4; cz <= int(std::floor(az1)) >> 4; ++cz)
-                    for (int cx = int(std::floor(ax0)) >> 4; cx <= int(std::floor(ax1)) >> 4; ++cx)
-                    {
-                        const qint64 k = pairKey(cx, cz);
-                        if (allChunks.contains(k) && !have.contains(k)) { have.insert(k); writeChunks << k; ++nWhole; }
-                    }
-            }
-            // The same for lakes and ponds (not rivers and not big reservoirs): a water body cut by the boundary stays whole, otherwise half of it ends up without water
-            for (const McObject& o : objects)
-            {
-                if (o.kind != McObject::Water || o.linear || o.vertices.isEmpty()) continue;
-                double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
-                for (const QVector3D& v : o.vertices)
-                {
-                    const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
-                    ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx); az0 = std::min(az0, bz); az1 = std::max(az1, bz);
-                }
-                const int c0 = int(std::floor(ax0)) >> 4, c1 = int(std::floor(ax1)) >> 4, d0 = int(std::floor(az0)) >> 4, d1 = int(std::floor(az1)) >> 4;
-                if (qint64(c1 - c0 + 1) * (d1 - d0 + 1) > 10000) continue;           // a big reservoir (more than ~2.5 km² of the extent) is cut as before
-                for (int cz = d0; cz <= d1; ++cz)
-                    for (int cx = c0; cx <= c1; ++cx)
-                    {
-                        const qint64 k = pairKey(cx, cz);
-                        if (allChunks.contains(k) && !have.contains(k)) { have.insert(k); writeChunks << k; ++nWhole; }
-                    }
-            }
-            if (nWhole > 0) res.lairInfo += (res.lairInfo.isEmpty() ? QString() : QStringLiteral("; ")) + QObject::tr("chunks added so that the buildings and lakes on the boundary stay whole: %1").arg(nWhole);
-        }
-        res.lairInfo += (res.lairInfo.isEmpty() ? QString() : QStringLiteral("; "))
-            + QObject::tr("polygon boundary: %1 of %2 chunks written").arg(writeChunks.size()).arg(before);
-    }
-    // Smoothing the border with the unwritten world (only the noise surroundings): for chunks at the export edge we write blending_data. Disabled by MCX_NOBLEND=1 (for comparison).
-    writeSet = QSet<ColKey>(writeChunks.constBegin(), writeChunks.constEnd());
-    blendBorder = world.normalSurroundings && !qEnvironmentVariableIsSet("MCX_NOBLEND");
-    for (const ChestSite& cs : chests)
-        chestsByChunk[pairKey(cs.x >> 4, cs.z >> 4)].append(cs);
-    for (const PaintingSite& pt : paints)
-        paintsByChunk[pairKey(pt.x >> 4, pt.z >> 4)].append(pt);
-    for (const FrameSite& fr : frames)
-        frameByChunk[pairKey(fr.x >> 4, fr.z >> 4)].append(fr);
-    for (const NpcSite& ns : npcs)
-        npcByChunk[pairKey(ns.x >> 4, ns.z >> 4)].append(ns);
-    for (const MannequinSite& ms : mannequins)
-        menByChunk[pairKey(ms.x >> 4, ms.z >> 4)].append(ms);
-    for (const SpawnerSite& sp : spawners)
-        spawnByChunk[pairKey(sp.x >> 4, sp.z >> 4)].append(sp);
-    // The chunk assembly is completely independent (store/ground/chestsByChunk are only read), so it
-    // runs in several threads; the regions are then assembled sequentially in the SAME order —
-    // the archive stays deterministic.
-    chunkTotal = int(writeChunks.size());
-    chunkDone = 0;
-    buildAbort = false;
-    auto buildOne = [&](qint64 k) -> ChunkBuild
-    {
-        ChunkBuild cb;
-        if (buildAbort.load() || (cancel && cancel->load()))
-        {
-            buildAbort.store(true);                     // cancel — cooperative, we finish the threads to the end
-            return cb;
-        }
-        const int cx = keyFirst(k), cz = keySecond(k);
-        const auto sit = store.chunks.constFind(k);
-        if (sit != store.chunks.constEnd())
-        {   // the center of mass of the object blocks + the maximal height — the spawn is put above this point
-            for (auto ssit = sit->constBegin(); ssit != sit->constEnd(); ++ssit)
-            {
-                const int secBaseY = ssit.key() << 4;   // an arithmetic shift — correct for y<0 too
-                const QVector<quint16>& sec = *ssit;
-                for (int i = 0; i < sec.size(); ++i)
-                {
-                    const quint16 id = sec[i];
-                    if (id == IdAir) continue;
-                    ++cb.blocks;
-                    if (id < IdPaletteStart || id == IdWater) continue;   // water is landscape, not an "object"
-                    cb.sumX += double(cx * 16 + (i & 15));
-                    cb.sumZ += double(cz * 16 + ((i >> 4) & 15));
-                    const int y = secBaseY + ((i >> 8) & 15);
-                    if (y > cb.maxY) cb.maxY = y;
-                    ++cb.objBlocks;
-                }
-            }
-        }
-        cb.nbt = zlibStream(buildChunkNbt(cx, cz, sit == store.chunks.constEnd() ? noSections : sit.value(),
-                               format, chestsByChunk.value(pairKey(cx, cz)), ground.value(k),
-                               caveSet.empty() ? nullptr : &caveSet,
-                               QVector<PaintingSite>(),                        // paintings — in entities/, not in BE
-                               spawnByChunk.value(pairKey(cx, cz)),
-                               fluidsByChunk.value(pairKey(cx, cz)),
-                               signsByChunk.value(pairKey(cx, cz)),
-                               bellsByChunk.value(pairKey(cx, cz)),
-                               bannersByChunk.value(pairKey(cx, cz)),
-                               zonesByChunk.value(pairKey(cx, cz)),
-                               lairSet.empty() ? nullptr : &lairSet,
-                               biomeCells.isEmpty() ? nullptr : &biomeCells,
-                               extraBesByChunk.value(pairKey(cx, cz)),
-                               heartsByChunk.value(pairKey(cx, cz)),
-                               blendBorder && ((!writeSet.contains(pairKey(cx - 1, cz))) + (!writeSet.contains(pairKey(cx + 1, cz)))
-                                   + (!writeSet.contains(pairKey(cx, cz - 1))) + (!writeSet.contains(pairKey(cx, cz + 1))) > 0),
-                               portalsByChunk.value(pairKey(cx, cz)),
-                               paleUnder.isEmpty() ? nullptr : &paleUnder));   // the compression here, in parallel: earlier it went sequentially in the "zip writing"
-        const int done = chunkDone.fetch_add(1) + 1;
-        if (progress && (done % 16 == 0 || done >= chunkTotal))
-            progress(done, chunkTotal, 2);              // the "chunk assembly" phase
-        return cb;
-    };
-    // We divide the work into blocks of ~16 chunks: there are not thousands of tasks, the distribution over cores is even.
-    // Our own QThreadPool — we do not compete with the global application pool (the export itself runs in it).
-    QThreadPool pool;
-    cores = std::max(1, QThread::idealThreadCount());
-    pool.setMaxThreadCount(cores);
-    nBlocks = std::max(1, std::min((chunkTotal + 15) / 16, cores * 4));
-    per = (chunkTotal + nBlocks - 1) / nBlocks;
-    blockOut = QVector<QVector<ChunkBuild>>(nBlocks);
-    for (int b = 0; b < nBlocks; ++b)
-    {
-        const int lo = b * per, hi = std::min(chunkTotal, lo + per);
-        futs << QtConcurrent::run(&pool, [&, lo, hi, b]
-        {
-            QVector<ChunkBuild>& out = blockOut[b];
-            out.reserve(hi - lo);
-            for (int i = lo; i < hi; ++i) out << buildOne(writeChunks.at(i));
-        });
-    }
-    for (QFuture<void>& f : futs) f.waitForFinished();
-    if (buildAbort.load())
-    {
-        res.cancelled = true;
-        res.error = QObject::tr("Export cancelled.");
-        return res;
-    }
-    blockTotal = 0;
-    // The center of mass of the object blocks (id >= IdPaletteStart — concrete/brick; the ground is metadata, it
-    // never entered the center) + the maximal height: the spawn above this point, in the middle of the scene.
-    objCx = 0.0;
-    objCz = 0.0;
-    objCount = 0;
-    objMaxY = -64;
-    idx = 0;
-    for (int b = 0; b < nBlocks; ++b)
-        for (const ChunkBuild& cb : blockOut[b])
-        {
-            blockTotal += cb.blocks;
-            objCx += cb.sumX; objCz += cb.sumZ; objCount += cb.objBlocks;
-            if (cb.maxY > objMaxY) objMaxY = cb.maxY;
-            const qint64 k = writeChunks.at(idx++);
-            const int cx = keyFirst(k), cz = keySecond(k);
-            const qint64 rk = pairKey(cx >> 5, cz >> 5);
-            RegionData& rd = regions[rk];
-            rd.order << qMakePair(cx & 31, cz & 31);
-            rd.payload.insert(pairKey(cx & 31, cz & 31), cb.nbt);
-        }
-    res.blockCount = blockTotal;
+    if (!assembleChunks()) return res;
 
-    spawnX = 0;
-    spawnY = 258;
-    spawnZ = 0;
-    // Spawn on the surface: the ground top of the column or the topmost block above it (the roof); if the column is occupied by a building — the nearest free one
-    // (a spiral up to 48 blocks), otherwise the player would appear on a roof or (with terrain) underground.
-    auto surfaceSpawn = [&](int x0, int z0, int& outX, int& outY, int& outZ) -> bool
-    {
-        for (int r = 0; r <= 48; ++r)
-            for (int dz = -r; dz <= r; ++dz)
-                for (int dx = -r; dx <= r; ++dx)
-                {
-                    if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
-                    const int x = x0 + dx, z = z0 + dz;
-                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                    if (git == ground.constEnd()) continue;
-                    const int col = (z & 15) * 16 + (x & 15);
-                    if (git->wd[col] > 0) continue;                       // not into water
-                    const int top = git->top[col];
-                    bool free = true;
-                    for (int y = top + 1; y <= std::min(top + 12, 319) && free; ++y)
-                        if (store.get(x, y, z)) free = false;
-                    if (!free) continue;
-                    outX = x; outZ = z; outY = std::min(top + 2, 310);
-                    return true;
-                }
-        return false;
-    };
-    if (objCount > 0)
-    {
-        spawnX = int(std::llround(objCx / double(objCount)));
-        spawnZ = int(std::llround(objCz / double(objCount)));
-        spawnY = int(std::min<qint64>(objMaxY + 3, 310));   // a fallback: above the very top of the scene
-        surfaceSpawn(spawnX, spawnZ, spawnX, spawnY, spawnZ);
-    }
-    if (world.hasSpawnPoint)
-    {   // the spawn in the center of the view of the 3D window/map (if this column got into the export), not in the middle of the whole area
-        const int sx0 = int(std::floor(toBlockX(tf, world.spawnMapX))), sz0 = int(std::floor(toBlockZ(tf, world.spawnMapY)));
-        int nx = spawnX, ny = spawnY, nz = spawnZ;
-        if (surfaceSpawn(sx0, sz0, nx, ny, nz)) { spawnX = nx; spawnY = ny; spawnZ = nz; }
-    }
-
-    tmcStepLog("post: chunks assembled");
-    // 5. The save zip archive. The 26.x layout: level.dat (+ the old one),
-    // data/minecraft/world_gen_settings.dat, chunks in dimensions/minecraft/overworld/region/.
-    // The legacy 1.21.x layout (as in a world created by the 1.21.11 client): level.dat (+ the old one, with
-    // WorldGenSettings inside), chunks in region/ in the root. The other state files (game_rules, weather,
-    // raids, DIM-1/DIM1, ...) are created by the game itself at the first opening — checked with vanilla servers.
-    if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
-    MiniDir dir(path);                          // unpackedFolder: the same entries become files under the world folder
-    auto addEntry = [&](const QString& name, const QByteArray& data)
-    { if (world.unpackedFolder) dir.add(name, data); else zip.add(name, data); };
-    levelDat = buildLevelDat(levelName, spawnX, spawnY, spawnZ, format, genGroundTop, world);
-    addEntry(QStringLiteral("level.dat"), levelDat);
-    addEntry(QStringLiteral("level.dat_old"), levelDat);
-    if (!legacy)
-        addEntry(QStringLiteral("data/minecraft/world_gen_settings.dat"), buildWorldGenSettings(genGroundTop, world));
-    // /locate and the Eye of Ender: our stronghold/city are written into chunks as "structure starts", but the game can find them by the placement grid
-    // only if the structure_set has a position exactly in this chunk. The datapack in the world ADDS (the vanilla ones are not touched) its own structure_set
-    // tmc:stronghold_here / tmc:ancient_city_here with the same structures: random_spread with a huge spacing (a 2048×2048 chunk cell) and a
-    // chosen salt so that the cell position coincides with the start chunk of our structure. /locate and the Eye of Ender collect the positions
-    // of all the structure sets, so they find both ours and the ordinary ones.
-    // real trial chambers and cities from the cave template: for /locate each instance gets its own structure_set (mineshafts are searched with the vanilla set: it checks every chunk)
-    if (!caveSet.empty() && !caveSet.tplStarts.isEmpty())
-    {
-        QVector<CaveSet::WorldStart> tmpWs;
-        for (const qint64 wk : writeChunks)
-        {
-            caveSet.startsAt(keyFirst(wk), keySecond(wk), tmpWs);
-            for (const CaveSet::WorldStart& ws : tmpWs)
-                if (ws.here && (ws.id == QLatin1String("minecraft:trial_chambers") || ws.id == QLatin1String("minecraft:ancient_city")))
-                    tplInst.append(TplInst{ ws.id, keyFirst(wk), keySecond(wk) });
-            if (tplInst.size() >= 120) break;
-        }
-    }
-    if (!world.attribution.isEmpty())
-        addEntry(QStringLiteral("ATTRIBUTION.txt"), world.attribution.toUtf8());       // Minecraft ignores unknown files in the save folder
-    if (!world.exportInfo.isEmpty())
-        addEntry(QStringLiteral("export_info.json"), world.exportInfo.toUtf8());       // the info about this export (app/exportmeta.h)
-    if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()))
-    {
-        for (int ti = 0; ti < tplInst.size(); ++ti)
-        {
-            const int salt = findPlacementSalt(qint64(world.seed), tplInst[ti].cx, tplInst[ti].cz, 2048);
-            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
-                                                 "\"structures\":[{\"structure\":\"%2\",\"weight\":1}]}").arg(salt).arg(tplInst[ti].id).toUtf8();
-            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/tpl_%1_%2.json").arg(tplInst[ti].id.section(QLatin1Char(':'), -1)).arg(ti), js);
-        }
-        addEntry(QStringLiteral("datapacks/tmc_lairs/pack.mcmeta"),
-                QByteArray("{\"pack\":{\"description\":\"tMC: strongholds, ancient cities and ruined portals located\",\"min_format\":82,\"max_format\":121}}"));
-        // ruined portals in forests: each gets its own structure_set with a salt at which the cell position coincides with the start chunk (/locate structure minecraft:ruined_portal)
-        for (int pi = 0; pi < portalStarts.size(); ++pi)
-        {
-            const int salt = findPlacementSalt(qint64(world.seed), portalStarts[pi].cx, portalStarts[pi].cz, 2048);
-            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
-                                                 "\"structures\":[{\"structure\":\"minecraft:ruined_portal\",\"weight\":1}]}").arg(salt).toUtf8();
-            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/ruined_portal_here_%1.json").arg(pi), js);
-        }
-        for (const LairPlace& pl : lairSet.placed)
-        {
-            const LairStruct& s = lairSet.st[pl.s];
-            const int scx = ((s.room[0] + pl.tx + s.room[3] + pl.tx) / 2) >> 4, scz = ((s.room[2] + pl.tz + s.room[5] + pl.tz) / 2) >> 4;   // as in LairSet::startsTouching
-            const int salt = findPlacementSalt(qint64(world.seed), scx, scz, 2048);
-            const bool city = (s.id == QLatin1String("ancient_city"));
-            const QByteArray js = QStringLiteral("{\"placement\":{\"type\":\"minecraft:random_spread\",\"salt\":%1,\"separation\":0,\"spacing\":2048,\"frequency\":0.0},"
-                                                 "\"structures\":[{\"structure\":\"minecraft:%2\",\"weight\":1}]}").arg(salt).arg(s.id).toUtf8();
-            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/%1.json")
-                        .arg(city ? QStringLiteral("ancient_city_here") : QStringLiteral("stronghold_here")), js);
-        }
-    }
-    regionDir = legacy ? QStringLiteral("region/")
-                                     : QStringLiteral("dimensions/minecraft/overworld/region/");
-    // We assemble the entities (mannequins, villagers, paintings, frames) into regions IN ADVANCE, so that the "packing" phase counter is one
-    // for everything: block regions + entity regions.
-    {
-        QSet<ColKey> entChunks;                                   // chunks where there is any entity at all
-        for (auto it = menByChunk.constBegin(); it != menByChunk.constEnd(); ++it) entChunks.insert(it.key());
-        for (auto it = npcByChunk.constBegin(); it != npcByChunk.constEnd(); ++it) entChunks.insert(it.key());
-        for (auto it = paintsByChunk.constBegin(); it != paintsByChunk.constEnd(); ++it) entChunks.insert(it.key());
-        for (auto it = frameByChunk.constBegin(); it != frameByChunk.constEnd(); ++it) entChunks.insert(it.key());
-        for (qint64 key : entChunks)
-        {
-            const int cx = keyFirst(key), cz = keySecond(key);
-            if (!clipPath.isEmpty() && !writeSet.contains(key)) continue;       // the chunk is outside the polygon boundary
-            RegionData& rd = eRegions[pairKey(cx >> 5, cz >> 5)];
-            const qint64 ck = pairKey(cx & 31, cz & 31);
-            if (!rd.payload.contains(ck))
-                rd.order << qMakePair(cx & 31, cz & 31);
-            rd.payload.insert(ck, buildEntityChunkNbt(cx, cz, menByChunk.value(key),
-                                                      format == McWorldExporter::Format::Legacy121x,
-                                                      npcByChunk.value(key), paintsByChunk.value(key), frameByChunk.value(key)));
-        }
-    }
-    tmcStepLog("post: entities assembled into regions");
-    regTotal = int(regions.size());
-    packTotal = regTotal + int(eRegions.size());
-    regDone = 0;
-    for (auto it = regions.constBegin(); it != regions.constEnd(); ++it)
-    {
-        if (progress && (regDone % 4 == 0 || regDone + 1 == regTotal))
-            progress(regDone, packTotal, 3);                      // the "packing regions into the zip" phase
-        ++regDone;
-        if (cancel && cancel->load())
-        {
-            res.cancelled = true;
-            res.error = QObject::tr("Export cancelled.");
-            return res;
-        }
-        const int rx = keyFirst(it.key()), rz = keySecond(it.key());
-        const QByteArray mca = buildRegionFile(it->order, it->payload, true);   // the chunks are already compressed
-        addEntry(regionDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz), mca);
-        ++res.regionCount;
-    }
-    tmcStepLog("post: block regions packed into the zip");
-    // 4b. entities/r.<rx>.<rz>.mca — display mannequins. Since 1.17 the server reads entities ONLY
-    // from here (the Entities tag in a region chunk is ignored — the smoke test showed it). The layout
-    // of both formats is the same, only the root differs: legacy — entities/ in the archive root,
-    // 26.x — dimensions/minecraft/overworld/entities/ (as in worlds created by servers).
-    {
-        const QString entDir = legacy ? QStringLiteral("entities/")
-                                      : QStringLiteral("dimensions/minecraft/overworld/entities/");
-        int eDone = 0;
-        for (auto it = eRegions.constBegin(); it != eRegions.constEnd(); ++it)
-        {
-            if (progress)
-                progress(regTotal + eDone, packTotal, 3);              // the same "packing" phase
-            ++eDone;
-            const int rx = keyFirst(it.key()), rz = keySecond(it.key());
-            addEntry(entDir + QStringLiteral("r.%1.%2.mca").arg(rx).arg(rz),
-                    buildRegionFile(it->order, it->payload));
-        }
-    }
-    tmcStepLog("post: entities packed");
-    if (world.unpackedFolder)
-    {   // files under the world folder — no archive, no zip limits
-        if (!dir.badWhy.isEmpty())
-        {
-            res.error = QObject::tr("Could not write the file %1: %2").arg(QDir::toNativeSeparators(dir.badFile), dir.badWhy);
-            return res;
-        }
-        if (progress) progress(0, 0, 11);
-        if (progress) progress(0, 0, 12);
-        tmcStepLog("post: world folder written");
-        res.ok = true;
-        res.zipBytes = qint64(dir.totalRaw);
-        return res;
-    }
-    // The limits of the classic zip (without zip64): offsets/sizes are uint32, the number of entries is uint16.
-    // For our format it is ~7000 region files — in reality there is never more, but an honest
-    // error is better than silently breaking the archive.
-    if (res.regionCount + 1 > 65534 || zip.totalBlob + 1024 * 1024 >= 0xFFFE0000ull)
-    {
-        res.error = QObject::tr("The scene is too big for a save zip archive (%1 region files, ~%2 MB). "
-                                "Export a smaller area.")
-                        .arg(res.regionCount)
-                        .arg(zip.totalBlob / (1024 * 1024));
-        return res;
-    }
-    if (progress) progress(0, 0, 11);                              // the "archive assembly" stage
-    zipData = zip.finish();
-
-    tmcStepLog("post: zip.finish() ready");
-    if (progress) progress(0, 0, 12);                              // the "writing the file to disk" stage
-    QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-    {
-        res.error = QObject::tr("Could not write the file %1: %2").arg(path, f.errorString());
-        return res;
-    }
-    if (f.write(zipData) != zipData.size())
-    {
-        res.error = QObject::tr("The file %1 was not written completely (quota/disk?).").arg(path);
-        f.close();
-        return res;
-    }
-    f.close();
-
-    tmcStepLog("post: file written");
-    res.ok = true;
-    res.zipBytes = zipData.size();
+    if (!writeZip()) return res;
     return res;
 }
 
