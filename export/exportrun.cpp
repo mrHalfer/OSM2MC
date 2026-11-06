@@ -374,6 +374,11 @@ private:
     void lap(const char* name);
     // 3. Ground: the terrain crust, caves, station halls, metro tunnels.
     bool buildGround();
+
+    // 1. Caves/lairs/pale-garden loading and the extent of all objects.
+    bool prepareObjects();
+    // 2. Voxelization of objects by role (buildings, roads, rails, patches).
+    bool buildObjects();
 };
 
 ExportRun::ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
@@ -8930,7 +8935,7 @@ bool ExportRun::buildGround()
     return true;
 }
 
-McWorldExporter::Result ExportRun::run()
+bool ExportRun::prepareObjects()
 {
     legacy = (format == Format::Legacy121x);
 
@@ -8954,7 +8959,7 @@ McWorldExporter::Result ExportRun::run()
         if (!caveSet.load(cavesPath, world.seed, &cavesErr))
         {
             res.error = cavesErr;
-            return res;
+            return false;
         }
     }
     // The secret passages of churches to the stronghold and the Ancient City (lair_structures.bin; no file — the feature is simply off).
@@ -9021,7 +9026,7 @@ McWorldExporter::Result ExportRun::run()
     if (totalVerts == 0)
     {
         res.error = QObject::tr("Nothing to export: all meshes are empty.");
-        return res;
+        return false;
     }
 
     tf.cx0 = (mnx + mxx) / 2.0;
@@ -9033,6 +9038,11 @@ McWorldExporter::Result ExportRun::run()
     span = mxz - mnz;
     if (span > 240.0) tf.zScale = 240.0 / span;   // height compression to fit into 0..255
 
+    return true;
+}
+
+bool ExportRun::buildObjects()
+{
     // 2. Voxelization of objects — by role (see McObject::Kind):
     //    Building/Generic — the mesh shell (floor/walls/roof, empty inside);
     //    Vegetation       — the mesh is NOT voxelized: the polygon "patch" goes to a forest (there is a REL height)
@@ -9260,7 +9270,7 @@ McWorldExporter::Result ExportRun::run()
                 }
             });
         for (QFuture<void>& f : fs) f.waitForFinished();
-        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return false; }
     }
     objDone = 0;
     objTotal = objects.size();
@@ -9299,7 +9309,7 @@ McWorldExporter::Result ExportRun::run()
         if (progress && (objDone % 16 == 0 || objDone + 1 == objTotal))
             progress(objDone, objTotal, 0);                       // the "objects" phase
         ++objDone;
-        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return false; }
         if (o.kind == McObject::ParkingLot)
         {   // rdcpol: over the polygon patch the turf is replaced with dark gray concrete (the surface layer of the ground), the place marking — after the ground
             QList<qint64> cols = std::move(pre[objDone - 1]);
@@ -10091,7 +10101,7 @@ McWorldExporter::Result ExportRun::run()
             pending.append(j);
             if (pending.size() >= 64)
                 flushJobs();
-            if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+            if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return false; }
         }
     }
     tmcStepLog("vox: loop over objects finished (before the last flush)");
@@ -10356,7 +10366,7 @@ McWorldExporter::Result ExportRun::run()
     }
     for (const LiftJob& lj : liftJobs)
     {
-        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
+        if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return false; }
         VoxelStore tmp;
         QHash<ColKey, int> tmpMin, tmpAnchor;
         // sites (chests, villagers, basements…) are not needed for the shaft — nullptr: no chests and no entities inside the cut-off part
@@ -10725,9 +10735,16 @@ McWorldExporter::Result ExportRun::run()
     if (store.chunks.isEmpty())
     {
         res.error = QObject::tr("Could not voxelize a single object (empty or too huge meshes).");
-        return res;
+        return false;
     }
 
+    return true;
+}
+
+McWorldExporter::Result ExportRun::run()
+{
+    if (!prepareObjects()) return res;
+    if (!buildObjects()) return res;
     // Diagnostics of the export step times: MCX_LOG_STEPS=1 in the environment -> "[mcx] step ms" lines to stderr
     // (needed to find heavy steps on big projects; in the normal mode it prints nothing).
     tmcStepLog("export: object voxelization finished");
