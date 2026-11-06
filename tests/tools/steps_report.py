@@ -3,7 +3,7 @@
 # Each [mcx] line reads "[mcx] HH:MM:SS <name> <ms> ms", where <ms> is the time SINCE the previous
 # [mcx] line (so a step's cost rides on the NEXT line). Repeated step names are summed.
 # With several logs the columns are compared: the LAST log is flagged when a step costs
-# >1000 ms and >1.5x more than in the FIRST one (a regression candidate, see AGENTS section 4).
+# >1000 ms and >1.5x more than in the FIRST one (a regression candidate, see .agents/build-test.md).
 import re, sys
 
 

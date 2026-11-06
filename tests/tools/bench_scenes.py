@@ -1,4 +1,4 @@
-# Bench/probe .osm scenes for step-time profiling and regression checks (AGENTS section 4).
+# Bench/probe .osm scenes for step-time profiling and regression checks (the speed check in .agents/build-test.md).
 # Usage: python bench_scenes.py <out_dir> [name ...]     (without names - all scenes)
 #       python bench_scenes.py --list
 # Scenes (~1.2-1.5 km, temperate lat 55.75, corner buildings give the world bounds + voxel chunks):
