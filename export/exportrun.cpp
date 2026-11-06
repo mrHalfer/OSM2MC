@@ -336,6 +336,11 @@ private:
     GroundChunk makeGround(qint64 ckKey);
     void assignCave(GroundChunk& g, qint64 ckKey);
     bool inExportRect(int cx, int cz);
+
+    // 3.57 Street furniture: fences, benches, lamps, parking markings, portals.
+    void buildStreetFurniture();
+    // Villages (beginStep 10): squares with bells, address plates, signposts, basements.
+    void buildVillages();
 };
 
 ExportRun::ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
@@ -1598,6 +1603,2991 @@ void ExportRun::assignCave(GroundChunk& g, qint64 ckKey)
 bool ExportRun::inExportRect(int cx, int cz)
 {
     return cx >= rcx0 - rectM && cx <= rcx1 + rectM && cz >= rcz0 - rectM && cz <= rcz1 + rectM;
+}
+
+void ExportRun::buildStreetFurniture()
+{
+    // 3.57 Street furniture (user requests): wooden fences around csrpol sites (with no
+    // fewer than two gates and solid outer corners) and lamp posts along roads —
+    // a village composition "plinth + post + lantern", but taller than the game analogs. Everything stands on the
+    // ground by surfaceTop (already with the noise lift taken into account).
+    {
+        auto gateIdFor = [](qint64 ck, const QSet<ColKey>& pad) -> quint16
+        {   // the gate faces "away from the spot" (outward)
+            const int x2 = keyFirst(ck), z2 = keySecond(ck);
+            if (pad.contains(pairKey(x2 - 1, z2))) return IdGateE;
+            if (pad.contains(pairKey(x2 + 1, z2))) return IdGateW;
+            if (pad.contains(pairKey(x2, z2 - 1))) return IdGateS;
+            return IdGateN;
+        };
+        static const int dxs[4] = { 1, -1, 0, 0 };
+        static const int dzs[4] = { 0, 0, 1, -1 };
+        // — site fences: a ring of free columns right around the spot, two gates roughly
+        //   opposite each other (deterministically by the hash). The ring is built by FLARING over 8 neighbors:
+        //   along the edges the result is the same row, and on the OUTER CORNERS diagonal cells appear —
+        //   without them the fence diverged at the corners and the posts did not connect.
+        int nSportEq = 0;
+        // columns covered by a court of ANY pad (markings, goals and a 2-block margin). Sports plots often
+        // lie inside a bigger csrpol plot (a stadium with its own code): without the global set the outer
+        // plot filled its free area with benches right through the pitch lines of the inner one
+        QSet<ColKey> courtCols;
+        // the smallest plots go first: a pitch with its own court markings must be painted before the bigger
+        // plot that contains it fills the free area with benches (the court zone is only known after its build)
+        QVector<int> padOrder(pads.size());
+        for (int i = 0; i < pads.size(); ++i) padOrder[i] = i;
+        std::stable_sort(padOrder.begin(), padOrder.end(),
+                         [this](int a, int b) { return pads[a].size() < pads[b].size(); });
+        for (int padIdx : padOrder)
+        {
+            const QList<qint64>& padCols = pads[padIdx];
+            const QSet<ColKey> pad(padCols.constBegin(), padCols.constEnd());
+            if (padCode.value(padIdx, 0) == 71323000 && !padIsLake.value(padIdx, 0))
+            {   // GREENHOUSE (hothouse, orangery): a plank frame with glass (walls 4 blocks, a flat glass roof with beams), inside real beds — rows of beds (farmland) with
+                // plantings (wheat, carrots, potatoes, beetroot), between pairs of rows irrigation ditches with water, aisles, lamps under the roof; the entrance — an opening of 3 cells
+                int gx0 = std::numeric_limits<int>::max(), gx1 = std::numeric_limits<int>::min(), gz0 = gx0, gz1 = gx1;
+                for (qint64 ck : padCols)
+                {
+                    gx0 = std::min(gx0, keyFirst(ck)); gx1 = std::max(gx1, keyFirst(ck));
+                    gz0 = std::min(gz0, keySecond(ck)); gz1 = std::max(gz1, keySecond(ck));
+                }
+                const bool rowsAlongX = (gx1 - gx0) >= (gz1 - gz0);                   // the bed rows run along the long axis
+                auto isBoundary = [&](int x, int z)
+                {
+                    return !pad.contains(pairKey(x + 1, z)) || !pad.contains(pairKey(x - 1, z)) || !pad.contains(pairKey(x, z + 1)) || !pad.contains(pairKey(x, z - 1));
+                };
+                QVector<qint64> bnd;
+                for (qint64 ck : padCols) if (isBoundary(keyFirst(ck), keySecond(ck))) bnd << ck;
+                std::sort(bnd.begin(), bnd.end());
+                QPoint gate(1 << 28, 1 << 28);
+                if (!bnd.isEmpty())
+                {
+                    const qint64 gk = bnd[int(colHash(bnd.first() ^ 0x6A7Eull) % quint32(bnd.size()))];
+                    gate = QPoint(keyFirst(gk), keySecond(gk));
+                }
+                const quint16 crops[4] = { IdWheat, IdCarrots, IdPotatoes, IdBeetroots };
+                int nBed = 0, dbgNoGround = 0, dbgInterior = 0;
+                for (qint64 ck : padCols)
+                {
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    if (colMin.contains(ck) || colWater.contains(ck)) continue;
+                    const int y0 = surfaceTop(ck) + 1;
+                    if (y0 + 6 > 250) continue;
+                    const bool boundary = isBoundary(x, z);
+                    if (boundary)
+                    {
+                        const bool inGate = std::abs(x - gate.x()) <= 1 && std::abs(z - gate.y()) <= 1;
+                        int free4 = 0;
+                        if (!pad.contains(pairKey(x + 1, z))) ++free4;
+                        if (!pad.contains(pairKey(x - 1, z))) ++free4;
+                        if (!pad.contains(pairKey(x, z + 1))) ++free4;
+                        if (!pad.contains(pairKey(x, z - 1))) ++free4;
+                        const bool post = free4 >= 2 || ((x + z) & 3) == 0;
+                        for (int dy = 0; dy < 4; ++dy)
+                        {
+                            if (inGate && dy < 3) continue;                              // the entrance opening 3 high
+                            if (store.get(x, y0 + dy, z) != IdAir) continue;
+                            store.set(x, y0 + dy, z, (post || dy == 0 || inGate) ? IdOakPlanks : IdGlass);
+                        }
+                        if (store.get(x, y0 + 4, z) == IdAir) store.set(x, y0 + 4, z, IdOakPlanks);
+                        continue;
+                    }
+                    // the roof
+                    if (store.get(x, y0 + 4, z) == IdAir) store.set(x, y0 + 4, z, (x & 3) == 0 ? IdOakPlanks : IdGlass);
+                    // beds: a chain of rows along the axis, period 6: 0 — aisle, 1-2 — bed, 3 — a ditch with water, 4-5 — bed
+                    const int r = rowsAlongX ? (z - gz0) : (x - gx0);
+                    const int c = rowsAlongX ? (x - gx0) : (z - gz0);
+                    const int ph = ((r % 6) + 6) % 6;
+                    const bool nearWall = !pad.contains(pairKey(x + 1, z)) || !pad.contains(pairKey(x - 1, z)) || !pad.contains(pairKey(x, z + 1)) || !pad.contains(pairKey(x, z - 1))
+                                          || !pad.contains(pairKey(x + 1, z + 1)) || !pad.contains(pairKey(x - 1, z - 1)) || !pad.contains(pairKey(x + 1, z - 1)) || !pad.contains(pairKey(x - 1, z + 1));
+                    auto git = ground.find(pairKey(x >> 4, z >> 4));
+                    if (git == ground.end()) { ++dbgNoGround; continue; }
+                    ++dbgInterior;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    const bool crossAisle = (c % 14) == 0 || (std::abs(x - gate.x()) <= 1 && std::abs(z - gate.y()) <= 3 && false);
+                    if (nearWall || ph == 0 || crossAisle)
+                    {   // aisle: trampled earth, under the roof a lamp every 8 cells
+                        if (git->wd[col] == 0) git->surf[col] = IdDirtPath;
+                        if (ph == 0 && (c % 8) == 4 && store.get(x, y0 + 3, z) == IdAir) store.set(x, y0 + 3, z, IdLanternHung);
+                        continue;
+                    }
+                    if (ph == 3)
+                    {   // irrigation ditch: water flush with the beds
+                        if (git->wd[col] == 0)
+                        {
+                            git->wd[col] = 1;
+                            if (git->art.isEmpty()) git->art.fill(0, 256);
+                            git->art[col] = 1;
+                        }
+                        continue;
+                    }
+                    git->surf[col] = IdFarmland;
+                    const quint16 crop = crops[colHash(pairKey(r / 3, c / 18) ^ padCols.first() ^ 0x6C0Full) % 4u];
+                    if (store.get(x, y0, z) == IdAir) { store.set(x, y0, z, crop); ++nBed; }
+                }
+                nSportEq += nBed > 0 ? 1 : 0;
+                if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[greenhouse] cols=%d beds=%d interior=%d noGround=%d bbox x %d..%d z %d..%d\n", int(padCols.size()), nBed, dbgInterior, dbgNoGround, gx0, gx1, gz0, gz1);
+                continue;
+            }
+            QVector<qint64> ring;
+            for (qint64 ck : padCols)
+            {
+                const int bx = keyFirst(ck), bz = keySecond(ck);
+                for (int ddy = -1; ddy <= 1; ++ddy)
+                    for (int ddx = -1; ddx <= 1; ++ddx)
+                    {
+                        if (!ddx && !ddy) continue;
+                        const qint64 nk = pairKey(bx + ddx, bz + ddy);
+                        if (pad.contains(nk) || colMin.contains(nk) || colWater.contains(nk))
+                            continue;                       // the fence does not climb onto a road/structure/water
+                        ring << nk;
+                    }
+            }
+            std::sort(ring.begin(), ring.end());
+            ring.erase(std::unique(ring.begin(), ring.end()), ring.end());
+            if (ring.size() < 8) continue;              // a degenerate spot — not fenced
+            auto freeAt = [&](int ri)
+            {
+                const qint64 ck = ring.at(ri);
+                const int y = surfaceTop(ck) + 1;
+                return y <= 254 && store.get(keyFirst(ck), y, keySecond(ck)) == IdAir;
+            };
+            auto findFree = [&](int start)
+            {
+                for (int s = 0; s < 8; ++s)
+                {
+                    const int ri = (start + s) % int(ring.size());
+                    if (freeAt(ri)) return ri;
+                }
+                return -1;
+            };
+            const quint32 h0 = colHash(ring.first() ^ 0xFECEull);
+            const int gateA = findFree(int(h0 % quint32(ring.size())));
+            const int gateB = findFree((gateA >= 0 ? gateA : 0) + int(ring.size()) / 2
+                                       + int(h0 >> 8) % 3);
+            const bool militaryPad = (padCode.value(padIdx, 0) == 53210000);
+            const quint16 milBrick = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+            const quint16 milMossy = quint16(IdPaletteStart + paletteIndexOf("minecraft:mossy_stone_bricks"));
+            for (int ri = 0; ri < int(ring.size()); ++ri)
+            {
+                if (!freeAt(ri)) continue;              // occupied (a fence of a neighboring spot/a post/a planting)
+                const qint64 ck = ring.at(ri);
+                const int x = keyFirst(ck), z = keySecond(ck);
+                const int y = surfaceTop(ck) + 1;
+                if (militaryPad)
+                {   // a military ground (landuse=military): a stone boundary wall two rows high with
+                    // brick pillars every few cells and two open gateways; guards patrol inside
+                    if (ri == gateA || ri == gateB) continue;                    // the gateway is left open
+                    const quint32 hm = colHash(ck ^ 0x4C177ull);
+                    if (hm % 5u == 0u && store.get(x, y + 1, z) == IdAir && store.get(x, y + 2, z) == IdAir)
+                    {   // a pillar: a brick column taller than the wall
+                        store.set(x, y, z, milBrick);
+                        store.set(x, y + 1, z, (hm >> 8) % 4u == 0u ? milMossy : milBrick);
+                        store.set(x, y + 2, z, milBrick);
+                    }
+                    else
+                    {
+                        store.set(x, y, z, IdStoneBrickWall);
+                        if (store.get(x, y + 1, z) == IdAir) store.set(x, y + 1, z, IdStoneBrickWall);
+                    }
+                    continue;
+                }
+                store.set(x, y, z, (ri == gateA || ri == gateB) ? gateIdFor(ck, pad) : IdFence);
+            }
+            // Iron golems: on a fenced site (except lakes) a 25% chance is counted TWICE (deterministically
+            // by the spot hash) — a site has 0, 1 or 2 guards. They stand on free columns inside the spot closer to
+            // the center of its bbox; the second one — not closer than 3 blocks to the first. A CHILDREN'S
+            // playground gets baby villagers playing there instead of a guard (the same hash choice as the
+            // equipment stage below makes).
+            if (!padIsLake.value(padIdx, 0))
+            {
+                int gx0 = std::numeric_limits<int>::max(), gx1 = std::numeric_limits<int>::min();
+                int gz0 = gx0, gz1 = gx1;
+                for (qint64 ck : padCols)
+                {
+                    gx0 = std::min(gx0, keyFirst(ck)); gx1 = std::max(gx1, keyFirst(ck));
+                    gz0 = std::min(gz0, keySecond(ck)); gz1 = std::max(gz1, keySecond(ck));
+                }
+                const double mx = 0.5 * (gx0 + gx1), mz = 0.5 * (gz0 + gz1);
+                QVector<QPoint> golemAt;
+                // the same deterministic choice the equipment stage below makes: CODE 53710000 is a
+                // children's playground; a small mixed 53700000 site may become one by the pad hash
+                const quint32 hpNow = colHash(ring.first() ^ 0x5B027ull);
+                const bool kidsPad = padCode.value(padIdx, 0) == 53710000 ||
+                    (padCode.value(padIdx, 0) == 53700000 && padCols.size() < 700 && hpNow % 100u < 30u);
+                // a military ground is guarded for real: 2 golems up to 10 for a huge base, standing in a ring
+                // around the center; other sites keep the old deterministic 25% chance of 0, 1 or 2 golems;
+                // a children's playground gets a full gang of 4-6 kids instead, always (they came to play)
+                const int wantKids = kidsPad ? 4 + int((hpNow >> 8) % 3u) : 0;
+                const int wantGolems = militaryPad ? std::min(10, 2 + int(padCols.size()) / 100000)
+                                                   : (kidsPad ? wantKids : 2);
+                for (int roll = 0; roll < wantGolems; ++roll)
+                {
+                    if (!militaryPad && !kidsPad &&
+                        colHash(ring.first() ^ (0x601E3ull + quint64(roll) * 0x9E37ull)) % 100u >= 25u)
+                        continue;
+                    const double fa = 6.283185307179586 * roll / std::max(1, wantGolems);
+                    const bool spread = militaryPad || kidsPad;           // kids roam the whole plot too
+                    const double fx = spread ? mx + 0.3 * (gx1 - gx0) * std::cos(fa) : mx;
+                    const double fz = spread ? mz + 0.3 * (gz1 - gz0) * std::sin(fa) : mz;
+                    qint64 best = 0; double bestD = 1e18; bool have = false;
+                    for (qint64 ck : padCols)
+                    {
+                        const int y = surfaceTop(ck) + 1;
+                        if (y > 253 || store.get(keyFirst(ck), y, keySecond(ck)) != IdAir) continue;
+                        bool nearOther = false;
+                        for (const QPoint& q : golemAt)
+                            if (std::max(std::abs(q.x() - keyFirst(ck)), std::abs(q.y() - keySecond(ck))) < 3) nearOther = true;
+                        if (nearOther) continue;
+                        const double d = (keyFirst(ck) - fx) * (keyFirst(ck) - fx) + (keySecond(ck) - fz) * (keySecond(ck) - fz);
+                        if (d < bestD) { bestD = d; best = ck; have = true; }
+                    }
+                    if (!have) continue;
+                    NpcSite g;
+                    if (kidsPad)
+                    {   // children play on the playground instead of a guard (baby villagers)
+                        g.kind = 0; g.baby = true; g.prof = PfNone; g.level = 1;
+                    }
+                    else
+                        g.kind = 3;                                      // minecraft:iron_golem
+                    g.x = keyFirst(best); g.z = keySecond(best);
+                    g.y = surfaceTop(best) + 1;                          // surfaceTop already includes the yShift lift
+                    g.yaw = int(colHash(best ^ 0x601Eull) % 4u) * 90;
+                    npcs.append(g);
+                    golemAt.append(QPoint(g.x, g.z));
+                }
+            }
+            if (militaryPad) continue;      // the wall and the guards are enough; no courts, lawns or benches
+            // SPORTS EQUIPMENT on sites (CODE 53700000 — sports, 53710000 — children's): by the size and shape of the site — a football pitch (goals, the center
+            // line and circle in white wool), volleyball/tennis (a net on posts), basketball (two backboards with cauldron hoops), workout (pull-up bars, parallel bars, benches) or a children's
+            // playground (swings, a sandbox, a carousel, benches). We place only on free columns inside the spot not closer than 1 block to the fence and with air above them.
+            if (!padIsLake.value(padIdx, 0) && padCols.size() >= 90)
+            {
+                int bx0 = std::numeric_limits<int>::max(), bx1 = std::numeric_limits<int>::min(), bz0 = bx0, bz1 = bx1;
+                for (qint64 ck : padCols)
+                {
+                    bx0 = std::min(bx0, keyFirst(ck)); bx1 = std::max(bx1, keyFirst(ck));
+                    bz0 = std::min(bz0, keySecond(ck)); bz1 = std::max(bz1, keySecond(ck));
+                }
+                const int Lx = bx1 - bx0 + 1, Lz = bz1 - bz0 + 1;
+                const bool alongX = Lx >= Lz;                                 // the long axis
+                const int L = alongX ? Lx : Lz, Wd = alongX ? Lz : Lx;        // the length / width of the site
+                const double fillRatio = double(padCols.size()) / double(std::max(1, Lx * Lz));   // 1 — a rectangle, less — a ragged outline
+                const quint32 hp = colHash(ring.first() ^ 0x5B027ull);
+                // the "u-axis" along the length, the "v-axis" across; to(u, v) -> (x, z)
+                auto toXZ = [&](int u, int v) { return alongX ? QPoint(bx0 + u, bz0 + v) : QPoint(bx0 + v, bz0 + u); };
+                auto inside = [&](int u, int v, int margin)
+                {
+                    const QPoint q = toXZ(u, v);
+                    for (int dz2 = -margin; dz2 <= margin; ++dz2)
+                        for (int dx2 = -margin; dx2 <= margin; ++dx2)
+                            if (!pad.contains(pairKey(q.x() + dx2, q.y() + dz2))) return false;
+                    return true;
+                };
+                int resX0 = 1, resX1 = 0, resZ0 = 1, resZ1 = 0;                  // the area occupied by the court (x, z): ordinary items are not placed there
+                auto freeCol = [&](int u, int v, int h) -> bool
+                {   // the column is inside (a 1-block margin) and there is air h blocks above the ground
+                    if (!inside(u, v, 1)) return false;
+                    const QPoint q = toXZ(u, v);
+                    if (q.x() >= resX0 && q.x() <= resX1 && q.y() >= resZ0 && q.y() <= resZ1) return false;
+                    if (courtCols.contains(pairKey(q.x(), q.y()))) return false;   // somebody else's court
+                    const int y = surfaceTop(pairKey(q.x(), q.y())) + 1;
+                    if (y + h > 253) return false;
+                    for (int dy = 0; dy < h; ++dy) if (store.get(q.x(), y + dy, q.y()) != IdAir) return false;
+                    return true;
+                };
+                auto put1 = [&](int u, int v, int dy, quint16 id)
+                {
+                    const QPoint q = toXZ(u, v);
+                    store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1 + dy, q.y(), id);
+                };
+                // a post (fence) of height h; false — did not fit
+                auto post = [&](int u, int v, int h) -> bool
+                {
+                    if (!freeCol(u, v, h)) return false;
+                    for (int dy = 0; dy < h; ++dy) put1(u, v, dy, IdFence);
+                    return true;
+                };
+                int whiteWool = -1;
+                for (int i = 0; i < kWoolsCount; ++i) if (qstrcmp(kWools[i].name, "minecraft:white_wool") == 0) { whiteWool = i; break; }
+                auto paint = [&](int u, int v)
+                {   // white marking: we change the top ground block in the column to white wool
+                    if (whiteWool < 0 || !inside(u, v, 0)) return;
+                    const QPoint q = toXZ(u, v);
+                    auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
+                    if (git != ground.end() && git->wd[(q.y() & 15) * 16 + (q.x() & 15)] == 0) git->surf[(q.y() & 15) * 16 + (q.x() & 15)] = quint16(IdWoolBase + whiteWool);
+                };
+                int nEq = 0;
+                const int vc = Wd / 2;
+                const int padKind = padCode.value(padIdx, 0);
+                const bool sportPad = (padKind == 53700000 || padKind == 53710000);
+                auto flowerAt = [&](int u, int v)
+                {   // a flower on the grass (only in a free column, air above the ground)
+                    if (!freeCol(u, v, 1)) return false;
+                    const QPoint q = toXZ(u, v);
+                    put1(u, v, 0, quint16(IdFlowerBase + int(colHash(pairKey(q.x(), q.y()) ^ 0xF10Eull) % quint32(kFlowersCount))));
+                    return true;
+                };
+                if (!sportPad)
+                {   // ——— other csrpol by codes ———
+                    quint16 hayBale = IdHayBale;
+                    switch (padKind)
+                    {
+                    case 53510000:
+                    {   // CEMETERY: rows of graves every 3 blocks along and 4 across: a gravestone (a stone wall 2 blocks) or a cross (a fence), in front of it a mound of coarse dirt; rare flowers
+                        const quint16 paveA = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
+                        const quint16 paveB = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+                        auto pavedC = [&](int u, int v) -> bool
+                        {   // a roadway, a paved square or water under the grave spot (a request: roads cross the cemetery);
+                            // the surface row is checked too: paving can get there without leaving a mark in the maps
+                            const QPoint q = toXZ(u, v);
+                            const ColKey ck = pairKey(q.x(), q.y());
+                            if (roadCols.contains(ck) || colWool.contains(ck) || colWater.contains(ck)) return true;
+                            const auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
+                            if (git != ground.end())
+                            {
+                                const quint16 s = git->surf[(q.y() & 15) * 16 + (q.x() & 15)];
+                                if (s >= IdWoolBase && s < quint16(IdWoolBase + kWoolsCount)) return true;
+                                if (s == paveA || s == paveB) return true;
+                            }
+                            return false;
+                        };
+                        for (int v = 2; v < Wd - 2; v += 4)
+                            for (int u = 2; u < L - 2; u += 3)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 31, v * 17) ^ ring.first() ^ 0xC3E7ull);
+                                if (hq % 100u >= 70u) continue;
+                                if (!(freeCol(u, v, 3) && freeCol(u, v + 1, 1) && freeCol(u, v + 2, 1))) continue;
+                                if (pavedC(u, v) || pavedC(u, v + 1) || pavedC(u, v + 2)) continue;   // no grave across a road (a request)
+                                if ((hq >> 8) % 100u < 55u)
+                                {   // a gravestone
+                                    put1(u, v, 0, IdStoneBrickWall);
+                                    put1(u, v, 1, IdStoneBrickWall);
+                                }
+                                else
+                                {   // a cross
+                                    put1(u, v, 0, IdFence); put1(u, v, 1, IdFence); put1(u, v, 2, IdFence);
+                                    if (freeCol(u - 1, v, 2) && freeCol(u + 1, v, 2)
+                                        && !pavedC(u - 1, v) && !pavedC(u + 1, v)) { put1(u - 1, v, 1, IdFence); put1(u + 1, v, 1, IdFence); }
+                                }
+                                put1(u, v + 1, 0, IdCoarseDirt);                          // a grave mound
+                                put1(u, v + 2, 0, IdCoarseDirt);
+                                if ((hq >> 16) % 100u < 25u && !pavedC(u + 1, v + 1)) flowerAt(u + 1, v + 1);
+                                ++nEq;
+                            }
+                        // benches at the edge
+                        for (int k = 0; k < 2; ++k)
+                        {
+                            const int u0 = 1 + k * std::max(4, L - 5);
+                            bool ok = true;
+                            for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, 1, 1) && !pavedC(u, 1);
+                            if (!ok) continue;
+                            for (int u = u0; u < u0 + 3; ++u) put1(u, 1, 0, alongX ? IdStairsS : IdStairsE);
+                            ++nEq;
+                        }
+                        break;
+                    }
+                    case 53530000:
+                    {   // MONUMENT, MEMORIAL: a stone site, in the center an obelisk (a 6-block wall on a 3×3 stone brick base) with an eternal flame (a lantern), flowers and benches around
+                        const int uc = L / 2, vm = Wd / 2;
+                        bool ok = true;
+                        for (int du = -1; du <= 1 && ok; ++du) for (int dv = -1; dv <= 1 && ok; ++dv) ok = freeCol(uc + du, vm + dv, 8);
+                        if (ok)
+                        {
+                            const quint16 sb = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+                            for (int du = -1; du <= 1; ++du) for (int dv = -1; dv <= 1; ++dv) put1(uc + du, vm + dv, 0, sb);
+                            for (int dy = 1; dy <= 6; ++dy) put1(uc, vm, dy, IdStoneBrickWall);
+                            put1(uc, vm, 7, IdLanternStanding);
+                            ++nEq;
+                            for (int a = 0; a < 4; ++a)
+                            {
+                                const int du = (a & 1) ? 3 : -3, dv = (a & 2) ? 3 : -3;
+                                if (freeCol(uc + du, vm + dv, 1)) { put1(uc + du, vm + dv, 0, quint16(IdFlowerPotBase + int(colHash(pairKey(a, uc) ^ 0x3E3ull) % quint32(kFlowersCount)))); ++nEq; }
+                            }
+                            for (int sd = -1; sd <= 1; sd += 2)
+                            {
+                                bool b2 = true;
+                                for (int dv = -1; dv <= 1 && b2; ++dv) b2 = freeCol(uc + 5 * sd, vm + dv, 1);
+                                if (!b2) continue;
+                                for (int dv = -1; dv <= 1; ++dv) put1(uc + 5 * sd, vm + dv, 0, sd < 0 ? (alongX ? IdStairsE : IdStairsS) : (alongX ? IdStairsW : IdStairsN));
+                                ++nEq;
+                            }
+                        }
+                        break;
+                    }
+                    case 51220000:
+                    {   // GAS STATION: a canopy on four supports (a 9×5 slab roof), under it two pumps (a blast furnace) with an indicator lantern; barrels (fuel) nearby
+                        const int uc = L / 2, vm = Wd / 2;
+                        const int du = std::min(4, std::max(2, L / 2 - 2)), dv = std::min(2, std::max(1, Wd / 2 - 2));
+                        bool ok = true;
+                        for (int a = -du; a <= du && ok; ++a) for (int b2 = -dv; b2 <= dv && ok; ++b2) ok = freeCol(uc + a, vm + b2, 5);
+                        if (ok)
+                        {
+                            for (int a : { -du, du }) for (int b2 : { -dv, dv }) for (int dy = 0; dy < 4; ++dy) put1(uc + a, vm + b2, dy, IdFence);
+                            for (int a = -du; a <= du; ++a) for (int b2 = -dv; b2 <= dv; ++b2) put1(uc + a, vm + b2, 4, IdSlabBottom);
+                            for (int a : { -du / 2, du / 2 })
+                            {
+                                put1(uc + a, vm, 0, quint16(int(IdBlastFurnaceBase) + (alongX ? 0 : 1)));
+                                put1(uc + a, vm, 1, IdLanternStanding);
+                            }
+                            ++nEq;
+                            for (int a = -1; a <= 1; a += 2)
+                                if (freeCol(uc + a, Wd - 2, 1)) { put1(uc + a, Wd - 2, 0, IdBarrel); ++nEq; }
+                        }
+                        break;
+                    }
+                    case 52400000:
+                    {   // APIARY: hives on posts in a grid every 4 blocks, flowers around, bees near the hives
+                        int nHive = 0;
+                        for (int v = 2; v < Wd - 2; v += 4)
+                            for (int u = 2; u < L - 2; u += 4)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 29, v * 13) ^ ring.first() ^ 0xA9E7ull);
+                                if (hq % 100u >= 65u || !freeCol(u, v, 2)) continue;
+                                put1(u, v, 0, IdFence);
+                                put1(u, v, 1, quint16(IdPaletteStart + paletteIndexOf("minecraft:beehive")));
+                                ++nHive; ++nEq;
+                                if (nHive <= 8)
+                                {
+                                    const QPoint q = toXZ(u, v);
+                                    NpcSite bee;
+                                    bee.kind = 5; bee.animal = QStringLiteral("minecraft:bee");
+                                    bee.x = q.x(); bee.z = q.y(); bee.y = surfaceTop(pairKey(q.x(), q.y())) + 3;
+                                    bee.yaw = int((hq >> 10) % 4u) * 90;
+                                    npcs.append(bee);
+                                }
+                            }
+                        for (int v = 1; v < Wd - 1; ++v)
+                            for (int u = 1; u < L - 1; ++u)
+                                if (colHash(pairKey(u * 7 + 1, v * 11 + 3) ^ ring.first() ^ 0xF1A7ull) % 100u < 22u) flowerAt(u, v);
+                        break;
+                    }
+                    case 51460000:
+                    {   // ELECTRIC SUBSTATION: 2×2×2 transformers of iron blocks with insulators (fences) on the top corners, towers (a fence of 8 with a crossbar) along the edges
+                        for (int v = 2; v < Wd - 3; v += 6)
+                            for (int u = 2; u < L - 3; u += 6)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 23, v * 19) ^ ring.first() ^ 0xE1ECull);
+                                if (hq % 100u >= 75u) continue;
+                                bool ok = true;
+                                for (int du = 0; du < 2 && ok; ++du) for (int dv = 0; dv < 2 && ok; ++dv) ok = freeCol(u + du, v + dv, 4);
+                                if (!ok) continue;
+                                for (int du = 0; du < 2; ++du) for (int dv = 0; dv < 2; ++dv)
+                                {
+                                    put1(u + du, v + dv, 0, IdIronBlock); put1(u + du, v + dv, 1, IdIronBlock);
+                                    if (du == dv || (hq & 1u)) { put1(u + du, v + dv, 2, IdFence); put1(u + du, v + dv, 3, IdFence); }
+                                }
+                                ++nEq;
+                            }
+                        for (int k = 0; k < 2; ++k)
+                        {
+                            const int u0 = 1 + k * std::max(3, L - 4), v0 = Wd / 2;
+                            bool ok = true;
+                            for (int dv = -1; dv <= 1 && ok; ++dv) ok = freeCol(u0, v0 + dv, 9);
+                            if (!ok) continue;
+                            for (int dy = 0; dy < 9; ++dy) put1(u0, v0, dy, IdFence);
+                            for (int dv = -1; dv <= 1; ++dv) put1(u0, v0 + dv, 7, IdFence);
+                            put1(u0, v0 - 1, 6, IdFence); put1(u0, v0 + 1, 6, IdFence);
+                            ++nEq;
+                        }
+                        break;
+                    }
+                    case 52100000:
+                    {   // AGRICULTURAL OBJECTS (territory): a 7×5 pen with animals, hay bales, barrels, drinkers (cauldrons)
+                        if (L >= 12 && Wd >= 9)
+                        {
+                            const int u0 = 2, v0 = 2;
+                            bool ok = true;
+                            for (int u = u0; u < u0 + 7 && ok; ++u) for (int v = v0; v < v0 + 5 && ok; ++v) ok = freeCol(u, v, 1);
+                            if (ok)
+                            {
+                                for (int u = u0; u < u0 + 7; ++u) { put1(u, v0, 0, IdFence); put1(u, v0 + 4, 0, IdFence); }
+                                for (int v = v0 + 1; v < v0 + 4; ++v) { put1(u0, v, 0, IdFence); if (v != v0 + 2) put1(u0 + 6, v, 0, IdFence); }
+                                put1(u0 + 6, v0 + 2, 0, alongX ? IdGateE : IdGateS);
+                                put1(u0 + 1, v0 + 3, 0, IdCauldron);                         // a drinker
+                                static const char* const kFarm[] = { "minecraft:cow", "minecraft:pig", "minecraft:sheep", "minecraft:chicken" };
+                                const int na = 2 + int(ring.first() % 3u);
+                                for (int a = 0; a < na; ++a)
+                                {
+                                    const QPoint q = toXZ(u0 + 2 + a, v0 + 1 + (a % 3));
+                                    NpcSite an;
+                                    an.kind = 5; an.animal = QString::fromLatin1(kFarm[(ring.first() >> (a * 3)) % 4u]);
+                                    an.x = q.x(); an.z = q.y(); an.y = surfaceTop(pairKey(q.x(), q.y())) + 1;
+                                    an.yaw = a * 90;
+                                    npcs.append(an);
+                                }
+                                ++nEq;
+                            }
+                        }
+                        for (int v = 2; v < Wd - 2; v += 5)
+                            for (int u = 11; u < L - 2; u += 5)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 17, v * 31) ^ ring.first() ^ 0x5E7Dull);
+                                if (hq % 100u >= 60u) continue;
+                                if (!freeCol(u, v, 2)) continue;
+                                if ((hq >> 8) % 3u == 0u) { put1(u, v, 0, IdBarrel); if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, IdBarrel); }
+                                else { put1(u, v, 0, hayBale); if ((hq >> 12) & 1u) put1(u, v, 1, hayBale); if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, hayBale); }
+                                ++nEq;
+                            }
+                        break;
+                    }
+                    case 51130000:
+                    {   // INDUSTRIAL ENTERPRISE (territory): stacks of containers (multicolored wool 4×2×2), barrels, pipes (fences)
+                        for (int v = 2; v < Wd - 3; v += 6)
+                            for (int u = 2; u < L - 5; u += 7)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 37, v * 41) ^ ring.first() ^ 0x1D05ull);
+                                if (hq % 100u >= 65u) continue;
+                                if ((hq >> 8) % 4u == 0u)
+                                {   // barrels
+                                    if (!freeCol(u, v, 2)) continue;
+                                    put1(u, v, 0, IdBarrel); put1(u, v, 1, IdBarrel);
+                                    if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, IdBarrel);
+                                    ++nEq;
+                                    continue;
+                                }
+                                bool ok = true;
+                                for (int du = 0; du < 4 && ok; ++du) for (int dv = 0; dv < 2 && ok; ++dv) ok = freeCol(u + du, v + dv, 2);
+                                if (!ok) continue;
+                                static const int kContainerWools[] = { 1, 5, 11, 14, 3, 4 };
+                                const int wc = std::min(kWoolsCount - 1, kContainerWools[(hq >> 12) % 6u]);
+                                for (int du = 0; du < 4; ++du) for (int dv = 0; dv < 2; ++dv)
+                                {
+                                    put1(u + du, v + dv, 0, quint16(IdWoolBase + wc));
+                                    if (((hq >> 20) & 1u) || du < 2) put1(u + du, v + dv, 1, quint16(IdWoolBase + wc));
+                                }
+                                ++nEq;
+                            }
+                        break;
+                    }
+                    case 53110000:
+                    {   // AIRPORT: white runway marking — center dashes 5 every 4, side lines, threshold stripes at the ends, lights along the edges
+                        const int vA = 2, vB = Wd - 3;
+                        for (int u = 1; u < L - 1; ++u)
+                        {
+                            paint(u, vA); paint(u, vB);                                      // the edges
+                            if ((u / 5) % 2 == 0) paint(u, vc);                              // the center dashes
+                        }
+                        for (int end = 0; end < 2; ++end)
+                            for (int v = vA + 2; v <= vB - 2; v += 2)
+                                for (int k = 0; k < 4; ++k) paint(end == 0 ? 2 + k : L - 3 - k, v);
+                        for (int u = 4; u < L - 3; u += 8)
+                            for (int v : { 1, Wd - 2 }) if (freeCol(u, v, 1)) { put1(u, v, 0, IdLanternStanding); ++nEq; }
+                        break;
+                    }
+                    case 53600000:
+                    case 53400000:
+                    {   // TERRITORIES OF SOCIAL AND RELIGIOUS OBJECTS (and others): a lawn with benches along the perimeter, flower beds and flowers; without wool
+                        for (int k = 0; k < 4; ++k)
+                        {
+                            const int u0 = 2 + (k & 1) * std::max(4, L - 7);
+                            const int v0 = (k & 2) ? std::max(2, Wd - 3) : 2;
+                            bool ok = true;
+                            for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
+                            if (!ok) continue;
+                            for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, alongX ? ((k & 2) ? IdStairsN : IdStairsS) : ((k & 2) ? IdStairsW : IdStairsE));
+                            ++nEq;
+                        }
+                        for (int v = 3; v < Wd - 3; v += 6)
+                            for (int u = 3; u < L - 3; u += 6)
+                            {
+                                const quint32 hq = colHash(pairKey(u * 13, v * 7) ^ ring.first() ^ 0xC1A5ull);
+                                if (hq % 100u >= 55u) continue;
+                                int made = 0;
+                                for (int du = 0; du < 2; ++du) for (int dv = 0; dv < 2; ++dv) if (flowerAt(u + du, v + dv)) ++made;
+                                if (made) ++nEq;
+                            }
+                        break;
+                    }
+                    default:
+                        break;                                                  // other codes (pipes, towers, tanks, etc.) — without furnishing
+                    }
+                    nSportEq += nEq;
+                    if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[csr] code=%d bbox x %d..%d z %d..%d cols=%d eq=%d\n", padKind, bx0, bx1, bz0, bz1, int(padCols.size()), nEq);
+                    continue;
+                }
+                QVector<QPoint> barAt;                                           // pull-up bars of the site: no more than two, not closer than 12 blocks to each other
+                auto canBar = [&](int u, int v)
+                {
+                    if (barAt.size() >= 2) return false;
+                    for (const QPoint& q : barAt) if (std::max(std::abs(q.x() - u), std::abs(q.y() - v)) < 12) return false;
+                    return true;
+                };
+                // COURTS AND FIELDS. We take the largest axis-aligned rectangle lying entirely inside the spot (with a 1-block margin from the edge) — so both rotated and oval spots are found. By its size and
+                // the spot area a kind is chosen: football / mini-football / basketball / hockey / tennis / volleyball. The court stands in the center of the rectangle, marked with white wool on the ground.
+                bool courtBuilt = false;
+                auto buildCourt = [&]() -> bool
+                {
+                    if (padKind != 53700000) return false;
+                    const int Wg = Lx, Hg = Lz;
+                    QVector<int> hgt(Wg, 0);
+                    int bestA = 0, bL = 0, bB = 0, bW = 0, bH = 0;
+                    for (int zi = 0; zi < Hg; ++zi)
+                    {
+                        for (int xi = 0; xi < Wg; ++xi)
+                        {
+                            const int x = bx0 + xi, z = bz0 + zi;
+                            bool ok = true;
+                            for (int dz2 = -1; dz2 <= 1 && ok; ++dz2) for (int dx2 = -1; dx2 <= 1 && ok; ++dx2) ok = pad.contains(pairKey(x + dx2, z + dz2));
+                            hgt[xi] = ok ? hgt[xi] + 1 : 0;
+                        }
+                        QVector<QPair<int, int>> st;                                      // (start, height)
+                        for (int xi = 0; xi <= Wg; ++xi)
+                        {
+                            const int cur = xi < Wg ? hgt[xi] : 0;
+                            int start = xi;
+                            while (!st.isEmpty() && st.last().second >= cur)
+                            {
+                                const int hh = st.last().second, s0 = st.last().first;
+                                st.removeLast();
+                                if (hh * (xi - s0) > bestA) { bestA = hh * (xi - s0); bL = s0; bB = zi; bW = xi - s0; bH = hh; }
+                                start = s0;
+                            }
+                            st.append(qMakePair(start, cur));
+                        }
+                    }
+                    if (bestA < 100) return false;
+                    const int rx0 = bx0 + bL, rz0 = bz0 + bB - bH + 1;                      // the rectangle [rx0, rx0+bW) × [rz0, rz0+bH)
+                    const bool longX = bW >= bH;
+                    const int a = longX ? bW : bH, b = longX ? bH : bW;
+                    const int area = int(padCols.size());
+                    struct Kind { int id; int w; };
+                    QVector<Kind> opts;
+                    if (a >= 36 && b >= 20 && area >= 1500) opts.append({ 0, area >= 2800 ? 8 : 3 });   // a football pitch
+                    if (a >= 26 && b >= 14 && area <= 3200) opts.append({ 1, 3 });                                        // mini-football / handball
+                    if (a >= 22 && b >= 11 && area <= 2200) opts.append({ 2, 4 });                                        // basketball
+                    if (a >= 26 && b >= 14 && area >= 900 && area <= 4500) opts.append({ 3, area >= 2800 ? 3 : 2 });      // a hockey box
+                    if (a >= 24 && b >= 10 && area <= 1400) opts.append({ 4, 2 });                                        // tennis
+                    if (a >= 16 && b >= 8 && area <= 1000) opts.append({ 5, 3 });                                         // volleyball
+                    if (opts.isEmpty()) return false;
+                    int wsum = 0;
+                    for (const Kind& k : opts) wsum += k.w;
+                    int pickW = int(hp % quint32(wsum)), kindSel = opts.first().id;
+                    for (const Kind& k : opts) { if (pickW < k.w) { kindSel = k.id; break; } pickW -= k.w; }
+                    int Lc, Wc;
+                    switch (kindSel)
+                    {
+                    case 0:  Lc = std::min(a - 2, 60); Wc = std::min(b - 0, 36); break;
+                    case 1:  Lc = std::min(a - 2, 34); Wc = std::min(b, 18); break;
+                    case 2:  Lc = std::min(a - 2, 28); Wc = std::min(b, 15); break;
+                    case 3:  Lc = std::min(a - 2, 30); Wc = std::min(b - 2, 15); break;
+                    case 4:  Lc = std::min(a - 2, 24); Wc = std::min(b - 2, 11); break;
+                    default: Lc = std::min(a - 2, 18); Wc = std::min(b - 2, 9); break;
+                    }
+                    if (Lc < 12 || Wc < 7) return false;
+                    const int ou = 1 + (a - 2 - Lc) / 2, ov = (b - Wc) / 2;                    // the court offset in the rectangle (along the length a margin is left for the goals)
+                    const int ox = longX ? rx0 + ou : rx0 + ov, oz = longX ? rz0 + ov : rz0 + ou;
+                    auto cxz = [&](int cu, int cv) { return longX ? QPoint(ox + cu, oz + cv) : QPoint(ox + cv, oz + cu); };
+                    auto cPaint = [&](int cu, int cv)
+                    {
+                        if (whiteWool < 0) return;
+                        const QPoint q = cxz(cu, cv);
+                        if (!pad.contains(pairKey(q.x(), q.y()))) return;
+                        auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
+                        if (git != ground.end() && git->wd[(q.y() & 15) * 16 + (q.x() & 15)] == 0) git->surf[(q.y() & 15) * 16 + (q.x() & 15)] = quint16(IdWoolBase + whiteWool);
+                    };
+                    auto cPut = [&](int cu, int cv, int dy, quint16 id)
+                    {
+                        const QPoint q = cxz(cu, cv);
+                        if (!pad.contains(pairKey(q.x(), q.y()))) return;
+                        const int y = surfaceTop(pairKey(q.x(), q.y())) + 1 + dy;
+                        if (y < 254 && store.get(q.x(), y, q.y()) == IdAir) store.set(q.x(), y, q.y(), id);
+                    };
+                    auto cFence = [&](int cu, int cv, int h) { for (int dy = 0; dy < h; ++dy) cPut(cu, cv, dy, IdFence); };
+                    const int vc2 = Wc / 2, uc2 = Lc / 2;
+                    auto outline = [&]()
+                    {
+                        for (int cu = 0; cu < Lc; ++cu) { cPaint(cu, 0); cPaint(cu, Wc - 1); }
+                        for (int cv = 0; cv < Wc; ++cv) { cPaint(0, cv); cPaint(Lc - 1, cv); }
+                    };
+                    auto circle = [&](int cu0, int cv0, int rad)
+                    {
+                        for (int ang = 0; ang < 96; ++ang)
+                        {
+                            const double t = ang * 3.14159265358979 / 48.0;
+                            cPaint(cu0 + int(std::lround(rad * std::cos(t))), cv0 + int(std::lround(rad * std::sin(t))));
+                        }
+                    };
+                    auto goal = [&](int cu, int halfW, int h)
+                    {   // a goal in the plane cu: two posts and a crossbar 2*halfW+1 wide
+                        cFence(cu, vc2 - halfW, h); cFence(cu, vc2 + halfW, h);
+                        for (int cv = vc2 - halfW + 1; cv < vc2 + halfW; ++cv) cPut(cu, cv, h - 1, IdFence);
+                    };
+                    // is it free under the court: nothing stands on the marking itself
+                    for (int cu = -1; cu <= Lc; ++cu)
+                        for (int cv = -1; cv <= Wc; ++cv)
+                        {
+                            const QPoint q = cxz(cu, cv);
+                            if (!pad.contains(pairKey(q.x(), q.y()))) continue;
+                            if (courtCols.contains(pairKey(q.x(), q.y()))) return false;   // no courts on top of each other
+                            if (store.get(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1, q.y()) != IdAir) return false;
+                        }
+                    switch (kindSel)
+                    {
+                    case 0:
+                    {   // a football pitch: the outline, the center line and circle, penalty areas 8×18 (from a length of 44), goals 7 wide and 3 high behind the lines
+                        outline();
+                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
+                        circle(uc2, vc2, std::max(3, std::min(5, Wc / 6)));
+                        cPaint(uc2, vc2);
+                        if (Lc >= 44 && Wc >= 24)
+                            for (int end = 0; end < 2; ++end)
+                            {
+                                const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
+                                for (int d = 0; d <= 8; ++d) { cPaint(base + step * d, vc2 - 9); cPaint(base + step * d, vc2 + 9); }
+                                for (int cv = vc2 - 9; cv <= vc2 + 9; ++cv) cPaint(base + step * 8, cv);
+                            }
+                        goal(-1, 3, 3); goal(Lc, 3, 3);
+                        break;
+                    }
+                    case 1:
+                    {   // mini-football / handball: the outline, the center, goal areas in an arc, goals 5 wide
+                        outline();
+                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
+                        circle(uc2, vc2, 3);
+                        for (int end = 0; end < 2; ++end)
+                        {
+                            const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
+                            for (int cv = vc2 - 4; cv <= vc2 + 4; ++cv) cPaint(base + step * 5, cv);
+                            for (int d = 0; d <= 5; ++d) { cPaint(base + step * d, vc2 - 4); cPaint(base + step * d, vc2 + 4); }
+                        }
+                        goal(-1, 2, 3); goal(Lc, 2, 3);
+                        break;
+                    }
+                    case 2:
+                    {   // basketball: the outline, the center, the circle, "keys" 5×5 at the hoops; backboards on posts behind the end lines
+                        outline();
+                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
+                        circle(uc2, vc2, 2);
+                        for (int end = 0; end < 2; ++end)
+                        {
+                            const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
+                            for (int d = 0; d <= 5; ++d) { cPaint(base + step * d, vc2 - 2); cPaint(base + step * d, vc2 + 2); }
+                            for (int cv = vc2 - 2; cv <= vc2 + 2; ++cv) cPaint(base + step * 5, cv);
+                            const int pu = end == 0 ? -1 : Lc, du = end == 0 ? 1 : -1;
+                            cFence(pu, vc2, 3);
+                            for (int cv = vc2 - 1; cv <= vc2 + 1; ++cv) cPut(pu, cv, 3, quint16(IdWoolBase + std::max(0, whiteWool)));
+                            cPut(pu + du, vc2, 2, IdCauldron);
+                        }
+                        break;
+                    }
+                    case 3:
+                    {   // a hockey box: boards of fences along the outline with 3-wide openings in the middle of the long sides, the center and blue lines, goals 3 wide
+                        for (int cu = -1; cu <= Lc; ++cu) for (int cv : { -1, Wc })
+                            if (std::abs(cu - uc2) > 1) cPut(cu, cv, 0, IdFence);
+                        for (int cv = 0; cv < Wc; ++cv) for (int cu : { -1, Lc }) cPut(cu, cv, 0, IdFence);
+                        for (int cv = 0; cv < Wc; ++cv) { cPaint(uc2, cv); cPaint(uc2 - 6, cv); cPaint(uc2 + 6, cv); }
+                        circle(uc2, vc2, 3);
+                        goal(2, 1, 2); goal(Lc - 3, 1, 2);
+                        break;
+                    }
+                    case 4:
+                    {   // tennis: the outline, a net in the center on posts behind the side lines, service lines ±6, the center service line
+                        outline();
+                        for (int cv = 1; cv < Wc - 1; ++cv) { cPaint(uc2 - 6, cv); cPaint(uc2 + 6, cv); }
+                        for (int cu = uc2 - 6; cu <= uc2 + 6; ++cu) cPaint(cu, vc2);
+                        cFence(uc2, -1, 3); cFence(uc2, Wc, 3);
+                        for (int cv = 0; cv < Wc; ++cv) cPut(uc2, cv, 1, IdFence);
+                        break;
+                    }
+                    default:
+                    {   // volleyball: the outline, a net in the center on posts, attack lines 3 blocks from the net
+                        outline();
+                        for (int cv = 0; cv < Wc; ++cv) { cPaint(uc2 - 3, cv); cPaint(uc2 + 3, cv); }
+                        cFence(uc2, -1, 3); cFence(uc2, Wc, 3);
+                        for (int cv = 0; cv < Wc; ++cv) cPut(uc2, cv, 1, IdFence);
+                        break;
+                    }
+                    }
+                    // the court zone (with a 1-block margin) is unavailable to ordinary items; for hockey the margin for the boards is already included
+                    const QPoint pA = cxz(-2, -2), pB = cxz(Lc + 1, Wc + 1);
+                    resX0 = std::min(pA.x(), pB.x()); resX1 = std::max(pA.x(), pB.x());
+                    resZ0 = std::min(pA.y(), pB.y()); resZ1 = std::max(pA.y(), pB.y());
+                    for (int qx = resX0; qx <= resX1; ++qx)
+                        for (int qz = resZ0; qz <= resZ1; ++qz)
+                            courtCols.insert(pairKey(qx, qz));                     // and to the items of the other pads too
+                    if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[court] kind=%d rect %dx%d court %dx%d area=%d\n", kindSel, a, b, Lc, Wc, area);
+                    return true;
+                };
+                bool kidsPad = (padKind == 53710000);
+                if (!kidsPad)
+                {
+                    courtBuilt = buildCourt();
+                    if (courtBuilt) ++nEq;
+                    else if (padCols.size() < 700 && hp % 100u < 30u) kidsPad = true;       // a small sports/children's playground (the code 53700000 unites both kinds)
+                }
+                if (kidsPad)
+                {   // CHILDREN'S PLAYGROUND
+                    // swings: a frame of two posts 4 high with a crossbar and two seats
+                    for (int k = 0; k < 2; ++k)
+                    {
+                        const int u0 = 2 + k * 6, v0 = std::max(1, vc - 3);
+                        if (u0 + 1 >= L - 1 || v0 + 5 >= Wd) break;
+                        bool ok = true;
+                        for (int v = v0; v <= v0 + 4 && ok; ++v) ok = freeCol(u0, v, 4);
+                        if (!ok) continue;
+                        post(u0, v0, 4); post(u0, v0 + 4, 4);
+                        for (int v = v0 + 1; v <= v0 + 3; ++v) put1(u0, v, 3, IdFence);
+                        for (int sv : { v0 + 1, v0 + 3 })
+                        {
+                            put1(u0, sv, 2, IdFence);                         // ropes
+                            put1(u0, sv, 1, IdSlabTop);                       // the seat
+                        }
+                        ++nEq;
+                    }
+                    // a 3×3 sandbox with a slab rim
+                    {
+                        const int u0 = std::max(2, L - 6), v0 = std::max(1, vc - 1);
+                        bool ok = u0 + 3 < L - 1 && v0 + 3 < Wd - 1;
+                        for (int u = u0; u <= u0 + 2 && ok; ++u) for (int v = v0; v <= v0 + 2 && ok; ++v) ok = freeCol(u, v, 1);
+                        if (ok)
+                        {
+                            for (int u = u0 - 1; u <= u0 + 3; ++u) for (int v = v0 - 1; v <= v0 + 3; ++v)
+                            {
+                                const bool edge = (u == u0 - 1 || u == u0 + 3 || v == v0 - 1 || v == v0 + 3);
+                                if (!freeCol(u, v, 1)) continue;
+                                if (edge) put1(u, v, 0, IdSlabBottom);
+                                else if (g_sandId) { const QPoint q = toXZ(u, v); store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())), q.y(), g_sandId); }
+                            }
+                            ++nEq;
+                        }
+                    }
+                    // a carousel: a cauldron on a post with four fence spokes
+                    {
+                        const int u0 = L / 2, v0 = std::max(2, Wd - 4);
+                        if (freeCol(u0, v0, 2) && freeCol(u0 - 1, v0, 1) && freeCol(u0 + 1, v0, 1) && freeCol(u0, v0 - 1, 1) && freeCol(u0, v0 + 1, 1))
+                        {
+                            put1(u0, v0, 0, IdFence); put1(u0, v0, 1, IdCauldron);
+                            put1(u0 - 1, v0, 0, IdFence); put1(u0 + 1, v0, 0, IdFence); put1(u0, v0 - 1, 0, IdFence); put1(u0, v0 + 1, 0, IdFence);
+                            ++nEq;
+                        }
+                    }
+                    // a bench at the edge
+                    for (int k = 0; k < 2; ++k)
+                    {
+                        const int u0 = 2 + k * (std::max(4, L - 6)), v0 = 1;
+                        bool ok = true;
+                        for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
+                        if (!ok) continue;
+                        const quint16 st = alongX ? IdStairsS : IdStairsE;    // the back toward the fence
+                        for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, st);
+                        ++nEq;
+                    }
+                }
+                else if (courtBuilt)
+                {
+                    // the court is already built (see buildCourt)
+                }
+                else
+                {   // WORKOUT: pull-up bars (a frame 4 wide), parallel bars, benches
+                    int k = 0;
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        const int u0 = 2 + i * std::max(12, L / 2), v0 = 2 + (i % 2) * std::max(0, Wd - 6);
+                        if (u0 + 3 >= L - 1 || v0 + 1 >= Wd || !canBar(u0, v0)) continue;
+                        bool ok = true;
+                        for (int u = u0; u <= u0 + 3 && ok; ++u) ok = freeCol(u, v0, 4);
+                        if (!ok) continue;
+                        post(u0, v0, 4); post(u0 + 3, v0, 4);
+                        put1(u0 + 1, v0, 3, IdFence); put1(u0 + 2, v0, 3, IdFence);           // the crossbar
+                        barAt.append(QPoint(u0, v0));
+                        ++k;
+                    }
+                    for (int i = 0; i < 1; ++i)
+                    {   // parallel bars: two parallel poles on posts (one set per site)
+                        const int u0 = 3 + i * 7, v0 = std::max(2, vc - 1);
+                        bool ok = u0 + 4 < L - 1 && v0 + 2 < Wd - 1;
+                        for (int u = u0; u <= u0 + 3 && ok; ++u) ok = freeCol(u, v0, 2) && freeCol(u, v0 + 2, 2);
+                        if (!ok) continue;
+                        for (int vv : { v0, v0 + 2 })
+                        {
+                            put1(u0, vv, 0, IdFence); put1(u0 + 3, vv, 0, IdFence);
+                            for (int u = u0; u <= u0 + 3; ++u) put1(u, vv, 1, IdFence);
+                        }
+                        ++k;
+                    }
+                    for (int i = 0; i < 2; ++i)
+                    {   // a bench-press bench
+                        const int u0 = 2 + i * std::max(4, L - 7), v0 = std::max(1, Wd - 2);
+                        bool ok = true;
+                        for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
+                        if (!ok) continue;
+                        for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, IdSlabBottom);
+                        ++k;
+                    }
+                    nEq = k;
+                }
+                // EVEN FILLING: the site is divided into windows of ~9×9 blocks; in each window with free space (at least 25 inner columns) where there is nothing yet, we try to put
+                // one item (a bench, parallel bars, a pull-up bar, a balance log; on children's ones — swings, a sandbox, a carousel, a bench, a rocker). We do not put much more often: one window — one item.
+                {
+                    const bool kids = kidsPad;
+                    int nBars = 0;                                                   // parallel bars: no more than two per site
+                    auto occupiedAt = [&](int u, int v)
+                    {
+                        const QPoint q = toXZ(u, v);
+                        return store.get(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1, q.y()) != IdAir;
+                    };
+                    auto tryPiece = [&](int kind, int u, int v) -> bool
+                    {
+                        if (kids)
+                        {
+                            if (kind == 0)
+                            {   // swings
+                                bool ok = true;
+                                for (int vv = v; vv <= v + 4 && ok; ++vv) ok = freeCol(u, vv, 4);
+                                if (!ok) return false;
+                                post(u, v, 4); post(u, v + 4, 4);
+                                for (int vv = v + 1; vv <= v + 3; ++vv) put1(u, vv, 3, IdFence);
+                                for (int sv : { v + 1, v + 3 }) { put1(u, sv, 2, IdFence); put1(u, sv, 1, IdSlabTop); }
+                                return true;
+                            }
+                            if (kind == 1)
+                            {   // a bench
+                                bool ok = true;
+                                for (int uu = u; uu < u + 3 && ok; ++uu) ok = freeCol(uu, v, 1);
+                                if (!ok) return false;
+                                for (int uu = u; uu < u + 3; ++uu) put1(uu, v, 0, alongX ? IdStairsS : IdStairsE);
+                                return true;
+                            }
+                            if (kind == 2)
+                            {   // a 3×3 sandbox with a rim
+                                bool ok = true;
+                                for (int uu = u - 1; uu <= u + 3 && ok; ++uu) for (int vv = v - 1; vv <= v + 3 && ok; ++vv) ok = freeCol(uu, vv, 1);
+                                if (!ok) return false;
+                                for (int uu = u - 1; uu <= u + 3; ++uu) for (int vv = v - 1; vv <= v + 3; ++vv)
+                                {
+                                    const bool edge = (uu == u - 1 || uu == u + 3 || vv == v - 1 || vv == v + 3);
+                                    if (edge) put1(uu, vv, 0, IdSlabBottom);
+                                    else if (g_sandId) { const QPoint q = toXZ(uu, vv); store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())), q.y(), g_sandId); }
+                                }
+                                return true;
+                            }
+                            if (kind == 3)
+                            {   // a carousel
+                                if (!(freeCol(u, v, 2) && freeCol(u - 1, v, 1) && freeCol(u + 1, v, 1) && freeCol(u, v - 1, 1) && freeCol(u, v + 1, 1))) return false;
+                                put1(u, v, 0, IdFence); put1(u, v, 1, IdCauldron);
+                                put1(u - 1, v, 0, IdFence); put1(u + 1, v, 0, IdFence); put1(u, v - 1, 0, IdFence); put1(u, v + 1, 0, IdFence);
+                                return true;
+                            }
+                            {   // a rocker: a slab on a post, length 5
+                                bool ok = true;
+                                for (int uu = u; uu < u + 5 && ok; ++uu) ok = freeCol(uu, v, 2);
+                                if (!ok) return false;
+                                put1(u + 2, v, 0, IdFence);
+                                put1(u, v, 1, IdSlabBottom); put1(u + 1, v, 1, IdSlabBottom); put1(u + 3, v, 1, IdSlabBottom); put1(u + 4, v, 1, IdSlabBottom);
+                                put1(u + 2, v, 1, IdSlabTop);
+                                return true;
+                            }
+                        }
+                        if (kind == 0)
+                        {   // a bench
+                            bool ok = true;
+                            for (int uu = u; uu < u + 3 && ok; ++uu) ok = freeCol(uu, v, 1);
+                            if (!ok) return false;
+                            for (int uu = u; uu < u + 3; ++uu) put1(uu, v, 0, IdSlabBottom);
+                            return true;
+                        }
+                        if (kind == 1)
+                        {   // parallel bars (no more than two per site)
+                            if (nBars >= 2) return false;
+                            bool ok = true;
+                            for (int uu = u; uu <= u + 3 && ok; ++uu) ok = freeCol(uu, v, 2) && freeCol(uu, v + 2, 2);
+                            if (!ok) return false;
+                            for (int vv : { v, v + 2 })
+                            {
+                                put1(u, vv, 0, IdFence); put1(u + 3, vv, 0, IdFence);
+                                for (int uu = u; uu <= u + 3; ++uu) put1(uu, vv, 1, IdFence);
+                            }
+                            ++nBars;
+                            return true;
+                        }
+                        if (kind == 2)
+                        {   // a pull-up bar (no more than two per site, not closer than 12 blocks to each other)
+                            if (!canBar(u, v)) return false;
+                            bool ok = true;
+                            for (int uu = u; uu <= u + 3 && ok; ++uu) ok = freeCol(uu, v, 4);
+                            if (!ok) return false;
+                            post(u, v, 4); post(u + 3, v, 4);
+                            put1(u + 1, v, 3, IdFence); put1(u + 2, v, 3, IdFence);
+                            barAt.append(QPoint(u, v));
+                            return true;
+                        }
+                        {   // a balance log: a row of slabs on low supports
+                            bool ok = true;
+                            for (int uu = u; uu < u + 5 && ok; ++uu) ok = freeCol(uu, v, 2);
+                            if (!ok) return false;
+                            for (int uu = u; uu < u + 5; ++uu) put1(uu, v, 0, IdSlabTop);
+                            return true;
+                        }
+                    };
+                    constexpr int kWin = 8;
+                    const int nKinds = kids ? 5 : 4;
+                    for (int v0 = 1; v0 < Wd - 1; v0 += kWin)
+                        for (int u0 = 1; u0 < L - 1; u0 += kWin)
+                        {
+                            int interior = 0;
+                            bool has = false;
+                            for (int vv = v0; vv < std::min(v0 + kWin, Wd - 1) && !has; ++vv)
+                                for (int uu = u0; uu < std::min(u0 + kWin, L - 1); ++uu)
+                                {
+                                    if (!inside(uu, vv, 1)) continue;
+                                    ++interior;
+                                    if (occupiedAt(uu, vv)) { has = true; break; }
+                                }
+                            if (has || interior < 20) continue;
+                            for (int t = 0; t < 48; ++t)
+                            {
+                                const quint32 hq = colHash(pairKey(u0 * 31 + t, v0 * 17) ^ ring.first() ^ 0x5CA9ull);
+                                const int u = u0 + int(hq % quint32(kWin)), v = v0 + int((hq >> 8) % quint32(kWin));
+                                static const int kSportKinds[8] = { 0, 3, 0, 2, 3, 0, 1, 3 };       // a bench, a balance beam, a pull-up bar, parallel bars (rare)
+                                const int pickK = kids ? int(((hq >> 16) + quint32(t)) % quint32(nKinds)) : kSportKinds[((hq >> 16) + quint32(t)) % 8u];
+                                if (tryPiece(pickK, u, v)) { ++nEq; break; }
+                            }
+                        }
+                }
+                nSportEq += nEq;
+                if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[sport] code=%d bbox x %d..%d z %d..%d cols=%d L=%d W=%d eq=%d\n", padCode.value(padIdx, 0), bx0, bx1, bz0, bz1, int(padCols.size()), L, Wd, nEq);
+            }
+        }
+        if (nSportEq > 0) res.lairInfo += QObject::tr("; equipment on sports grounds: %1 items").arg(nSportEq);
+        // — lamp posts: at a road column by hash ~1/24 we look for a free neighboring NON-road
+        //   column and put a post (not closer than 10 blocks to the others); distance + hash = "along the road,
+        //   not a picket fence". The composition: a plinth of a cobblestone wall, 6 fence posts, at the top toward the
+        //   road a wing of one post goes out, under it a lantern hangs (hanging=true).
+        QVector<QPoint> poles;
+        QVector<qint64> rc(roadCols.constBegin(), roadCols.constEnd());
+        std::sort(rc.begin(), rc.end());
+        for (qint64 ck : rc)
+        {
+            if (colHash(ck ^ 0xFA11ull) % 24u != 0u) continue;
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            for (int d = 0; d < 4; ++d)
+            {
+                const int px = bx + dxs[d], pz = bz + dzs[d];
+                const qint64 pk = pairKey(px, pz);
+                if (roadCols.contains(pk) || colMin.contains(pk) || colWater.contains(pk)) continue;
+                const int y0 = surfaceTop(pk) + 1;
+                if (y0 + 6 > 254) continue;
+                bool free = true;
+                for (int dy = 0; dy < 7 && free; ++dy)       // the plinth + 6 posts of the stand
+                    if (store.get(px, y0 + dy, pz) != IdAir) free = false;
+                if (free && store.get(bx, y0 + 6, bz) != IdAir) free = false;    // the wing above the road
+                if (free && store.get(bx, y0 + 5, bz) != IdAir) free = false;    // the place for the lantern
+                bool near = false;
+                for (const QPoint& p : poles)
+                    if (std::max(std::abs(p.x() - px), std::abs(p.y() - pz)) < 10) { near = true; break; }
+                if (!free || near) continue;
+                store.set(px, y0, pz, IdCobbleWall);
+                for (int dy = 1; dy <= 6; ++dy) store.set(px, y0 + dy, pz, IdFence);
+                store.set(bx, y0 + 6, bz, IdFence);          // the wing: a post sideways, toward the road
+                store.set(bx, y0 + 5, bz, IdLanternHung);    // the lantern hangs under the wing
+                poles.append(QPoint(px, pz));
+                break;
+            }
+        }
+        // — PARK PATHS (CODE 71126000) are well lit: at road columns inside a park there are low lamp posts (a plinth of a cobblestone wall, 3 fence posts,
+        //   a lantern on top) no less often than every ~6 blocks; street posts are taller (the same distance for them).
+        {
+            QVector<ColSpan> parkSpansAll;
+            for (const VegSite& vs3 : forests) if (vs3.park) parkSpansAll += vs3.spans;
+            if (!parkSpansAll.isEmpty())
+            {
+                parkSpansAll = mergeSpans(parkSpansAll);
+                for (qint64 ck : rc)
+                {
+                    const int bx = keyFirst(ck), bz = keySecond(ck);
+                    if (!spansContain(parkSpansAll, bx, bz)) continue;
+                    if (colHash(ck ^ 0x9A8Cull) % 3u != 0u) continue;
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        const int px = bx + dxs[d], pz = bz + dzs[d];
+                        const qint64 pk = pairKey(px, pz);
+                        if (roadCols.contains(pk) || colMin.contains(pk) || colWater.contains(pk) || colWool.contains(pk)) continue;
+                        const int y0 = surfaceTop(pk) + 1;
+                        if (y0 + 5 > 254) continue;
+                        bool free = true;
+                        for (int dy = 0; dy < 5 && free; ++dy)
+                            if (store.get(px, y0 + dy, pz) != IdAir) free = false;
+                        bool near = false;
+                        for (const QPoint& p : poles)
+                            if (std::max(std::abs(p.x() - px), std::abs(p.y() - pz)) < 6) { near = true; break; }
+                        if (!free || near) continue;
+                        store.set(px, y0, pz, IdCobbleWall);
+                        for (int dy = 1; dy <= 3; ++dy) store.set(px, y0 + dy, pz, IdFence);
+                        store.set(px, y0 + 4, pz, IdLanternStanding);
+                        poles.append(QPoint(px, pz));
+                        break;
+                    }
+                }
+            }
+        }
+        // ——— PORTALS TO THE NETHER in forests (vegpol, CODE 71111110/71126000; request: the forest area is at least
+        //     5000 REAL m² — see PortalForest::areaM2 — and no more than one portal within a
+        //     radius of 1000 blocks; there are no portals on csrpol). Forests are taken from big to small
+        //     (deterministically), a portal gets a forest around which there is no other one yet.
+        //     The frame is vanilla: 4×5 obsidian (the bottom/top rows of 4, posts 2×3), in an
+        //     ACTIVE one (10% of forests) the interior 2×2 of tiers y+1..y+2 — portal blocks (axis —
+        //     the direction of the frame extent: it stands along X → axis=x), the row y+3 inside stays
+        //     air. A "ruined" one — vanilla ruins our way: the bottom row is whole, the posts/top
+        //     arc with deterministic gaps (~25%), some of the remainder — crying_obsidian.
+        //     The frame is entirely inside the forest spot on flat ground (not a road/water/structure), the volume
+        //     4×5 is air (the trees are already planted), otherwise we try the next point of this forest. ———
+        {
+            struct Cand { int x, z; bool runX; };
+            QVector<int> order;
+            for (int i = 0; i < portalForests.size(); ++i)
+                if (portalForests[i].areaM2 >= 2500.0) order.append(i);
+            std::sort(order.begin(), order.end(), [&](int a, int b)
+            {
+                if (portalForests[a].areaM2 != portalForests[b].areaM2)
+                    return portalForests[a].areaM2 > portalForests[b].areaM2;
+                return portalForests[a].h < portalForests[b].h;
+            });
+            QVector<QPoint> placedPortals;                        // the centers of the portals already standing (blocks)
+            for (int fi : order)
+            {
+                const PortalForest& pf = portalForests[fi];
+                const quint32 h = pf.h;
+                // 10% of forests are active by hash; and in a big world (more than 5000 blocks along at least one side) the biggest forest with a portal always gets an ACTIVE one,
+                // so that at least one working portal exists (MCX_BIGWORLD=1 enables this rule in the test).
+                const bool bigWorld = std::max((mxx - mnx) * tf.sx, (mxy - mny) * tf.sz) >= 5000.0 || qEnvironmentVariableIsSet("MCX_BIGWORLD");
+                const bool active = ((h >> 16) % 100u) < 10u || (bigWorld && placedPortals.isEmpty());
+                QVector<Cand> cands;                              // the frame entirely in the forest spot
+                const bool xFirst = ((h >> 8) & 1u) != 0u;
+                {   // we take candidates by segments: along Z — inside a segment (step 5), along X — by checking the neighboring x
+                    const int nSp = pf.spans.size();
+                    const int sp0 = nSp ? int((h >> 3) % quint32(nSp)) : 0;
+                    for (int t = 0; t < nSp && cands.size() < 20000; ++t)
+                    {
+                        const ColSpan& c = pf.spans[(sp0 + t) % nSp];
+                        for (int z = c.z0; z + 3 <= c.z1 && cands.size() < 20000; z += 5)
+                        {
+                            bool okX = true;
+                            for (int i = 1; i < 4 && okX; ++i)
+                                if (!spansContain(pf.spans, c.x + i, z)) okX = false;
+                            if (okX && xFirst) cands.append(Cand{ c.x, z, true });
+                            else cands.append(Cand{ c.x, z, false });
+                        }
+                    }
+                }
+                if (cands.isEmpty()) continue;
+                const int off = int((h >> 4) % quint32(cands.size()));
+                const int tries = std::min(int(cands.size()), 6000);
+                for (int ci = 0; ci < tries; ++ci)
+                {
+                    const Cand& c = cands[int((qint64(off) + qint64(ci) * 7919) % cands.size())];
+                    {   // not closer than 1000 blocks to an already standing portal
+                        bool far = true;
+                        for (const QPoint& pp : placedPortals)
+                            if (std::hypot(double(pp.x() - c.x), double(pp.y() - c.z)) < 1000.0) { far = false; break; }
+                        if (!far) continue;                       // too close to someone else's portal
+                    }
+                    int yb = 0; bool ok = true;
+                    for (int i = 0; i < 4 && ok; ++i)
+                    {   // the floor is flat, not a road/water, the height is within the world bounds
+                        const int bx = c.runX ? c.x + i : c.x;
+                        const int bz = c.runX ? c.z : c.z + i;
+                        const qint64 ck = pairKey(bx, bz);
+                        if (colMin.contains(ck) || colWater.contains(ck)
+                            || roadCols.contains(ck)) { ok = false; break; }
+                        const int y = surfaceTop(ck);
+                        if (i == 0) yb = y;
+                        else if (y != yb) { ok = false; break; }
+                    }
+                    if (!ok || yb + 6 > 254) continue;
+                    const int y0 = yb + 1;                        // the bottom row of the frame
+                    auto cellAt = [&](int i, int dy)
+                    { return pairKey(c.runX ? c.x + i : c.x, c.runX ? c.z : c.z + i); };
+                    for (int dy = 0; dy < 5 && ok; ++dy)          // the frame volume — air
+                        for (int i = 0; i < 4; ++i)
+                            if (store.get(keyFirst(cellAt(i, dy)), y0 + dy,
+                                          keySecond(cellAt(i, dy))) != IdAir)
+                                { ok = false; break; }
+                    if (!ok) continue;
+                    // ——— here we go: 14 cells of the frame (i — along the axis, dy — height) ———
+                    quint32 s = h ^ 0x0BADu;
+                    auto lcg = [&s]()
+                    { s = s * 1664525u + 1013904223u; return s; };
+                    for (int dy = 0; dy < 5; ++dy)
+                        for (int i = 0; i < 4; ++i)
+                        {
+                            const bool frame = dy == 0 || dy == 4
+                                            || (i == 0 || i == 3);      // 14 cells of the perimeter
+                            if (!frame) continue;
+                            const qint64 ck = cellAt(i, dy);
+                            const int bx = keyFirst(ck), bz = keySecond(ck);
+                            if (!active)
+                            {   // "ruined": the bottom is whole, the posts/top break deterministically
+                                if (dy > 0 && (lcg() >> 16) % 100u < 25u) continue;
+                                store.set(bx, y0 + dy, bz,
+                                          (dy > 0 && (lcg() >> 16) % 100u < 20u)
+                                              ? IdCryingObsidian : IdObsidian);
+                            }
+                            else store.set(bx, y0 + dy, bz, IdObsidian);
+                        }
+                    if (active)
+                    {   // active: portal 2×2 (i=1..2, dy=1..2), the row dy=3 inside — air
+                        const quint16 pid = c.runX ? IdPortalX : IdPortalZ;
+                        for (int dy = 1; dy <= 2; ++dy)
+                            for (int i = 1; i <= 2; ++i)
+                            {
+                                const qint64 ck = cellAt(i, dy);
+                                store.set(keyFirst(ck), y0 + dy, keySecond(ck), pid);
+                            }
+                    }
+                    // LAVA PITS around the portal (request): 3..6 pits 1×1 of depth 1 (lava at a level below the floor, air above it)
+                    // on a flat free floor within a radius of 5 blocks from the frame; the neighboring floor blocks around a pit are replaced
+                    // with magma with a 60% chance. A pit does not touch the frame cells and does not climb onto a road/water.
+                    {
+                        const quint16 magma = quint16(IdPaletteStart + paletteIndexOf("minecraft:magma_block"));
+                        const int nPits = 3 + int(lcg() >> 16) % 4;
+                        QVector<QPoint> pits;
+                        for (int tr = 0; tr < 60 && pits.size() < nPits; ++tr)
+                        {
+                            const int i = int(lcg() >> 16) % 12 - 4;            // along the axis: -4..7
+                            const int o = int(lcg() >> 16) % 11 - 5;            // across: -5..5
+                            if (i >= -1 && i <= 4 && o >= -1 && o <= 1) continue;   // the frame itself and right next to it
+                            const int bx = c.runX ? c.x + i : c.x + o;
+                            const int bz = c.runX ? c.z + o : c.z + i;
+                            bool near = false;
+                            for (const QPoint& q : pits)
+                                if (std::abs(q.x() - bx) <= 1 && std::abs(q.y() - bz) <= 1) near = true;
+                            if (near) continue;
+                            bool good = true;
+                            for (int dz = -1; dz <= 1 && good; ++dz)
+                                for (int dx = -1; dx <= 1; ++dx)
+                                {
+                                    const qint64 ck = pairKey(bx + dx, bz + dz);
+                                    if (colMin.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)
+                                        || !ground.contains(pairKey((bx + dx) >> 4, (bz + dz) >> 4))
+                                        || surfaceTop(ck) != yb || store.get(bx + dx, yb + 1, bz + dz) != IdAir
+                                        || store.get(bx + dx, yb, bz + dz) != IdAir)
+                                    { good = false; break; }
+                                }
+                            if (!good) continue;
+                            {   // a pit: the ground top in this column is lowered by 2 (lava at yb-1, air above it)
+                                auto git2 = ground.find(pairKey(bx >> 4, bz >> 4));
+                                if (git2 != ground.end())
+                                {
+                                    const int col2 = (bz & 15) * 16 + (bx & 15);
+                                    git2->top[col2] = qint16(yb - 2);
+                                }
+                            }
+                            store.set(bx, yb - 1, bz, IdLava);
+                            for (int d4 = 0; d4 < 4; ++d4)
+                            {
+                                const int nx = bx + (d4 == 0) - (d4 == 1), nz = bz + (d4 == 2) - (d4 == 3);
+                                if ((lcg() >> 16) % 100u < 60u) store.set(nx, yb, nz, magma);
+                            }
+                            pits.append(QPoint(bx, bz));
+                        }
+                    }
+                    {   // PORTAL RUINS AS IN THE ORIGINAL: a netherrack spot (rarer toward the edges) with magma inclusions, gold blocks and a chest with ruined_portal loot
+                        const quint16 nether = quint16(IdPaletteStart + paletteIndexOf("minecraft:netherrack"));
+                        const quint16 magmaR = quint16(IdPaletteStart + paletteIndexOf("minecraft:magma_block"));
+                        const quint16 goldB = quint16(IdPaletteStart + paletteIndexOf("minecraft:gold_block"));
+                        const double ecx = c.x + (c.runX ? 1.5 : 0.0), ecz = c.z + (c.runX ? 0.0 : 1.5);
+                        QVector<QPoint> flatCells;
+                        for (int dz = -8; dz <= 8; ++dz)
+                            for (int dx = -8; dx <= 8; ++dx)
+                            {
+                                const int bx = c.x + dx, bz = c.z + dz;
+                                const qint64 ck = pairKey(bx, bz);
+                                const double ex = (bx - ecx) * (c.runX ? 0.7 : 1.0), ez = (bz - ecz) * (c.runX ? 1.0 : 0.7);
+                                const double dd = std::hypot(ex, ez);
+                                const int pr = dd < 2.6 ? 90 : dd < 4.6 ? 62 : dd < 6.6 ? 28 : dd < 8.0 ? 8 : 0;
+                                if (!pr || (lcg() >> 16) % 100u >= quint32(pr)) continue;
+                                if (colMin.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)) continue;
+                                const auto git3 = ground.find(pairKey(bx >> 4, bz >> 4));
+                                if (git3 == ground.end()) continue;
+                                const int col3 = (bz & 15) * 16 + (bx & 15);
+                                if (git3->wd[col3] > 0 || surfaceTop(ck) != yb) continue;
+                                git3->surf[col3] = ((lcg() >> 16) % 100u < 14u) ? magmaR : nether;
+                                if (store.get(bx, yb + 1, bz) == IdAir) flatCells.append(QPoint(bx, bz));
+                            }
+                        // gold blocks (1–2) on the spot and a chest next to the frame
+                        int nGold = 1 + int((lcg() >> 16) % 2u);
+                        for (int tr = 0; tr < 40 && nGold > 0 && !flatCells.isEmpty(); ++tr)
+                        {
+                            const QPoint q = flatCells[int((lcg() >> 16) % quint32(flatCells.size()))];
+                            const bool onFrame = (c.runX ? (q.y() == c.z && q.x() >= c.x && q.x() <= c.x + 3) : (q.x() == c.x && q.y() >= c.z && q.y() <= c.z + 3));
+                            if (onFrame || store.get(q.x(), yb + 1, q.y()) != IdAir) continue;
+                            store.set(q.x(), yb + 1, q.y(), goldB);
+                            --nGold;
+                        }
+                        for (int tr = 0; tr < 60 && !flatCells.isEmpty(); ++tr)
+                        {
+                            const QPoint q = flatCells[int((lcg() >> 16) % quint32(flatCells.size()))];
+                            const int ai = c.runX ? q.x() - c.x : q.y() - c.z, ao = c.runX ? q.y() - c.z : q.x() - c.x;
+                            if (ai < -1 || ai > 4 || std::abs(ao) < 2 || std::abs(ao) > 4) continue;
+                            if (store.get(q.x(), yb + 1, q.y()) != IdAir) continue;
+                            store.set(q.x(), yb + 1, q.y(), IdChest);
+                            chests.append(ChestSite{ q.x(), yb + 1, q.y(), kChestLootCount - 2 });
+                            break;
+                        }
+                        PortalStartSite ps;
+                        const int fx0 = c.x, fx1 = c.runX ? c.x + 3 : c.x, fz0 = c.z, fz1 = c.runX ? c.z : c.z + 3;
+                        ps.bb[0] = fx0 - 3; ps.bb[1] = y0 - 1; ps.bb[2] = fz0 - 3; ps.bb[3] = fx1 + 3; ps.bb[4] = y0 + 5; ps.bb[5] = fz1 + 3;
+                        ps.cx = ((ps.bb[0] + ps.bb[3]) / 2) >> 4; ps.cz = ((ps.bb[2] + ps.bb[5]) / 2) >> 4;
+                        portalStarts.append(ps);
+                        for (int pz = ps.bb[2] >> 4; pz <= (ps.bb[5] >> 4); ++pz)
+                            for (int px = ps.bb[0] >> 4; px <= (ps.bb[3] >> 4); ++px)
+                                portalsByChunk[pairKey(px, pz)].append(ps);
+                    }
+                    placedPortals.append(QPoint(c.x, c.z));
+                    break;                                          // one portal per forest
+                }
+            }
+        }
+    }
+
+    // PARKING LOT MARKING (rdcpol): light gray carpets. From every long enough edge of the outline inward into the polygon, perpendicular
+    // to the edge, lines 12 blocks long run with a step of 7 blocks along the edge (if it does not fit into the parking lot — not drawn; if the parking lot is wider than three
+    // line lengths (36) — the lines only from one of the opposite sides). A line does not touch (including diagonally) lines already laid from other edges — there are no intersections;
+    // if a line touches another object (a building, a road, rails, water, any block at the carpet height) — it is not drawn at all.
+    {
+        quint16 lgCarpet = 0;
+        int nParkWall = 0;
+        for (int i = 0; i < kCarpetsCount; ++i)
+            if (qstrcmp(kCarpets[i].name, "minecraft:white_carpet") == 0) lgCarpet = quint16(IdCarpetBase + i);   // the parking marking — white
+        if (lgCarpet)
+            for (const ParkSite& ps : parks)
+            {
+                QHash<ColKey, int> owner;                                  // a marking cell -> the line number
+                int lineNo = 0;
+                for (const QVector<QPointF>& ring : ps.rings)
+                    for (int e = 0; e < ring.size(); ++e)
+                    {
+                        const QPointF p0 = ring[e], p1 = ring[(e + 1) % ring.size()];
+                        const double len = std::hypot(p1.x() - p0.x(), p1.y() - p0.y());
+                        if (len < 8.0) continue;
+                        const double dx = (p1.x() - p0.x()) / len, dz = (p1.y() - p0.y()) / len;
+                        auto inside = [&](double x, double z) { return ps.cols.contains(pairKey(int(std::floor(x)), int(std::floor(z)))); };
+                        double nx = -dz, nz = dx;                           // the normal into the polygon
+                        const double mx = (p0.x() + p1.x()) * 0.5, mz = (p0.y() + p1.y()) * 0.5;
+                        if (!inside(mx + nx * 2.0, mz + nz * 2.0))
+                        {
+                            nx = -nx; nz = -nz;
+                            if (!inside(mx + nx * 2.0, mz + nz * 2.0)) continue;
+                        }
+                        for (double t = 3.5; t <= len - 3.5; t += 7.0)
+                        {
+                            QVector<qint64> cells;
+                            bool ok = true;
+                            // The parking depth across (up to 36 = 3 line lengths): the first exit from the spot along the normal.
+                            // A 12-block line MUST fit entirely, otherwise it is not drawn; if the depth is less than 36, the lines are drawn
+                            // only from one side (where the start cell is "earlier" than the exit point), from the opposite one — not.
+                            double exitSl = -1.0;
+                            int exX = 0, exZ = 0;
+                            for (double sl = 0.5; sl <= 36.0; sl += 0.5)
+                            {
+                                const double x = p0.x() + dx * t + nx * sl, z = p0.y() + dz * t + nz * sl;
+                                const int fx = int(std::floor(x)), fz = int(std::floor(z));
+                                const qint64 ck = pairKey(fx, fz);
+                                if (!ps.cols.contains(ck)) { exitSl = sl; exX = fx; exZ = fz; break; }
+                                if (sl <= 12.0 && (cells.isEmpty() || cells.last() != ck)) cells.append(ck);
+                            }
+                            if (exitSl >= 0.0 && exitSl <= 12.0) continue;              // the line length is greater than the parking lot — no lines
+                            if (cells.size() < 5) continue;
+                            if (exitSl >= 0.0)
+                            {   // depth < 36: only one of the two opposite sides
+                                const int sx0 = keyFirst(cells.first()), sz0 = keySecond(cells.first());
+                                if (!(sx0 < exX || (sx0 == exX && sz0 < exZ))) continue;
+                            }
+                            for (qint64 ck : cells)
+                            {   // touches another object — the line is not drawn
+                                const int cxk = keyFirst(ck), czk = keySecond(ck);
+                                if (colMin.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck) || colWater.contains(ck)
+                                    || store.get(cxk, surfaceTop(ck) + 1, czk) != IdAir) { ok = false; break; }
+                            }
+                            if (!ok) continue;
+                            for (qint64 ck : cells)
+                            {   // touching someone else's line (3×3) — cancel
+                                for (int ax = -1; ax <= 1 && ok; ++ax)
+                                    for (int az = -1; az <= 1; ++az)
+                                    {
+                                        const auto oit = owner.constFind(pairKey(keyFirst(ck) + ax, keySecond(ck) + az));
+                                        if (oit != owner.constEnd() && oit.value() != lineNo) { ok = false; break; }
+                                    }
+                                if (!ok) break;
+                            }
+                            if (!ok) continue;
+                            for (qint64 ck : cells) owner.insert(ck, lineNo);
+                            ++lineNo;
+                        }
+                    }
+                for (auto it = owner.constBegin(); it != owner.constEnd(); ++it)
+                {
+                    const int x = keyFirst(it.key()), z = keySecond(it.key());
+                    const int y = surfaceTop(it.key()) + 1;
+                    if (y > 254 || store.get(x, y, z) != IdAir) continue;
+                    store.set(x, y, z, lgCarpet);
+                }
+                // STONE FENCE of a parking lot with marking: a ring of columns right behind the spot edge (by 8 neighbors). The fence does not touch the roadway: columns within 1 block of
+                // a road (including an adjacent one) stay an opening — the entrance is there. It does not climb onto buildings, water, rails, other parking lots; if there is no entrance (the parking lot does not adjoin a road),
+                // we leave a three-cell opening at a random place of the ring.
+                if (!owner.isEmpty())
+                {
+                    QVector<qint64> ringW;
+                    for (qint64 ck : ps.cols)
+                    {
+                        const int bx = keyFirst(ck), bz = keySecond(ck);
+                        for (int ddz = -1; ddz <= 1; ++ddz)
+                            for (int ddx = -1; ddx <= 1; ++ddx)
+                            {
+                                if (!ddx && !ddz) continue;
+                                const qint64 nk = pairKey(bx + ddx, bz + ddz);
+                                if (!ps.cols.contains(nk)) ringW << nk;
+                            }
+                    }
+                    std::sort(ringW.begin(), ringW.end());
+                    ringW.erase(std::unique(ringW.begin(), ringW.end()), ringW.end());
+                    auto nearRoad = [&](qint64 ck)
+                    {
+                        const int bx = keyFirst(ck), bz = keySecond(ck);
+                        for (int ddz = -1; ddz <= 1; ++ddz)
+                            for (int ddx = -1; ddx <= 1; ++ddx)
+                                if (roadCols.contains(pairKey(bx + ddx, bz + ddz))) return true;
+                        return false;
+                    };
+                    QVector<char> skip(ringW.size(), 0);
+                    bool anyEntrance = false;
+                    for (int i = 0; i < ringW.size(); ++i)
+                        if (nearRoad(ringW[i])) { skip[i] = 1; anyEntrance = true; }
+                    if (!anyEntrance && ringW.size() > 12)
+                    {
+                        const int g0 = int(colHash(ringW.first() ^ 0x9A7Eull) % quint32(ringW.size()));
+                        for (int q = 0; q < 3; ++q) skip[(g0 + q) % ringW.size()] = 1;
+                    }
+                    int nWall = 0;
+                    for (int i = 0; i < ringW.size(); ++i)
+                    {
+                        if (skip[i]) continue;
+                        const qint64 ck = ringW[i];
+                        if (colMin.contains(ck) || colWater.contains(ck) || railColsAll.contains(ck) || roadCols.contains(ck)) continue;
+                        bool other = false;
+                        for (const ParkSite& po : parks) if (&po != &ps && po.cols.contains(ck)) { other = true; break; }
+                        if (other) continue;
+                        const int x = keyFirst(ck), z = keySecond(ck);
+                        const int y = surfaceTop(ck) + 1;
+                        if (y > 253 || store.get(x, y, z) != IdAir) continue;
+                        store.set(x, y, z, IdStoneFence);
+                        ++nWall;
+                    }
+                    nParkWall += nWall;
+                }
+            }
+    }
+
+}
+
+void ExportRun::buildVillages()
+{
+    if (!privCenters.isEmpty())
+    {
+        struct Bucket { qint64 sx = 0, sz = 0; int n = 0; };
+        QHash<ColKey, Bucket> buckets;
+        for (const QPoint& pc : privCenters)
+        {
+            Bucket& b = buckets[pairKey(int(std::floor(pc.x() / 128.0)), int(std::floor(pc.y() / 128.0)))];
+            b.sx += pc.x(); b.sz += pc.y(); ++b.n;
+        }
+        QVector<QPair<int, qint64>> order2;                      // (the number of houses, the cell key) — in descending order
+        for (auto it = buckets.constBegin(); it != buckets.constEnd(); ++it)
+            order2.append(qMakePair(it.value().n, it.key()));
+        std::sort(order2.begin(), order2.end(), [](const QPair<int, qint64>& a, const QPair<int, qint64>& b)
+        { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+        // The distance between villages — 500 blocks (request: "count by half"; in big areas the villages come out twice
+        // as often along each axis).
+        QVector<QPoint> vcenters;
+        for (const auto& oc : order2)
+        {
+            const Bucket& b = buckets[oc.second];
+            if (b.n < 3 && !vcenters.isEmpty()) break;            // single houses do not form villages themselves
+            const QPoint c(int(b.sx / b.n), int(b.sz / b.n));
+            const double minD = 500.0;
+            bool far = true;
+            for (const QPoint& q : vcenters)
+                if (std::hypot(double(q.x() - c.x()), double(q.y() - c.y())) < minD) { far = false; break; }
+            if (far) vcenters.append(c);
+        }
+        auto isVeg = [](quint16 bid)
+        {
+            return bid == IdAir || bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter
+                || bid == IdPaleHangingMoss || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass
+                || bid == IdTallGrassUpper || bid == IdWheat || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
+        };
+        // The site (2R+1)² is free: no houses/water/roads/rails/csrpol wool, the height difference <= 3, only grass/trees on it.
+        auto siteOk = [&](int cx, int cz, int R) -> bool
+        {
+            int tmin = 1 << 20, tmax = -(1 << 20);
+            for (int dz = -R; dz <= R; ++dz)
+                for (int dx = -R; dx <= R; ++dx)
+                {
+                    const int x = cx + dx, z = cz + dz;
+                    const qint64 ck = pairKey(x, z);
+                    if (colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
+                        || roadCols.contains(ck) || railColsAll.contains(ck)) return false;
+                    if (!ground.contains(pairKey(x >> 4, z >> 4))) return false;
+                    const int t = surfaceTop(ck);
+                    if (t > 235) return false;
+                    tmin = std::min(tmin, t); tmax = std::max(tmax, t);
+                    if (tmax - tmin > 3) return false;
+                    for (int y = t + 1; y <= t + 8; ++y)
+                        if (!isVeg(store.get(x, y, z))) return false;       // a fence/post/furniture — the place is taken
+                }
+            return true;
+        };
+        // Searching for a site by rings around vc (a step of 3 blocks along the ring), up to the radius maxR.
+        auto findSite = [&](const QPoint& vc, int R, int maxR, int& ox, int& oz) -> bool
+        {
+            // Rings with a step of 1 up to a radius of 32 and 2 beyond: earlier a step of 3 could skip a free spot exactly the size of the
+            // square (the center did not hit the grid) and give a false "no place" -> an extra house demolition.
+            for (int r = 0; r <= maxR; r += (r < 32 ? 1 : 2))
+            {
+                const int aStep = (r < 32) ? 1 : 2;
+                for (int a = -r; a <= r; a += (r ? aStep : 1))
+                {
+                    const int cand[4][2] = { { a, -r }, { a, r }, { -r, a }, { r, a } };
+                    for (int q = 0; q < (r ? 4 : 1); ++q)
+                        if (siteOk(vc.x() + cand[q][0], vc.y() + cand[q][1], R))
+                        { ox = vc.x() + cand[q][0]; oz = vc.y() + cand[q][1]; return true; }
+                }
+            }
+            return false;
+        };
+        // Demolition of the private house nearest to vc (allowed by the user if there is no place): we erase its blocks, columns,
+        // entities and basement. It returns the center of the freed place.
+        QSet<int> demolished;
+        auto demolishNear = [&](const QPoint& vc, QPoint& outC) -> bool
+        {
+            int best = -1; double bd = 1e18;
+            for (int i = 0; i < privCenters.size(); ++i)
+            {
+                if (demolished.contains(i)) continue;
+                const double d = std::hypot(double(privCenters[i].x() - vc.x()), double(privCenters[i].y() - vc.y()));
+                if (d < bd) { bd = d; best = i; }
+            }
+            if (best < 0 || bd > 160.0) return false;
+            demolished.insert(best);
+            const QRect bx = privBoxes[best];
+            const int x0 = bx.x() - 1, x1 = bx.x() + bx.width(), z0 = bx.y() - 1, z1 = bx.y() + bx.height();
+            int ymin = 1 << 20;
+            for (int z = z0; z <= z1; ++z)
+                for (int x = x0; x <= x1; ++x)
+                {
+                    const auto it = colMin.constFind(pairKey(x, z));
+                    if (it != colMin.constEnd()) ymin = std::min(ymin, it.value());
+                }
+            if (ymin == (1 << 20)) return false;
+            for (int z = z0; z <= z1; ++z)
+                for (int x = x0; x <= x1; ++x)
+                {
+                    for (int y = std::max(-64, ymin - 2); y <= std::min(319, ymin + 70); ++y)
+                        if (store.get(x, y, z) != IdAir) store.erase(x, y, z);
+                    colMin.remove(pairKey(x, z));
+                    colAnchor.remove(pairKey(x, z));
+                    // the ground top in the metadata was raised under the house foundation (max(..., colMin-1)): we return the natural
+                    // level, otherwise the village square will stand on the house "pedestal", and surfaceTop will diverge from ground.top
+                    auto gh = ground.find(pairKey(x >> 4, z >> 4));
+                    if (gh != ground.end())
+                    {
+                        const int col = (z & 15) * 16 + (x & 15);
+                        if (gh->wd[col] == 0)
+                            gh->top[col] = qint16(groundTopCol(x, z));
+                    }
+                }
+            auto inBox = [&](int x, int z) { return x >= x0 && x <= x1 && z >= z0 && z <= z1; };
+            auto prune = [&](auto& v) { for (int i = v.size() - 1; i >= 0; --i) if (inBox(v[i].x, v[i].z)) v.removeAt(i); };
+            prune(chests); prune(paints); prune(mannequins); prune(spawners); prune(npcs); prune(frames);
+            for (int i = basements.size() - 1; i >= 0; --i)
+                if (inBox(basements[i].cx, basements[i].cz)) basements.removeAt(i);
+            outC = bx.center();
+            return true;
+        };
+        const quint16 cobble = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobblestone"));
+        const bool forceDemolish = qEnvironmentVariableIsSet("MCX_FORCE_DEMOLISH");   // a test hook
+        for (const QPoint& vc : vcenters)
+        {
+            int px = 0, pz = 0, R = 5;
+            bool placed = false;
+            if (!forceDemolish)
+            {
+                placed = findSite(vc, 5, 128, px, pz);                        // the full 11×11 square
+                if (!placed) { R = 3; placed = findSite(vc, 3, 128, px, pz); }   // a compact 7×7
+            }
+            if (!placed)
+            {   // no place — we demolish the nearest house and put the square in its place
+                QPoint c;
+                if (demolishNear(vc, c))
+                {
+                    R = 5; placed = findSite(c, 5, 12, px, pz);
+                    if (!placed) { R = 3; placed = findSite(c, 3, 12, px, pz); }
+                }
+            }
+            if (!placed) continue;
+            auto topAt = [&](int x, int z) { return surfaceTop(pairKey(x, z)); };
+            // we cut down trees/grass on the square and above it
+            for (int dz = -R; dz <= R; ++dz)
+                for (int dx = -R; dx <= R; ++dx)
+                {
+                    const int x = px + dx, z = pz + dz, t = topAt(x, z);
+                    for (int y = t + 1; y <= t + 16; ++y)
+                    {
+                        const quint16 bid = store.get(x, y, z);
+                        if (bid != IdAir && isVeg(bid)) store.erase(x, y, z);
+                    }
+                }
+            auto put = [&](int dx, int dz, int dy, quint16 bid)
+            { const int x = px + dx, z = pz + dz; store.set(x, topAt(x, z) + dy, z, bid); };
+            put(0, 0, 1, IdBell);                                         // the bell — the center
+            bellSites.append(BellSite{ px, topAt(px, pz) + 1, pz });
+            {   // trampled earth: the square spot (a circle R+0.5) — a path with coarse_dirt inclusions, plus 4 trails of 7 blocks
+                auto setSurf = [&](int x, int z, quint16 sid) -> bool
+                {
+                    auto git = ground.find(pairKey(x >> 4, z >> 4));
+                    if (git == ground.end()) return false;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0 || git->surf[col] != IdGrass) return false;
+                    git->surf[col] = sid;
+                    return true;
+                };
+                for (int dz = -R; dz <= R; ++dz)
+                    for (int dx = -R; dx <= R; ++dx)
+                    {
+                        if (dx * dx + dz * dz > (R + 0.5) * (R + 0.5)) continue;
+                        const int x = px + dx, z = pz + dz;
+                        setSurf(x, z, (colHash(pairKey(x, z) ^ 0xD177ull) % 4u == 0u) ? IdCoarseDirt : IdDirtPath);
+                    }
+                static const int ax[4] = { 1, -1, 0, 0 }, az[4] = { 0, 0, 1, -1 };
+                for (int d = 0; d < 4; ++d)
+                    for (int k = R + 1; k <= R + 7; ++k)
+                    {
+                        const int x = px + ax[d] * k, z = pz + az[d] * k;
+                        const qint64 ck = pairKey(x, z);
+                        if (colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
+                            || roadCols.contains(ck) || railColsAll.contains(ck)) break;
+                        if (!setSurf(x, z, IdDirtPath)) break;
+                        const int t = topAt(x, z);
+                        for (int y = t + 1; y <= t + 4; ++y)
+                            if (isVeg(store.get(x, y, z)) && store.get(x, y, z) != IdAir) store.erase(x, y, z);
+                    }
+            }
+            if (R >= 5)
+            {
+                // a 3×3 well at the right-back: a ring of cobblestone, water inside, 4 posts and a slab roof
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -5; dx <= -3; ++dx)
+                        put(dx, dz, 1, (dx == -4 && dz == 0) ? quint16(IdWater) : cobble);
+                for (int sxp = -5; sxp <= -3; sxp += 2)
+                    for (int szp = -1; szp <= 1; szp += 2)
+                    { put(sxp, szp, 2, IdFence); put(sxp, szp, 3, IdFence); }
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -5; dx <= -3; ++dx)
+                        put(dx, dz, 4, IdSlabBottom);
+                // lanterns on posts at the corners of the square
+                for (int sxp = -3; sxp <= 3; sxp += 6)
+                    for (int szp = -4; szp <= 4; szp += 8)
+                    { put(sxp, szp, 1, IdFence); put(sxp, szp, 2, IdFence); put(sxp, szp, 3, IdLanternStanding); }
+            }
+            // villager work blocks around the bell
+            put(3, 0, 1, IdComposter);
+            put(0, 3, 1, IdBarrel);
+            put(0, -3, 1, IdSmithingTable);
+            put(3, 3, 1, IdLoom);
+            // villagers and a golem
+            static const int kProf[4] = { PfFarmer, PfLibrarian, PfCleric, PfToolsmith };
+            for (int ni = 0; ni < 3; ++ni)
+            {
+                NpcSite v;
+                v.kind = 0; v.prof = kProf[ni % 4]; v.level = 2 + ni;
+                v.x = px + (ni == 0 ? 1 : ni == 1 ? -1 : 2); v.z = pz + (ni == 0 ? 1 : ni == 1 ? 2 : -1);
+                v.y = topAt(v.x, v.z) + 1;
+                v.vtype = 0; v.yaw = ni * 90;
+                npcs.append(v);
+            }
+            NpcSite g; g.kind = 3; g.x = px - 1; g.z = pz - 2; g.y = topAt(g.x, g.z) + 1;
+            npcs.append(g);
+        }
+    }
+
+    // SIGNS WITH ADDRESSES: one per house, on the side of the nearest road (searching outward up to 24 blocks over road columns);
+    // no road nearby — the first suitable side. Line 1 — TYSTR, line 2 — STREET, line 3 — NUMBR+ADDNUM.
+    {
+        static const int sdx[4] = { 0, 1, 0, -1 }, sdz[4] = { -1, 0, 1, 0 };
+        for (const SignCand& sc : signCands)
+        {
+            int bestD = -1, bestDist = 1 << 20;
+            for (int d = 0; d < 4; ++d)
+            {
+                if (!sc.ok[d]) continue;
+                int dist = 99;
+                for (int k = 1; k <= 24; ++k)
+                    if (roadCols.contains(pairKey(sc.x[d] + sdx[d] * k, sc.z[d] + sdz[d] * k))) { dist = k; break; }
+                if (dist < bestDist) { bestDist = dist; bestD = d; }
+            }
+            if (bestD < 0) continue;
+            const int x = sc.x[bestD], z = sc.z[bestD];
+            if (store.get(x, sc.y, z) != IdAir) continue;                           // the cell is taken by someone else's block
+            if (store.get(x - sdx[bestD], sc.y, z - sdz[bestD]) == IdAir) continue; // the wall is gone (the house was demolished)
+            store.set(x, sc.y, z, quint16(int(IdWallSignBase) + bestD));
+            signSites.append(SignSite{ x, sc.y, z, sc.l1, sc.l2, sc.l3 });
+        }
+    }
+    for (const BannerSite& bn : bannerSites)
+        bannersByChunk[pairKey(bn.x >> 4, bn.z >> 4)].append(bn);
+    for (const LairZone& z : lairZones)
+        for (int zcz = z.z0 >> 4; zcz <= (z.z1 >> 4); ++zcz)
+            for (int zcx = z.x0 >> 4; zcx <= (z.x1 >> 4); ++zcx)
+                zonesByChunk[pairKey(zcx, zcz)].append(z);
+    for (const BellSite& bl : bellSites)
+        bellsByChunk[pairKey(bl.x >> 4, bl.z >> 4)].append(bl);
+
+    // SIGNPOSTS AT INTERSECTIONS (request): named rdslin streets (TYSTR+STREET). An intersection — the places where the roadways of two DIFFERENT
+    // named streets cross or touch (columns with a neighbor of another name). Close points (up to 10 blocks) are merged into
+    // one intersection; next to it on free ground by the roadway we put a stone_brick_wall post 4 high and on its sides — signs
+    // (waxed, like on houses): line 1 — TYSTR, line 2 — STREET. More than 4 streets — a second row of signs below (up to 8). The post — stone_brick_wall 4 high, a lantern on top.
+    {
+        static const int ndx[4] = { 1, -1, 0, 0 }, ndz[4] = { 0, 0, 1, -1 };
+        // Real intersections — where the AXIS lines of two different roads cross (or abut each other, a tolerance of 1.5 blocks)
+        // at an angle of at least ~12°; the roadway width does not matter. At least one name is needed; pedestrian/bike paths
+        // are counted only if they have a name themselves; one and the same street (the same TYSTR+STREET) does not form an intersection.
+        {
+            struct Sg { int line; double x0, z0, x1, z1; };
+            QVector<Sg> sgs;
+            QHash<ColKey, QVector<int>> sgGrid;
+            constexpr double kCell = 24.0, kTol = 1.5;
+            for (int li = 0; li < roadLines.size(); ++li)
+            {
+                const QVector<QPointF>& pt = roadLines[li].pts;
+                for (int k = 0; k + 1 < pt.size(); ++k)
+                {
+                    const Sg g{ li, pt[k].x(), pt[k].y(), pt[k + 1].x(), pt[k + 1].y() };
+                    if (std::hypot(g.x1 - g.x0, g.z1 - g.z0) < 1e-6) continue;
+                    const int idx = sgs.size();
+                    sgs.append(g);
+                    const int cx0 = int(std::floor((std::min(g.x0, g.x1) - kTol) / kCell)), cx1 = int(std::floor((std::max(g.x0, g.x1) + kTol) / kCell));
+                    const int cz0 = int(std::floor((std::min(g.z0, g.z1) - kTol) / kCell)), cz1 = int(std::floor((std::max(g.z0, g.z1) + kTol) / kCell));
+                    for (int cz = cz0; cz <= cz1; ++cz)
+                        for (int cx = cx0; cx <= cx1; ++cx)
+                            sgGrid[pairKey(cx, cz)].append(idx);
+                }
+            }
+            for (auto it = sgGrid.constBegin(); it != sgGrid.constEnd(); ++it)
+            {
+                const QVector<int>& lst = it.value();
+                const int cellX = keyFirst(it.key()), cellZ = keySecond(it.key());
+                for (int ia = 0; ia < lst.size(); ++ia)
+                    for (int ib = ia + 1; ib < lst.size(); ++ib)
+                    {
+                        const Sg& a = sgs[lst[ia]]; const Sg& b = sgs[lst[ib]];
+                        const RoadLine& la = roadLines[a.line]; const RoadLine& lb = roadLines[b.line];
+                        if (la.obj == lb.obj) continue;                              // parts of one road
+                        const bool namedA = la.nameId >= 0, namedB = lb.nameId >= 0;
+                        if (!namedA && !namedB) continue;                           // at least one name is needed
+                        if (namedA && namedB && la.nameId == lb.nameId) continue;   // the same street
+                        if ((la.ped && !namedA) || (lb.ped && !namedB)) continue;   // an unnamed pedestrian/bike path — not an intersection
+                        const double d1x = a.x1 - a.x0, d1z = a.z1 - a.z0, d2x = b.x1 - b.x0, d2z = b.z1 - b.z0;
+                        const double len1 = std::hypot(d1x, d1z), len2 = std::hypot(d2x, d2z);
+                        const double cr = d1x * d2z - d1z * d2x;
+                        if (std::abs(cr) / (len1 * len2) < 0.2) continue;           // almost parallel — not an intersection
+                        const double ex = b.x0 - a.x0, ez = b.z0 - a.z0;
+                        const double t = (ex * d2z - ez * d2x) / cr;                // the position on a
+                        const double u = (ex * d1z - ez * d1x) / cr;                // the position on b
+                        const double tolA = kTol / len1, tolB = kTol / len2;
+                        if (t < -tolA || t > 1.0 + tolA || u < -tolB || u > 1.0 + tolB) continue;
+                        const double px = a.x0 + t * d1x, pz = a.z0 + t * d1z;
+                        if (int(std::floor(px / kCell)) != cellX || int(std::floor(pz / kCell)) != cellZ) continue;   // we count in one cell
+                        juncPts.append(JuncPt{ int(std::floor(px)), int(std::floor(pz)), la.nameId, lb.nameId });
+                    }
+            }
+        }
+        std::sort(juncPts.begin(), juncPts.end(), [](const JuncPt& a, const JuncPt& b)
+        { return a.x != b.x ? a.x < b.x : (a.z != b.z ? a.z < b.z : (a.a != b.a ? a.a < b.a : a.b < b.b)); });
+        QHash<ColKey, QVector<int>> jGrid;                         // a 10×10 grid for merging the points
+        for (int i = 0; i < juncPts.size(); ++i)
+            jGrid[pairKey(int(std::floor(juncPts[i].x / 10.0)), int(std::floor(juncPts[i].z / 10.0)))].append(i);
+        QVector<char> jUsed(juncPts.size(), 0);
+        auto isVegJ = [](quint16 bid)
+        {
+            return bid == IdAir || bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter
+                || bid == IdPaleHangingMoss || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass
+                || bid == IdTallGrassUpper || bid == IdWheat || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
+        };
+        static const int sdxJ[4] = { 0, 1, 0, -1 }, sdzJ[4] = { -1, 0, 1, 0 };
+        int posts = 0;
+        for (int i = 0; i < juncPts.size(); ++i)
+        {
+            if (jUsed[i]) continue;
+            QSet<int> names;
+            double sxm = 0, szm = 0; int cnt = 0;
+            const int gx = int(std::floor(juncPts[i].x / 10.0)), gz = int(std::floor(juncPts[i].z / 10.0));
+            for (int dgx = -1; dgx <= 1; ++dgx)
+                for (int dgz = -1; dgz <= 1; ++dgz)
+                {
+                    const auto git = jGrid.constFind(pairKey(gx + dgx, gz + dgz));
+                    if (git == jGrid.constEnd()) continue;
+                    for (int q : git.value())
+                    {
+                        if (jUsed[q]) continue;
+                        if (std::hypot(double(juncPts[q].x - juncPts[i].x), double(juncPts[q].z - juncPts[i].z)) > 10.0) continue;
+                        jUsed[q] = 1;
+                        if (juncPts[q].a >= 0) names.insert(juncPts[q].a);      // -1 — an unnamed road: it does not go into the list of names
+                        if (juncPts[q].b >= 0) names.insert(juncPts[q].b);
+                        sxm += juncPts[q].x; szm += juncPts[q].z; ++cnt;
+                    }
+                }
+            if (names.isEmpty() || cnt == 0) continue;
+            const int cx = int(std::lround(sxm / cnt)), cz = int(std::lround(szm / cnt));
+            // the post place: free 1×1 ground next to the roadway (within 2 blocks), closer to the intersection center
+            int bestX = 0, bestZ = 0, bestD = 1 << 20;
+            for (int r = 1; r <= 9; ++r)
+            {
+                for (int dz = -r; dz <= r; ++dz)
+                    for (int dx = -r; dx <= r; ++dx)
+                    {
+                        if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                        const int x = cx + dx, z = cz + dz;
+                        const qint64 ck = pairKey(x, z);
+                        if (roadCols.contains(ck) || colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
+                            || railColsAll.contains(ck)) continue;
+                        if (!ground.contains(pairKey(x >> 4, z >> 4))) continue;
+                        bool nearRoad = false;
+                        for (int k = 0; k < 4 && !nearRoad; ++k)
+                            for (int st = 1; st <= 2; ++st)
+                                if (roadCols.contains(pairKey(x + ndx[k] * st, z + ndz[k] * st))) { nearRoad = true; break; }
+                        if (!nearRoad) continue;
+                        const int t = surfaceTop(ck);
+                        if (t > 245) continue;
+                        bool freeCol = true;
+                        for (int y = t + 1; y <= t + 5 && freeCol; ++y)
+                            if (!isVegJ(store.get(x, y, z))) freeCol = false;
+                        for (int k = 0; k < 4 && freeCol; ++k)           // the sign cells on the sides — are free
+                            for (int y = t + 2; y <= t + 3; ++y)
+                                if (!isVegJ(store.get(x + sdxJ[k], y, z + sdzJ[k]))) { freeCol = false; break; }
+                        if (!freeCol) continue;
+                        const int d2 = dx * dx + dz * dz;
+                        if (d2 < bestD) { bestD = d2; bestX = x; bestZ = z; }
+                    }
+                if (bestD < (1 << 20)) break;
+            }
+            if (bestD == (1 << 20)) continue;
+            const int t0 = surfaceTop(pairKey(bestX, bestZ));
+            for (int k = 0; k < 4; ++k)                                   // clearing the grass under the post and signs
+                for (int y = t0 + 1; y <= t0 + 5; ++y)
+                {
+                    const int x = bestX + (k == 0 ? 0 : sdxJ[k - 1]), z = bestZ + (k == 0 ? 0 : sdzJ[k - 1]);
+                    if (store.get(x, y, z) != IdAir && isVegJ(store.get(x, y, z))) store.erase(x, y, z);
+                }
+            for (int y = t0 + 1; y <= t0 + 4; ++y)
+                store.set(bestX, y, bestZ, IdStoneBrickWall);              // a post of stone brick wall
+            store.set(bestX, t0 + 5, bestZ, IdLanternStanding);            // a lantern at the very top
+            QList<int> nm = names.values();
+            std::sort(nm.begin(), nm.end());
+            for (int k = 0; k < nm.size() && k < 8; ++k)
+            {
+                const int d = k % 4, y = t0 + 3 - (k / 4);
+                const int x = bestX + sdxJ[d], z = bestZ + sdzJ[d];
+                store.set(x, y, z, quint16(int(IdWallSignBase) + d));
+                signSites.append(SignSite{ x, y, z, roadNames[nm[k]].first, roadNames[nm[k]].second, QString() });
+            }
+            ++posts;
+        }
+        Q_UNUSED(posts);
+    }
+    for (const SignSite& sg : signSites)
+        signsByChunk[pairKey(sg.x >> 4, sg.z >> 4)].append(sg);
+
+    // BASEMENTS of private houses: we take out a room (the ground top in these columns is lowered to wy-5), lay a cobblestone floor,
+    // make a hatch in the house floor (iron, covered with a 3×3 carpet) and a vertical ladder (the holder — a block on the north side),
+    // a chest or mobs.
+    {
+        const quint16 cobbleB = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobblestone"));
+        // CHURCH DUNGEON: a maze of corridors 2 blocks wide under the building and around it, in 1–2 levels. A maze cell is a 4×4 block
+        // square (the grid step is 5: between cells a 1-block wall), the cell core is 2×2, the passage between neighbors is 2 wide (3 blocks long through the wall).
+        // "Transition zones" 3×3 / 4×4 — at forks (always), turns (sometimes) and dead ends (always); a dead end — a room with a chest.
+        // The entrance — a ladder from the church; the lower level is connected by a ladder from the farthest dead end of the upper one. The maze walls — the ground itself
+        // (only corridors are carved: the ground top in a column is lowered, the ceiling and floor are added with blocks). Chests in dead ends (2–4), an expensive one —
+        // one, in the deepest dead end (guarded by 3 mobs); zombies, skeletons, spiders, witches and endermen roam the corridors.
+        // deepSpots/deepFloor (optional): the chest cells on the LOWEST level of the maze (not the "expensive" chest — earlier) and the level of their floor —
+        // a secret shaft is hidden under one of such chests later.
+        auto buildChurchDungeon = [&](const BasementSite& bs, QVector<QPoint>* deepSpots = nullptr, int* deepFloor = nullptr) -> bool
+        {
+            const int Wy = bs.wy;
+            quint32 seed = colHash(pairKey(bs.hx, bs.hz) ^ 0xD06E0ull) | 1u;
+            auto rnd = [&seed](int mod) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return mod > 0 ? int(seed % quint32(mod)) : 0; };
+            auto colAt = [&](int x, int z, int& col) -> GroundChunk*
+            {
+                auto it = ground.find(pairKey(x >> 4, z >> 4));
+                if (it == ground.end()) return nullptr;
+                col = (z & 15) * 16 + (x & 15);
+                return &it.value();
+            };
+            const int fl1 = Wy - 7, fl2 = Wy - 11;
+            auto usable = [&](int x, int z, int floorY) -> bool
+            {
+                if (x == bs.hx && z == bs.hz && floorY != fl1) return false;             // the descent column belongs only to the 1st level
+                int col; GroundChunk* g = colAt(x, z, col);
+                if (!g || g->wd[col] > 0) return false;
+                if (g->top[col] < floorY + 3) return false;                              // above the corridor ceiling at least 1 layer of ground is needed
+                for (int y = floorY; y <= floorY + 2; ++y)
+                    if (store.get(x, y, z) != IdAir) return false;
+                return true;
+            };
+            static const int dxs[4] = { 0, 1, 0, -1 }, dzs[4] = { -1, 0, 1, 0 };          // 0=N,1=E,2=S,3=W
+            const int N = 6, M = 6, P = 5;
+            struct Maze { QVector<char> vis, e, s; int cnt = 0; };                         // e — a passage to the east, s — to the south of the cell
+            auto newMaze = [&]() { Maze m; m.vis.fill(0, N * M); m.e.fill(0, N * M); m.s.fill(0, N * M); return m; };
+            auto passage = [&](const Maze& m, int i, int j, int d) -> bool
+            {   // is there a passage from cell (i,j) in direction d
+                if (d == 1) return i + 1 < N && m.e[j * N + i];
+                if (d == 3) return i > 0 && m.e[j * N + i - 1];
+                if (d == 2) return j + 1 < M && m.s[j * N + i];
+                return j > 0 && m.s[(j - 1) * N + i];
+            };
+            int ox = 0, oz = 0;
+            auto cx0 = [&](int i) { return ox + P * i + 1; };
+            auto cz0 = [&](int j) { return oz + P * j + 1; };
+            auto coreOk = [&](int i, int j, int fy) -> bool
+            {
+                for (int a = 1; a <= 2; ++a)
+                    for (int b = 1; b <= 2; ++b)
+                        if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false;
+                return true;
+            };
+            // passage blocks: from (i,j) to the east — x cx0+3..cx0+5, z cz0+1..cz0+2; to the south — z cz0+3..cz0+5, x cx0+1..cx0+2
+            auto passOk = [&](int i, int j, int d, int fy) -> bool
+            {
+                if (d == 1) { for (int a = 3; a <= 5; ++a) for (int b = 1; b <= 2; ++b) if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false; }
+                else        { for (int a = 1; a <= 2; ++a) for (int b = 3; b <= 5; ++b) if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false; }
+                return true;
+            };
+            auto genMaze = [&](int fy, int sI, int sJ, int blockDir, Maze& m) -> int
+            {
+                m = newMaze();
+                if (!coreOk(sI, sJ, fy)) return 0;
+                QVector<QPoint> stk;
+                stk.append(QPoint(sI, sJ)); m.vis[sJ * N + sI] = 1; m.cnt = 1;
+                while (!stk.isEmpty())
+                {
+                    const QPoint c = stk.last();
+                    int cand[4], nc = 0;
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
+                        if (ni < 0 || ni >= N || nj < 0 || nj >= M || m.vis[nj * N + ni]) continue;
+                        if (c.x() == sI && c.y() == sJ && d == blockDir) continue;
+                        if (!coreOk(ni, nj, fy)) continue;
+                        const bool fwd = (d == 1 || d == 2);
+                        if (!(fwd ? passOk(c.x(), c.y(), d, fy) : passOk(ni, nj, (d == 3) ? 1 : 2, fy))) continue;
+                        cand[nc++] = d;
+                    }
+                    if (nc == 0) { stk.removeLast(); continue; }
+                    const int d = cand[rnd(nc)];
+                    const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
+                    if (d == 1) m.e[c.y() * N + c.x()] = 1; else if (d == 3) m.e[nj * N + ni] = 1;
+                    else if (d == 2) m.s[c.y() * N + c.x()] = 1; else m.s[nj * N + ni] = 1;
+                    m.vis[nj * N + ni] = 1; ++m.cnt;
+                    stk.append(QPoint(ni, nj));
+                }
+                return m.cnt;
+            };
+            struct MazeInfo { QVector<int> dist; QVector<QPoint> leaves; QVector<QPoint> order; };
+            auto analyze = [&](const Maze& m, int sI, int sJ) -> MazeInfo
+            {
+                MazeInfo mi;
+                mi.dist.fill(-1, N * M);
+                QVector<QPoint> q; q.append(QPoint(sI, sJ)); mi.dist[sJ * N + sI] = 0;
+                for (int h = 0; h < q.size(); ++h)
+                {
+                    const QPoint c = q[h];
+                    mi.order.append(c);
+                    int deg = 0;
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        if (!passage(m, c.x(), c.y(), d)) continue;
+                        ++deg;
+                        const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
+                        if (mi.dist[nj * N + ni] >= 0) continue;
+                        mi.dist[nj * N + ni] = mi.dist[c.y() * N + c.x()] + 1;
+                        q.append(QPoint(ni, nj));
+                    }
+                    if (deg == 1 && !(c.x() == sI && c.y() == sJ)) mi.leaves.append(c);
+                }
+                return mi;
+            };
+            // ---- level 1: the entrance — the core of cell (2,0), the descent column = its north-west core block = (hx,hz)
+            const int sI1 = 2, sJ1 = 0;
+            ox = bs.hx - (P * sI1 + 2); oz = bs.hz - 2;
+            Maze mz1, mz2;
+            const int n1 = genMaze(fl1, sI1, sJ1, 0, mz1);                               // the north is closed: the ladder holder is there
+            if (n1 < 10) return false;
+            MazeInfo m1 = analyze(mz1, sI1, sJ1);
+            // ---- the lower level: from the farthest dead end of the upper one (the ladder at the wall of the dead-end room farthest from the passage)
+            int connI = -1, connJ = -1, connOd = -1, n2 = 0;
+            QPoint ladd2(0, 0);                                                           // the ladder block between levels (a column)
+            int ladFace = 0;                                                              // where the ladder faces (the index IdLadderN+..)
+            MazeInfo m2;
+            if (!m1.leaves.isEmpty() && rnd(100) < 70)
+            {
+                QPoint far = m1.leaves.first();
+                for (const QPoint& l : m1.leaves)
+                    if (m1.dist[l.y() * N + l.x()] > m1.dist[far.y() * N + far.x()]) far = l;
+                int od = -1;
+                for (int d = 0; d < 4; ++d) if (passage(mz1, far.x(), far.y(), d)) od = d;
+                const int f = (od + 2) % 4;                                               // the far wall of the dead end — the holder
+                int lx = cx0(far.x()) + 1, lz = cz0(far.y()) + 1;
+                if (f == 2) lz = cz0(far.y()) + 2;
+                if (f == 1) lx = cx0(far.x()) + 2;
+                n2 = genMaze(fl2, far.x(), far.y(), f, mz2);
+                if (n2 >= 8)
+                {
+                    connI = far.x(); connJ = far.y(); connOd = od; ladd2 = QPoint(lx, lz);
+                    ladFace = (f + 2) % 4;
+                    m2 = analyze(mz2, connI, connJ);
+                }
+                else n2 = 0;
+            }
+            // ---- the set of level columns: cores, passages, rooms 3×3/4×4 (forks, turns, dead ends)
+            struct RoomR { int x0, z0, x1, z1; };
+            QHash<int, RoomR> rooms1, rooms2;
+            auto buildCols = [&](const Maze& m, int fy, bool isLower, QHash<int, RoomR>& rooms) -> QVector<QPoint>
+            {
+                QSet<ColKey> seen; QVector<QPoint> out;
+                auto add = [&](int x, int z) { if (seen.contains(pairKey(x, z))) return; seen.insert(pairKey(x, z)); out.append(QPoint(x, z)); };
+                for (int j = 0; j < M; ++j)
+                    for (int i = 0; i < N; ++i)
+                    {
+                        if (!m.vis[j * N + i]) continue;
+                        for (int a = 1; a <= 2; ++a) for (int b = 1; b <= 2; ++b) add(cx0(i) + a, cz0(j) + b);          // the core
+                        if (i + 1 < N && m.e[j * N + i]) for (int a = 3; a <= 5; ++a) for (int b = 1; b <= 2; ++b) add(cx0(i) + a, cz0(j) + b);
+                        if (j + 1 < M && m.s[j * N + i]) for (int a = 1; a <= 2; ++a) for (int b = 3; b <= 5; ++b) add(cx0(i) + a, cz0(j) + b);
+                        // a room
+                        int deg = 0, dirs[4] = { 0, 0, 0, 0 };
+                        for (int d = 0; d < 4; ++d) if (passage(m, i, j, d)) { ++deg; dirs[d] = 1; }
+                        const bool isEntrance = (!isLower && i == sI1 && j == sJ1);
+                        const bool isConn = (connI >= 0 && i == connI && j == connJ);
+                        if (isEntrance || (isConn && isLower)) continue;                  // the entrance and the start of the lower level — only the core
+                        const bool straight = (deg == 2 && ((dirs[0] && dirs[2]) || (dirs[1] && dirs[3])));
+                        int size = 0;
+                        if (deg == 1) size = (rnd(2) ? 4 : 3);
+                        if (isConn && !isLower) size = 3;                                  // the connector room — only 3×3, oriented toward the passage
+                        else if (deg >= 3) size = (rnd(100) < 60 ? 4 : 3);
+                        else if (deg == 2 && !straight && rnd(100) < 45) size = 3;
+                        if (!size) continue;
+                        RoomR r;
+                        if (size == 4) r = RoomR{ cx0(i), cz0(j), cx0(i) + 3, cz0(j) + 3 };
+                        else
+                        {   // 3×3 inside the cell, must contain the core; at a dead end it grows toward the passage
+                            int ox3 = rnd(2), oz3 = rnd(2);
+                            if (deg == 1)
+                            {
+                                const int od = dirs[0] ? 0 : dirs[1] ? 1 : dirs[2] ? 2 : 3;
+                                if (od == 0) oz3 = 0; else if (od == 2) oz3 = 1;
+                                if (od == 3) ox3 = 0; else if (od == 1) ox3 = 1;
+                            }
+                            r = RoomR{ cx0(i) + ox3, cz0(j) + oz3, cx0(i) + ox3 + 2, cz0(j) + oz3 + 2 };
+                        }
+                        bool ok = true;
+                        for (int z = r.z0; z <= r.z1 && ok; ++z) for (int x = r.x0; x <= r.x1; ++x) if (!usable(x, z, fy)) { ok = false; break; }
+                        if (!ok) continue;
+                        // the ladder column down (the L1 connector) must not fall out of the holder wall: the connector room is already oriented
+                        for (int z = r.z0; z <= r.z1; ++z) for (int x = r.x0; x <= r.x1; ++x) add(x, z);
+                        rooms.insert(j * N + i, r);
+                    }
+                return out;
+            };
+            QVector<QPoint> cols2;
+            if (n2 > 0) cols2 = buildCols(mz2, fl2, true, rooms2);
+            const QVector<QPoint> cols1 = buildCols(mz1, fl1, false, rooms1);
+            // ---- writing: first the lower level (it uses the original ground tops), then the upper one
+            QHash<ColKey, QPair<int, quint16>> origMap;                                // the original column top/surface before any edits
+            auto origOf = [&](int x, int z, GroundChunk* g, int col) -> QPair<int, quint16>
+            {
+                const qint64 k = pairKey(x, z);
+                auto it = origMap.find(k);
+                if (it == origMap.end()) it = origMap.insert(k, qMakePair(int(g->top[col]), quint16(g->surf[col])));
+                return it.value();
+            };
+            auto fillCeiling = [&](int x, int z, int fromY, GroundChunk* g, int col)
+            {
+                const QPair<int, quint16> o = origOf(x, z, g, col);
+                const int orig = o.first;
+                const quint16 surf = o.second;
+                for (int y = fromY; y <= orig; ++y)
+                {
+                    const quint16 id = (y == orig) ? surf : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
+                    if (store.get(x, y, z) == IdAir) store.set(x, y, z, id);          // building blocks (the church floor) are not overwritten
+                }
+            };
+            const bool hasConn = (n2 > 0);
+            auto isConnCol = [&](int x, int z) { return hasConn && x == ladd2.x() && z == ladd2.y(); };
+            auto carve = [&](const QVector<QPoint>& cols, int floorY, bool lower)
+            {
+                for (const QPoint& c : cols)
+                {
+                    const int x = c.x(), z = c.y();
+                    int col; GroundChunk* g = colAt(x, z, col);
+                    if (!g) continue;
+                    if (!lower && x == bs.hx && z == bs.hz) continue;                       // the descent column — separately
+                    const bool isConn = isConnCol(x, z);
+                    if (lower)
+                    {
+                        if (!isConn) fillCeiling(x, z, floorY + 3, g, col);
+                        g->top[col] = qint16(floorY - 1);
+                        store.set(x, floorY, z, cobbleB);
+                        if (store.get(x, floorY - 1, z) == IdAir) store.set(x, floorY - 1, z, cobbleB);       // a floor in two layers
+                    }
+                    else
+                    {
+                        for (int y = floorY + 1; y <= floorY + 2; ++y) store.erase(x, y, z);   // air (removes the stone filled by the lower level)
+                        fillCeiling(x, z, floorY + 3, g, col);
+                        if (!isConn)
+                        {
+                            g->top[col] = qint16(std::min<int>(g->top[col], floorY - 1));
+                            store.set(x, floorY, z, cobbleB);
+                            if (store.get(x, floorY - 1, z) == IdAir) store.set(x, floorY - 1, z, cobbleB);   // a floor in two layers
+                        }
+                        else
+                            g->top[col] = qint16(std::min<int>(g->top[col], fl2 - 1));
+                    }
+                }
+            };
+            if (n2 > 0) carve(cols2, fl2, true);
+            carve(cols1, fl1, false);
+            // the descent column from the church
+            {
+                int col; GroundChunk* g = colAt(bs.hx, bs.hz, col);
+                if (!g) return false;
+                origOf(bs.hx, bs.hz, g, col);
+                store.erase(bs.hx, Wy - 1, bs.hz);
+                store.erase(bs.hx, Wy - 2, bs.hz);
+                g->top[col] = qint16(fl1 - 1);
+                store.set(bs.hx, fl1, bs.hz, cobbleB);
+                for (int y = fl1 + 1; y <= Wy - 2; ++y) store.set(bs.hx, y, bs.hz, IdLadderS);   // the holder — north (the maze wall)
+            }
+            // the ladder between levels
+            if (n2 > 0)
+            {
+                const quint16 lad = quint16(int(IdLadderN) + ladFace);
+                for (int y = fl2 + 1; y <= fl1 + 2; ++y) store.set(ladd2.x(), y, ladd2.y(), lad);
+            }
+            // the hatch and a 3×3 carpet above it (a wooden one — no lever is needed)
+            {
+                const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
+                const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        const int x = bs.hx + dx, z = bs.hz + dz;
+                        if (store.get(x, bs.wy, z) != IdAir) continue;
+                        if (!(dx == 0 && dz == 0) && store.get(x, bs.wy - 1, z) == IdAir) continue;
+                        store.set(x, bs.wy, z, carpet);
+                    }
+                store.set(bs.hx, bs.wy - 1, bs.hz, IdOakTrapdoor);
+            }
+            // chests: in dead ends (2–4), one expensive — in the deepest dead end; guards
+            struct Spot { int level; QPoint cell; int dist; };
+            QVector<Spot> spots;
+            for (const QPoint& l : m1.leaves)
+                if (!(connI >= 0 && l.x() == connI && l.y() == connJ)) spots.append(Spot{ 1, l, m1.dist[l.y() * N + l.x()] });
+            if (n2 > 0)
+                for (const QPoint& l : m2.leaves) spots.append(Spot{ 2, l, 100 + m2.dist[l.y() * N + l.x()] });
+            std::sort(spots.begin(), spots.end(), [](const Spot& a, const Spot& b) { return a.dist > b.dist; });
+            const int nChest = std::min(int(spots.size()), 2 + rnd(3));
+            static const int kMobVar[5] = { 0, 1, 2, 3, 7 };                           // zombie, skeleton, spider, witch, enderman
+            auto blockOfSpot = [&](const Spot& sp, int& bx, int& bz)
+            {   // the chest block: the center of the dead-end room (or of the core)
+                const auto& rm = (sp.level == 1) ? rooms1 : rooms2;
+                const auto it = rm.constFind(sp.cell.y() * N + sp.cell.x());
+                if (it != rm.constEnd()) { bx = (it->x0 + it->x1) / 2; bz = (it->z0 + it->z1) / 2; }
+                else { bx = cx0(sp.cell.x()) + 1; bz = cz0(sp.cell.y()) + 1; }
+                if (isConnCol(bx, bz) || (sp.level == 1 && bx == bs.hx && bz == bs.hz)) { bx += 1; }
+            };
+            for (int k = 0; k < nChest; ++k)
+            {
+                const Spot& sp = spots[k];
+                int x, z; blockOfSpot(sp, x, z);
+                const int fy = (sp.level == 1 ? fl1 : fl2) + 1;
+                store.set(x, fy, z, IdChest);
+                const bool rich = (k == 0);
+                if (deepSpots && sp.level == (n2 > 0 ? 2 : 1))
+                {
+                    if (rich) deepSpots->append(QPoint(x, z)); else deepSpots->prepend(QPoint(x, z));
+                }
+                chests.append(ChestSite{ x, fy, z, rich ? kLootT1 + rnd(kChestLootCount - kLootT1) : pickChestLoot(quint32(rnd(1 << 20)), 55, 45) });
+                if (rich)
+                {   // guards — 3 mobs on the nearest columns of the same level
+                    const QVector<QPoint>& lc = (sp.level == 1) ? cols1 : cols2;
+                    QVector<QPoint> near;
+                    for (const QPoint& c : lc)
+                    {
+                        if (c.x() == x && c.y() == z) continue;
+                        if (std::max(std::abs(c.x() - x), std::abs(c.y() - z)) <= 3) near.append(c);
+                    }
+                    int g = 0;
+                    while (!near.isEmpty() && g < 3)
+                    {
+                        const QPoint c = near.takeAt(rnd(int(near.size())));
+                        NpcSite m; m.kind = 4; m.variant = kMobVar[rnd(5)]; m.x = c.x(); m.z = c.y(); m.y = fy; m.yaw = rnd(4) * 90;
+                        npcs.append(m);
+                        ++g;
+                    }
+                }
+            }
+            if (deepSpots)
+            {   // the other dead ends of the lower level (without a chest) are also candidates for a shaft: the chest will be placed on the spot when the shaft is built
+                const int deepLevel = (n2 > 0) ? 2 : 1;
+                if (deepFloor) *deepFloor = (deepLevel == 2) ? fl2 : fl1;
+                for (int k = nChest; k < spots.size(); ++k)
+                    if (spots[k].level == deepLevel)
+                    {
+                        int x, z; blockOfSpot(spots[k], x, z);
+                        deepSpots->append(QPoint(x, z));
+                    }
+            }
+            // roaming mobs along the corridors of both levels
+            const int totalCells = n1 + n2;
+            const int nMob = std::max(4, std::min(12, totalCells / 5));
+            for (int k = 0; k < nMob; ++k)
+            {
+                const bool low = (n2 > 0 && rnd(100) < 45);
+                const QVector<QPoint>& lc = low ? cols2 : cols1;
+                if (lc.size() < 4) continue;
+                const QPoint c = lc[rnd(int(lc.size()))];
+                if ((!low && c.x() == bs.hx && c.y() == bs.hz) || (low && isConnCol(c.x(), c.y()))) continue;
+                NpcSite m; m.kind = 4; m.variant = kMobVar[rnd(5)]; m.x = c.x(); m.z = c.y(); m.y = (low ? fl2 : fl1) + 1; m.yaw = rnd(4) * 90;
+                npcs.append(m);
+            }
+            // cobwebs under the corridor ceiling and rare lanterns in room corners (little light; the maze mobs do not despawn anyway — PersistenceRequired)
+            {
+                const quint16 web = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobweb"));
+                auto decorate = [&](const QVector<QPoint>& cols, int floorY, bool lower, const QHash<int, RoomR>& rooms)
+                {
+                    for (const QPoint& c : cols)
+                    {
+                        if ((!lower && c.x() == bs.hx && c.y() == bs.hz) || (lower && isConnCol(c.x(), c.y()))) continue;
+                        if (store.get(c.x(), floorY + 1, c.y()) != IdAir) continue;                // a chest/ladder
+                        if (rnd(100) < 7 && store.get(c.x(), floorY + 2, c.y()) == IdAir) store.set(c.x(), floorY + 2, c.y(), web);
+                    }
+                    for (auto it = rooms.constBegin(); it != rooms.constEnd(); ++it)
+                    {
+                        if (rnd(100) >= 55) continue;
+                        const int x = it->x0, z = it->z0;
+                        if ((!lower && x == bs.hx && z == bs.hz) || (lower && isConnCol(x, z))) continue;
+                        if (store.get(x, floorY + 1, z) == IdAir && store.get(x, floorY, z) != IdAir) store.set(x, floorY + 1, z, IdLanternStanding);
+                    }
+                };
+                decorate(cols1, fl1, false, rooms1);
+                if (n2 > 0) decorate(cols2, fl2, true, rooms2);
+            }
+            return true;
+        };
+        // UNDERGROUND LABORATORY of a science building (44315000): a complex under the building 9 blocks below the walking level — a 3×N corridor along the south from the shaft and up to 6 rooms
+        // 7×6 on the sides (openings 3 wide). In the rooms simple redstone mechanisms: a lamp panel with levers, chains of repeaters with a delay, a music
+        // panel (buttons + note blocks), a "flower" of pistons around a block with a lever, a safe behind an iron door with buttons, an office. The light — lamps with redstone blocks in the ceiling.
+        // The entrance — a hatch under a 3×3 carpet and a ladder at the north end of the corridor. The dead-end chests of the corridor are candidates for the Ancient City entrance (deepSpots/deepFloor).
+        auto buildLab = [&](const BasementSite& bs, QVector<QPoint>* deepSpots, int* deepFloor) -> bool
+        {
+            if (caveSet.empty()) return false;
+            const int Wy = bs.wy, fl = Wy - 9, y1 = fl + 1;
+            QHash<QString, quint16> stCache;
+            auto stId = [&](const char* name, std::initializer_list<std::pair<const char*, const char*>> pr) -> quint16
+            {
+                CaveState s;
+                s.name = QString::fromLatin1(name);
+                for (const auto& kv : pr) s.props.append(qMakePair(QString::fromLatin1(kv.first), QString::fromLatin1(kv.second)));
+                const QString key = caveStateKey(s);
+                const auto ci = stCache.constFind(key);
+                if (ci != stCache.constEnd()) return ci.value();
+                int idx = -1;
+                for (int i = 0; i < caveSet.states.size(); ++i) if (caveStateKey(caveSet.states[i]) == key) { idx = i; break; }
+                if (idx < 0)
+                {
+                    idx = caveSet.states.size();
+                    caveSet.states.append(s);
+                    caveSet.idOf.append(caveStateToId(s, idx));
+                }
+                stCache.insert(key, caveSet.idOf[idx]);
+                return caveSet.idOf[idx];
+            };
+            static const char* const kDn[4] = { "north", "east", "south", "west" };
+            auto colAt = [&](int x, int z, int& col) -> GroundChunk*
+            {
+                auto it = ground.find(pairKey(x >> 4, z >> 4));
+                if (it == ground.end()) return nullptr;
+                col = (z & 15) * 16 + (x & 15);
+                return &it.value();
+            };
+            auto usable = [&](int x, int z) -> bool
+            {
+                int col; GroundChunk* g = colAt(x, z, col);
+                if (!g || g->wd[col] > 0 || g->top[col] < fl + 4) return false;
+                for (int y = fl - 1; y <= fl + 3; ++y)
+                    if (store.get(x, y, z) != IdAir) return false;
+                return true;
+            };
+            const quint16 floorB = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+            const quint16 wallB = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
+            const quint16 ironB = quint16(IdIronBlock);
+            const quint16 lampOn = stId("minecraft:redstone_lamp", { { "lit", "true" } });
+            const quint16 lampOff = stId("minecraft:redstone_lamp", { { "lit", "false" } });
+            const quint16 rsBlock = stId("minecraft:redstone_block", {});
+            static const int dxs[4] = { 0, 1, 0, -1 }, dzs[4] = { -1, 0, 1, 0 };
+            const int kRoomU0[3] = { 2, 10, 18 };
+            for (int attempt = 0; attempt < 2; ++attempt)
+            {
+                const int vs = attempt == 0 ? 1 : -1;                                       // the v-axis: +x or -x
+                auto wxz = [&](int u, int v, int& x, int& z) { x = bs.hx + vs * (v - 1); z = bs.hz + u; };
+                auto dirOf = [&](int du, int dv) -> int { return du > 0 ? 2 : du < 0 ? 0 : (dv * vs > 0 ? 1 : 3); };
+                auto ok = [&](int u, int v) { int x, z; wxz(u, v, x, z); return usable(x, z); };
+                int Lc = 0;                                                                  // the corridor length: the maximal prefix of suitable columns
+                for (int u = 0; u < 26; ++u)
+                {
+                    if (!(ok(u, 0) && ok(u, 1) && ok(u, 2))) break;
+                    Lc = u + 1;
+                }
+                if (Lc < 10) continue;
+                struct RoomL { int u0, side; bool on; };                                      // side: +1 south-v (v>=4), -1 (v<=-2)
+                QVector<RoomL> rl;
+                int nOn = 0;
+                for (int c = 0; c < 3; ++c)
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        RoomL r{ kRoomU0[c], side, false };
+                        if (r.u0 + 7 <= Lc)
+                        {
+                            bool good = true;
+                            for (int ru = 0; ru < 7 && good; ++ru)
+                            {
+                                for (int rd = 0; rd < 6 && good; ++rd) good = ok(r.u0 + ru, side > 0 ? 4 + rd : -2 - rd);
+                                if (good && ru >= 2 && ru <= 4) good = ok(r.u0 + ru, side > 0 ? 3 : -1);      // the opening in the wall to the corridor
+                            }
+                            r.on = good;
+                        }
+                        if (r.on) ++nOn;
+                        rl.append(r);
+                    }
+                if (nOn < 2) continue;
+                // ——— the set of columns and writing ———
+                QSet<ColKey> carved;
+                QVector<QPoint> cols;
+                auto addC = [&](int u, int v)
+                {
+                    int x, z; wxz(u, v, x, z);
+                    if (carved.contains(pairKey(x, z))) return;
+                    carved.insert(pairKey(x, z));
+                    cols.append(QPoint(x, z));
+                };
+                for (int u = 0; u < Lc; ++u) for (int v = 0; v <= 2; ++v) addC(u, v);
+                auto roomUV = [&](const RoomL& r, int ru, int rd, int& u, int& v) { u = r.u0 + ru; v = r.side > 0 ? 4 + rd : -2 - rd; };
+                for (const RoomL& r : rl)
+                {
+                    if (!r.on) continue;
+                    for (int ru = 0; ru < 7; ++ru) for (int rd = 0; rd < 6; ++rd) { int u, v; roomUV(r, ru, rd, u, v); addC(u, v); }
+                    for (int ru = 2; ru <= 4; ++ru) addC(r.u0 + ru, r.side > 0 ? 3 : -1);     // the opening
+                }
+                for (const QPoint& c : cols)
+                {
+                    int col; GroundChunk* g = colAt(c.x(), c.y(), col);
+                    if (!g) return false;
+                }
+                // the original top/surface before edits and the ceiling
+                for (const QPoint& c : cols)
+                {
+                    int col; GroundChunk* g = colAt(c.x(), c.y(), col);
+                    const int orig = g->top[col];
+                    const quint16 surf = g->surf[col];
+                    for (int y = fl + 4; y <= orig; ++y)
+                    {
+                        const quint16 id = (y == orig) ? surf : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
+                        if (store.get(c.x(), y, c.y()) == IdAir) store.set(c.x(), y, c.y(), id);
+                    }
+                    g->top[col] = qint16(fl - 1);
+                    store.set(c.x(), fl, c.y(), floorB);
+                    if (store.get(c.x(), fl - 1, c.y()) == IdAir) store.set(c.x(), fl - 1, c.y(), floorB);
+                }
+                // the descent column (u=0,v=1): a shaft from the house floor
+                {
+                    int col; GroundChunk* g = colAt(bs.hx, bs.hz, col);
+                    if (!g) return false;
+                    store.erase(bs.hx, Wy - 1, bs.hz);
+                    store.erase(bs.hx, Wy - 2, bs.hz);
+                    for (int y = fl + 4; y <= Wy - 3; ++y) store.erase(bs.hx, y, bs.hz);
+                    g->top[col] = qint16(fl - 1);
+                    for (int y = fl + 1; y <= Wy - 2; ++y) store.set(bs.hx, y, bs.hz, IdLadderS);   // the holder — north (soil/wall)
+                }
+                // lining the walls with stone brick (8 neighbors outside the set of columns), ceiling lights
+                QSet<ColKey> lined;
+                for (const QPoint& c : cols)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            const qint64 nk = pairKey(c.x() + dx, c.y() + dz);
+                            if (carved.contains(nk) || lined.contains(nk)) continue;
+                            lined.insert(nk);
+                            for (int y = fl + 1; y <= fl + 3; ++y)
+                                if (store.get(keyFirst(nk), y, keySecond(nk)) == IdAir)
+                                    store.set(keyFirst(nk), y, keySecond(nk), wallB);
+                        }
+                auto putAt = [&](int u, int v, int dy, quint16 id)
+                {
+                    int x, z; wxz(u, v, x, z);
+                    store.set(x, y1 + dy, z, id);
+                };
+                auto chestAt = [&](int u, int v, int tbl)
+                {
+                    int x, z; wxz(u, v, x, z);
+                    store.set(x, y1, z, IdChest);
+                    chests.append(ChestSite{ x, y1, z, tbl });
+                };
+                auto lampAt = [&](int u, int v)
+                {
+                    int x, z; wxz(u, v, x, z);
+                    if (store.get(x, fl + 3, z) != IdAir) return;
+                    store.set(x, fl + 3, z, lampOn);
+                    store.set(x, fl + 4, z, rsBlock);
+                };
+                for (int u = 3; u < Lc; u += 6) lampAt(u, 1);                                   // the corridor lighting
+                // ——— room mechanisms ———
+                QHash<ColKey, char> kind;                                                       // (x,z) -> W wire, L lever, R repeater (N-S 'n' / E-W 'e')
+                QVector<QPair<QPoint, int>> wires;                                              // the wire positions
+                auto mark = [&](int u, int v, char k) { int x, z; wxz(u, v, x, z); kind.insert(pairKey(x, z), k); };
+                auto leverFloor = [&](int u, int v) { putAt(u, v, 0, stId("minecraft:lever", { { "face", "floor" }, { "facing", "north" }, { "powered", "false" } })); mark(u, v, 'L'); };
+                auto wireAt = [&](int u, int v) { int x, z; wxz(u, v, x, z); wires.append(qMakePair(QPoint(x, z), 0)); mark(u, v, 'W'); };
+                auto repeaterAt = [&](int u, int v, int towardInput, int delay)
+                {
+                    putAt(u, v, 0, stId("minecraft:repeater", { { "delay", delay == 1 ? "1" : delay == 2 ? "2" : delay == 3 ? "3" : "4" }, { "facing", kDn[towardInput] },
+                                                                { "locked", "false" }, { "powered", "false" } }));
+                    mark(u, v, (towardInput & 1) ? 'e' : 'n');
+                };
+                auto buttonAt = [&](int u, int v, int faceDir) { putAt(u, v, 0, stId("minecraft:stone_button", { { "face", "wall" }, { "facing", kDn[faceDir] }, { "powered", "false" } })); };
+                int nMech = 0;
+                int ri = 0;
+                for (const RoomL& r : rl)
+                {
+                    ++ri;
+                    if (!r.on) continue;
+                    ++nMech;
+                    auto RU = [&](int ru, int rd, int& u, int& v) { roomUV(r, ru, rd, u, v); };
+                    const int dRu = dirOf(1, 0), dRd = (r.side > 0) ? dirOf(0, 1) : dirOf(0, -1);   // world directions +ru and +rd
+                    const int dRuNeg = (dRu + 2) & 3, dRdNeg = (dRd + 2) & 3;
+                    int u, v;
+                    RU(1, 4, u, v); lampAt(u, v);                                                    // the room ceiling lamps
+                    RU(5, 4, u, v); lampAt(u, v);
+                    RU(3, 1, u, v); lampAt(u, v);
+                    switch (nMech % 6)
+                    {
+                    case 1:
+                        for (int rd = 1; rd <= 5; rd += 2)                                           // three lines: a lever — a wire — a lamp
+                        {
+                            RU(0, rd, u, v); leverFloor(u, v);
+                            for (int ru = 1; ru <= 4; ++ru) { RU(ru, rd, u, v); wireAt(u, v); }
+                            RU(5, rd, u, v); putAt(u, v, 0, lampOff);
+                        }
+                        break;
+                    case 2:
+                        for (int rd = 1; rd <= 4; rd += 3)                                           // a lever — a chain of repeaters with a delay — lamps
+                        {
+                            RU(0, rd, u, v); leverFloor(u, v);
+                            RU(1, rd, u, v); wireAt(u, v);
+                            for (int ru = 2; ru <= 4; ++ru) { RU(ru, rd, u, v); repeaterAt(u, v, dRuNeg, 4); }
+                            RU(5, rd, u, v); wireAt(u, v);
+                            RU(6, rd, u, v); putAt(u, v, 0, lampOff);
+                        }
+                        break;
+                    case 3:
+                        for (int ru = 1; ru <= 5; ru += 1)                                           // music: a note block and a button next to it
+                        {
+                            RU(ru, 3, u, v);
+                            static const char* const kNote[5] = { "0", "4", "7", "12", "16" };
+                            putAt(u, v, 0, stId("minecraft:note_block", { { "instrument", "basedrum" }, { "note", kNote[ru - 1] }, { "powered", "false" } }));
+                            RU(ru, 2, u, v); buttonAt(u, v, dRdNeg);                                  // a button on the note block itself (from the entrance side)
+                        }
+                        break;
+                    case 4:
+                        {   // a "flower" of pistons: a block with a lever in the center, pistons around facing up
+                            RU(3, 3, u, v); putAt(u, v, 0, ironB);
+                            RU(3, 2, u, v); putAt(u, v, 0, stId("minecraft:lever", { { "face", "wall" }, { "facing", kDn[dRdNeg] }, { "powered", "false" } }));
+                            RU(2, 3, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
+                            RU(4, 3, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
+                            RU(3, 4, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
+                        }
+                        break;
+                    case 5:
+                        {   // a safe: a 3×2 niche in the far corner behind an iron door, buttons outside and inside
+                            for (int dy = 0; dy < 3; ++dy)
+                            {
+                                RU(3, 3, u, v); putAt(u, v, dy, wallB);
+                                RU(3, 5, u, v); putAt(u, v, dy, wallB);
+                                RU(4, 3, u, v); putAt(u, v, dy, wallB);
+                                RU(5, 3, u, v); putAt(u, v, dy, wallB);
+                                RU(6, 3, u, v); putAt(u, v, dy, wallB);
+                            }
+                            RU(3, 4, u, v);
+                            putAt(u, v, 0, stId("minecraft:iron_door", { { "facing", kDn[dRuNeg] }, { "half", "lower" }, { "hinge", "left" }, { "open", "false" }, { "powered", "false" } }));
+                            putAt(u, v, 1, stId("minecraft:iron_door", { { "facing", kDn[dRuNeg] }, { "half", "upper" }, { "hinge", "left" }, { "open", "false" }, { "powered", "false" } }));
+                            putAt(u, v, 2, wallB);
+                            RU(2, 3, u, v); buttonAt(u, v, dRuNeg);                                   // outside — on the block (3,3)
+                            RU(4, 5, u, v); buttonAt(u, v, dRu);                                      // inside — on the block (3,5)
+                            RU(6, 5, u, v); chestAt(u, v, kLootT1 + int(colHash(pairKey(bs.hx, bs.hz) ^ 0x5AFEull) % quint32(kChestLootCount - kLootT1)));
+                        }
+                        break;
+                    default:
+                        {   // an office
+                            RU(0, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
+                            RU(1, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
+                            RU(5, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
+                            RU(6, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
+                            RU(3, 5, u, v); putAt(u, v, 0, IdCraftingTable);
+                            RU(2, 5, u, v); putAt(u, v, 0, IdCartographyTable);
+                            RU(4, 5, u, v); putAt(u, v, 0, IdFurnace);
+                        }
+                        break;
+                    }
+                    Q_UNUSED(dRu); Q_UNUSED(dRd);
+                }
+                // wires with connections
+                for (const auto& w : wires)
+                {
+                    QVector<QPair<QString, QString>> pr;
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        const auto kit = kind.constFind(pairKey(w.first.x() + dxs[d], w.first.y() + dzs[d]));
+                        bool con = false;
+                        if (kit != kind.constEnd())
+                            con = (*kit == 'W' || *kit == 'L' || (*kit == 'n' && (d & 1) == 0) || (*kit == 'e' && (d & 1) == 1));
+                        pr << qMakePair(QString::fromLatin1(kDn[d]), con ? QStringLiteral("side") : QStringLiteral("none"));
+                    }
+                    CaveState s;
+                    s.name = QStringLiteral("minecraft:redstone_wire");
+                    s.props = pr;
+                    s.props << qMakePair(QStringLiteral("power"), QStringLiteral("0"));
+                    const QString key = caveStateKey(s);
+                    int idx = -1;
+                    for (int i = 0; i < caveSet.states.size(); ++i) if (caveStateKey(caveSet.states[i]) == key) { idx = i; break; }
+                    if (idx < 0) { idx = caveSet.states.size(); caveSet.states.append(s); caveSet.idOf.append(caveStateToId(s, idx)); }
+                    store.set(w.first.x(), y1, w.first.y(), caveSet.idOf[idx]);
+                }
+                // the hatch and a 3×3 carpet above it
+                {
+                    const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
+                    const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            const int x = bs.hx + dx, z = bs.hz + dz;
+                            if (store.get(x, bs.wy, z) != IdAir) continue;
+                            if (!(dx == 0 && dz == 0) && store.get(x, bs.wy - 1, z) == IdAir) continue;
+                            store.set(x, bs.wy, z, carpet);
+                        }
+                    store.set(bs.hx, bs.wy - 1, bs.hz, IdOakTrapdoor);
+                }
+                // a chest at the start of the corridor (everyday/medium) and candidates for a secret shaft — the end of the corridor
+                chestAt(2, 0, pickChestLoot(colHash(pairKey(bs.hx, bs.hz) ^ 0x1AB5ull), 40, 50));
+                if (deepSpots)
+                {
+                    for (int u = Lc - 1; u >= std::max(4, Lc - 5); --u)
+                    {
+                        int x, z; wxz(u, 1, x, z);
+                        if (store.get(x, y1, z) == IdAir) deepSpots->append(QPoint(x, z));
+                    }
+                    if (deepFloor) *deepFloor = fl;
+                }
+                Q_UNUSED(nMech);
+                return true;
+            }
+            return false;
+        };
+        // We build the church dungeons first; for each we remember the lower-level chests — a secret shaft is hidden under one of them.
+        QVector<QVector<QPoint>> deepSpots(basements.size());
+        QVector<int> deepFloor(basements.size(), 0);
+        for (int i = 0; i < basements.size(); ++i)
+        {
+            if (basements[i].church)
+            {
+                if (!buildChurchDungeon(basements[i], &deepSpots[i], &deepFloor[i])) deepSpots[i].clear();
+            }
+            else if (basements[i].lab)
+            {
+                if (!buildLab(basements[i], &deepSpots[i], &deepFloor[i])) deepSpots[i].clear();
+            }
+        }
+        // SECRET PASSAGES: in the biggest church — a shaft to the End portal (a stronghold room, y≈23), in the second biggest — to the Ancient
+        // City (Deep Dark, y≈-49). The entrance — not in the church itself, but in the maze under it: the floor under one of the chests of the LOWER level is replaced
+        // with a hatch, then a ladder goes down. The structure template is placed so that its entrance column coincides with the shaft; the rectangles of the two
+        // structures do not intersect.
+        if (!lairSet.empty())
+        {
+            QVector<int> order;                                   // churches with a maze, in descending "size" (area × height)
+            for (int i = 0; i < basements.size(); ++i)
+                if (basements[i].church && !deepSpots[i].isEmpty()) order.append(i);
+            std::stable_sort(order.begin(), order.end(), [&](int a, int b)
+            { return basements[a].size != basements[b].size ? basements[a].size > basements[b].size : basements[a].hx < basements[b].hx; });
+            int nChurch = 0;
+            for (const BasementSite& b : basements) if (b.church) ++nChurch;
+            res.lairInfo.prepend(QObject::tr("churches: %1, with a maze: %2").arg(nChurch).arg(order.size()) + ((res.lairInfo.isEmpty() || res.lairInfo.startsWith(QLatin1String("; "))) ? QString() : QStringLiteral("; ")));
+            const int sS = lairSet.find(QStringLiteral("stronghold")), sC = lairSet.find(QStringLiteral("ancient_city"));
+            auto churchCentre = [&](int bi) { return QPointF(basements[bi].cx, basements[bi].cz); };
+            // does dead end c fit under the entrance of structure s (the chunks around the shaft and the whole main hall, the depth) — without regard to the neighboring structure
+            auto candOk = [&](int s2, int bi, const QPoint& c, LairPlace& pl) -> bool
+            {
+                const LairStruct& ls = lairSet.st[s2];
+                if (deepFloor[bi] - ls.floorY < 8) return false;
+                const int X = c.x(), Z = c.y();
+                if (!ground.contains(pairKey(X >> 4, Z >> 4)) || !ground.contains(pairKey((X - 1) >> 4, (Z - 1) >> 4))) return false;
+                pl = LairPlace(); pl.s = s2; pl.tx = X - ls.ex; pl.tz = Z - ls.ez; pl.sx = X; pl.sz = Z;
+                const int rx0 = ((ls.room[0] + pl.tx) >> 4) - 1, rx1 = ((ls.room[3] + pl.tx) >> 4) + 1;
+                const int rz0 = ((ls.room[2] + pl.tz) >> 4) - 1, rz1 = ((ls.room[5] + pl.tz) >> 4) + 1;
+                for (int dcz = rz0; dcz <= rz1; ++dcz)
+                    for (int dcx = rx0; dcx <= rx1; ++dcx)
+                        if (!ground.contains(pairKey(dcx, dcz))) return false;
+                for (int dcz = -1; dcz <= 1; ++dcz)
+                    for (int dcx = -1; dcx <= 1; ++dcx)
+                        if (!ground.contains(pairKey((X >> 4) + dcx, (Z >> 4) + dcz))) return false;
+                return true;
+            };
+            // the shaft of one structure must not pass through the rectangle of another
+            auto conflict = [&](const LairPlace& a, const LairPlace& b) -> bool
+            { return lairSet.rectOf(a).adjusted(-2, -2, 2, 2).contains(b.sx, b.sz) || lairSet.rectOf(b).adjusted(-2, -2, 2, 2).contains(a.sx, a.sz); };
+            // the first suitable dead end of church bi for structure s2; dead ends are tried from the farthest from the point away (the maze "goes away" from the neighboring church)
+            auto planFor = [&](int s2, int bi, const LairPlace* avoid, const QPointF& away, LairPlace& out) -> bool
+            {
+                QVector<QPoint> cands = deepSpots[bi];
+                std::stable_sort(cands.begin(), cands.end(), [&](const QPoint& a, const QPoint& b)
+                { return std::hypot(a.x() - away.x(), a.y() - away.y()) > std::hypot(b.x() - away.x(), b.y() - away.y()); });
+                for (const QPoint& c : cands)
+                {
+                    LairPlace pl;
+                    if (!candOk(s2, bi, c, pl)) continue;
+                    if (avoid && conflict(pl, *avoid)) continue;
+                    out = pl;
+                    return true;
+                }
+                return false;
+            };
+            // a pair: structure s1 in church b1 and s2 in b2 — both are placed together (so that the shaft of the first does not interfere with the second)
+            auto tryPair = [&](int s1, int b1, int s2, int b2, LairPlace& p1, LairPlace& p2) -> bool
+            {
+                QVector<QPoint> cands = deepSpots[b1];
+                const QPointF away = churchCentre(b2);
+                std::stable_sort(cands.begin(), cands.end(), [&](const QPoint& a, const QPoint& b)
+                { return std::hypot(a.x() - away.x(), a.y() - away.y()) > std::hypot(b.x() - away.x(), b.y() - away.y()); });
+                for (const QPoint& c : cands)
+                {
+                    LairPlace pl1;
+                    if (!candOk(s1, b1, c, pl1)) continue;
+                    LairPlace pl2;
+                    if (planFor(s2, b2, &pl1, churchCentre(b1), pl2)) { p1 = pl1; p2 = pl2; return true; }
+                }
+                return false;
+            };
+            auto buildShaft = [&](int bi, const LairPlace& pl)
+            {
+                const LairStruct& ls = lairSet.st[pl.s];
+                const int X = pl.sx, Z = pl.sz, fl = deepFloor[bi], fy = ls.floorY;
+                GroundChunk& g = ground.find(pairKey(X >> 4, Z >> 4)).value();
+                g.top[(Z & 15) * 16 + (X & 15)] = qint16(fy);
+                store.set(X, fy, Z, cobbleB);
+                for (int y = fy + 1; y <= fl - 1; ++y)
+                {
+                    store.set(X, y, Z, IdLadderS);
+                    if (store.get(X, y, Z - 1) == IdAir) store.set(X, y, Z - 1, cobbleB);
+                }
+                store.set(X, fl, Z, IdOakTrapdoor);
+                if (store.get(X, fl + 1, Z) == IdAir)
+                {   // the dead end had no chest — we put it on top of the hatch (the entrance is hidden exactly under the chest)
+                    store.set(X, fl + 1, Z, IdChest);
+                    chests.append(ChestSite{ X, fl + 1, Z, pickChestLoot(colHash(pairKey(X, Z) ^ 0xC4E57ull), 40, 60) });
+                }
+                lairSet.placed.append(pl);
+                if (basements[bi].forced)
+                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)").arg(ls.id).arg(X).arg(Z);
+                else if (basements[bi].lab)
+                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)").arg(ls.id).arg(X).arg(Z);
+                else
+                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)")
+                                        .arg(ls.id).arg(X).arg(Z).arg(order.indexOf(bi) + 1).arg(order.size());
+                if (qEnvironmentVariableIsSet("MCX_LAIRDBG"))
+                    std::fprintf(stderr, "[lair] %s shaft x=%d z=%d floorY=%d levelFloor=%d tx=%d tz=%d\n", qPrintable(ls.id), X, Z, fy, fl, pl.tx, pl.tz);
+            };
+            // churches set by the user by chunk coordinates (WorldOptions::lairChurchChunks: "x z; x z" or "x y z; x y z" as in F3)
+            QVector<int> forced;
+            {
+                const QStringList groups = world.lairChurchChunks.split(QRegularExpression(QStringLiteral("[;|\\n]")), Qt::SkipEmptyParts);
+                QVector<QPoint> chunks;
+                static const QRegularExpression numRe(QStringLiteral("-?\\d+"));
+                for (const QString& g : groups)
+                {
+                    QVector<int> nums;
+                    auto it = numRe.globalMatch(g);
+                    while (it.hasNext()) nums.append(it.next().captured().toInt());
+                    if (nums.size() >= 3) chunks.append(QPoint(nums[0], nums[2]));
+                    else if (nums.size() == 2) chunks.append(QPoint(nums[0], nums[1]));
+                }
+                if (groups.size() < 2 && chunks.isEmpty())
+                {   // without ";" — six/four numbers in a row
+                    QVector<int> nums;
+                    auto it = numRe.globalMatch(world.lairChurchChunks);
+                    while (it.hasNext()) nums.append(it.next().captured().toInt());
+                    if (nums.size() == 6) chunks << QPoint(nums[0], nums[2]) << QPoint(nums[3], nums[5]);
+                    else if (nums.size() == 4) chunks << QPoint(nums[0], nums[1]) << QPoint(nums[2], nums[3]);
+                }
+                for (const QPoint& ch : chunks)
+                {
+                    int best = -1; double bd = 1e18;
+                    for (int bi : order)
+                    {
+                        const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
+                        if (d < bd) { bd = d; best = bi; }
+                    }
+                    if (best >= 0 && bd <= 48.0 && !forced.contains(best)) forced.append(best);
+                    else res.lairInfo += QObject::tr("; no church with a maze in chunk (%1, %2)").arg(ch.x()).arg(ch.y());
+                }
+            }
+            // the building separately for the stronghold / the Ancient City (WorldOptions::strongholdChunk / cityChunk: "x z" or "x y z" as in F3): the NEAREST of those that
+            // were marked for the point (any code); if none of them got a maze — the old rule (a church with a maze within 48 blocks of the point)
+            auto churchByChunk = [&](const QString& text, const QString& what, int role) -> int
+            {
+                static const QRegularExpression numRe2(QStringLiteral("-?\\d+"));
+                QVector<int> nums;
+                auto it = numRe2.globalMatch(text);
+                while (it.hasNext()) nums.append(it.next().captured().toInt());
+                if (nums.size() < 2) return -1;
+                const QPoint ch = nums.size() >= 3 ? QPoint(nums[0], nums[2]) : QPoint(nums[0], nums[1]);
+                int best = -1; double bd = 1e18;
+                for (int bi : order)
+                {
+                    if (basements[bi].forced != role) continue;
+                    const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
+                    if (d < bd) { bd = d; best = bi; }
+                }
+                if (best >= 0) return best;
+                for (int bi : order)
+                {
+                    const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
+                    if (d < bd) { bd = d; best = bi; }
+                }
+                if (best >= 0 && (bd <= 48.0 || text.trimmed().startsWith(QLatin1Char('~')))) return best;     // "~" — a choice by a click on the map: just the nearest church
+                res.lairInfo += QObject::tr("; %1: no church with a maze in chunk (%2, %3)").arg(what).arg(ch.x()).arg(ch.y());
+                return -1;
+            };
+            const int fixS = churchByChunk(world.strongholdChunk, QStringLiteral("stronghold"), 1);
+            const int fixC = churchByChunk(world.cityChunk, QStringLiteral("Ancient City"), 2);
+            QVector<int> autoOrder;                                // for the automatic choice — without the buildings that were marked for a point
+            for (int bi : order) if (!basements[bi].forced) autoOrder.append(bi);
+            LairPlace pl1, pl2;
+            bool done = false;
+            if (sS >= 0 && sC >= 0 && (fixS >= 0 || fixC >= 0) && fixS != fixC)
+            {   // buildings are set for specific structures (by points on the map): the second one (if not set) is chosen automatically
+                if (fixS >= 0 && fixC >= 0)
+                {
+                    if (tryPair(sS, fixS, sC, fixC, pl1, pl2)) { buildShaft(fixS, pl1); buildShaft(fixC, pl2); done = true; }
+                    else
+                    {   // the two points are close (the rectangles of the structures get in each other's way): the stronghold stays where the point is,
+                        // the city goes to the nearest marked building where it does not conflict with it
+                        if (planFor(sS, fixS, nullptr, QPointF(-1e9, -1e9), pl1))
+                        {
+                            buildShaft(fixS, pl1);
+                            done = true;
+                            QVector<int> cityCands;
+                            cityCands.append(fixC);
+                            for (int bi : order) if (basements[bi].forced == 2 && bi != fixC) cityCands.append(bi);
+                            bool cityOk = false;
+                            for (int bi : cityCands)
+                                if (bi != fixS && planFor(sC, bi, &pl1, QPointF(pl1.sx, pl1.sz), pl2)) { buildShaft(bi, pl2); cityOk = true; break; }
+                            if (!cityOk) res.lairInfo += QObject::tr("; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other's way");
+                        }
+                    }
+                }
+                else
+                {
+                    for (int k = 0; k < autoOrder.size() && !done; ++k)
+                    {
+                        const int bs_ = fixS >= 0 ? fixS : autoOrder[k];
+                        const int bc_ = fixC >= 0 ? fixC : autoOrder[k];
+                        if (bs_ == bc_) continue;
+                        if (tryPair(sS, bs_, sC, bc_, pl1, pl2)) { buildShaft(bs_, pl1); buildShaft(bc_, pl2); done = true; }
+                    }
+                    if (!done)
+                    {   // there is no suitable second building: we place the chosen structure alone, the other one is left to the fallbacks below
+                        const int fb = fixS >= 0 ? fixS : fixC;
+                        if (planFor(fixS >= 0 ? sS : sC, fb, nullptr, QPointF(-1e9, -1e9), pl1)) { buildShaft(fb, pl1); done = true; }
+                    }
+                }
+                if (!done) res.lairInfo += QObject::tr("; the entrances cannot be placed in the given buildings — choosing automatically");
+            }
+            if (!done && sS >= 0 && sC >= 0 && forced.size() >= 2)
+            {   // two given churches: the stronghold — in the bigger one (if it works out), otherwise vice versa
+                const int bigger = (basements[forced[0]].size >= basements[forced[1]].size) ? forced[0] : forced[1];
+                const int smaller = (bigger == forced[0]) ? forced[1] : forced[0];
+                if (tryPair(sS, bigger, sC, smaller, pl1, pl2)) { buildShaft(bigger, pl1); buildShaft(smaller, pl2); done = true; }
+                else if (tryPair(sS, smaller, sC, bigger, pl1, pl2)) { buildShaft(smaller, pl1); buildShaft(bigger, pl2); done = true; }
+                else res.lairInfo += QObject::tr("; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically");
+            }
+            if (!done)
+            {   // automatically: the biggest by "size"; the stronghold in the biggest of the suitable ones, the city in the next one (together, so as not to interfere)
+                if (sS >= 0 && sC >= 0 && !qEnvironmentVariableIsSet("MCX_CITY_FROM_LAB"))        // debug: the city only through the laboratory
+                {
+                    for (int i = 0; i < autoOrder.size() && !done; ++i)
+                        for (int j = 0; j < autoOrder.size() && !done; ++j)
+                        {
+                            if (i == j) continue;
+                            if (tryPair(sS, autoOrder[i], sC, autoOrder[j], pl1, pl2)) { buildShaft(autoOrder[i], pl1); buildShaft(autoOrder[j], pl2); done = true; }
+                        }
+                }
+                if (!done)
+                {   // at least one structure
+                    bool placedS = false;
+                    for (int bi : autoOrder)
+                        if (sS >= 0 && !placedS && planFor(sS, bi, nullptr, QPointF(-1e9, -1e9), pl1)) { buildShaft(bi, pl1); placedS = true; break; }
+                    if (!placedS) res.lairInfo += QObject::tr("; stronghold — no suitable church was found");
+                }
+            }
+            // FALLBACK for the Ancient City: there is no suitable church — the entrance from the underground laboratory of a research building (the biggest — first), then of a school
+            if (sC >= 0)
+            {
+                bool cityPlaced = false;
+                const LairPlace* strong = nullptr;
+                for (const LairPlace& pp : lairSet.placed) { if (pp.s == sC) cityPlaced = true; else if (pp.s == sS) strong = &pp; }
+                if (!cityPlaced)
+                {
+                    QVector<int> labs;
+                    for (int i = 0; i < basements.size(); ++i) if (basements[i].lab && !deepSpots[i].isEmpty()) labs.append(i);
+                    std::stable_sort(labs.begin(), labs.end(), [&](int a, int b)
+                    {   // research buildings first, schools after them; inside a group — the biggest first
+                        if (basements[a].school != basements[b].school) return !basements[a].school;
+                        return basements[a].size != basements[b].size ? basements[a].size > basements[b].size : basements[a].hx < basements[b].hx;
+                    });
+                    const LairPlace avoidCopy = strong ? *strong : LairPlace();
+                    for (int bi : labs)
+                    {
+                        LairPlace plc;
+                        if (planFor(sC, bi, strong ? &avoidCopy : nullptr, strong ? QPointF(strong->sx, strong->sz) : QPointF(-1e9, -1e9), plc))
+                        {
+                            buildShaft(bi, plc);
+                            cityPlaced = true;
+                            break;
+                        }
+                    }
+                    if (!cityPlaced)
+                        res.lairInfo += QObject::tr("; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)");
+                }
+            }
+        }
+        for (const BasementSite& bs : basements)
+        {
+            if (bs.church || bs.lab) continue;
+            bool ok = true;
+            for (int z = bs.z0 - 1; z <= bs.z1 + 1 && ok; ++z)     // the room + a ring of walls: the ground must be solid down to wy-2
+                for (int x = bs.x0 - 1; x <= bs.x1 + 1; ++x)
+                {
+                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                    if (git == ground.constEnd()) { ok = false; break; }
+                    const int tp = git->top[(z & 15) * 16 + (x & 15)];
+                    if (tp < bs.wy - (bs.church ? 3 : 2) || git->wd[(z & 15) * 16 + (x & 15)] > 0) { ok = false; break; }
+                }
+            if (!ok) continue;
+            if (bs.church)
+                for (int z = bs.z0; z <= bs.z1; ++z)
+                    for (int x = bs.x0; x <= bs.x1; ++x)
+                        store.erase(x, bs.wy - 2, z);                       // the bottom row of the church's double floor slab — into the room
+            for (int z = bs.z0; z <= bs.z1; ++z)
+                for (int x = bs.x0; x <= bs.x1; ++x)
+                {
+                    auto git = ground.find(pairKey(x >> 4, z >> 4));
+                    git->top[(z & 15) * 16 + (x & 15)] = qint16(bs.wy - 5);
+                    store.set(x, bs.wy - 4, z, cobbleB);                    // the basement floor
+                }
+            store.erase(bs.hx, bs.wy - 1, bs.hz);                           // an opening in the house floor
+            for (int y = bs.wy - 3; y <= bs.wy - 2; ++y)
+                store.set(bs.hx, y, bs.hz, IdLadderS);                      // facing south: the holder — north
+            store.set(bs.x0, bs.wy - 3, bs.z1, IdLanternStanding);          // light in two corners by the far wall
+            store.set(bs.x1, bs.wy - 3, bs.z1, IdLanternStanding);
+            // a 3×3 carpet on top of the hatch (the center — the hatch cell): we put it on free cells of the house floor; the hatch itself — always
+            {
+                const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
+                const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        const int x = bs.hx + dx, z = bs.hz + dz;
+                        const bool center = (dx == 0 && dz == 0);
+                        if (store.get(x, bs.wy, z) != IdAir) continue;                       // occupied by furniture/a block
+                        if (!center && store.get(x, bs.wy - 1, z) == IdAir) continue;       // no floor under the carpet
+                        store.set(x, bs.wy, z, carpet);
+                    }
+                // The hatch: while it is covered with a carpet (the carpet on the hatch cell always lands — it is free by the search condition), in 30% of cases
+                // we put an ordinary wooden one (opens by hand, no lever is needed); otherwise an iron one + a lever on the ceiling next to
+                // the ladder (powers the hatch through the floor block). A hatch not covered with a carpet is always iron.
+                const bool covered = (store.get(bs.hx, bs.wy, bs.hz) >= IdCarpetBase
+                                      && store.get(bs.hx, bs.wy, bs.hz) < IdCarpetBase + kCarpetsCount);
+                const bool woodHatch = covered && (colHash(pairKey(bs.hx, bs.hz) ^ 0x7A9Dull) % 100u) < 30u;
+                store.set(bs.hx, bs.wy - 1, bs.hz, woodHatch ? IdOakTrapdoor : IdIronTrapdoor);   // flush with the floor
+                if (!woodHatch)
+                    store.set(bs.hx - 1, bs.wy - 2, bs.hz, IdLeverCeil);
+            }
+            const quint32 hc = colHash(pairKey(bs.cx, bs.cz) ^ 0xBA5E1ull);
+            if (bs.content == 0)
+            {
+                const int tbl = bs.church ? pickChestLoot(hc >> 3, 20, 30)    // church: 20% everyday, 30% medium, 50% expensive
+                                          : pickChestLoot(hc >> 3, 30, 35);   // house: 30% everyday, 35% medium, 35% expensive
+                store.set(bs.x1, bs.wy - 3, bs.z0 + 1, IdChest);            // a chest in the corner by the east wall
+                chests.append(ChestSite{ bs.x1, bs.wy - 3, bs.z0 + 1, tbl });
+                if (tbl >= kLootT1)
+                {   // the expensive chest is guarded by 2–3 mobs next to it (the nearest free cells of the room)
+                    QVector<QPoint> near;
+                    for (int z = bs.z0; z <= bs.z1; ++z)
+                        for (int x = bs.x0; x <= bs.x1; ++x)
+                        {
+                            if ((x == bs.hx && z == bs.hz) || (x == bs.x1 && z == bs.z0 + 1)) continue;
+                            if (z == bs.z1 && (x == bs.x0 || x == bs.x1)) continue;     // lanterns
+                            near.append(QPoint(x, z));
+                        }
+                    std::sort(near.begin(), near.end(), [&](const QPoint& p, const QPoint& q)
+                    {
+                        const int dp = std::abs(p.x() - bs.x1) + std::abs(p.y() - (bs.z0 + 1));
+                        const int dq = std::abs(q.x() - bs.x1) + std::abs(q.y() - (bs.z0 + 1));
+                        return dp != dq ? dp < dq : (p.y() != q.y() ? p.y() < q.y() : p.x() < q.x());
+                    });
+                    const int nGuard = std::min(int(near.size()), 2 + int((hc >> 6) % 2u));
+                    for (int i = 0; i < nGuard; ++i)
+                    {
+                        NpcSite m;
+                        m.kind = 4; m.variant = bs.mobType; m.x = near[i].x(); m.z = near[i].y(); m.y = bs.wy - 3;
+                        m.yaw = int((hc >> (16 + i)) % 4u) * 90;
+                        npcs.append(m);
+                    }
+                }
+            }
+            else
+            {
+                QVector<QPoint> cells;                                      // the room cells, except the descent and lanterns
+                for (int z = bs.z0; z <= bs.z1; ++z)
+                    for (int x = bs.x0; x <= bs.x1; ++x)
+                    {
+                        if ((x == bs.hx && z == bs.hz) || (z == bs.z1 && (x == bs.x0 || x == bs.x1))) continue;
+                        cells.append(QPoint(x, z));
+                    }
+                const int area = (bs.x1 - bs.x0 + 1) * (bs.z1 - bs.z0 + 1);
+                const int n = std::min(int(cells.size()), 3 + int((hc >> 4) % 3u) + (area >= 20 ? 2 : 1));   // 4..7 mobs
+                const int st = int((hc >> 9) % quint32(std::max(1, int(cells.size()))));
+                auto gcdI = [](int p, int q) { while (q) { const int r = p % q; p = q; q = r; } return p; };
+                int stp = 1;                                                // the step is coprime with the number of cells — mobs do not coincide
+                for (int cand : { 5, 3, 7, 2, 4 })
+                    if (!cells.isEmpty() && gcdI(cand, int(cells.size())) == 1) { stp = cand; break; }
+                for (int i = 0; i < n; ++i)
+                {
+                    const QPoint c = cells[(st + i * stp) % cells.size()];
+                    NpcSite m;
+                    m.kind = 4; m.variant = bs.mobType;
+                    m.x = c.x(); m.z = c.y(); m.y = bs.wy - 3;
+                    m.yaw = int((hc >> (13 + i)) % 4u) * 90;
+                    npcs.append(m);
+                }
+            }
+        }
+    }
+
 }
 
 McWorldExporter::Result ExportRun::run()
@@ -7682,2989 +10672,14 @@ McWorldExporter::Result ExportRun::run()
 
     lap("before 3.57");
     beginStep(7);
-    // 3.57 Street furniture (user requests): wooden fences around csrpol sites (with no
-    // fewer than two gates and solid outer corners) and lamp posts along roads —
-    // a village composition "plinth + post + lantern", but taller than the game analogs. Everything stands on the
-    // ground by surfaceTop (already with the noise lift taken into account).
-    {
-        auto gateIdFor = [](qint64 ck, const QSet<ColKey>& pad) -> quint16
-        {   // the gate faces "away from the spot" (outward)
-            const int x2 = keyFirst(ck), z2 = keySecond(ck);
-            if (pad.contains(pairKey(x2 - 1, z2))) return IdGateE;
-            if (pad.contains(pairKey(x2 + 1, z2))) return IdGateW;
-            if (pad.contains(pairKey(x2, z2 - 1))) return IdGateS;
-            return IdGateN;
-        };
-        static const int dxs[4] = { 1, -1, 0, 0 };
-        static const int dzs[4] = { 0, 0, 1, -1 };
-        // — site fences: a ring of free columns right around the spot, two gates roughly
-        //   opposite each other (deterministically by the hash). The ring is built by FLARING over 8 neighbors:
-        //   along the edges the result is the same row, and on the OUTER CORNERS diagonal cells appear —
-        //   without them the fence diverged at the corners and the posts did not connect.
-        int nSportEq = 0;
-        // columns covered by a court of ANY pad (markings, goals and a 2-block margin). Sports plots often
-        // lie inside a bigger csrpol plot (a stadium with its own code): without the global set the outer
-        // plot filled its free area with benches right through the pitch lines of the inner one
-        QSet<ColKey> courtCols;
-        // the smallest plots go first: a pitch with its own court markings must be painted before the bigger
-        // plot that contains it fills the free area with benches (the court zone is only known after its build)
-        QVector<int> padOrder(pads.size());
-        for (int i = 0; i < pads.size(); ++i) padOrder[i] = i;
-        std::stable_sort(padOrder.begin(), padOrder.end(),
-                         [this](int a, int b) { return pads[a].size() < pads[b].size(); });
-        for (int padIdx : padOrder)
-        {
-            const QList<qint64>& padCols = pads[padIdx];
-            const QSet<ColKey> pad(padCols.constBegin(), padCols.constEnd());
-            if (padCode.value(padIdx, 0) == 71323000 && !padIsLake.value(padIdx, 0))
-            {   // GREENHOUSE (hothouse, orangery): a plank frame with glass (walls 4 blocks, a flat glass roof with beams), inside real beds — rows of beds (farmland) with
-                // plantings (wheat, carrots, potatoes, beetroot), between pairs of rows irrigation ditches with water, aisles, lamps under the roof; the entrance — an opening of 3 cells
-                int gx0 = std::numeric_limits<int>::max(), gx1 = std::numeric_limits<int>::min(), gz0 = gx0, gz1 = gx1;
-                for (qint64 ck : padCols)
-                {
-                    gx0 = std::min(gx0, keyFirst(ck)); gx1 = std::max(gx1, keyFirst(ck));
-                    gz0 = std::min(gz0, keySecond(ck)); gz1 = std::max(gz1, keySecond(ck));
-                }
-                const bool rowsAlongX = (gx1 - gx0) >= (gz1 - gz0);                   // the bed rows run along the long axis
-                auto isBoundary = [&](int x, int z)
-                {
-                    return !pad.contains(pairKey(x + 1, z)) || !pad.contains(pairKey(x - 1, z)) || !pad.contains(pairKey(x, z + 1)) || !pad.contains(pairKey(x, z - 1));
-                };
-                QVector<qint64> bnd;
-                for (qint64 ck : padCols) if (isBoundary(keyFirst(ck), keySecond(ck))) bnd << ck;
-                std::sort(bnd.begin(), bnd.end());
-                QPoint gate(1 << 28, 1 << 28);
-                if (!bnd.isEmpty())
-                {
-                    const qint64 gk = bnd[int(colHash(bnd.first() ^ 0x6A7Eull) % quint32(bnd.size()))];
-                    gate = QPoint(keyFirst(gk), keySecond(gk));
-                }
-                const quint16 crops[4] = { IdWheat, IdCarrots, IdPotatoes, IdBeetroots };
-                int nBed = 0, dbgNoGround = 0, dbgInterior = 0;
-                for (qint64 ck : padCols)
-                {
-                    const int x = keyFirst(ck), z = keySecond(ck);
-                    if (colMin.contains(ck) || colWater.contains(ck)) continue;
-                    const int y0 = surfaceTop(ck) + 1;
-                    if (y0 + 6 > 250) continue;
-                    const bool boundary = isBoundary(x, z);
-                    if (boundary)
-                    {
-                        const bool inGate = std::abs(x - gate.x()) <= 1 && std::abs(z - gate.y()) <= 1;
-                        int free4 = 0;
-                        if (!pad.contains(pairKey(x + 1, z))) ++free4;
-                        if (!pad.contains(pairKey(x - 1, z))) ++free4;
-                        if (!pad.contains(pairKey(x, z + 1))) ++free4;
-                        if (!pad.contains(pairKey(x, z - 1))) ++free4;
-                        const bool post = free4 >= 2 || ((x + z) & 3) == 0;
-                        for (int dy = 0; dy < 4; ++dy)
-                        {
-                            if (inGate && dy < 3) continue;                              // the entrance opening 3 high
-                            if (store.get(x, y0 + dy, z) != IdAir) continue;
-                            store.set(x, y0 + dy, z, (post || dy == 0 || inGate) ? IdOakPlanks : IdGlass);
-                        }
-                        if (store.get(x, y0 + 4, z) == IdAir) store.set(x, y0 + 4, z, IdOakPlanks);
-                        continue;
-                    }
-                    // the roof
-                    if (store.get(x, y0 + 4, z) == IdAir) store.set(x, y0 + 4, z, (x & 3) == 0 ? IdOakPlanks : IdGlass);
-                    // beds: a chain of rows along the axis, period 6: 0 — aisle, 1-2 — bed, 3 — a ditch with water, 4-5 — bed
-                    const int r = rowsAlongX ? (z - gz0) : (x - gx0);
-                    const int c = rowsAlongX ? (x - gx0) : (z - gz0);
-                    const int ph = ((r % 6) + 6) % 6;
-                    const bool nearWall = !pad.contains(pairKey(x + 1, z)) || !pad.contains(pairKey(x - 1, z)) || !pad.contains(pairKey(x, z + 1)) || !pad.contains(pairKey(x, z - 1))
-                                          || !pad.contains(pairKey(x + 1, z + 1)) || !pad.contains(pairKey(x - 1, z - 1)) || !pad.contains(pairKey(x + 1, z - 1)) || !pad.contains(pairKey(x - 1, z + 1));
-                    auto git = ground.find(pairKey(x >> 4, z >> 4));
-                    if (git == ground.end()) { ++dbgNoGround; continue; }
-                    ++dbgInterior;
-                    const int col = (z & 15) * 16 + (x & 15);
-                    const bool crossAisle = (c % 14) == 0 || (std::abs(x - gate.x()) <= 1 && std::abs(z - gate.y()) <= 3 && false);
-                    if (nearWall || ph == 0 || crossAisle)
-                    {   // aisle: trampled earth, under the roof a lamp every 8 cells
-                        if (git->wd[col] == 0) git->surf[col] = IdDirtPath;
-                        if (ph == 0 && (c % 8) == 4 && store.get(x, y0 + 3, z) == IdAir) store.set(x, y0 + 3, z, IdLanternHung);
-                        continue;
-                    }
-                    if (ph == 3)
-                    {   // irrigation ditch: water flush with the beds
-                        if (git->wd[col] == 0)
-                        {
-                            git->wd[col] = 1;
-                            if (git->art.isEmpty()) git->art.fill(0, 256);
-                            git->art[col] = 1;
-                        }
-                        continue;
-                    }
-                    git->surf[col] = IdFarmland;
-                    const quint16 crop = crops[colHash(pairKey(r / 3, c / 18) ^ padCols.first() ^ 0x6C0Full) % 4u];
-                    if (store.get(x, y0, z) == IdAir) { store.set(x, y0, z, crop); ++nBed; }
-                }
-                nSportEq += nBed > 0 ? 1 : 0;
-                if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[greenhouse] cols=%d beds=%d interior=%d noGround=%d bbox x %d..%d z %d..%d\n", int(padCols.size()), nBed, dbgInterior, dbgNoGround, gx0, gx1, gz0, gz1);
-                continue;
-            }
-            QVector<qint64> ring;
-            for (qint64 ck : padCols)
-            {
-                const int bx = keyFirst(ck), bz = keySecond(ck);
-                for (int ddy = -1; ddy <= 1; ++ddy)
-                    for (int ddx = -1; ddx <= 1; ++ddx)
-                    {
-                        if (!ddx && !ddy) continue;
-                        const qint64 nk = pairKey(bx + ddx, bz + ddy);
-                        if (pad.contains(nk) || colMin.contains(nk) || colWater.contains(nk))
-                            continue;                       // the fence does not climb onto a road/structure/water
-                        ring << nk;
-                    }
-            }
-            std::sort(ring.begin(), ring.end());
-            ring.erase(std::unique(ring.begin(), ring.end()), ring.end());
-            if (ring.size() < 8) continue;              // a degenerate spot — not fenced
-            auto freeAt = [&](int ri)
-            {
-                const qint64 ck = ring.at(ri);
-                const int y = surfaceTop(ck) + 1;
-                return y <= 254 && store.get(keyFirst(ck), y, keySecond(ck)) == IdAir;
-            };
-            auto findFree = [&](int start)
-            {
-                for (int s = 0; s < 8; ++s)
-                {
-                    const int ri = (start + s) % int(ring.size());
-                    if (freeAt(ri)) return ri;
-                }
-                return -1;
-            };
-            const quint32 h0 = colHash(ring.first() ^ 0xFECEull);
-            const int gateA = findFree(int(h0 % quint32(ring.size())));
-            const int gateB = findFree((gateA >= 0 ? gateA : 0) + int(ring.size()) / 2
-                                       + int(h0 >> 8) % 3);
-            const bool militaryPad = (padCode.value(padIdx, 0) == 53210000);
-            const quint16 milBrick = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
-            const quint16 milMossy = quint16(IdPaletteStart + paletteIndexOf("minecraft:mossy_stone_bricks"));
-            for (int ri = 0; ri < int(ring.size()); ++ri)
-            {
-                if (!freeAt(ri)) continue;              // occupied (a fence of a neighboring spot/a post/a planting)
-                const qint64 ck = ring.at(ri);
-                const int x = keyFirst(ck), z = keySecond(ck);
-                const int y = surfaceTop(ck) + 1;
-                if (militaryPad)
-                {   // a military ground (landuse=military): a stone boundary wall two rows high with
-                    // brick pillars every few cells and two open gateways; guards patrol inside
-                    if (ri == gateA || ri == gateB) continue;                    // the gateway is left open
-                    const quint32 hm = colHash(ck ^ 0x4C177ull);
-                    if (hm % 5u == 0u && store.get(x, y + 1, z) == IdAir && store.get(x, y + 2, z) == IdAir)
-                    {   // a pillar: a brick column taller than the wall
-                        store.set(x, y, z, milBrick);
-                        store.set(x, y + 1, z, (hm >> 8) % 4u == 0u ? milMossy : milBrick);
-                        store.set(x, y + 2, z, milBrick);
-                    }
-                    else
-                    {
-                        store.set(x, y, z, IdStoneBrickWall);
-                        if (store.get(x, y + 1, z) == IdAir) store.set(x, y + 1, z, IdStoneBrickWall);
-                    }
-                    continue;
-                }
-                store.set(x, y, z, (ri == gateA || ri == gateB) ? gateIdFor(ck, pad) : IdFence);
-            }
-            // Iron golems: on a fenced site (except lakes) a 25% chance is counted TWICE (deterministically
-            // by the spot hash) — a site has 0, 1 or 2 guards. They stand on free columns inside the spot closer to
-            // the center of its bbox; the second one — not closer than 3 blocks to the first. A CHILDREN'S
-            // playground gets baby villagers playing there instead of a guard (the same hash choice as the
-            // equipment stage below makes).
-            if (!padIsLake.value(padIdx, 0))
-            {
-                int gx0 = std::numeric_limits<int>::max(), gx1 = std::numeric_limits<int>::min();
-                int gz0 = gx0, gz1 = gx1;
-                for (qint64 ck : padCols)
-                {
-                    gx0 = std::min(gx0, keyFirst(ck)); gx1 = std::max(gx1, keyFirst(ck));
-                    gz0 = std::min(gz0, keySecond(ck)); gz1 = std::max(gz1, keySecond(ck));
-                }
-                const double mx = 0.5 * (gx0 + gx1), mz = 0.5 * (gz0 + gz1);
-                QVector<QPoint> golemAt;
-                // the same deterministic choice the equipment stage below makes: CODE 53710000 is a
-                // children's playground; a small mixed 53700000 site may become one by the pad hash
-                const quint32 hpNow = colHash(ring.first() ^ 0x5B027ull);
-                const bool kidsPad = padCode.value(padIdx, 0) == 53710000 ||
-                    (padCode.value(padIdx, 0) == 53700000 && padCols.size() < 700 && hpNow % 100u < 30u);
-                // a military ground is guarded for real: 2 golems up to 10 for a huge base, standing in a ring
-                // around the center; other sites keep the old deterministic 25% chance of 0, 1 or 2 golems;
-                // a children's playground gets a full gang of 4-6 kids instead, always (they came to play)
-                const int wantKids = kidsPad ? 4 + int((hpNow >> 8) % 3u) : 0;
-                const int wantGolems = militaryPad ? std::min(10, 2 + int(padCols.size()) / 100000)
-                                                   : (kidsPad ? wantKids : 2);
-                for (int roll = 0; roll < wantGolems; ++roll)
-                {
-                    if (!militaryPad && !kidsPad &&
-                        colHash(ring.first() ^ (0x601E3ull + quint64(roll) * 0x9E37ull)) % 100u >= 25u)
-                        continue;
-                    const double fa = 6.283185307179586 * roll / std::max(1, wantGolems);
-                    const bool spread = militaryPad || kidsPad;           // kids roam the whole plot too
-                    const double fx = spread ? mx + 0.3 * (gx1 - gx0) * std::cos(fa) : mx;
-                    const double fz = spread ? mz + 0.3 * (gz1 - gz0) * std::sin(fa) : mz;
-                    qint64 best = 0; double bestD = 1e18; bool have = false;
-                    for (qint64 ck : padCols)
-                    {
-                        const int y = surfaceTop(ck) + 1;
-                        if (y > 253 || store.get(keyFirst(ck), y, keySecond(ck)) != IdAir) continue;
-                        bool nearOther = false;
-                        for (const QPoint& q : golemAt)
-                            if (std::max(std::abs(q.x() - keyFirst(ck)), std::abs(q.y() - keySecond(ck))) < 3) nearOther = true;
-                        if (nearOther) continue;
-                        const double d = (keyFirst(ck) - fx) * (keyFirst(ck) - fx) + (keySecond(ck) - fz) * (keySecond(ck) - fz);
-                        if (d < bestD) { bestD = d; best = ck; have = true; }
-                    }
-                    if (!have) continue;
-                    NpcSite g;
-                    if (kidsPad)
-                    {   // children play on the playground instead of a guard (baby villagers)
-                        g.kind = 0; g.baby = true; g.prof = PfNone; g.level = 1;
-                    }
-                    else
-                        g.kind = 3;                                      // minecraft:iron_golem
-                    g.x = keyFirst(best); g.z = keySecond(best);
-                    g.y = surfaceTop(best) + 1;                          // surfaceTop already includes the yShift lift
-                    g.yaw = int(colHash(best ^ 0x601Eull) % 4u) * 90;
-                    npcs.append(g);
-                    golemAt.append(QPoint(g.x, g.z));
-                }
-            }
-            if (militaryPad) continue;      // the wall and the guards are enough; no courts, lawns or benches
-            // SPORTS EQUIPMENT on sites (CODE 53700000 — sports, 53710000 — children's): by the size and shape of the site — a football pitch (goals, the center
-            // line and circle in white wool), volleyball/tennis (a net on posts), basketball (two backboards with cauldron hoops), workout (pull-up bars, parallel bars, benches) or a children's
-            // playground (swings, a sandbox, a carousel, benches). We place only on free columns inside the spot not closer than 1 block to the fence and with air above them.
-            if (!padIsLake.value(padIdx, 0) && padCols.size() >= 90)
-            {
-                int bx0 = std::numeric_limits<int>::max(), bx1 = std::numeric_limits<int>::min(), bz0 = bx0, bz1 = bx1;
-                for (qint64 ck : padCols)
-                {
-                    bx0 = std::min(bx0, keyFirst(ck)); bx1 = std::max(bx1, keyFirst(ck));
-                    bz0 = std::min(bz0, keySecond(ck)); bz1 = std::max(bz1, keySecond(ck));
-                }
-                const int Lx = bx1 - bx0 + 1, Lz = bz1 - bz0 + 1;
-                const bool alongX = Lx >= Lz;                                 // the long axis
-                const int L = alongX ? Lx : Lz, Wd = alongX ? Lz : Lx;        // the length / width of the site
-                const double fillRatio = double(padCols.size()) / double(std::max(1, Lx * Lz));   // 1 — a rectangle, less — a ragged outline
-                const quint32 hp = colHash(ring.first() ^ 0x5B027ull);
-                // the "u-axis" along the length, the "v-axis" across; to(u, v) -> (x, z)
-                auto toXZ = [&](int u, int v) { return alongX ? QPoint(bx0 + u, bz0 + v) : QPoint(bx0 + v, bz0 + u); };
-                auto inside = [&](int u, int v, int margin)
-                {
-                    const QPoint q = toXZ(u, v);
-                    for (int dz2 = -margin; dz2 <= margin; ++dz2)
-                        for (int dx2 = -margin; dx2 <= margin; ++dx2)
-                            if (!pad.contains(pairKey(q.x() + dx2, q.y() + dz2))) return false;
-                    return true;
-                };
-                int resX0 = 1, resX1 = 0, resZ0 = 1, resZ1 = 0;                  // the area occupied by the court (x, z): ordinary items are not placed there
-                auto freeCol = [&](int u, int v, int h) -> bool
-                {   // the column is inside (a 1-block margin) and there is air h blocks above the ground
-                    if (!inside(u, v, 1)) return false;
-                    const QPoint q = toXZ(u, v);
-                    if (q.x() >= resX0 && q.x() <= resX1 && q.y() >= resZ0 && q.y() <= resZ1) return false;
-                    if (courtCols.contains(pairKey(q.x(), q.y()))) return false;   // somebody else's court
-                    const int y = surfaceTop(pairKey(q.x(), q.y())) + 1;
-                    if (y + h > 253) return false;
-                    for (int dy = 0; dy < h; ++dy) if (store.get(q.x(), y + dy, q.y()) != IdAir) return false;
-                    return true;
-                };
-                auto put1 = [&](int u, int v, int dy, quint16 id)
-                {
-                    const QPoint q = toXZ(u, v);
-                    store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1 + dy, q.y(), id);
-                };
-                // a post (fence) of height h; false — did not fit
-                auto post = [&](int u, int v, int h) -> bool
-                {
-                    if (!freeCol(u, v, h)) return false;
-                    for (int dy = 0; dy < h; ++dy) put1(u, v, dy, IdFence);
-                    return true;
-                };
-                int whiteWool = -1;
-                for (int i = 0; i < kWoolsCount; ++i) if (qstrcmp(kWools[i].name, "minecraft:white_wool") == 0) { whiteWool = i; break; }
-                auto paint = [&](int u, int v)
-                {   // white marking: we change the top ground block in the column to white wool
-                    if (whiteWool < 0 || !inside(u, v, 0)) return;
-                    const QPoint q = toXZ(u, v);
-                    auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
-                    if (git != ground.end() && git->wd[(q.y() & 15) * 16 + (q.x() & 15)] == 0) git->surf[(q.y() & 15) * 16 + (q.x() & 15)] = quint16(IdWoolBase + whiteWool);
-                };
-                int nEq = 0;
-                const int vc = Wd / 2;
-                const int padKind = padCode.value(padIdx, 0);
-                const bool sportPad = (padKind == 53700000 || padKind == 53710000);
-                auto flowerAt = [&](int u, int v)
-                {   // a flower on the grass (only in a free column, air above the ground)
-                    if (!freeCol(u, v, 1)) return false;
-                    const QPoint q = toXZ(u, v);
-                    put1(u, v, 0, quint16(IdFlowerBase + int(colHash(pairKey(q.x(), q.y()) ^ 0xF10Eull) % quint32(kFlowersCount))));
-                    return true;
-                };
-                if (!sportPad)
-                {   // ——— other csrpol by codes ———
-                    quint16 hayBale = IdHayBale;
-                    switch (padKind)
-                    {
-                    case 53510000:
-                    {   // CEMETERY: rows of graves every 3 blocks along and 4 across: a gravestone (a stone wall 2 blocks) or a cross (a fence), in front of it a mound of coarse dirt; rare flowers
-                        const quint16 paveA = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
-                        const quint16 paveB = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
-                        auto pavedC = [&](int u, int v) -> bool
-                        {   // a roadway, a paved square or water under the grave spot (a request: roads cross the cemetery);
-                            // the surface row is checked too: paving can get there without leaving a mark in the maps
-                            const QPoint q = toXZ(u, v);
-                            const ColKey ck = pairKey(q.x(), q.y());
-                            if (roadCols.contains(ck) || colWool.contains(ck) || colWater.contains(ck)) return true;
-                            const auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
-                            if (git != ground.end())
-                            {
-                                const quint16 s = git->surf[(q.y() & 15) * 16 + (q.x() & 15)];
-                                if (s >= IdWoolBase && s < quint16(IdWoolBase + kWoolsCount)) return true;
-                                if (s == paveA || s == paveB) return true;
-                            }
-                            return false;
-                        };
-                        for (int v = 2; v < Wd - 2; v += 4)
-                            for (int u = 2; u < L - 2; u += 3)
-                            {
-                                const quint32 hq = colHash(pairKey(u * 31, v * 17) ^ ring.first() ^ 0xC3E7ull);
-                                if (hq % 100u >= 70u) continue;
-                                if (!(freeCol(u, v, 3) && freeCol(u, v + 1, 1) && freeCol(u, v + 2, 1))) continue;
-                                if (pavedC(u, v) || pavedC(u, v + 1) || pavedC(u, v + 2)) continue;   // no grave across a road (a request)
-                                if ((hq >> 8) % 100u < 55u)
-                                {   // a gravestone
-                                    put1(u, v, 0, IdStoneBrickWall);
-                                    put1(u, v, 1, IdStoneBrickWall);
-                                }
-                                else
-                                {   // a cross
-                                    put1(u, v, 0, IdFence); put1(u, v, 1, IdFence); put1(u, v, 2, IdFence);
-                                    if (freeCol(u - 1, v, 2) && freeCol(u + 1, v, 2)
-                                        && !pavedC(u - 1, v) && !pavedC(u + 1, v)) { put1(u - 1, v, 1, IdFence); put1(u + 1, v, 1, IdFence); }
-                                }
-                                put1(u, v + 1, 0, IdCoarseDirt);                          // a grave mound
-                                put1(u, v + 2, 0, IdCoarseDirt);
-                                if ((hq >> 16) % 100u < 25u && !pavedC(u + 1, v + 1)) flowerAt(u + 1, v + 1);
-                                ++nEq;
-                            }
-                        // benches at the edge
-                        for (int k = 0; k < 2; ++k)
-                        {
-                            const int u0 = 1 + k * std::max(4, L - 5);
-                            bool ok = true;
-                            for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, 1, 1) && !pavedC(u, 1);
-                            if (!ok) continue;
-                            for (int u = u0; u < u0 + 3; ++u) put1(u, 1, 0, alongX ? IdStairsS : IdStairsE);
-                            ++nEq;
-                        }
-                        break;
-                    }
-                    case 53530000:
-                    {   // MONUMENT, MEMORIAL: a stone site, in the center an obelisk (a 6-block wall on a 3×3 stone brick base) with an eternal flame (a lantern), flowers and benches around
-                        const int uc = L / 2, vm = Wd / 2;
-                        bool ok = true;
-                        for (int du = -1; du <= 1 && ok; ++du) for (int dv = -1; dv <= 1 && ok; ++dv) ok = freeCol(uc + du, vm + dv, 8);
-                        if (ok)
-                        {
-                            const quint16 sb = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
-                            for (int du = -1; du <= 1; ++du) for (int dv = -1; dv <= 1; ++dv) put1(uc + du, vm + dv, 0, sb);
-                            for (int dy = 1; dy <= 6; ++dy) put1(uc, vm, dy, IdStoneBrickWall);
-                            put1(uc, vm, 7, IdLanternStanding);
-                            ++nEq;
-                            for (int a = 0; a < 4; ++a)
-                            {
-                                const int du = (a & 1) ? 3 : -3, dv = (a & 2) ? 3 : -3;
-                                if (freeCol(uc + du, vm + dv, 1)) { put1(uc + du, vm + dv, 0, quint16(IdFlowerPotBase + int(colHash(pairKey(a, uc) ^ 0x3E3ull) % quint32(kFlowersCount)))); ++nEq; }
-                            }
-                            for (int sd = -1; sd <= 1; sd += 2)
-                            {
-                                bool b2 = true;
-                                for (int dv = -1; dv <= 1 && b2; ++dv) b2 = freeCol(uc + 5 * sd, vm + dv, 1);
-                                if (!b2) continue;
-                                for (int dv = -1; dv <= 1; ++dv) put1(uc + 5 * sd, vm + dv, 0, sd < 0 ? (alongX ? IdStairsE : IdStairsS) : (alongX ? IdStairsW : IdStairsN));
-                                ++nEq;
-                            }
-                        }
-                        break;
-                    }
-                    case 51220000:
-                    {   // GAS STATION: a canopy on four supports (a 9×5 slab roof), under it two pumps (a blast furnace) with an indicator lantern; barrels (fuel) nearby
-                        const int uc = L / 2, vm = Wd / 2;
-                        const int du = std::min(4, std::max(2, L / 2 - 2)), dv = std::min(2, std::max(1, Wd / 2 - 2));
-                        bool ok = true;
-                        for (int a = -du; a <= du && ok; ++a) for (int b2 = -dv; b2 <= dv && ok; ++b2) ok = freeCol(uc + a, vm + b2, 5);
-                        if (ok)
-                        {
-                            for (int a : { -du, du }) for (int b2 : { -dv, dv }) for (int dy = 0; dy < 4; ++dy) put1(uc + a, vm + b2, dy, IdFence);
-                            for (int a = -du; a <= du; ++a) for (int b2 = -dv; b2 <= dv; ++b2) put1(uc + a, vm + b2, 4, IdSlabBottom);
-                            for (int a : { -du / 2, du / 2 })
-                            {
-                                put1(uc + a, vm, 0, quint16(int(IdBlastFurnaceBase) + (alongX ? 0 : 1)));
-                                put1(uc + a, vm, 1, IdLanternStanding);
-                            }
-                            ++nEq;
-                            for (int a = -1; a <= 1; a += 2)
-                                if (freeCol(uc + a, Wd - 2, 1)) { put1(uc + a, Wd - 2, 0, IdBarrel); ++nEq; }
-                        }
-                        break;
-                    }
-                    case 52400000:
-                    {   // APIARY: hives on posts in a grid every 4 blocks, flowers around, bees near the hives
-                        int nHive = 0;
-                        for (int v = 2; v < Wd - 2; v += 4)
-                            for (int u = 2; u < L - 2; u += 4)
-                            {
-                                const quint32 hq = colHash(pairKey(u * 29, v * 13) ^ ring.first() ^ 0xA9E7ull);
-                                if (hq % 100u >= 65u || !freeCol(u, v, 2)) continue;
-                                put1(u, v, 0, IdFence);
-                                put1(u, v, 1, quint16(IdPaletteStart + paletteIndexOf("minecraft:beehive")));
-                                ++nHive; ++nEq;
-                                if (nHive <= 8)
-                                {
-                                    const QPoint q = toXZ(u, v);
-                                    NpcSite bee;
-                                    bee.kind = 5; bee.animal = QStringLiteral("minecraft:bee");
-                                    bee.x = q.x(); bee.z = q.y(); bee.y = surfaceTop(pairKey(q.x(), q.y())) + 3;
-                                    bee.yaw = int((hq >> 10) % 4u) * 90;
-                                    npcs.append(bee);
-                                }
-                            }
-                        for (int v = 1; v < Wd - 1; ++v)
-                            for (int u = 1; u < L - 1; ++u)
-                                if (colHash(pairKey(u * 7 + 1, v * 11 + 3) ^ ring.first() ^ 0xF1A7ull) % 100u < 22u) flowerAt(u, v);
-                        break;
-                    }
-                    case 51460000:
-                    {   // ELECTRIC SUBSTATION: 2×2×2 transformers of iron blocks with insulators (fences) on the top corners, towers (a fence of 8 with a crossbar) along the edges
-                        for (int v = 2; v < Wd - 3; v += 6)
-                            for (int u = 2; u < L - 3; u += 6)
-                            {
-                                const quint32 hq = colHash(pairKey(u * 23, v * 19) ^ ring.first() ^ 0xE1ECull);
-                                if (hq % 100u >= 75u) continue;
-                                bool ok = true;
-                                for (int du = 0; du < 2 && ok; ++du) for (int dv = 0; dv < 2 && ok; ++dv) ok = freeCol(u + du, v + dv, 4);
-                                if (!ok) continue;
-                                for (int du = 0; du < 2; ++du) for (int dv = 0; dv < 2; ++dv)
-                                {
-                                    put1(u + du, v + dv, 0, IdIronBlock); put1(u + du, v + dv, 1, IdIronBlock);
-                                    if (du == dv || (hq & 1u)) { put1(u + du, v + dv, 2, IdFence); put1(u + du, v + dv, 3, IdFence); }
-                                }
-                                ++nEq;
-                            }
-                        for (int k = 0; k < 2; ++k)
-                        {
-                            const int u0 = 1 + k * std::max(3, L - 4), v0 = Wd / 2;
-                            bool ok = true;
-                            for (int dv = -1; dv <= 1 && ok; ++dv) ok = freeCol(u0, v0 + dv, 9);
-                            if (!ok) continue;
-                            for (int dy = 0; dy < 9; ++dy) put1(u0, v0, dy, IdFence);
-                            for (int dv = -1; dv <= 1; ++dv) put1(u0, v0 + dv, 7, IdFence);
-                            put1(u0, v0 - 1, 6, IdFence); put1(u0, v0 + 1, 6, IdFence);
-                            ++nEq;
-                        }
-                        break;
-                    }
-                    case 52100000:
-                    {   // AGRICULTURAL OBJECTS (territory): a 7×5 pen with animals, hay bales, barrels, drinkers (cauldrons)
-                        if (L >= 12 && Wd >= 9)
-                        {
-                            const int u0 = 2, v0 = 2;
-                            bool ok = true;
-                            for (int u = u0; u < u0 + 7 && ok; ++u) for (int v = v0; v < v0 + 5 && ok; ++v) ok = freeCol(u, v, 1);
-                            if (ok)
-                            {
-                                for (int u = u0; u < u0 + 7; ++u) { put1(u, v0, 0, IdFence); put1(u, v0 + 4, 0, IdFence); }
-                                for (int v = v0 + 1; v < v0 + 4; ++v) { put1(u0, v, 0, IdFence); if (v != v0 + 2) put1(u0 + 6, v, 0, IdFence); }
-                                put1(u0 + 6, v0 + 2, 0, alongX ? IdGateE : IdGateS);
-                                put1(u0 + 1, v0 + 3, 0, IdCauldron);                         // a drinker
-                                static const char* const kFarm[] = { "minecraft:cow", "minecraft:pig", "minecraft:sheep", "minecraft:chicken" };
-                                const int na = 2 + int(ring.first() % 3u);
-                                for (int a = 0; a < na; ++a)
-                                {
-                                    const QPoint q = toXZ(u0 + 2 + a, v0 + 1 + (a % 3));
-                                    NpcSite an;
-                                    an.kind = 5; an.animal = QString::fromLatin1(kFarm[(ring.first() >> (a * 3)) % 4u]);
-                                    an.x = q.x(); an.z = q.y(); an.y = surfaceTop(pairKey(q.x(), q.y())) + 1;
-                                    an.yaw = a * 90;
-                                    npcs.append(an);
-                                }
-                                ++nEq;
-                            }
-                        }
-                        for (int v = 2; v < Wd - 2; v += 5)
-                            for (int u = 11; u < L - 2; u += 5)
-                            {
-                                const quint32 hq = colHash(pairKey(u * 17, v * 31) ^ ring.first() ^ 0x5E7Dull);
-                                if (hq % 100u >= 60u) continue;
-                                if (!freeCol(u, v, 2)) continue;
-                                if ((hq >> 8) % 3u == 0u) { put1(u, v, 0, IdBarrel); if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, IdBarrel); }
-                                else { put1(u, v, 0, hayBale); if ((hq >> 12) & 1u) put1(u, v, 1, hayBale); if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, hayBale); }
-                                ++nEq;
-                            }
-                        break;
-                    }
-                    case 51130000:
-                    {   // INDUSTRIAL ENTERPRISE (territory): stacks of containers (multicolored wool 4×2×2), barrels, pipes (fences)
-                        for (int v = 2; v < Wd - 3; v += 6)
-                            for (int u = 2; u < L - 5; u += 7)
-                            {
-                                const quint32 hq = colHash(pairKey(u * 37, v * 41) ^ ring.first() ^ 0x1D05ull);
-                                if (hq % 100u >= 65u) continue;
-                                if ((hq >> 8) % 4u == 0u)
-                                {   // barrels
-                                    if (!freeCol(u, v, 2)) continue;
-                                    put1(u, v, 0, IdBarrel); put1(u, v, 1, IdBarrel);
-                                    if (freeCol(u + 1, v, 1)) put1(u + 1, v, 0, IdBarrel);
-                                    ++nEq;
-                                    continue;
-                                }
-                                bool ok = true;
-                                for (int du = 0; du < 4 && ok; ++du) for (int dv = 0; dv < 2 && ok; ++dv) ok = freeCol(u + du, v + dv, 2);
-                                if (!ok) continue;
-                                static const int kContainerWools[] = { 1, 5, 11, 14, 3, 4 };
-                                const int wc = std::min(kWoolsCount - 1, kContainerWools[(hq >> 12) % 6u]);
-                                for (int du = 0; du < 4; ++du) for (int dv = 0; dv < 2; ++dv)
-                                {
-                                    put1(u + du, v + dv, 0, quint16(IdWoolBase + wc));
-                                    if (((hq >> 20) & 1u) || du < 2) put1(u + du, v + dv, 1, quint16(IdWoolBase + wc));
-                                }
-                                ++nEq;
-                            }
-                        break;
-                    }
-                    case 53110000:
-                    {   // AIRPORT: white runway marking — center dashes 5 every 4, side lines, threshold stripes at the ends, lights along the edges
-                        const int vA = 2, vB = Wd - 3;
-                        for (int u = 1; u < L - 1; ++u)
-                        {
-                            paint(u, vA); paint(u, vB);                                      // the edges
-                            if ((u / 5) % 2 == 0) paint(u, vc);                              // the center dashes
-                        }
-                        for (int end = 0; end < 2; ++end)
-                            for (int v = vA + 2; v <= vB - 2; v += 2)
-                                for (int k = 0; k < 4; ++k) paint(end == 0 ? 2 + k : L - 3 - k, v);
-                        for (int u = 4; u < L - 3; u += 8)
-                            for (int v : { 1, Wd - 2 }) if (freeCol(u, v, 1)) { put1(u, v, 0, IdLanternStanding); ++nEq; }
-                        break;
-                    }
-                    case 53600000:
-                    case 53400000:
-                    {   // TERRITORIES OF SOCIAL AND RELIGIOUS OBJECTS (and others): a lawn with benches along the perimeter, flower beds and flowers; without wool
-                        for (int k = 0; k < 4; ++k)
-                        {
-                            const int u0 = 2 + (k & 1) * std::max(4, L - 7);
-                            const int v0 = (k & 2) ? std::max(2, Wd - 3) : 2;
-                            bool ok = true;
-                            for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
-                            if (!ok) continue;
-                            for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, alongX ? ((k & 2) ? IdStairsN : IdStairsS) : ((k & 2) ? IdStairsW : IdStairsE));
-                            ++nEq;
-                        }
-                        for (int v = 3; v < Wd - 3; v += 6)
-                            for (int u = 3; u < L - 3; u += 6)
-                            {
-                                const quint32 hq = colHash(pairKey(u * 13, v * 7) ^ ring.first() ^ 0xC1A5ull);
-                                if (hq % 100u >= 55u) continue;
-                                int made = 0;
-                                for (int du = 0; du < 2; ++du) for (int dv = 0; dv < 2; ++dv) if (flowerAt(u + du, v + dv)) ++made;
-                                if (made) ++nEq;
-                            }
-                        break;
-                    }
-                    default:
-                        break;                                                  // other codes (pipes, towers, tanks, etc.) — without furnishing
-                    }
-                    nSportEq += nEq;
-                    if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[csr] code=%d bbox x %d..%d z %d..%d cols=%d eq=%d\n", padKind, bx0, bx1, bz0, bz1, int(padCols.size()), nEq);
-                    continue;
-                }
-                QVector<QPoint> barAt;                                           // pull-up bars of the site: no more than two, not closer than 12 blocks to each other
-                auto canBar = [&](int u, int v)
-                {
-                    if (barAt.size() >= 2) return false;
-                    for (const QPoint& q : barAt) if (std::max(std::abs(q.x() - u), std::abs(q.y() - v)) < 12) return false;
-                    return true;
-                };
-                // COURTS AND FIELDS. We take the largest axis-aligned rectangle lying entirely inside the spot (with a 1-block margin from the edge) — so both rotated and oval spots are found. By its size and
-                // the spot area a kind is chosen: football / mini-football / basketball / hockey / tennis / volleyball. The court stands in the center of the rectangle, marked with white wool on the ground.
-                bool courtBuilt = false;
-                auto buildCourt = [&]() -> bool
-                {
-                    if (padKind != 53700000) return false;
-                    const int Wg = Lx, Hg = Lz;
-                    QVector<int> hgt(Wg, 0);
-                    int bestA = 0, bL = 0, bB = 0, bW = 0, bH = 0;
-                    for (int zi = 0; zi < Hg; ++zi)
-                    {
-                        for (int xi = 0; xi < Wg; ++xi)
-                        {
-                            const int x = bx0 + xi, z = bz0 + zi;
-                            bool ok = true;
-                            for (int dz2 = -1; dz2 <= 1 && ok; ++dz2) for (int dx2 = -1; dx2 <= 1 && ok; ++dx2) ok = pad.contains(pairKey(x + dx2, z + dz2));
-                            hgt[xi] = ok ? hgt[xi] + 1 : 0;
-                        }
-                        QVector<QPair<int, int>> st;                                      // (start, height)
-                        for (int xi = 0; xi <= Wg; ++xi)
-                        {
-                            const int cur = xi < Wg ? hgt[xi] : 0;
-                            int start = xi;
-                            while (!st.isEmpty() && st.last().second >= cur)
-                            {
-                                const int hh = st.last().second, s0 = st.last().first;
-                                st.removeLast();
-                                if (hh * (xi - s0) > bestA) { bestA = hh * (xi - s0); bL = s0; bB = zi; bW = xi - s0; bH = hh; }
-                                start = s0;
-                            }
-                            st.append(qMakePair(start, cur));
-                        }
-                    }
-                    if (bestA < 100) return false;
-                    const int rx0 = bx0 + bL, rz0 = bz0 + bB - bH + 1;                      // the rectangle [rx0, rx0+bW) × [rz0, rz0+bH)
-                    const bool longX = bW >= bH;
-                    const int a = longX ? bW : bH, b = longX ? bH : bW;
-                    const int area = int(padCols.size());
-                    struct Kind { int id; int w; };
-                    QVector<Kind> opts;
-                    if (a >= 36 && b >= 20 && area >= 1500) opts.append({ 0, area >= 2800 ? 8 : 3 });   // a football pitch
-                    if (a >= 26 && b >= 14 && area <= 3200) opts.append({ 1, 3 });                                        // mini-football / handball
-                    if (a >= 22 && b >= 11 && area <= 2200) opts.append({ 2, 4 });                                        // basketball
-                    if (a >= 26 && b >= 14 && area >= 900 && area <= 4500) opts.append({ 3, area >= 2800 ? 3 : 2 });      // a hockey box
-                    if (a >= 24 && b >= 10 && area <= 1400) opts.append({ 4, 2 });                                        // tennis
-                    if (a >= 16 && b >= 8 && area <= 1000) opts.append({ 5, 3 });                                         // volleyball
-                    if (opts.isEmpty()) return false;
-                    int wsum = 0;
-                    for (const Kind& k : opts) wsum += k.w;
-                    int pickW = int(hp % quint32(wsum)), kindSel = opts.first().id;
-                    for (const Kind& k : opts) { if (pickW < k.w) { kindSel = k.id; break; } pickW -= k.w; }
-                    int Lc, Wc;
-                    switch (kindSel)
-                    {
-                    case 0:  Lc = std::min(a - 2, 60); Wc = std::min(b - 0, 36); break;
-                    case 1:  Lc = std::min(a - 2, 34); Wc = std::min(b, 18); break;
-                    case 2:  Lc = std::min(a - 2, 28); Wc = std::min(b, 15); break;
-                    case 3:  Lc = std::min(a - 2, 30); Wc = std::min(b - 2, 15); break;
-                    case 4:  Lc = std::min(a - 2, 24); Wc = std::min(b - 2, 11); break;
-                    default: Lc = std::min(a - 2, 18); Wc = std::min(b - 2, 9); break;
-                    }
-                    if (Lc < 12 || Wc < 7) return false;
-                    const int ou = 1 + (a - 2 - Lc) / 2, ov = (b - Wc) / 2;                    // the court offset in the rectangle (along the length a margin is left for the goals)
-                    const int ox = longX ? rx0 + ou : rx0 + ov, oz = longX ? rz0 + ov : rz0 + ou;
-                    auto cxz = [&](int cu, int cv) { return longX ? QPoint(ox + cu, oz + cv) : QPoint(ox + cv, oz + cu); };
-                    auto cPaint = [&](int cu, int cv)
-                    {
-                        if (whiteWool < 0) return;
-                        const QPoint q = cxz(cu, cv);
-                        if (!pad.contains(pairKey(q.x(), q.y()))) return;
-                        auto git = ground.find(pairKey(q.x() >> 4, q.y() >> 4));
-                        if (git != ground.end() && git->wd[(q.y() & 15) * 16 + (q.x() & 15)] == 0) git->surf[(q.y() & 15) * 16 + (q.x() & 15)] = quint16(IdWoolBase + whiteWool);
-                    };
-                    auto cPut = [&](int cu, int cv, int dy, quint16 id)
-                    {
-                        const QPoint q = cxz(cu, cv);
-                        if (!pad.contains(pairKey(q.x(), q.y()))) return;
-                        const int y = surfaceTop(pairKey(q.x(), q.y())) + 1 + dy;
-                        if (y < 254 && store.get(q.x(), y, q.y()) == IdAir) store.set(q.x(), y, q.y(), id);
-                    };
-                    auto cFence = [&](int cu, int cv, int h) { for (int dy = 0; dy < h; ++dy) cPut(cu, cv, dy, IdFence); };
-                    const int vc2 = Wc / 2, uc2 = Lc / 2;
-                    auto outline = [&]()
-                    {
-                        for (int cu = 0; cu < Lc; ++cu) { cPaint(cu, 0); cPaint(cu, Wc - 1); }
-                        for (int cv = 0; cv < Wc; ++cv) { cPaint(0, cv); cPaint(Lc - 1, cv); }
-                    };
-                    auto circle = [&](int cu0, int cv0, int rad)
-                    {
-                        for (int ang = 0; ang < 96; ++ang)
-                        {
-                            const double t = ang * 3.14159265358979 / 48.0;
-                            cPaint(cu0 + int(std::lround(rad * std::cos(t))), cv0 + int(std::lround(rad * std::sin(t))));
-                        }
-                    };
-                    auto goal = [&](int cu, int halfW, int h)
-                    {   // a goal in the plane cu: two posts and a crossbar 2*halfW+1 wide
-                        cFence(cu, vc2 - halfW, h); cFence(cu, vc2 + halfW, h);
-                        for (int cv = vc2 - halfW + 1; cv < vc2 + halfW; ++cv) cPut(cu, cv, h - 1, IdFence);
-                    };
-                    // is it free under the court: nothing stands on the marking itself
-                    for (int cu = -1; cu <= Lc; ++cu)
-                        for (int cv = -1; cv <= Wc; ++cv)
-                        {
-                            const QPoint q = cxz(cu, cv);
-                            if (!pad.contains(pairKey(q.x(), q.y()))) continue;
-                            if (courtCols.contains(pairKey(q.x(), q.y()))) return false;   // no courts on top of each other
-                            if (store.get(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1, q.y()) != IdAir) return false;
-                        }
-                    switch (kindSel)
-                    {
-                    case 0:
-                    {   // a football pitch: the outline, the center line and circle, penalty areas 8×18 (from a length of 44), goals 7 wide and 3 high behind the lines
-                        outline();
-                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
-                        circle(uc2, vc2, std::max(3, std::min(5, Wc / 6)));
-                        cPaint(uc2, vc2);
-                        if (Lc >= 44 && Wc >= 24)
-                            for (int end = 0; end < 2; ++end)
-                            {
-                                const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
-                                for (int d = 0; d <= 8; ++d) { cPaint(base + step * d, vc2 - 9); cPaint(base + step * d, vc2 + 9); }
-                                for (int cv = vc2 - 9; cv <= vc2 + 9; ++cv) cPaint(base + step * 8, cv);
-                            }
-                        goal(-1, 3, 3); goal(Lc, 3, 3);
-                        break;
-                    }
-                    case 1:
-                    {   // mini-football / handball: the outline, the center, goal areas in an arc, goals 5 wide
-                        outline();
-                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
-                        circle(uc2, vc2, 3);
-                        for (int end = 0; end < 2; ++end)
-                        {
-                            const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
-                            for (int cv = vc2 - 4; cv <= vc2 + 4; ++cv) cPaint(base + step * 5, cv);
-                            for (int d = 0; d <= 5; ++d) { cPaint(base + step * d, vc2 - 4); cPaint(base + step * d, vc2 + 4); }
-                        }
-                        goal(-1, 2, 3); goal(Lc, 2, 3);
-                        break;
-                    }
-                    case 2:
-                    {   // basketball: the outline, the center, the circle, "keys" 5×5 at the hoops; backboards on posts behind the end lines
-                        outline();
-                        for (int cv = 0; cv < Wc; ++cv) cPaint(uc2, cv);
-                        circle(uc2, vc2, 2);
-                        for (int end = 0; end < 2; ++end)
-                        {
-                            const int base = end == 0 ? 0 : Lc - 1, step = end == 0 ? 1 : -1;
-                            for (int d = 0; d <= 5; ++d) { cPaint(base + step * d, vc2 - 2); cPaint(base + step * d, vc2 + 2); }
-                            for (int cv = vc2 - 2; cv <= vc2 + 2; ++cv) cPaint(base + step * 5, cv);
-                            const int pu = end == 0 ? -1 : Lc, du = end == 0 ? 1 : -1;
-                            cFence(pu, vc2, 3);
-                            for (int cv = vc2 - 1; cv <= vc2 + 1; ++cv) cPut(pu, cv, 3, quint16(IdWoolBase + std::max(0, whiteWool)));
-                            cPut(pu + du, vc2, 2, IdCauldron);
-                        }
-                        break;
-                    }
-                    case 3:
-                    {   // a hockey box: boards of fences along the outline with 3-wide openings in the middle of the long sides, the center and blue lines, goals 3 wide
-                        for (int cu = -1; cu <= Lc; ++cu) for (int cv : { -1, Wc })
-                            if (std::abs(cu - uc2) > 1) cPut(cu, cv, 0, IdFence);
-                        for (int cv = 0; cv < Wc; ++cv) for (int cu : { -1, Lc }) cPut(cu, cv, 0, IdFence);
-                        for (int cv = 0; cv < Wc; ++cv) { cPaint(uc2, cv); cPaint(uc2 - 6, cv); cPaint(uc2 + 6, cv); }
-                        circle(uc2, vc2, 3);
-                        goal(2, 1, 2); goal(Lc - 3, 1, 2);
-                        break;
-                    }
-                    case 4:
-                    {   // tennis: the outline, a net in the center on posts behind the side lines, service lines ±6, the center service line
-                        outline();
-                        for (int cv = 1; cv < Wc - 1; ++cv) { cPaint(uc2 - 6, cv); cPaint(uc2 + 6, cv); }
-                        for (int cu = uc2 - 6; cu <= uc2 + 6; ++cu) cPaint(cu, vc2);
-                        cFence(uc2, -1, 3); cFence(uc2, Wc, 3);
-                        for (int cv = 0; cv < Wc; ++cv) cPut(uc2, cv, 1, IdFence);
-                        break;
-                    }
-                    default:
-                    {   // volleyball: the outline, a net in the center on posts, attack lines 3 blocks from the net
-                        outline();
-                        for (int cv = 0; cv < Wc; ++cv) { cPaint(uc2 - 3, cv); cPaint(uc2 + 3, cv); }
-                        cFence(uc2, -1, 3); cFence(uc2, Wc, 3);
-                        for (int cv = 0; cv < Wc; ++cv) cPut(uc2, cv, 1, IdFence);
-                        break;
-                    }
-                    }
-                    // the court zone (with a 1-block margin) is unavailable to ordinary items; for hockey the margin for the boards is already included
-                    const QPoint pA = cxz(-2, -2), pB = cxz(Lc + 1, Wc + 1);
-                    resX0 = std::min(pA.x(), pB.x()); resX1 = std::max(pA.x(), pB.x());
-                    resZ0 = std::min(pA.y(), pB.y()); resZ1 = std::max(pA.y(), pB.y());
-                    for (int qx = resX0; qx <= resX1; ++qx)
-                        for (int qz = resZ0; qz <= resZ1; ++qz)
-                            courtCols.insert(pairKey(qx, qz));                     // and to the items of the other pads too
-                    if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[court] kind=%d rect %dx%d court %dx%d area=%d\n", kindSel, a, b, Lc, Wc, area);
-                    return true;
-                };
-                bool kidsPad = (padKind == 53710000);
-                if (!kidsPad)
-                {
-                    courtBuilt = buildCourt();
-                    if (courtBuilt) ++nEq;
-                    else if (padCols.size() < 700 && hp % 100u < 30u) kidsPad = true;       // a small sports/children's playground (the code 53700000 unites both kinds)
-                }
-                if (kidsPad)
-                {   // CHILDREN'S PLAYGROUND
-                    // swings: a frame of two posts 4 high with a crossbar and two seats
-                    for (int k = 0; k < 2; ++k)
-                    {
-                        const int u0 = 2 + k * 6, v0 = std::max(1, vc - 3);
-                        if (u0 + 1 >= L - 1 || v0 + 5 >= Wd) break;
-                        bool ok = true;
-                        for (int v = v0; v <= v0 + 4 && ok; ++v) ok = freeCol(u0, v, 4);
-                        if (!ok) continue;
-                        post(u0, v0, 4); post(u0, v0 + 4, 4);
-                        for (int v = v0 + 1; v <= v0 + 3; ++v) put1(u0, v, 3, IdFence);
-                        for (int sv : { v0 + 1, v0 + 3 })
-                        {
-                            put1(u0, sv, 2, IdFence);                         // ropes
-                            put1(u0, sv, 1, IdSlabTop);                       // the seat
-                        }
-                        ++nEq;
-                    }
-                    // a 3×3 sandbox with a slab rim
-                    {
-                        const int u0 = std::max(2, L - 6), v0 = std::max(1, vc - 1);
-                        bool ok = u0 + 3 < L - 1 && v0 + 3 < Wd - 1;
-                        for (int u = u0; u <= u0 + 2 && ok; ++u) for (int v = v0; v <= v0 + 2 && ok; ++v) ok = freeCol(u, v, 1);
-                        if (ok)
-                        {
-                            for (int u = u0 - 1; u <= u0 + 3; ++u) for (int v = v0 - 1; v <= v0 + 3; ++v)
-                            {
-                                const bool edge = (u == u0 - 1 || u == u0 + 3 || v == v0 - 1 || v == v0 + 3);
-                                if (!freeCol(u, v, 1)) continue;
-                                if (edge) put1(u, v, 0, IdSlabBottom);
-                                else if (g_sandId) { const QPoint q = toXZ(u, v); store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())), q.y(), g_sandId); }
-                            }
-                            ++nEq;
-                        }
-                    }
-                    // a carousel: a cauldron on a post with four fence spokes
-                    {
-                        const int u0 = L / 2, v0 = std::max(2, Wd - 4);
-                        if (freeCol(u0, v0, 2) && freeCol(u0 - 1, v0, 1) && freeCol(u0 + 1, v0, 1) && freeCol(u0, v0 - 1, 1) && freeCol(u0, v0 + 1, 1))
-                        {
-                            put1(u0, v0, 0, IdFence); put1(u0, v0, 1, IdCauldron);
-                            put1(u0 - 1, v0, 0, IdFence); put1(u0 + 1, v0, 0, IdFence); put1(u0, v0 - 1, 0, IdFence); put1(u0, v0 + 1, 0, IdFence);
-                            ++nEq;
-                        }
-                    }
-                    // a bench at the edge
-                    for (int k = 0; k < 2; ++k)
-                    {
-                        const int u0 = 2 + k * (std::max(4, L - 6)), v0 = 1;
-                        bool ok = true;
-                        for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
-                        if (!ok) continue;
-                        const quint16 st = alongX ? IdStairsS : IdStairsE;    // the back toward the fence
-                        for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, st);
-                        ++nEq;
-                    }
-                }
-                else if (courtBuilt)
-                {
-                    // the court is already built (see buildCourt)
-                }
-                else
-                {   // WORKOUT: pull-up bars (a frame 4 wide), parallel bars, benches
-                    int k = 0;
-                    for (int i = 0; i < 2; ++i)
-                    {
-                        const int u0 = 2 + i * std::max(12, L / 2), v0 = 2 + (i % 2) * std::max(0, Wd - 6);
-                        if (u0 + 3 >= L - 1 || v0 + 1 >= Wd || !canBar(u0, v0)) continue;
-                        bool ok = true;
-                        for (int u = u0; u <= u0 + 3 && ok; ++u) ok = freeCol(u, v0, 4);
-                        if (!ok) continue;
-                        post(u0, v0, 4); post(u0 + 3, v0, 4);
-                        put1(u0 + 1, v0, 3, IdFence); put1(u0 + 2, v0, 3, IdFence);           // the crossbar
-                        barAt.append(QPoint(u0, v0));
-                        ++k;
-                    }
-                    for (int i = 0; i < 1; ++i)
-                    {   // parallel bars: two parallel poles on posts (one set per site)
-                        const int u0 = 3 + i * 7, v0 = std::max(2, vc - 1);
-                        bool ok = u0 + 4 < L - 1 && v0 + 2 < Wd - 1;
-                        for (int u = u0; u <= u0 + 3 && ok; ++u) ok = freeCol(u, v0, 2) && freeCol(u, v0 + 2, 2);
-                        if (!ok) continue;
-                        for (int vv : { v0, v0 + 2 })
-                        {
-                            put1(u0, vv, 0, IdFence); put1(u0 + 3, vv, 0, IdFence);
-                            for (int u = u0; u <= u0 + 3; ++u) put1(u, vv, 1, IdFence);
-                        }
-                        ++k;
-                    }
-                    for (int i = 0; i < 2; ++i)
-                    {   // a bench-press bench
-                        const int u0 = 2 + i * std::max(4, L - 7), v0 = std::max(1, Wd - 2);
-                        bool ok = true;
-                        for (int u = u0; u < u0 + 3 && ok; ++u) ok = freeCol(u, v0, 1);
-                        if (!ok) continue;
-                        for (int u = u0; u < u0 + 3; ++u) put1(u, v0, 0, IdSlabBottom);
-                        ++k;
-                    }
-                    nEq = k;
-                }
-                // EVEN FILLING: the site is divided into windows of ~9×9 blocks; in each window with free space (at least 25 inner columns) where there is nothing yet, we try to put
-                // one item (a bench, parallel bars, a pull-up bar, a balance log; on children's ones — swings, a sandbox, a carousel, a bench, a rocker). We do not put much more often: one window — one item.
-                {
-                    const bool kids = kidsPad;
-                    int nBars = 0;                                                   // parallel bars: no more than two per site
-                    auto occupiedAt = [&](int u, int v)
-                    {
-                        const QPoint q = toXZ(u, v);
-                        return store.get(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1, q.y()) != IdAir;
-                    };
-                    auto tryPiece = [&](int kind, int u, int v) -> bool
-                    {
-                        if (kids)
-                        {
-                            if (kind == 0)
-                            {   // swings
-                                bool ok = true;
-                                for (int vv = v; vv <= v + 4 && ok; ++vv) ok = freeCol(u, vv, 4);
-                                if (!ok) return false;
-                                post(u, v, 4); post(u, v + 4, 4);
-                                for (int vv = v + 1; vv <= v + 3; ++vv) put1(u, vv, 3, IdFence);
-                                for (int sv : { v + 1, v + 3 }) { put1(u, sv, 2, IdFence); put1(u, sv, 1, IdSlabTop); }
-                                return true;
-                            }
-                            if (kind == 1)
-                            {   // a bench
-                                bool ok = true;
-                                for (int uu = u; uu < u + 3 && ok; ++uu) ok = freeCol(uu, v, 1);
-                                if (!ok) return false;
-                                for (int uu = u; uu < u + 3; ++uu) put1(uu, v, 0, alongX ? IdStairsS : IdStairsE);
-                                return true;
-                            }
-                            if (kind == 2)
-                            {   // a 3×3 sandbox with a rim
-                                bool ok = true;
-                                for (int uu = u - 1; uu <= u + 3 && ok; ++uu) for (int vv = v - 1; vv <= v + 3 && ok; ++vv) ok = freeCol(uu, vv, 1);
-                                if (!ok) return false;
-                                for (int uu = u - 1; uu <= u + 3; ++uu) for (int vv = v - 1; vv <= v + 3; ++vv)
-                                {
-                                    const bool edge = (uu == u - 1 || uu == u + 3 || vv == v - 1 || vv == v + 3);
-                                    if (edge) put1(uu, vv, 0, IdSlabBottom);
-                                    else if (g_sandId) { const QPoint q = toXZ(uu, vv); store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())), q.y(), g_sandId); }
-                                }
-                                return true;
-                            }
-                            if (kind == 3)
-                            {   // a carousel
-                                if (!(freeCol(u, v, 2) && freeCol(u - 1, v, 1) && freeCol(u + 1, v, 1) && freeCol(u, v - 1, 1) && freeCol(u, v + 1, 1))) return false;
-                                put1(u, v, 0, IdFence); put1(u, v, 1, IdCauldron);
-                                put1(u - 1, v, 0, IdFence); put1(u + 1, v, 0, IdFence); put1(u, v - 1, 0, IdFence); put1(u, v + 1, 0, IdFence);
-                                return true;
-                            }
-                            {   // a rocker: a slab on a post, length 5
-                                bool ok = true;
-                                for (int uu = u; uu < u + 5 && ok; ++uu) ok = freeCol(uu, v, 2);
-                                if (!ok) return false;
-                                put1(u + 2, v, 0, IdFence);
-                                put1(u, v, 1, IdSlabBottom); put1(u + 1, v, 1, IdSlabBottom); put1(u + 3, v, 1, IdSlabBottom); put1(u + 4, v, 1, IdSlabBottom);
-                                put1(u + 2, v, 1, IdSlabTop);
-                                return true;
-                            }
-                        }
-                        if (kind == 0)
-                        {   // a bench
-                            bool ok = true;
-                            for (int uu = u; uu < u + 3 && ok; ++uu) ok = freeCol(uu, v, 1);
-                            if (!ok) return false;
-                            for (int uu = u; uu < u + 3; ++uu) put1(uu, v, 0, IdSlabBottom);
-                            return true;
-                        }
-                        if (kind == 1)
-                        {   // parallel bars (no more than two per site)
-                            if (nBars >= 2) return false;
-                            bool ok = true;
-                            for (int uu = u; uu <= u + 3 && ok; ++uu) ok = freeCol(uu, v, 2) && freeCol(uu, v + 2, 2);
-                            if (!ok) return false;
-                            for (int vv : { v, v + 2 })
-                            {
-                                put1(u, vv, 0, IdFence); put1(u + 3, vv, 0, IdFence);
-                                for (int uu = u; uu <= u + 3; ++uu) put1(uu, vv, 1, IdFence);
-                            }
-                            ++nBars;
-                            return true;
-                        }
-                        if (kind == 2)
-                        {   // a pull-up bar (no more than two per site, not closer than 12 blocks to each other)
-                            if (!canBar(u, v)) return false;
-                            bool ok = true;
-                            for (int uu = u; uu <= u + 3 && ok; ++uu) ok = freeCol(uu, v, 4);
-                            if (!ok) return false;
-                            post(u, v, 4); post(u + 3, v, 4);
-                            put1(u + 1, v, 3, IdFence); put1(u + 2, v, 3, IdFence);
-                            barAt.append(QPoint(u, v));
-                            return true;
-                        }
-                        {   // a balance log: a row of slabs on low supports
-                            bool ok = true;
-                            for (int uu = u; uu < u + 5 && ok; ++uu) ok = freeCol(uu, v, 2);
-                            if (!ok) return false;
-                            for (int uu = u; uu < u + 5; ++uu) put1(uu, v, 0, IdSlabTop);
-                            return true;
-                        }
-                    };
-                    constexpr int kWin = 8;
-                    const int nKinds = kids ? 5 : 4;
-                    for (int v0 = 1; v0 < Wd - 1; v0 += kWin)
-                        for (int u0 = 1; u0 < L - 1; u0 += kWin)
-                        {
-                            int interior = 0;
-                            bool has = false;
-                            for (int vv = v0; vv < std::min(v0 + kWin, Wd - 1) && !has; ++vv)
-                                for (int uu = u0; uu < std::min(u0 + kWin, L - 1); ++uu)
-                                {
-                                    if (!inside(uu, vv, 1)) continue;
-                                    ++interior;
-                                    if (occupiedAt(uu, vv)) { has = true; break; }
-                                }
-                            if (has || interior < 20) continue;
-                            for (int t = 0; t < 48; ++t)
-                            {
-                                const quint32 hq = colHash(pairKey(u0 * 31 + t, v0 * 17) ^ ring.first() ^ 0x5CA9ull);
-                                const int u = u0 + int(hq % quint32(kWin)), v = v0 + int((hq >> 8) % quint32(kWin));
-                                static const int kSportKinds[8] = { 0, 3, 0, 2, 3, 0, 1, 3 };       // a bench, a balance beam, a pull-up bar, parallel bars (rare)
-                                const int pickK = kids ? int(((hq >> 16) + quint32(t)) % quint32(nKinds)) : kSportKinds[((hq >> 16) + quint32(t)) % 8u];
-                                if (tryPiece(pickK, u, v)) { ++nEq; break; }
-                            }
-                        }
-                }
-                nSportEq += nEq;
-                if (qEnvironmentVariableIsSet("MCX_LAIRDBG")) std::fprintf(stderr, "[sport] code=%d bbox x %d..%d z %d..%d cols=%d L=%d W=%d eq=%d\n", padCode.value(padIdx, 0), bx0, bx1, bz0, bz1, int(padCols.size()), L, Wd, nEq);
-            }
-        }
-        if (nSportEq > 0) res.lairInfo += QObject::tr("; equipment on sports grounds: %1 items").arg(nSportEq);
-        // — lamp posts: at a road column by hash ~1/24 we look for a free neighboring NON-road
-        //   column and put a post (not closer than 10 blocks to the others); distance + hash = "along the road,
-        //   not a picket fence". The composition: a plinth of a cobblestone wall, 6 fence posts, at the top toward the
-        //   road a wing of one post goes out, under it a lantern hangs (hanging=true).
-        QVector<QPoint> poles;
-        QVector<qint64> rc(roadCols.constBegin(), roadCols.constEnd());
-        std::sort(rc.begin(), rc.end());
-        for (qint64 ck : rc)
-        {
-            if (colHash(ck ^ 0xFA11ull) % 24u != 0u) continue;
-            const int bx = keyFirst(ck), bz = keySecond(ck);
-            for (int d = 0; d < 4; ++d)
-            {
-                const int px = bx + dxs[d], pz = bz + dzs[d];
-                const qint64 pk = pairKey(px, pz);
-                if (roadCols.contains(pk) || colMin.contains(pk) || colWater.contains(pk)) continue;
-                const int y0 = surfaceTop(pk) + 1;
-                if (y0 + 6 > 254) continue;
-                bool free = true;
-                for (int dy = 0; dy < 7 && free; ++dy)       // the plinth + 6 posts of the stand
-                    if (store.get(px, y0 + dy, pz) != IdAir) free = false;
-                if (free && store.get(bx, y0 + 6, bz) != IdAir) free = false;    // the wing above the road
-                if (free && store.get(bx, y0 + 5, bz) != IdAir) free = false;    // the place for the lantern
-                bool near = false;
-                for (const QPoint& p : poles)
-                    if (std::max(std::abs(p.x() - px), std::abs(p.y() - pz)) < 10) { near = true; break; }
-                if (!free || near) continue;
-                store.set(px, y0, pz, IdCobbleWall);
-                for (int dy = 1; dy <= 6; ++dy) store.set(px, y0 + dy, pz, IdFence);
-                store.set(bx, y0 + 6, bz, IdFence);          // the wing: a post sideways, toward the road
-                store.set(bx, y0 + 5, bz, IdLanternHung);    // the lantern hangs under the wing
-                poles.append(QPoint(px, pz));
-                break;
-            }
-        }
-        // — PARK PATHS (CODE 71126000) are well lit: at road columns inside a park there are low lamp posts (a plinth of a cobblestone wall, 3 fence posts,
-        //   a lantern on top) no less often than every ~6 blocks; street posts are taller (the same distance for them).
-        {
-            QVector<ColSpan> parkSpansAll;
-            for (const VegSite& vs3 : forests) if (vs3.park) parkSpansAll += vs3.spans;
-            if (!parkSpansAll.isEmpty())
-            {
-                parkSpansAll = mergeSpans(parkSpansAll);
-                for (qint64 ck : rc)
-                {
-                    const int bx = keyFirst(ck), bz = keySecond(ck);
-                    if (!spansContain(parkSpansAll, bx, bz)) continue;
-                    if (colHash(ck ^ 0x9A8Cull) % 3u != 0u) continue;
-                    for (int d = 0; d < 4; ++d)
-                    {
-                        const int px = bx + dxs[d], pz = bz + dzs[d];
-                        const qint64 pk = pairKey(px, pz);
-                        if (roadCols.contains(pk) || colMin.contains(pk) || colWater.contains(pk) || colWool.contains(pk)) continue;
-                        const int y0 = surfaceTop(pk) + 1;
-                        if (y0 + 5 > 254) continue;
-                        bool free = true;
-                        for (int dy = 0; dy < 5 && free; ++dy)
-                            if (store.get(px, y0 + dy, pz) != IdAir) free = false;
-                        bool near = false;
-                        for (const QPoint& p : poles)
-                            if (std::max(std::abs(p.x() - px), std::abs(p.y() - pz)) < 6) { near = true; break; }
-                        if (!free || near) continue;
-                        store.set(px, y0, pz, IdCobbleWall);
-                        for (int dy = 1; dy <= 3; ++dy) store.set(px, y0 + dy, pz, IdFence);
-                        store.set(px, y0 + 4, pz, IdLanternStanding);
-                        poles.append(QPoint(px, pz));
-                        break;
-                    }
-                }
-            }
-        }
-        // ——— PORTALS TO THE NETHER in forests (vegpol, CODE 71111110/71126000; request: the forest area is at least
-        //     5000 REAL m² — see PortalForest::areaM2 — and no more than one portal within a
-        //     radius of 1000 blocks; there are no portals on csrpol). Forests are taken from big to small
-        //     (deterministically), a portal gets a forest around which there is no other one yet.
-        //     The frame is vanilla: 4×5 obsidian (the bottom/top rows of 4, posts 2×3), in an
-        //     ACTIVE one (10% of forests) the interior 2×2 of tiers y+1..y+2 — portal blocks (axis —
-        //     the direction of the frame extent: it stands along X → axis=x), the row y+3 inside stays
-        //     air. A "ruined" one — vanilla ruins our way: the bottom row is whole, the posts/top
-        //     arc with deterministic gaps (~25%), some of the remainder — crying_obsidian.
-        //     The frame is entirely inside the forest spot on flat ground (not a road/water/structure), the volume
-        //     4×5 is air (the trees are already planted), otherwise we try the next point of this forest. ———
-        {
-            struct Cand { int x, z; bool runX; };
-            QVector<int> order;
-            for (int i = 0; i < portalForests.size(); ++i)
-                if (portalForests[i].areaM2 >= 2500.0) order.append(i);
-            std::sort(order.begin(), order.end(), [&](int a, int b)
-            {
-                if (portalForests[a].areaM2 != portalForests[b].areaM2)
-                    return portalForests[a].areaM2 > portalForests[b].areaM2;
-                return portalForests[a].h < portalForests[b].h;
-            });
-            QVector<QPoint> placedPortals;                        // the centers of the portals already standing (blocks)
-            for (int fi : order)
-            {
-                const PortalForest& pf = portalForests[fi];
-                const quint32 h = pf.h;
-                // 10% of forests are active by hash; and in a big world (more than 5000 blocks along at least one side) the biggest forest with a portal always gets an ACTIVE one,
-                // so that at least one working portal exists (MCX_BIGWORLD=1 enables this rule in the test).
-                const bool bigWorld = std::max((mxx - mnx) * tf.sx, (mxy - mny) * tf.sz) >= 5000.0 || qEnvironmentVariableIsSet("MCX_BIGWORLD");
-                const bool active = ((h >> 16) % 100u) < 10u || (bigWorld && placedPortals.isEmpty());
-                QVector<Cand> cands;                              // the frame entirely in the forest spot
-                const bool xFirst = ((h >> 8) & 1u) != 0u;
-                {   // we take candidates by segments: along Z — inside a segment (step 5), along X — by checking the neighboring x
-                    const int nSp = pf.spans.size();
-                    const int sp0 = nSp ? int((h >> 3) % quint32(nSp)) : 0;
-                    for (int t = 0; t < nSp && cands.size() < 20000; ++t)
-                    {
-                        const ColSpan& c = pf.spans[(sp0 + t) % nSp];
-                        for (int z = c.z0; z + 3 <= c.z1 && cands.size() < 20000; z += 5)
-                        {
-                            bool okX = true;
-                            for (int i = 1; i < 4 && okX; ++i)
-                                if (!spansContain(pf.spans, c.x + i, z)) okX = false;
-                            if (okX && xFirst) cands.append(Cand{ c.x, z, true });
-                            else cands.append(Cand{ c.x, z, false });
-                        }
-                    }
-                }
-                if (cands.isEmpty()) continue;
-                const int off = int((h >> 4) % quint32(cands.size()));
-                const int tries = std::min(int(cands.size()), 6000);
-                for (int ci = 0; ci < tries; ++ci)
-                {
-                    const Cand& c = cands[int((qint64(off) + qint64(ci) * 7919) % cands.size())];
-                    {   // not closer than 1000 blocks to an already standing portal
-                        bool far = true;
-                        for (const QPoint& pp : placedPortals)
-                            if (std::hypot(double(pp.x() - c.x), double(pp.y() - c.z)) < 1000.0) { far = false; break; }
-                        if (!far) continue;                       // too close to someone else's portal
-                    }
-                    int yb = 0; bool ok = true;
-                    for (int i = 0; i < 4 && ok; ++i)
-                    {   // the floor is flat, not a road/water, the height is within the world bounds
-                        const int bx = c.runX ? c.x + i : c.x;
-                        const int bz = c.runX ? c.z : c.z + i;
-                        const qint64 ck = pairKey(bx, bz);
-                        if (colMin.contains(ck) || colWater.contains(ck)
-                            || roadCols.contains(ck)) { ok = false; break; }
-                        const int y = surfaceTop(ck);
-                        if (i == 0) yb = y;
-                        else if (y != yb) { ok = false; break; }
-                    }
-                    if (!ok || yb + 6 > 254) continue;
-                    const int y0 = yb + 1;                        // the bottom row of the frame
-                    auto cellAt = [&](int i, int dy)
-                    { return pairKey(c.runX ? c.x + i : c.x, c.runX ? c.z : c.z + i); };
-                    for (int dy = 0; dy < 5 && ok; ++dy)          // the frame volume — air
-                        for (int i = 0; i < 4; ++i)
-                            if (store.get(keyFirst(cellAt(i, dy)), y0 + dy,
-                                          keySecond(cellAt(i, dy))) != IdAir)
-                                { ok = false; break; }
-                    if (!ok) continue;
-                    // ——— here we go: 14 cells of the frame (i — along the axis, dy — height) ———
-                    quint32 s = h ^ 0x0BADu;
-                    auto lcg = [&s]()
-                    { s = s * 1664525u + 1013904223u; return s; };
-                    for (int dy = 0; dy < 5; ++dy)
-                        for (int i = 0; i < 4; ++i)
-                        {
-                            const bool frame = dy == 0 || dy == 4
-                                            || (i == 0 || i == 3);      // 14 cells of the perimeter
-                            if (!frame) continue;
-                            const qint64 ck = cellAt(i, dy);
-                            const int bx = keyFirst(ck), bz = keySecond(ck);
-                            if (!active)
-                            {   // "ruined": the bottom is whole, the posts/top break deterministically
-                                if (dy > 0 && (lcg() >> 16) % 100u < 25u) continue;
-                                store.set(bx, y0 + dy, bz,
-                                          (dy > 0 && (lcg() >> 16) % 100u < 20u)
-                                              ? IdCryingObsidian : IdObsidian);
-                            }
-                            else store.set(bx, y0 + dy, bz, IdObsidian);
-                        }
-                    if (active)
-                    {   // active: portal 2×2 (i=1..2, dy=1..2), the row dy=3 inside — air
-                        const quint16 pid = c.runX ? IdPortalX : IdPortalZ;
-                        for (int dy = 1; dy <= 2; ++dy)
-                            for (int i = 1; i <= 2; ++i)
-                            {
-                                const qint64 ck = cellAt(i, dy);
-                                store.set(keyFirst(ck), y0 + dy, keySecond(ck), pid);
-                            }
-                    }
-                    // LAVA PITS around the portal (request): 3..6 pits 1×1 of depth 1 (lava at a level below the floor, air above it)
-                    // on a flat free floor within a radius of 5 blocks from the frame; the neighboring floor blocks around a pit are replaced
-                    // with magma with a 60% chance. A pit does not touch the frame cells and does not climb onto a road/water.
-                    {
-                        const quint16 magma = quint16(IdPaletteStart + paletteIndexOf("minecraft:magma_block"));
-                        const int nPits = 3 + int(lcg() >> 16) % 4;
-                        QVector<QPoint> pits;
-                        for (int tr = 0; tr < 60 && pits.size() < nPits; ++tr)
-                        {
-                            const int i = int(lcg() >> 16) % 12 - 4;            // along the axis: -4..7
-                            const int o = int(lcg() >> 16) % 11 - 5;            // across: -5..5
-                            if (i >= -1 && i <= 4 && o >= -1 && o <= 1) continue;   // the frame itself and right next to it
-                            const int bx = c.runX ? c.x + i : c.x + o;
-                            const int bz = c.runX ? c.z + o : c.z + i;
-                            bool near = false;
-                            for (const QPoint& q : pits)
-                                if (std::abs(q.x() - bx) <= 1 && std::abs(q.y() - bz) <= 1) near = true;
-                            if (near) continue;
-                            bool good = true;
-                            for (int dz = -1; dz <= 1 && good; ++dz)
-                                for (int dx = -1; dx <= 1; ++dx)
-                                {
-                                    const qint64 ck = pairKey(bx + dx, bz + dz);
-                                    if (colMin.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)
-                                        || !ground.contains(pairKey((bx + dx) >> 4, (bz + dz) >> 4))
-                                        || surfaceTop(ck) != yb || store.get(bx + dx, yb + 1, bz + dz) != IdAir
-                                        || store.get(bx + dx, yb, bz + dz) != IdAir)
-                                    { good = false; break; }
-                                }
-                            if (!good) continue;
-                            {   // a pit: the ground top in this column is lowered by 2 (lava at yb-1, air above it)
-                                auto git2 = ground.find(pairKey(bx >> 4, bz >> 4));
-                                if (git2 != ground.end())
-                                {
-                                    const int col2 = (bz & 15) * 16 + (bx & 15);
-                                    git2->top[col2] = qint16(yb - 2);
-                                }
-                            }
-                            store.set(bx, yb - 1, bz, IdLava);
-                            for (int d4 = 0; d4 < 4; ++d4)
-                            {
-                                const int nx = bx + (d4 == 0) - (d4 == 1), nz = bz + (d4 == 2) - (d4 == 3);
-                                if ((lcg() >> 16) % 100u < 60u) store.set(nx, yb, nz, magma);
-                            }
-                            pits.append(QPoint(bx, bz));
-                        }
-                    }
-                    {   // PORTAL RUINS AS IN THE ORIGINAL: a netherrack spot (rarer toward the edges) with magma inclusions, gold blocks and a chest with ruined_portal loot
-                        const quint16 nether = quint16(IdPaletteStart + paletteIndexOf("minecraft:netherrack"));
-                        const quint16 magmaR = quint16(IdPaletteStart + paletteIndexOf("minecraft:magma_block"));
-                        const quint16 goldB = quint16(IdPaletteStart + paletteIndexOf("minecraft:gold_block"));
-                        const double ecx = c.x + (c.runX ? 1.5 : 0.0), ecz = c.z + (c.runX ? 0.0 : 1.5);
-                        QVector<QPoint> flatCells;
-                        for (int dz = -8; dz <= 8; ++dz)
-                            for (int dx = -8; dx <= 8; ++dx)
-                            {
-                                const int bx = c.x + dx, bz = c.z + dz;
-                                const qint64 ck = pairKey(bx, bz);
-                                const double ex = (bx - ecx) * (c.runX ? 0.7 : 1.0), ez = (bz - ecz) * (c.runX ? 1.0 : 0.7);
-                                const double dd = std::hypot(ex, ez);
-                                const int pr = dd < 2.6 ? 90 : dd < 4.6 ? 62 : dd < 6.6 ? 28 : dd < 8.0 ? 8 : 0;
-                                if (!pr || (lcg() >> 16) % 100u >= quint32(pr)) continue;
-                                if (colMin.contains(ck) || colWater.contains(ck) || roadCols.contains(ck)) continue;
-                                const auto git3 = ground.find(pairKey(bx >> 4, bz >> 4));
-                                if (git3 == ground.end()) continue;
-                                const int col3 = (bz & 15) * 16 + (bx & 15);
-                                if (git3->wd[col3] > 0 || surfaceTop(ck) != yb) continue;
-                                git3->surf[col3] = ((lcg() >> 16) % 100u < 14u) ? magmaR : nether;
-                                if (store.get(bx, yb + 1, bz) == IdAir) flatCells.append(QPoint(bx, bz));
-                            }
-                        // gold blocks (1–2) on the spot and a chest next to the frame
-                        int nGold = 1 + int((lcg() >> 16) % 2u);
-                        for (int tr = 0; tr < 40 && nGold > 0 && !flatCells.isEmpty(); ++tr)
-                        {
-                            const QPoint q = flatCells[int((lcg() >> 16) % quint32(flatCells.size()))];
-                            const bool onFrame = (c.runX ? (q.y() == c.z && q.x() >= c.x && q.x() <= c.x + 3) : (q.x() == c.x && q.y() >= c.z && q.y() <= c.z + 3));
-                            if (onFrame || store.get(q.x(), yb + 1, q.y()) != IdAir) continue;
-                            store.set(q.x(), yb + 1, q.y(), goldB);
-                            --nGold;
-                        }
-                        for (int tr = 0; tr < 60 && !flatCells.isEmpty(); ++tr)
-                        {
-                            const QPoint q = flatCells[int((lcg() >> 16) % quint32(flatCells.size()))];
-                            const int ai = c.runX ? q.x() - c.x : q.y() - c.z, ao = c.runX ? q.y() - c.z : q.x() - c.x;
-                            if (ai < -1 || ai > 4 || std::abs(ao) < 2 || std::abs(ao) > 4) continue;
-                            if (store.get(q.x(), yb + 1, q.y()) != IdAir) continue;
-                            store.set(q.x(), yb + 1, q.y(), IdChest);
-                            chests.append(ChestSite{ q.x(), yb + 1, q.y(), kChestLootCount - 2 });
-                            break;
-                        }
-                        PortalStartSite ps;
-                        const int fx0 = c.x, fx1 = c.runX ? c.x + 3 : c.x, fz0 = c.z, fz1 = c.runX ? c.z : c.z + 3;
-                        ps.bb[0] = fx0 - 3; ps.bb[1] = y0 - 1; ps.bb[2] = fz0 - 3; ps.bb[3] = fx1 + 3; ps.bb[4] = y0 + 5; ps.bb[5] = fz1 + 3;
-                        ps.cx = ((ps.bb[0] + ps.bb[3]) / 2) >> 4; ps.cz = ((ps.bb[2] + ps.bb[5]) / 2) >> 4;
-                        portalStarts.append(ps);
-                        for (int pz = ps.bb[2] >> 4; pz <= (ps.bb[5] >> 4); ++pz)
-                            for (int px = ps.bb[0] >> 4; px <= (ps.bb[3] >> 4); ++px)
-                                portalsByChunk[pairKey(px, pz)].append(ps);
-                    }
-                    placedPortals.append(QPoint(c.x, c.z));
-                    break;                                          // one portal per forest
-                }
-            }
-        }
-    }
-
-    // PARKING LOT MARKING (rdcpol): light gray carpets. From every long enough edge of the outline inward into the polygon, perpendicular
-    // to the edge, lines 12 blocks long run with a step of 7 blocks along the edge (if it does not fit into the parking lot — not drawn; if the parking lot is wider than three
-    // line lengths (36) — the lines only from one of the opposite sides). A line does not touch (including diagonally) lines already laid from other edges — there are no intersections;
-    // if a line touches another object (a building, a road, rails, water, any block at the carpet height) — it is not drawn at all.
-    {
-        quint16 lgCarpet = 0;
-        int nParkWall = 0;
-        for (int i = 0; i < kCarpetsCount; ++i)
-            if (qstrcmp(kCarpets[i].name, "minecraft:white_carpet") == 0) lgCarpet = quint16(IdCarpetBase + i);   // the parking marking — white
-        if (lgCarpet)
-            for (const ParkSite& ps : parks)
-            {
-                QHash<ColKey, int> owner;                                  // a marking cell -> the line number
-                int lineNo = 0;
-                for (const QVector<QPointF>& ring : ps.rings)
-                    for (int e = 0; e < ring.size(); ++e)
-                    {
-                        const QPointF p0 = ring[e], p1 = ring[(e + 1) % ring.size()];
-                        const double len = std::hypot(p1.x() - p0.x(), p1.y() - p0.y());
-                        if (len < 8.0) continue;
-                        const double dx = (p1.x() - p0.x()) / len, dz = (p1.y() - p0.y()) / len;
-                        auto inside = [&](double x, double z) { return ps.cols.contains(pairKey(int(std::floor(x)), int(std::floor(z)))); };
-                        double nx = -dz, nz = dx;                           // the normal into the polygon
-                        const double mx = (p0.x() + p1.x()) * 0.5, mz = (p0.y() + p1.y()) * 0.5;
-                        if (!inside(mx + nx * 2.0, mz + nz * 2.0))
-                        {
-                            nx = -nx; nz = -nz;
-                            if (!inside(mx + nx * 2.0, mz + nz * 2.0)) continue;
-                        }
-                        for (double t = 3.5; t <= len - 3.5; t += 7.0)
-                        {
-                            QVector<qint64> cells;
-                            bool ok = true;
-                            // The parking depth across (up to 36 = 3 line lengths): the first exit from the spot along the normal.
-                            // A 12-block line MUST fit entirely, otherwise it is not drawn; if the depth is less than 36, the lines are drawn
-                            // only from one side (where the start cell is "earlier" than the exit point), from the opposite one — not.
-                            double exitSl = -1.0;
-                            int exX = 0, exZ = 0;
-                            for (double sl = 0.5; sl <= 36.0; sl += 0.5)
-                            {
-                                const double x = p0.x() + dx * t + nx * sl, z = p0.y() + dz * t + nz * sl;
-                                const int fx = int(std::floor(x)), fz = int(std::floor(z));
-                                const qint64 ck = pairKey(fx, fz);
-                                if (!ps.cols.contains(ck)) { exitSl = sl; exX = fx; exZ = fz; break; }
-                                if (sl <= 12.0 && (cells.isEmpty() || cells.last() != ck)) cells.append(ck);
-                            }
-                            if (exitSl >= 0.0 && exitSl <= 12.0) continue;              // the line length is greater than the parking lot — no lines
-                            if (cells.size() < 5) continue;
-                            if (exitSl >= 0.0)
-                            {   // depth < 36: only one of the two opposite sides
-                                const int sx0 = keyFirst(cells.first()), sz0 = keySecond(cells.first());
-                                if (!(sx0 < exX || (sx0 == exX && sz0 < exZ))) continue;
-                            }
-                            for (qint64 ck : cells)
-                            {   // touches another object — the line is not drawn
-                                const int cxk = keyFirst(ck), czk = keySecond(ck);
-                                if (colMin.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck) || colWater.contains(ck)
-                                    || store.get(cxk, surfaceTop(ck) + 1, czk) != IdAir) { ok = false; break; }
-                            }
-                            if (!ok) continue;
-                            for (qint64 ck : cells)
-                            {   // touching someone else's line (3×3) — cancel
-                                for (int ax = -1; ax <= 1 && ok; ++ax)
-                                    for (int az = -1; az <= 1; ++az)
-                                    {
-                                        const auto oit = owner.constFind(pairKey(keyFirst(ck) + ax, keySecond(ck) + az));
-                                        if (oit != owner.constEnd() && oit.value() != lineNo) { ok = false; break; }
-                                    }
-                                if (!ok) break;
-                            }
-                            if (!ok) continue;
-                            for (qint64 ck : cells) owner.insert(ck, lineNo);
-                            ++lineNo;
-                        }
-                    }
-                for (auto it = owner.constBegin(); it != owner.constEnd(); ++it)
-                {
-                    const int x = keyFirst(it.key()), z = keySecond(it.key());
-                    const int y = surfaceTop(it.key()) + 1;
-                    if (y > 254 || store.get(x, y, z) != IdAir) continue;
-                    store.set(x, y, z, lgCarpet);
-                }
-                // STONE FENCE of a parking lot with marking: a ring of columns right behind the spot edge (by 8 neighbors). The fence does not touch the roadway: columns within 1 block of
-                // a road (including an adjacent one) stay an opening — the entrance is there. It does not climb onto buildings, water, rails, other parking lots; if there is no entrance (the parking lot does not adjoin a road),
-                // we leave a three-cell opening at a random place of the ring.
-                if (!owner.isEmpty())
-                {
-                    QVector<qint64> ringW;
-                    for (qint64 ck : ps.cols)
-                    {
-                        const int bx = keyFirst(ck), bz = keySecond(ck);
-                        for (int ddz = -1; ddz <= 1; ++ddz)
-                            for (int ddx = -1; ddx <= 1; ++ddx)
-                            {
-                                if (!ddx && !ddz) continue;
-                                const qint64 nk = pairKey(bx + ddx, bz + ddz);
-                                if (!ps.cols.contains(nk)) ringW << nk;
-                            }
-                    }
-                    std::sort(ringW.begin(), ringW.end());
-                    ringW.erase(std::unique(ringW.begin(), ringW.end()), ringW.end());
-                    auto nearRoad = [&](qint64 ck)
-                    {
-                        const int bx = keyFirst(ck), bz = keySecond(ck);
-                        for (int ddz = -1; ddz <= 1; ++ddz)
-                            for (int ddx = -1; ddx <= 1; ++ddx)
-                                if (roadCols.contains(pairKey(bx + ddx, bz + ddz))) return true;
-                        return false;
-                    };
-                    QVector<char> skip(ringW.size(), 0);
-                    bool anyEntrance = false;
-                    for (int i = 0; i < ringW.size(); ++i)
-                        if (nearRoad(ringW[i])) { skip[i] = 1; anyEntrance = true; }
-                    if (!anyEntrance && ringW.size() > 12)
-                    {
-                        const int g0 = int(colHash(ringW.first() ^ 0x9A7Eull) % quint32(ringW.size()));
-                        for (int q = 0; q < 3; ++q) skip[(g0 + q) % ringW.size()] = 1;
-                    }
-                    int nWall = 0;
-                    for (int i = 0; i < ringW.size(); ++i)
-                    {
-                        if (skip[i]) continue;
-                        const qint64 ck = ringW[i];
-                        if (colMin.contains(ck) || colWater.contains(ck) || railColsAll.contains(ck) || roadCols.contains(ck)) continue;
-                        bool other = false;
-                        for (const ParkSite& po : parks) if (&po != &ps && po.cols.contains(ck)) { other = true; break; }
-                        if (other) continue;
-                        const int x = keyFirst(ck), z = keySecond(ck);
-                        const int y = surfaceTop(ck) + 1;
-                        if (y > 253 || store.get(x, y, z) != IdAir) continue;
-                        store.set(x, y, z, IdStoneFence);
-                        ++nWall;
-                    }
-                    nParkWall += nWall;
-                }
-            }
-    }
-
+    buildStreetFurniture();
     // VILLAGES (request): raids in Minecraft happen in a "village" — an area with villager points of interest (a bell, beds,
     // work blocks). Private houses already carry beds; to make the village real, in the places where private houses cluster
     // (clusters on a 128-block grid) we put a square: a bell, a well, work blocks, lanterns, three villagers and a golem.
     // Villages — NOT closer than 1000 blocks to each other; the square is built at a free place near the cluster center,
     // trees and grass on it are cut down (VoxelStore::erase).
     beginStep(10);                                                   // "villages, signs, basements"
-    if (!privCenters.isEmpty())
-    {
-        struct Bucket { qint64 sx = 0, sz = 0; int n = 0; };
-        QHash<ColKey, Bucket> buckets;
-        for (const QPoint& pc : privCenters)
-        {
-            Bucket& b = buckets[pairKey(int(std::floor(pc.x() / 128.0)), int(std::floor(pc.y() / 128.0)))];
-            b.sx += pc.x(); b.sz += pc.y(); ++b.n;
-        }
-        QVector<QPair<int, qint64>> order2;                      // (the number of houses, the cell key) — in descending order
-        for (auto it = buckets.constBegin(); it != buckets.constEnd(); ++it)
-            order2.append(qMakePair(it.value().n, it.key()));
-        std::sort(order2.begin(), order2.end(), [](const QPair<int, qint64>& a, const QPair<int, qint64>& b)
-        { return a.first != b.first ? a.first > b.first : a.second < b.second; });
-        // The distance between villages — 500 blocks (request: "count by half"; in big areas the villages come out twice
-        // as often along each axis).
-        QVector<QPoint> vcenters;
-        for (const auto& oc : order2)
-        {
-            const Bucket& b = buckets[oc.second];
-            if (b.n < 3 && !vcenters.isEmpty()) break;            // single houses do not form villages themselves
-            const QPoint c(int(b.sx / b.n), int(b.sz / b.n));
-            const double minD = 500.0;
-            bool far = true;
-            for (const QPoint& q : vcenters)
-                if (std::hypot(double(q.x() - c.x()), double(q.y() - c.y())) < minD) { far = false; break; }
-            if (far) vcenters.append(c);
-        }
-        auto isVeg = [](quint16 bid)
-        {
-            return bid == IdAir || bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter
-                || bid == IdPaleHangingMoss || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass
-                || bid == IdTallGrassUpper || bid == IdWheat || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
-        };
-        // The site (2R+1)² is free: no houses/water/roads/rails/csrpol wool, the height difference <= 3, only grass/trees on it.
-        auto siteOk = [&](int cx, int cz, int R) -> bool
-        {
-            int tmin = 1 << 20, tmax = -(1 << 20);
-            for (int dz = -R; dz <= R; ++dz)
-                for (int dx = -R; dx <= R; ++dx)
-                {
-                    const int x = cx + dx, z = cz + dz;
-                    const qint64 ck = pairKey(x, z);
-                    if (colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
-                        || roadCols.contains(ck) || railColsAll.contains(ck)) return false;
-                    if (!ground.contains(pairKey(x >> 4, z >> 4))) return false;
-                    const int t = surfaceTop(ck);
-                    if (t > 235) return false;
-                    tmin = std::min(tmin, t); tmax = std::max(tmax, t);
-                    if (tmax - tmin > 3) return false;
-                    for (int y = t + 1; y <= t + 8; ++y)
-                        if (!isVeg(store.get(x, y, z))) return false;       // a fence/post/furniture — the place is taken
-                }
-            return true;
-        };
-        // Searching for a site by rings around vc (a step of 3 blocks along the ring), up to the radius maxR.
-        auto findSite = [&](const QPoint& vc, int R, int maxR, int& ox, int& oz) -> bool
-        {
-            // Rings with a step of 1 up to a radius of 32 and 2 beyond: earlier a step of 3 could skip a free spot exactly the size of the
-            // square (the center did not hit the grid) and give a false "no place" -> an extra house demolition.
-            for (int r = 0; r <= maxR; r += (r < 32 ? 1 : 2))
-            {
-                const int aStep = (r < 32) ? 1 : 2;
-                for (int a = -r; a <= r; a += (r ? aStep : 1))
-                {
-                    const int cand[4][2] = { { a, -r }, { a, r }, { -r, a }, { r, a } };
-                    for (int q = 0; q < (r ? 4 : 1); ++q)
-                        if (siteOk(vc.x() + cand[q][0], vc.y() + cand[q][1], R))
-                        { ox = vc.x() + cand[q][0]; oz = vc.y() + cand[q][1]; return true; }
-                }
-            }
-            return false;
-        };
-        // Demolition of the private house nearest to vc (allowed by the user if there is no place): we erase its blocks, columns,
-        // entities and basement. It returns the center of the freed place.
-        QSet<int> demolished;
-        auto demolishNear = [&](const QPoint& vc, QPoint& outC) -> bool
-        {
-            int best = -1; double bd = 1e18;
-            for (int i = 0; i < privCenters.size(); ++i)
-            {
-                if (demolished.contains(i)) continue;
-                const double d = std::hypot(double(privCenters[i].x() - vc.x()), double(privCenters[i].y() - vc.y()));
-                if (d < bd) { bd = d; best = i; }
-            }
-            if (best < 0 || bd > 160.0) return false;
-            demolished.insert(best);
-            const QRect bx = privBoxes[best];
-            const int x0 = bx.x() - 1, x1 = bx.x() + bx.width(), z0 = bx.y() - 1, z1 = bx.y() + bx.height();
-            int ymin = 1 << 20;
-            for (int z = z0; z <= z1; ++z)
-                for (int x = x0; x <= x1; ++x)
-                {
-                    const auto it = colMin.constFind(pairKey(x, z));
-                    if (it != colMin.constEnd()) ymin = std::min(ymin, it.value());
-                }
-            if (ymin == (1 << 20)) return false;
-            for (int z = z0; z <= z1; ++z)
-                for (int x = x0; x <= x1; ++x)
-                {
-                    for (int y = std::max(-64, ymin - 2); y <= std::min(319, ymin + 70); ++y)
-                        if (store.get(x, y, z) != IdAir) store.erase(x, y, z);
-                    colMin.remove(pairKey(x, z));
-                    colAnchor.remove(pairKey(x, z));
-                    // the ground top in the metadata was raised under the house foundation (max(..., colMin-1)): we return the natural
-                    // level, otherwise the village square will stand on the house "pedestal", and surfaceTop will diverge from ground.top
-                    auto gh = ground.find(pairKey(x >> 4, z >> 4));
-                    if (gh != ground.end())
-                    {
-                        const int col = (z & 15) * 16 + (x & 15);
-                        if (gh->wd[col] == 0)
-                            gh->top[col] = qint16(groundTopCol(x, z));
-                    }
-                }
-            auto inBox = [&](int x, int z) { return x >= x0 && x <= x1 && z >= z0 && z <= z1; };
-            auto prune = [&](auto& v) { for (int i = v.size() - 1; i >= 0; --i) if (inBox(v[i].x, v[i].z)) v.removeAt(i); };
-            prune(chests); prune(paints); prune(mannequins); prune(spawners); prune(npcs); prune(frames);
-            for (int i = basements.size() - 1; i >= 0; --i)
-                if (inBox(basements[i].cx, basements[i].cz)) basements.removeAt(i);
-            outC = bx.center();
-            return true;
-        };
-        const quint16 cobble = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobblestone"));
-        const bool forceDemolish = qEnvironmentVariableIsSet("MCX_FORCE_DEMOLISH");   // a test hook
-        for (const QPoint& vc : vcenters)
-        {
-            int px = 0, pz = 0, R = 5;
-            bool placed = false;
-            if (!forceDemolish)
-            {
-                placed = findSite(vc, 5, 128, px, pz);                        // the full 11×11 square
-                if (!placed) { R = 3; placed = findSite(vc, 3, 128, px, pz); }   // a compact 7×7
-            }
-            if (!placed)
-            {   // no place — we demolish the nearest house and put the square in its place
-                QPoint c;
-                if (demolishNear(vc, c))
-                {
-                    R = 5; placed = findSite(c, 5, 12, px, pz);
-                    if (!placed) { R = 3; placed = findSite(c, 3, 12, px, pz); }
-                }
-            }
-            if (!placed) continue;
-            auto topAt = [&](int x, int z) { return surfaceTop(pairKey(x, z)); };
-            // we cut down trees/grass on the square and above it
-            for (int dz = -R; dz <= R; ++dz)
-                for (int dx = -R; dx <= R; ++dx)
-                {
-                    const int x = px + dx, z = pz + dz, t = topAt(x, z);
-                    for (int y = t + 1; y <= t + 16; ++y)
-                    {
-                        const quint16 bid = store.get(x, y, z);
-                        if (bid != IdAir && isVeg(bid)) store.erase(x, y, z);
-                    }
-                }
-            auto put = [&](int dx, int dz, int dy, quint16 bid)
-            { const int x = px + dx, z = pz + dz; store.set(x, topAt(x, z) + dy, z, bid); };
-            put(0, 0, 1, IdBell);                                         // the bell — the center
-            bellSites.append(BellSite{ px, topAt(px, pz) + 1, pz });
-            {   // trampled earth: the square spot (a circle R+0.5) — a path with coarse_dirt inclusions, plus 4 trails of 7 blocks
-                auto setSurf = [&](int x, int z, quint16 sid) -> bool
-                {
-                    auto git = ground.find(pairKey(x >> 4, z >> 4));
-                    if (git == ground.end()) return false;
-                    const int col = (z & 15) * 16 + (x & 15);
-                    if (git->wd[col] > 0 || git->surf[col] != IdGrass) return false;
-                    git->surf[col] = sid;
-                    return true;
-                };
-                for (int dz = -R; dz <= R; ++dz)
-                    for (int dx = -R; dx <= R; ++dx)
-                    {
-                        if (dx * dx + dz * dz > (R + 0.5) * (R + 0.5)) continue;
-                        const int x = px + dx, z = pz + dz;
-                        setSurf(x, z, (colHash(pairKey(x, z) ^ 0xD177ull) % 4u == 0u) ? IdCoarseDirt : IdDirtPath);
-                    }
-                static const int ax[4] = { 1, -1, 0, 0 }, az[4] = { 0, 0, 1, -1 };
-                for (int d = 0; d < 4; ++d)
-                    for (int k = R + 1; k <= R + 7; ++k)
-                    {
-                        const int x = px + ax[d] * k, z = pz + az[d] * k;
-                        const qint64 ck = pairKey(x, z);
-                        if (colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
-                            || roadCols.contains(ck) || railColsAll.contains(ck)) break;
-                        if (!setSurf(x, z, IdDirtPath)) break;
-                        const int t = topAt(x, z);
-                        for (int y = t + 1; y <= t + 4; ++y)
-                            if (isVeg(store.get(x, y, z)) && store.get(x, y, z) != IdAir) store.erase(x, y, z);
-                    }
-            }
-            if (R >= 5)
-            {
-                // a 3×3 well at the right-back: a ring of cobblestone, water inside, 4 posts and a slab roof
-                for (int dz = -1; dz <= 1; ++dz)
-                    for (int dx = -5; dx <= -3; ++dx)
-                        put(dx, dz, 1, (dx == -4 && dz == 0) ? quint16(IdWater) : cobble);
-                for (int sxp = -5; sxp <= -3; sxp += 2)
-                    for (int szp = -1; szp <= 1; szp += 2)
-                    { put(sxp, szp, 2, IdFence); put(sxp, szp, 3, IdFence); }
-                for (int dz = -1; dz <= 1; ++dz)
-                    for (int dx = -5; dx <= -3; ++dx)
-                        put(dx, dz, 4, IdSlabBottom);
-                // lanterns on posts at the corners of the square
-                for (int sxp = -3; sxp <= 3; sxp += 6)
-                    for (int szp = -4; szp <= 4; szp += 8)
-                    { put(sxp, szp, 1, IdFence); put(sxp, szp, 2, IdFence); put(sxp, szp, 3, IdLanternStanding); }
-            }
-            // villager work blocks around the bell
-            put(3, 0, 1, IdComposter);
-            put(0, 3, 1, IdBarrel);
-            put(0, -3, 1, IdSmithingTable);
-            put(3, 3, 1, IdLoom);
-            // villagers and a golem
-            static const int kProf[4] = { PfFarmer, PfLibrarian, PfCleric, PfToolsmith };
-            for (int ni = 0; ni < 3; ++ni)
-            {
-                NpcSite v;
-                v.kind = 0; v.prof = kProf[ni % 4]; v.level = 2 + ni;
-                v.x = px + (ni == 0 ? 1 : ni == 1 ? -1 : 2); v.z = pz + (ni == 0 ? 1 : ni == 1 ? 2 : -1);
-                v.y = topAt(v.x, v.z) + 1;
-                v.vtype = 0; v.yaw = ni * 90;
-                npcs.append(v);
-            }
-            NpcSite g; g.kind = 3; g.x = px - 1; g.z = pz - 2; g.y = topAt(g.x, g.z) + 1;
-            npcs.append(g);
-        }
-    }
-
-    // SIGNS WITH ADDRESSES: one per house, on the side of the nearest road (searching outward up to 24 blocks over road columns);
-    // no road nearby — the first suitable side. Line 1 — TYSTR, line 2 — STREET, line 3 — NUMBR+ADDNUM.
-    {
-        static const int sdx[4] = { 0, 1, 0, -1 }, sdz[4] = { -1, 0, 1, 0 };
-        for (const SignCand& sc : signCands)
-        {
-            int bestD = -1, bestDist = 1 << 20;
-            for (int d = 0; d < 4; ++d)
-            {
-                if (!sc.ok[d]) continue;
-                int dist = 99;
-                for (int k = 1; k <= 24; ++k)
-                    if (roadCols.contains(pairKey(sc.x[d] + sdx[d] * k, sc.z[d] + sdz[d] * k))) { dist = k; break; }
-                if (dist < bestDist) { bestDist = dist; bestD = d; }
-            }
-            if (bestD < 0) continue;
-            const int x = sc.x[bestD], z = sc.z[bestD];
-            if (store.get(x, sc.y, z) != IdAir) continue;                           // the cell is taken by someone else's block
-            if (store.get(x - sdx[bestD], sc.y, z - sdz[bestD]) == IdAir) continue; // the wall is gone (the house was demolished)
-            store.set(x, sc.y, z, quint16(int(IdWallSignBase) + bestD));
-            signSites.append(SignSite{ x, sc.y, z, sc.l1, sc.l2, sc.l3 });
-        }
-    }
-    for (const BannerSite& bn : bannerSites)
-        bannersByChunk[pairKey(bn.x >> 4, bn.z >> 4)].append(bn);
-    for (const LairZone& z : lairZones)
-        for (int zcz = z.z0 >> 4; zcz <= (z.z1 >> 4); ++zcz)
-            for (int zcx = z.x0 >> 4; zcx <= (z.x1 >> 4); ++zcx)
-                zonesByChunk[pairKey(zcx, zcz)].append(z);
-    for (const BellSite& bl : bellSites)
-        bellsByChunk[pairKey(bl.x >> 4, bl.z >> 4)].append(bl);
-
-    // SIGNPOSTS AT INTERSECTIONS (request): named rdslin streets (TYSTR+STREET). An intersection — the places where the roadways of two DIFFERENT
-    // named streets cross or touch (columns with a neighbor of another name). Close points (up to 10 blocks) are merged into
-    // one intersection; next to it on free ground by the roadway we put a stone_brick_wall post 4 high and on its sides — signs
-    // (waxed, like on houses): line 1 — TYSTR, line 2 — STREET. More than 4 streets — a second row of signs below (up to 8). The post — stone_brick_wall 4 high, a lantern on top.
-    {
-        static const int ndx[4] = { 1, -1, 0, 0 }, ndz[4] = { 0, 0, 1, -1 };
-        // Real intersections — where the AXIS lines of two different roads cross (or abut each other, a tolerance of 1.5 blocks)
-        // at an angle of at least ~12°; the roadway width does not matter. At least one name is needed; pedestrian/bike paths
-        // are counted only if they have a name themselves; one and the same street (the same TYSTR+STREET) does not form an intersection.
-        {
-            struct Sg { int line; double x0, z0, x1, z1; };
-            QVector<Sg> sgs;
-            QHash<ColKey, QVector<int>> sgGrid;
-            constexpr double kCell = 24.0, kTol = 1.5;
-            for (int li = 0; li < roadLines.size(); ++li)
-            {
-                const QVector<QPointF>& pt = roadLines[li].pts;
-                for (int k = 0; k + 1 < pt.size(); ++k)
-                {
-                    const Sg g{ li, pt[k].x(), pt[k].y(), pt[k + 1].x(), pt[k + 1].y() };
-                    if (std::hypot(g.x1 - g.x0, g.z1 - g.z0) < 1e-6) continue;
-                    const int idx = sgs.size();
-                    sgs.append(g);
-                    const int cx0 = int(std::floor((std::min(g.x0, g.x1) - kTol) / kCell)), cx1 = int(std::floor((std::max(g.x0, g.x1) + kTol) / kCell));
-                    const int cz0 = int(std::floor((std::min(g.z0, g.z1) - kTol) / kCell)), cz1 = int(std::floor((std::max(g.z0, g.z1) + kTol) / kCell));
-                    for (int cz = cz0; cz <= cz1; ++cz)
-                        for (int cx = cx0; cx <= cx1; ++cx)
-                            sgGrid[pairKey(cx, cz)].append(idx);
-                }
-            }
-            for (auto it = sgGrid.constBegin(); it != sgGrid.constEnd(); ++it)
-            {
-                const QVector<int>& lst = it.value();
-                const int cellX = keyFirst(it.key()), cellZ = keySecond(it.key());
-                for (int ia = 0; ia < lst.size(); ++ia)
-                    for (int ib = ia + 1; ib < lst.size(); ++ib)
-                    {
-                        const Sg& a = sgs[lst[ia]]; const Sg& b = sgs[lst[ib]];
-                        const RoadLine& la = roadLines[a.line]; const RoadLine& lb = roadLines[b.line];
-                        if (la.obj == lb.obj) continue;                              // parts of one road
-                        const bool namedA = la.nameId >= 0, namedB = lb.nameId >= 0;
-                        if (!namedA && !namedB) continue;                           // at least one name is needed
-                        if (namedA && namedB && la.nameId == lb.nameId) continue;   // the same street
-                        if ((la.ped && !namedA) || (lb.ped && !namedB)) continue;   // an unnamed pedestrian/bike path — not an intersection
-                        const double d1x = a.x1 - a.x0, d1z = a.z1 - a.z0, d2x = b.x1 - b.x0, d2z = b.z1 - b.z0;
-                        const double len1 = std::hypot(d1x, d1z), len2 = std::hypot(d2x, d2z);
-                        const double cr = d1x * d2z - d1z * d2x;
-                        if (std::abs(cr) / (len1 * len2) < 0.2) continue;           // almost parallel — not an intersection
-                        const double ex = b.x0 - a.x0, ez = b.z0 - a.z0;
-                        const double t = (ex * d2z - ez * d2x) / cr;                // the position on a
-                        const double u = (ex * d1z - ez * d1x) / cr;                // the position on b
-                        const double tolA = kTol / len1, tolB = kTol / len2;
-                        if (t < -tolA || t > 1.0 + tolA || u < -tolB || u > 1.0 + tolB) continue;
-                        const double px = a.x0 + t * d1x, pz = a.z0 + t * d1z;
-                        if (int(std::floor(px / kCell)) != cellX || int(std::floor(pz / kCell)) != cellZ) continue;   // we count in one cell
-                        juncPts.append(JuncPt{ int(std::floor(px)), int(std::floor(pz)), la.nameId, lb.nameId });
-                    }
-            }
-        }
-        std::sort(juncPts.begin(), juncPts.end(), [](const JuncPt& a, const JuncPt& b)
-        { return a.x != b.x ? a.x < b.x : (a.z != b.z ? a.z < b.z : (a.a != b.a ? a.a < b.a : a.b < b.b)); });
-        QHash<ColKey, QVector<int>> jGrid;                         // a 10×10 grid for merging the points
-        for (int i = 0; i < juncPts.size(); ++i)
-            jGrid[pairKey(int(std::floor(juncPts[i].x / 10.0)), int(std::floor(juncPts[i].z / 10.0)))].append(i);
-        QVector<char> jUsed(juncPts.size(), 0);
-        auto isVegJ = [](quint16 bid)
-        {
-            return bid == IdAir || bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter
-                || bid == IdPaleHangingMoss || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass
-                || bid == IdTallGrassUpper || bid == IdWheat || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid);
-        };
-        static const int sdxJ[4] = { 0, 1, 0, -1 }, sdzJ[4] = { -1, 0, 1, 0 };
-        int posts = 0;
-        for (int i = 0; i < juncPts.size(); ++i)
-        {
-            if (jUsed[i]) continue;
-            QSet<int> names;
-            double sxm = 0, szm = 0; int cnt = 0;
-            const int gx = int(std::floor(juncPts[i].x / 10.0)), gz = int(std::floor(juncPts[i].z / 10.0));
-            for (int dgx = -1; dgx <= 1; ++dgx)
-                for (int dgz = -1; dgz <= 1; ++dgz)
-                {
-                    const auto git = jGrid.constFind(pairKey(gx + dgx, gz + dgz));
-                    if (git == jGrid.constEnd()) continue;
-                    for (int q : git.value())
-                    {
-                        if (jUsed[q]) continue;
-                        if (std::hypot(double(juncPts[q].x - juncPts[i].x), double(juncPts[q].z - juncPts[i].z)) > 10.0) continue;
-                        jUsed[q] = 1;
-                        if (juncPts[q].a >= 0) names.insert(juncPts[q].a);      // -1 — an unnamed road: it does not go into the list of names
-                        if (juncPts[q].b >= 0) names.insert(juncPts[q].b);
-                        sxm += juncPts[q].x; szm += juncPts[q].z; ++cnt;
-                    }
-                }
-            if (names.isEmpty() || cnt == 0) continue;
-            const int cx = int(std::lround(sxm / cnt)), cz = int(std::lround(szm / cnt));
-            // the post place: free 1×1 ground next to the roadway (within 2 blocks), closer to the intersection center
-            int bestX = 0, bestZ = 0, bestD = 1 << 20;
-            for (int r = 1; r <= 9; ++r)
-            {
-                for (int dz = -r; dz <= r; ++dz)
-                    for (int dx = -r; dx <= r; ++dx)
-                    {
-                        if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
-                        const int x = cx + dx, z = cz + dz;
-                        const qint64 ck = pairKey(x, z);
-                        if (roadCols.contains(ck) || colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
-                            || railColsAll.contains(ck)) continue;
-                        if (!ground.contains(pairKey(x >> 4, z >> 4))) continue;
-                        bool nearRoad = false;
-                        for (int k = 0; k < 4 && !nearRoad; ++k)
-                            for (int st = 1; st <= 2; ++st)
-                                if (roadCols.contains(pairKey(x + ndx[k] * st, z + ndz[k] * st))) { nearRoad = true; break; }
-                        if (!nearRoad) continue;
-                        const int t = surfaceTop(ck);
-                        if (t > 245) continue;
-                        bool freeCol = true;
-                        for (int y = t + 1; y <= t + 5 && freeCol; ++y)
-                            if (!isVegJ(store.get(x, y, z))) freeCol = false;
-                        for (int k = 0; k < 4 && freeCol; ++k)           // the sign cells on the sides — are free
-                            for (int y = t + 2; y <= t + 3; ++y)
-                                if (!isVegJ(store.get(x + sdxJ[k], y, z + sdzJ[k]))) { freeCol = false; break; }
-                        if (!freeCol) continue;
-                        const int d2 = dx * dx + dz * dz;
-                        if (d2 < bestD) { bestD = d2; bestX = x; bestZ = z; }
-                    }
-                if (bestD < (1 << 20)) break;
-            }
-            if (bestD == (1 << 20)) continue;
-            const int t0 = surfaceTop(pairKey(bestX, bestZ));
-            for (int k = 0; k < 4; ++k)                                   // clearing the grass under the post and signs
-                for (int y = t0 + 1; y <= t0 + 5; ++y)
-                {
-                    const int x = bestX + (k == 0 ? 0 : sdxJ[k - 1]), z = bestZ + (k == 0 ? 0 : sdzJ[k - 1]);
-                    if (store.get(x, y, z) != IdAir && isVegJ(store.get(x, y, z))) store.erase(x, y, z);
-                }
-            for (int y = t0 + 1; y <= t0 + 4; ++y)
-                store.set(bestX, y, bestZ, IdStoneBrickWall);              // a post of stone brick wall
-            store.set(bestX, t0 + 5, bestZ, IdLanternStanding);            // a lantern at the very top
-            QList<int> nm = names.values();
-            std::sort(nm.begin(), nm.end());
-            for (int k = 0; k < nm.size() && k < 8; ++k)
-            {
-                const int d = k % 4, y = t0 + 3 - (k / 4);
-                const int x = bestX + sdxJ[d], z = bestZ + sdzJ[d];
-                store.set(x, y, z, quint16(int(IdWallSignBase) + d));
-                signSites.append(SignSite{ x, y, z, roadNames[nm[k]].first, roadNames[nm[k]].second, QString() });
-            }
-            ++posts;
-        }
-        Q_UNUSED(posts);
-    }
-    for (const SignSite& sg : signSites)
-        signsByChunk[pairKey(sg.x >> 4, sg.z >> 4)].append(sg);
-
-    // BASEMENTS of private houses: we take out a room (the ground top in these columns is lowered to wy-5), lay a cobblestone floor,
-    // make a hatch in the house floor (iron, covered with a 3×3 carpet) and a vertical ladder (the holder — a block on the north side),
-    // a chest or mobs.
-    {
-        const quint16 cobbleB = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobblestone"));
-        // CHURCH DUNGEON: a maze of corridors 2 blocks wide under the building and around it, in 1–2 levels. A maze cell is a 4×4 block
-        // square (the grid step is 5: between cells a 1-block wall), the cell core is 2×2, the passage between neighbors is 2 wide (3 blocks long through the wall).
-        // "Transition zones" 3×3 / 4×4 — at forks (always), turns (sometimes) and dead ends (always); a dead end — a room with a chest.
-        // The entrance — a ladder from the church; the lower level is connected by a ladder from the farthest dead end of the upper one. The maze walls — the ground itself
-        // (only corridors are carved: the ground top in a column is lowered, the ceiling and floor are added with blocks). Chests in dead ends (2–4), an expensive one —
-        // one, in the deepest dead end (guarded by 3 mobs); zombies, skeletons, spiders, witches and endermen roam the corridors.
-        // deepSpots/deepFloor (optional): the chest cells on the LOWEST level of the maze (not the "expensive" chest — earlier) and the level of their floor —
-        // a secret shaft is hidden under one of such chests later.
-        auto buildChurchDungeon = [&](const BasementSite& bs, QVector<QPoint>* deepSpots = nullptr, int* deepFloor = nullptr) -> bool
-        {
-            const int Wy = bs.wy;
-            quint32 seed = colHash(pairKey(bs.hx, bs.hz) ^ 0xD06E0ull) | 1u;
-            auto rnd = [&seed](int mod) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return mod > 0 ? int(seed % quint32(mod)) : 0; };
-            auto colAt = [&](int x, int z, int& col) -> GroundChunk*
-            {
-                auto it = ground.find(pairKey(x >> 4, z >> 4));
-                if (it == ground.end()) return nullptr;
-                col = (z & 15) * 16 + (x & 15);
-                return &it.value();
-            };
-            const int fl1 = Wy - 7, fl2 = Wy - 11;
-            auto usable = [&](int x, int z, int floorY) -> bool
-            {
-                if (x == bs.hx && z == bs.hz && floorY != fl1) return false;             // the descent column belongs only to the 1st level
-                int col; GroundChunk* g = colAt(x, z, col);
-                if (!g || g->wd[col] > 0) return false;
-                if (g->top[col] < floorY + 3) return false;                              // above the corridor ceiling at least 1 layer of ground is needed
-                for (int y = floorY; y <= floorY + 2; ++y)
-                    if (store.get(x, y, z) != IdAir) return false;
-                return true;
-            };
-            static const int dxs[4] = { 0, 1, 0, -1 }, dzs[4] = { -1, 0, 1, 0 };          // 0=N,1=E,2=S,3=W
-            const int N = 6, M = 6, P = 5;
-            struct Maze { QVector<char> vis, e, s; int cnt = 0; };                         // e — a passage to the east, s — to the south of the cell
-            auto newMaze = [&]() { Maze m; m.vis.fill(0, N * M); m.e.fill(0, N * M); m.s.fill(0, N * M); return m; };
-            auto passage = [&](const Maze& m, int i, int j, int d) -> bool
-            {   // is there a passage from cell (i,j) in direction d
-                if (d == 1) return i + 1 < N && m.e[j * N + i];
-                if (d == 3) return i > 0 && m.e[j * N + i - 1];
-                if (d == 2) return j + 1 < M && m.s[j * N + i];
-                return j > 0 && m.s[(j - 1) * N + i];
-            };
-            int ox = 0, oz = 0;
-            auto cx0 = [&](int i) { return ox + P * i + 1; };
-            auto cz0 = [&](int j) { return oz + P * j + 1; };
-            auto coreOk = [&](int i, int j, int fy) -> bool
-            {
-                for (int a = 1; a <= 2; ++a)
-                    for (int b = 1; b <= 2; ++b)
-                        if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false;
-                return true;
-            };
-            // passage blocks: from (i,j) to the east — x cx0+3..cx0+5, z cz0+1..cz0+2; to the south — z cz0+3..cz0+5, x cx0+1..cx0+2
-            auto passOk = [&](int i, int j, int d, int fy) -> bool
-            {
-                if (d == 1) { for (int a = 3; a <= 5; ++a) for (int b = 1; b <= 2; ++b) if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false; }
-                else        { for (int a = 1; a <= 2; ++a) for (int b = 3; b <= 5; ++b) if (!usable(cx0(i) + a, cz0(j) + b, fy)) return false; }
-                return true;
-            };
-            auto genMaze = [&](int fy, int sI, int sJ, int blockDir, Maze& m) -> int
-            {
-                m = newMaze();
-                if (!coreOk(sI, sJ, fy)) return 0;
-                QVector<QPoint> stk;
-                stk.append(QPoint(sI, sJ)); m.vis[sJ * N + sI] = 1; m.cnt = 1;
-                while (!stk.isEmpty())
-                {
-                    const QPoint c = stk.last();
-                    int cand[4], nc = 0;
-                    for (int d = 0; d < 4; ++d)
-                    {
-                        const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
-                        if (ni < 0 || ni >= N || nj < 0 || nj >= M || m.vis[nj * N + ni]) continue;
-                        if (c.x() == sI && c.y() == sJ && d == blockDir) continue;
-                        if (!coreOk(ni, nj, fy)) continue;
-                        const bool fwd = (d == 1 || d == 2);
-                        if (!(fwd ? passOk(c.x(), c.y(), d, fy) : passOk(ni, nj, (d == 3) ? 1 : 2, fy))) continue;
-                        cand[nc++] = d;
-                    }
-                    if (nc == 0) { stk.removeLast(); continue; }
-                    const int d = cand[rnd(nc)];
-                    const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
-                    if (d == 1) m.e[c.y() * N + c.x()] = 1; else if (d == 3) m.e[nj * N + ni] = 1;
-                    else if (d == 2) m.s[c.y() * N + c.x()] = 1; else m.s[nj * N + ni] = 1;
-                    m.vis[nj * N + ni] = 1; ++m.cnt;
-                    stk.append(QPoint(ni, nj));
-                }
-                return m.cnt;
-            };
-            struct MazeInfo { QVector<int> dist; QVector<QPoint> leaves; QVector<QPoint> order; };
-            auto analyze = [&](const Maze& m, int sI, int sJ) -> MazeInfo
-            {
-                MazeInfo mi;
-                mi.dist.fill(-1, N * M);
-                QVector<QPoint> q; q.append(QPoint(sI, sJ)); mi.dist[sJ * N + sI] = 0;
-                for (int h = 0; h < q.size(); ++h)
-                {
-                    const QPoint c = q[h];
-                    mi.order.append(c);
-                    int deg = 0;
-                    for (int d = 0; d < 4; ++d)
-                    {
-                        if (!passage(m, c.x(), c.y(), d)) continue;
-                        ++deg;
-                        const int ni = c.x() + dxs[d], nj = c.y() + dzs[d];
-                        if (mi.dist[nj * N + ni] >= 0) continue;
-                        mi.dist[nj * N + ni] = mi.dist[c.y() * N + c.x()] + 1;
-                        q.append(QPoint(ni, nj));
-                    }
-                    if (deg == 1 && !(c.x() == sI && c.y() == sJ)) mi.leaves.append(c);
-                }
-                return mi;
-            };
-            // ---- level 1: the entrance — the core of cell (2,0), the descent column = its north-west core block = (hx,hz)
-            const int sI1 = 2, sJ1 = 0;
-            ox = bs.hx - (P * sI1 + 2); oz = bs.hz - 2;
-            Maze mz1, mz2;
-            const int n1 = genMaze(fl1, sI1, sJ1, 0, mz1);                               // the north is closed: the ladder holder is there
-            if (n1 < 10) return false;
-            MazeInfo m1 = analyze(mz1, sI1, sJ1);
-            // ---- the lower level: from the farthest dead end of the upper one (the ladder at the wall of the dead-end room farthest from the passage)
-            int connI = -1, connJ = -1, connOd = -1, n2 = 0;
-            QPoint ladd2(0, 0);                                                           // the ladder block between levels (a column)
-            int ladFace = 0;                                                              // where the ladder faces (the index IdLadderN+..)
-            MazeInfo m2;
-            if (!m1.leaves.isEmpty() && rnd(100) < 70)
-            {
-                QPoint far = m1.leaves.first();
-                for (const QPoint& l : m1.leaves)
-                    if (m1.dist[l.y() * N + l.x()] > m1.dist[far.y() * N + far.x()]) far = l;
-                int od = -1;
-                for (int d = 0; d < 4; ++d) if (passage(mz1, far.x(), far.y(), d)) od = d;
-                const int f = (od + 2) % 4;                                               // the far wall of the dead end — the holder
-                int lx = cx0(far.x()) + 1, lz = cz0(far.y()) + 1;
-                if (f == 2) lz = cz0(far.y()) + 2;
-                if (f == 1) lx = cx0(far.x()) + 2;
-                n2 = genMaze(fl2, far.x(), far.y(), f, mz2);
-                if (n2 >= 8)
-                {
-                    connI = far.x(); connJ = far.y(); connOd = od; ladd2 = QPoint(lx, lz);
-                    ladFace = (f + 2) % 4;
-                    m2 = analyze(mz2, connI, connJ);
-                }
-                else n2 = 0;
-            }
-            // ---- the set of level columns: cores, passages, rooms 3×3/4×4 (forks, turns, dead ends)
-            struct RoomR { int x0, z0, x1, z1; };
-            QHash<int, RoomR> rooms1, rooms2;
-            auto buildCols = [&](const Maze& m, int fy, bool isLower, QHash<int, RoomR>& rooms) -> QVector<QPoint>
-            {
-                QSet<ColKey> seen; QVector<QPoint> out;
-                auto add = [&](int x, int z) { if (seen.contains(pairKey(x, z))) return; seen.insert(pairKey(x, z)); out.append(QPoint(x, z)); };
-                for (int j = 0; j < M; ++j)
-                    for (int i = 0; i < N; ++i)
-                    {
-                        if (!m.vis[j * N + i]) continue;
-                        for (int a = 1; a <= 2; ++a) for (int b = 1; b <= 2; ++b) add(cx0(i) + a, cz0(j) + b);          // the core
-                        if (i + 1 < N && m.e[j * N + i]) for (int a = 3; a <= 5; ++a) for (int b = 1; b <= 2; ++b) add(cx0(i) + a, cz0(j) + b);
-                        if (j + 1 < M && m.s[j * N + i]) for (int a = 1; a <= 2; ++a) for (int b = 3; b <= 5; ++b) add(cx0(i) + a, cz0(j) + b);
-                        // a room
-                        int deg = 0, dirs[4] = { 0, 0, 0, 0 };
-                        for (int d = 0; d < 4; ++d) if (passage(m, i, j, d)) { ++deg; dirs[d] = 1; }
-                        const bool isEntrance = (!isLower && i == sI1 && j == sJ1);
-                        const bool isConn = (connI >= 0 && i == connI && j == connJ);
-                        if (isEntrance || (isConn && isLower)) continue;                  // the entrance and the start of the lower level — only the core
-                        const bool straight = (deg == 2 && ((dirs[0] && dirs[2]) || (dirs[1] && dirs[3])));
-                        int size = 0;
-                        if (deg == 1) size = (rnd(2) ? 4 : 3);
-                        if (isConn && !isLower) size = 3;                                  // the connector room — only 3×3, oriented toward the passage
-                        else if (deg >= 3) size = (rnd(100) < 60 ? 4 : 3);
-                        else if (deg == 2 && !straight && rnd(100) < 45) size = 3;
-                        if (!size) continue;
-                        RoomR r;
-                        if (size == 4) r = RoomR{ cx0(i), cz0(j), cx0(i) + 3, cz0(j) + 3 };
-                        else
-                        {   // 3×3 inside the cell, must contain the core; at a dead end it grows toward the passage
-                            int ox3 = rnd(2), oz3 = rnd(2);
-                            if (deg == 1)
-                            {
-                                const int od = dirs[0] ? 0 : dirs[1] ? 1 : dirs[2] ? 2 : 3;
-                                if (od == 0) oz3 = 0; else if (od == 2) oz3 = 1;
-                                if (od == 3) ox3 = 0; else if (od == 1) ox3 = 1;
-                            }
-                            r = RoomR{ cx0(i) + ox3, cz0(j) + oz3, cx0(i) + ox3 + 2, cz0(j) + oz3 + 2 };
-                        }
-                        bool ok = true;
-                        for (int z = r.z0; z <= r.z1 && ok; ++z) for (int x = r.x0; x <= r.x1; ++x) if (!usable(x, z, fy)) { ok = false; break; }
-                        if (!ok) continue;
-                        // the ladder column down (the L1 connector) must not fall out of the holder wall: the connector room is already oriented
-                        for (int z = r.z0; z <= r.z1; ++z) for (int x = r.x0; x <= r.x1; ++x) add(x, z);
-                        rooms.insert(j * N + i, r);
-                    }
-                return out;
-            };
-            QVector<QPoint> cols2;
-            if (n2 > 0) cols2 = buildCols(mz2, fl2, true, rooms2);
-            const QVector<QPoint> cols1 = buildCols(mz1, fl1, false, rooms1);
-            // ---- writing: first the lower level (it uses the original ground tops), then the upper one
-            QHash<ColKey, QPair<int, quint16>> origMap;                                // the original column top/surface before any edits
-            auto origOf = [&](int x, int z, GroundChunk* g, int col) -> QPair<int, quint16>
-            {
-                const qint64 k = pairKey(x, z);
-                auto it = origMap.find(k);
-                if (it == origMap.end()) it = origMap.insert(k, qMakePair(int(g->top[col]), quint16(g->surf[col])));
-                return it.value();
-            };
-            auto fillCeiling = [&](int x, int z, int fromY, GroundChunk* g, int col)
-            {
-                const QPair<int, quint16> o = origOf(x, z, g, col);
-                const int orig = o.first;
-                const quint16 surf = o.second;
-                for (int y = fromY; y <= orig; ++y)
-                {
-                    const quint16 id = (y == orig) ? surf : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
-                    if (store.get(x, y, z) == IdAir) store.set(x, y, z, id);          // building blocks (the church floor) are not overwritten
-                }
-            };
-            const bool hasConn = (n2 > 0);
-            auto isConnCol = [&](int x, int z) { return hasConn && x == ladd2.x() && z == ladd2.y(); };
-            auto carve = [&](const QVector<QPoint>& cols, int floorY, bool lower)
-            {
-                for (const QPoint& c : cols)
-                {
-                    const int x = c.x(), z = c.y();
-                    int col; GroundChunk* g = colAt(x, z, col);
-                    if (!g) continue;
-                    if (!lower && x == bs.hx && z == bs.hz) continue;                       // the descent column — separately
-                    const bool isConn = isConnCol(x, z);
-                    if (lower)
-                    {
-                        if (!isConn) fillCeiling(x, z, floorY + 3, g, col);
-                        g->top[col] = qint16(floorY - 1);
-                        store.set(x, floorY, z, cobbleB);
-                        if (store.get(x, floorY - 1, z) == IdAir) store.set(x, floorY - 1, z, cobbleB);       // a floor in two layers
-                    }
-                    else
-                    {
-                        for (int y = floorY + 1; y <= floorY + 2; ++y) store.erase(x, y, z);   // air (removes the stone filled by the lower level)
-                        fillCeiling(x, z, floorY + 3, g, col);
-                        if (!isConn)
-                        {
-                            g->top[col] = qint16(std::min<int>(g->top[col], floorY - 1));
-                            store.set(x, floorY, z, cobbleB);
-                            if (store.get(x, floorY - 1, z) == IdAir) store.set(x, floorY - 1, z, cobbleB);   // a floor in two layers
-                        }
-                        else
-                            g->top[col] = qint16(std::min<int>(g->top[col], fl2 - 1));
-                    }
-                }
-            };
-            if (n2 > 0) carve(cols2, fl2, true);
-            carve(cols1, fl1, false);
-            // the descent column from the church
-            {
-                int col; GroundChunk* g = colAt(bs.hx, bs.hz, col);
-                if (!g) return false;
-                origOf(bs.hx, bs.hz, g, col);
-                store.erase(bs.hx, Wy - 1, bs.hz);
-                store.erase(bs.hx, Wy - 2, bs.hz);
-                g->top[col] = qint16(fl1 - 1);
-                store.set(bs.hx, fl1, bs.hz, cobbleB);
-                for (int y = fl1 + 1; y <= Wy - 2; ++y) store.set(bs.hx, y, bs.hz, IdLadderS);   // the holder — north (the maze wall)
-            }
-            // the ladder between levels
-            if (n2 > 0)
-            {
-                const quint16 lad = quint16(int(IdLadderN) + ladFace);
-                for (int y = fl2 + 1; y <= fl1 + 2; ++y) store.set(ladd2.x(), y, ladd2.y(), lad);
-            }
-            // the hatch and a 3×3 carpet above it (a wooden one — no lever is needed)
-            {
-                const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
-                const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
-                for (int dz = -1; dz <= 1; ++dz)
-                    for (int dx = -1; dx <= 1; ++dx)
-                    {
-                        const int x = bs.hx + dx, z = bs.hz + dz;
-                        if (store.get(x, bs.wy, z) != IdAir) continue;
-                        if (!(dx == 0 && dz == 0) && store.get(x, bs.wy - 1, z) == IdAir) continue;
-                        store.set(x, bs.wy, z, carpet);
-                    }
-                store.set(bs.hx, bs.wy - 1, bs.hz, IdOakTrapdoor);
-            }
-            // chests: in dead ends (2–4), one expensive — in the deepest dead end; guards
-            struct Spot { int level; QPoint cell; int dist; };
-            QVector<Spot> spots;
-            for (const QPoint& l : m1.leaves)
-                if (!(connI >= 0 && l.x() == connI && l.y() == connJ)) spots.append(Spot{ 1, l, m1.dist[l.y() * N + l.x()] });
-            if (n2 > 0)
-                for (const QPoint& l : m2.leaves) spots.append(Spot{ 2, l, 100 + m2.dist[l.y() * N + l.x()] });
-            std::sort(spots.begin(), spots.end(), [](const Spot& a, const Spot& b) { return a.dist > b.dist; });
-            const int nChest = std::min(int(spots.size()), 2 + rnd(3));
-            static const int kMobVar[5] = { 0, 1, 2, 3, 7 };                           // zombie, skeleton, spider, witch, enderman
-            auto blockOfSpot = [&](const Spot& sp, int& bx, int& bz)
-            {   // the chest block: the center of the dead-end room (or of the core)
-                const auto& rm = (sp.level == 1) ? rooms1 : rooms2;
-                const auto it = rm.constFind(sp.cell.y() * N + sp.cell.x());
-                if (it != rm.constEnd()) { bx = (it->x0 + it->x1) / 2; bz = (it->z0 + it->z1) / 2; }
-                else { bx = cx0(sp.cell.x()) + 1; bz = cz0(sp.cell.y()) + 1; }
-                if (isConnCol(bx, bz) || (sp.level == 1 && bx == bs.hx && bz == bs.hz)) { bx += 1; }
-            };
-            for (int k = 0; k < nChest; ++k)
-            {
-                const Spot& sp = spots[k];
-                int x, z; blockOfSpot(sp, x, z);
-                const int fy = (sp.level == 1 ? fl1 : fl2) + 1;
-                store.set(x, fy, z, IdChest);
-                const bool rich = (k == 0);
-                if (deepSpots && sp.level == (n2 > 0 ? 2 : 1))
-                {
-                    if (rich) deepSpots->append(QPoint(x, z)); else deepSpots->prepend(QPoint(x, z));
-                }
-                chests.append(ChestSite{ x, fy, z, rich ? kLootT1 + rnd(kChestLootCount - kLootT1) : pickChestLoot(quint32(rnd(1 << 20)), 55, 45) });
-                if (rich)
-                {   // guards — 3 mobs on the nearest columns of the same level
-                    const QVector<QPoint>& lc = (sp.level == 1) ? cols1 : cols2;
-                    QVector<QPoint> near;
-                    for (const QPoint& c : lc)
-                    {
-                        if (c.x() == x && c.y() == z) continue;
-                        if (std::max(std::abs(c.x() - x), std::abs(c.y() - z)) <= 3) near.append(c);
-                    }
-                    int g = 0;
-                    while (!near.isEmpty() && g < 3)
-                    {
-                        const QPoint c = near.takeAt(rnd(int(near.size())));
-                        NpcSite m; m.kind = 4; m.variant = kMobVar[rnd(5)]; m.x = c.x(); m.z = c.y(); m.y = fy; m.yaw = rnd(4) * 90;
-                        npcs.append(m);
-                        ++g;
-                    }
-                }
-            }
-            if (deepSpots)
-            {   // the other dead ends of the lower level (without a chest) are also candidates for a shaft: the chest will be placed on the spot when the shaft is built
-                const int deepLevel = (n2 > 0) ? 2 : 1;
-                if (deepFloor) *deepFloor = (deepLevel == 2) ? fl2 : fl1;
-                for (int k = nChest; k < spots.size(); ++k)
-                    if (spots[k].level == deepLevel)
-                    {
-                        int x, z; blockOfSpot(spots[k], x, z);
-                        deepSpots->append(QPoint(x, z));
-                    }
-            }
-            // roaming mobs along the corridors of both levels
-            const int totalCells = n1 + n2;
-            const int nMob = std::max(4, std::min(12, totalCells / 5));
-            for (int k = 0; k < nMob; ++k)
-            {
-                const bool low = (n2 > 0 && rnd(100) < 45);
-                const QVector<QPoint>& lc = low ? cols2 : cols1;
-                if (lc.size() < 4) continue;
-                const QPoint c = lc[rnd(int(lc.size()))];
-                if ((!low && c.x() == bs.hx && c.y() == bs.hz) || (low && isConnCol(c.x(), c.y()))) continue;
-                NpcSite m; m.kind = 4; m.variant = kMobVar[rnd(5)]; m.x = c.x(); m.z = c.y(); m.y = (low ? fl2 : fl1) + 1; m.yaw = rnd(4) * 90;
-                npcs.append(m);
-            }
-            // cobwebs under the corridor ceiling and rare lanterns in room corners (little light; the maze mobs do not despawn anyway — PersistenceRequired)
-            {
-                const quint16 web = quint16(IdPaletteStart + paletteIndexOf("minecraft:cobweb"));
-                auto decorate = [&](const QVector<QPoint>& cols, int floorY, bool lower, const QHash<int, RoomR>& rooms)
-                {
-                    for (const QPoint& c : cols)
-                    {
-                        if ((!lower && c.x() == bs.hx && c.y() == bs.hz) || (lower && isConnCol(c.x(), c.y()))) continue;
-                        if (store.get(c.x(), floorY + 1, c.y()) != IdAir) continue;                // a chest/ladder
-                        if (rnd(100) < 7 && store.get(c.x(), floorY + 2, c.y()) == IdAir) store.set(c.x(), floorY + 2, c.y(), web);
-                    }
-                    for (auto it = rooms.constBegin(); it != rooms.constEnd(); ++it)
-                    {
-                        if (rnd(100) >= 55) continue;
-                        const int x = it->x0, z = it->z0;
-                        if ((!lower && x == bs.hx && z == bs.hz) || (lower && isConnCol(x, z))) continue;
-                        if (store.get(x, floorY + 1, z) == IdAir && store.get(x, floorY, z) != IdAir) store.set(x, floorY + 1, z, IdLanternStanding);
-                    }
-                };
-                decorate(cols1, fl1, false, rooms1);
-                if (n2 > 0) decorate(cols2, fl2, true, rooms2);
-            }
-            return true;
-        };
-        // UNDERGROUND LABORATORY of a science building (44315000): a complex under the building 9 blocks below the walking level — a 3×N corridor along the south from the shaft and up to 6 rooms
-        // 7×6 on the sides (openings 3 wide). In the rooms simple redstone mechanisms: a lamp panel with levers, chains of repeaters with a delay, a music
-        // panel (buttons + note blocks), a "flower" of pistons around a block with a lever, a safe behind an iron door with buttons, an office. The light — lamps with redstone blocks in the ceiling.
-        // The entrance — a hatch under a 3×3 carpet and a ladder at the north end of the corridor. The dead-end chests of the corridor are candidates for the Ancient City entrance (deepSpots/deepFloor).
-        auto buildLab = [&](const BasementSite& bs, QVector<QPoint>* deepSpots, int* deepFloor) -> bool
-        {
-            if (caveSet.empty()) return false;
-            const int Wy = bs.wy, fl = Wy - 9, y1 = fl + 1;
-            QHash<QString, quint16> stCache;
-            auto stId = [&](const char* name, std::initializer_list<std::pair<const char*, const char*>> pr) -> quint16
-            {
-                CaveState s;
-                s.name = QString::fromLatin1(name);
-                for (const auto& kv : pr) s.props.append(qMakePair(QString::fromLatin1(kv.first), QString::fromLatin1(kv.second)));
-                const QString key = caveStateKey(s);
-                const auto ci = stCache.constFind(key);
-                if (ci != stCache.constEnd()) return ci.value();
-                int idx = -1;
-                for (int i = 0; i < caveSet.states.size(); ++i) if (caveStateKey(caveSet.states[i]) == key) { idx = i; break; }
-                if (idx < 0)
-                {
-                    idx = caveSet.states.size();
-                    caveSet.states.append(s);
-                    caveSet.idOf.append(caveStateToId(s, idx));
-                }
-                stCache.insert(key, caveSet.idOf[idx]);
-                return caveSet.idOf[idx];
-            };
-            static const char* const kDn[4] = { "north", "east", "south", "west" };
-            auto colAt = [&](int x, int z, int& col) -> GroundChunk*
-            {
-                auto it = ground.find(pairKey(x >> 4, z >> 4));
-                if (it == ground.end()) return nullptr;
-                col = (z & 15) * 16 + (x & 15);
-                return &it.value();
-            };
-            auto usable = [&](int x, int z) -> bool
-            {
-                int col; GroundChunk* g = colAt(x, z, col);
-                if (!g || g->wd[col] > 0 || g->top[col] < fl + 4) return false;
-                for (int y = fl - 1; y <= fl + 3; ++y)
-                    if (store.get(x, y, z) != IdAir) return false;
-                return true;
-            };
-            const quint16 floorB = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
-            const quint16 wallB = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
-            const quint16 ironB = quint16(IdIronBlock);
-            const quint16 lampOn = stId("minecraft:redstone_lamp", { { "lit", "true" } });
-            const quint16 lampOff = stId("minecraft:redstone_lamp", { { "lit", "false" } });
-            const quint16 rsBlock = stId("minecraft:redstone_block", {});
-            static const int dxs[4] = { 0, 1, 0, -1 }, dzs[4] = { -1, 0, 1, 0 };
-            const int kRoomU0[3] = { 2, 10, 18 };
-            for (int attempt = 0; attempt < 2; ++attempt)
-            {
-                const int vs = attempt == 0 ? 1 : -1;                                       // the v-axis: +x or -x
-                auto wxz = [&](int u, int v, int& x, int& z) { x = bs.hx + vs * (v - 1); z = bs.hz + u; };
-                auto dirOf = [&](int du, int dv) -> int { return du > 0 ? 2 : du < 0 ? 0 : (dv * vs > 0 ? 1 : 3); };
-                auto ok = [&](int u, int v) { int x, z; wxz(u, v, x, z); return usable(x, z); };
-                int Lc = 0;                                                                  // the corridor length: the maximal prefix of suitable columns
-                for (int u = 0; u < 26; ++u)
-                {
-                    if (!(ok(u, 0) && ok(u, 1) && ok(u, 2))) break;
-                    Lc = u + 1;
-                }
-                if (Lc < 10) continue;
-                struct RoomL { int u0, side; bool on; };                                      // side: +1 south-v (v>=4), -1 (v<=-2)
-                QVector<RoomL> rl;
-                int nOn = 0;
-                for (int c = 0; c < 3; ++c)
-                    for (int side = -1; side <= 1; side += 2)
-                    {
-                        RoomL r{ kRoomU0[c], side, false };
-                        if (r.u0 + 7 <= Lc)
-                        {
-                            bool good = true;
-                            for (int ru = 0; ru < 7 && good; ++ru)
-                            {
-                                for (int rd = 0; rd < 6 && good; ++rd) good = ok(r.u0 + ru, side > 0 ? 4 + rd : -2 - rd);
-                                if (good && ru >= 2 && ru <= 4) good = ok(r.u0 + ru, side > 0 ? 3 : -1);      // the opening in the wall to the corridor
-                            }
-                            r.on = good;
-                        }
-                        if (r.on) ++nOn;
-                        rl.append(r);
-                    }
-                if (nOn < 2) continue;
-                // ——— the set of columns and writing ———
-                QSet<ColKey> carved;
-                QVector<QPoint> cols;
-                auto addC = [&](int u, int v)
-                {
-                    int x, z; wxz(u, v, x, z);
-                    if (carved.contains(pairKey(x, z))) return;
-                    carved.insert(pairKey(x, z));
-                    cols.append(QPoint(x, z));
-                };
-                for (int u = 0; u < Lc; ++u) for (int v = 0; v <= 2; ++v) addC(u, v);
-                auto roomUV = [&](const RoomL& r, int ru, int rd, int& u, int& v) { u = r.u0 + ru; v = r.side > 0 ? 4 + rd : -2 - rd; };
-                for (const RoomL& r : rl)
-                {
-                    if (!r.on) continue;
-                    for (int ru = 0; ru < 7; ++ru) for (int rd = 0; rd < 6; ++rd) { int u, v; roomUV(r, ru, rd, u, v); addC(u, v); }
-                    for (int ru = 2; ru <= 4; ++ru) addC(r.u0 + ru, r.side > 0 ? 3 : -1);     // the opening
-                }
-                for (const QPoint& c : cols)
-                {
-                    int col; GroundChunk* g = colAt(c.x(), c.y(), col);
-                    if (!g) return false;
-                }
-                // the original top/surface before edits and the ceiling
-                for (const QPoint& c : cols)
-                {
-                    int col; GroundChunk* g = colAt(c.x(), c.y(), col);
-                    const int orig = g->top[col];
-                    const quint16 surf = g->surf[col];
-                    for (int y = fl + 4; y <= orig; ++y)
-                    {
-                        const quint16 id = (y == orig) ? surf : (y >= orig - 2 ? quint16(IdDirt) : quint16(IdStone));
-                        if (store.get(c.x(), y, c.y()) == IdAir) store.set(c.x(), y, c.y(), id);
-                    }
-                    g->top[col] = qint16(fl - 1);
-                    store.set(c.x(), fl, c.y(), floorB);
-                    if (store.get(c.x(), fl - 1, c.y()) == IdAir) store.set(c.x(), fl - 1, c.y(), floorB);
-                }
-                // the descent column (u=0,v=1): a shaft from the house floor
-                {
-                    int col; GroundChunk* g = colAt(bs.hx, bs.hz, col);
-                    if (!g) return false;
-                    store.erase(bs.hx, Wy - 1, bs.hz);
-                    store.erase(bs.hx, Wy - 2, bs.hz);
-                    for (int y = fl + 4; y <= Wy - 3; ++y) store.erase(bs.hx, y, bs.hz);
-                    g->top[col] = qint16(fl - 1);
-                    for (int y = fl + 1; y <= Wy - 2; ++y) store.set(bs.hx, y, bs.hz, IdLadderS);   // the holder — north (soil/wall)
-                }
-                // lining the walls with stone brick (8 neighbors outside the set of columns), ceiling lights
-                QSet<ColKey> lined;
-                for (const QPoint& c : cols)
-                    for (int dz = -1; dz <= 1; ++dz)
-                        for (int dx = -1; dx <= 1; ++dx)
-                        {
-                            const qint64 nk = pairKey(c.x() + dx, c.y() + dz);
-                            if (carved.contains(nk) || lined.contains(nk)) continue;
-                            lined.insert(nk);
-                            for (int y = fl + 1; y <= fl + 3; ++y)
-                                if (store.get(keyFirst(nk), y, keySecond(nk)) == IdAir)
-                                    store.set(keyFirst(nk), y, keySecond(nk), wallB);
-                        }
-                auto putAt = [&](int u, int v, int dy, quint16 id)
-                {
-                    int x, z; wxz(u, v, x, z);
-                    store.set(x, y1 + dy, z, id);
-                };
-                auto chestAt = [&](int u, int v, int tbl)
-                {
-                    int x, z; wxz(u, v, x, z);
-                    store.set(x, y1, z, IdChest);
-                    chests.append(ChestSite{ x, y1, z, tbl });
-                };
-                auto lampAt = [&](int u, int v)
-                {
-                    int x, z; wxz(u, v, x, z);
-                    if (store.get(x, fl + 3, z) != IdAir) return;
-                    store.set(x, fl + 3, z, lampOn);
-                    store.set(x, fl + 4, z, rsBlock);
-                };
-                for (int u = 3; u < Lc; u += 6) lampAt(u, 1);                                   // the corridor lighting
-                // ——— room mechanisms ———
-                QHash<ColKey, char> kind;                                                       // (x,z) -> W wire, L lever, R repeater (N-S 'n' / E-W 'e')
-                QVector<QPair<QPoint, int>> wires;                                              // the wire positions
-                auto mark = [&](int u, int v, char k) { int x, z; wxz(u, v, x, z); kind.insert(pairKey(x, z), k); };
-                auto leverFloor = [&](int u, int v) { putAt(u, v, 0, stId("minecraft:lever", { { "face", "floor" }, { "facing", "north" }, { "powered", "false" } })); mark(u, v, 'L'); };
-                auto wireAt = [&](int u, int v) { int x, z; wxz(u, v, x, z); wires.append(qMakePair(QPoint(x, z), 0)); mark(u, v, 'W'); };
-                auto repeaterAt = [&](int u, int v, int towardInput, int delay)
-                {
-                    putAt(u, v, 0, stId("minecraft:repeater", { { "delay", delay == 1 ? "1" : delay == 2 ? "2" : delay == 3 ? "3" : "4" }, { "facing", kDn[towardInput] },
-                                                                { "locked", "false" }, { "powered", "false" } }));
-                    mark(u, v, (towardInput & 1) ? 'e' : 'n');
-                };
-                auto buttonAt = [&](int u, int v, int faceDir) { putAt(u, v, 0, stId("minecraft:stone_button", { { "face", "wall" }, { "facing", kDn[faceDir] }, { "powered", "false" } })); };
-                int nMech = 0;
-                int ri = 0;
-                for (const RoomL& r : rl)
-                {
-                    ++ri;
-                    if (!r.on) continue;
-                    ++nMech;
-                    auto RU = [&](int ru, int rd, int& u, int& v) { roomUV(r, ru, rd, u, v); };
-                    const int dRu = dirOf(1, 0), dRd = (r.side > 0) ? dirOf(0, 1) : dirOf(0, -1);   // world directions +ru and +rd
-                    const int dRuNeg = (dRu + 2) & 3, dRdNeg = (dRd + 2) & 3;
-                    int u, v;
-                    RU(1, 4, u, v); lampAt(u, v);                                                    // the room ceiling lamps
-                    RU(5, 4, u, v); lampAt(u, v);
-                    RU(3, 1, u, v); lampAt(u, v);
-                    switch (nMech % 6)
-                    {
-                    case 1:
-                        for (int rd = 1; rd <= 5; rd += 2)                                           // three lines: a lever — a wire — a lamp
-                        {
-                            RU(0, rd, u, v); leverFloor(u, v);
-                            for (int ru = 1; ru <= 4; ++ru) { RU(ru, rd, u, v); wireAt(u, v); }
-                            RU(5, rd, u, v); putAt(u, v, 0, lampOff);
-                        }
-                        break;
-                    case 2:
-                        for (int rd = 1; rd <= 4; rd += 3)                                           // a lever — a chain of repeaters with a delay — lamps
-                        {
-                            RU(0, rd, u, v); leverFloor(u, v);
-                            RU(1, rd, u, v); wireAt(u, v);
-                            for (int ru = 2; ru <= 4; ++ru) { RU(ru, rd, u, v); repeaterAt(u, v, dRuNeg, 4); }
-                            RU(5, rd, u, v); wireAt(u, v);
-                            RU(6, rd, u, v); putAt(u, v, 0, lampOff);
-                        }
-                        break;
-                    case 3:
-                        for (int ru = 1; ru <= 5; ru += 1)                                           // music: a note block and a button next to it
-                        {
-                            RU(ru, 3, u, v);
-                            static const char* const kNote[5] = { "0", "4", "7", "12", "16" };
-                            putAt(u, v, 0, stId("minecraft:note_block", { { "instrument", "basedrum" }, { "note", kNote[ru - 1] }, { "powered", "false" } }));
-                            RU(ru, 2, u, v); buttonAt(u, v, dRdNeg);                                  // a button on the note block itself (from the entrance side)
-                        }
-                        break;
-                    case 4:
-                        {   // a "flower" of pistons: a block with a lever in the center, pistons around facing up
-                            RU(3, 3, u, v); putAt(u, v, 0, ironB);
-                            RU(3, 2, u, v); putAt(u, v, 0, stId("minecraft:lever", { { "face", "wall" }, { "facing", kDn[dRdNeg] }, { "powered", "false" } }));
-                            RU(2, 3, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
-                            RU(4, 3, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
-                            RU(3, 4, u, v); putAt(u, v, 0, stId("minecraft:piston", { { "extended", "false" }, { "facing", "up" } }));
-                        }
-                        break;
-                    case 5:
-                        {   // a safe: a 3×2 niche in the far corner behind an iron door, buttons outside and inside
-                            for (int dy = 0; dy < 3; ++dy)
-                            {
-                                RU(3, 3, u, v); putAt(u, v, dy, wallB);
-                                RU(3, 5, u, v); putAt(u, v, dy, wallB);
-                                RU(4, 3, u, v); putAt(u, v, dy, wallB);
-                                RU(5, 3, u, v); putAt(u, v, dy, wallB);
-                                RU(6, 3, u, v); putAt(u, v, dy, wallB);
-                            }
-                            RU(3, 4, u, v);
-                            putAt(u, v, 0, stId("minecraft:iron_door", { { "facing", kDn[dRuNeg] }, { "half", "lower" }, { "hinge", "left" }, { "open", "false" }, { "powered", "false" } }));
-                            putAt(u, v, 1, stId("minecraft:iron_door", { { "facing", kDn[dRuNeg] }, { "half", "upper" }, { "hinge", "left" }, { "open", "false" }, { "powered", "false" } }));
-                            putAt(u, v, 2, wallB);
-                            RU(2, 3, u, v); buttonAt(u, v, dRuNeg);                                   // outside — on the block (3,3)
-                            RU(4, 5, u, v); buttonAt(u, v, dRu);                                      // inside — on the block (3,5)
-                            RU(6, 5, u, v); chestAt(u, v, kLootT1 + int(colHash(pairKey(bs.hx, bs.hz) ^ 0x5AFEull) % quint32(kChestLootCount - kLootT1)));
-                        }
-                        break;
-                    default:
-                        {   // an office
-                            RU(0, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
-                            RU(1, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
-                            RU(5, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
-                            RU(6, 4, u, v); putAt(u, v, 0, IdBookshelf); putAt(u, v, 1, IdBookshelf);
-                            RU(3, 5, u, v); putAt(u, v, 0, IdCraftingTable);
-                            RU(2, 5, u, v); putAt(u, v, 0, IdCartographyTable);
-                            RU(4, 5, u, v); putAt(u, v, 0, IdFurnace);
-                        }
-                        break;
-                    }
-                    Q_UNUSED(dRu); Q_UNUSED(dRd);
-                }
-                // wires with connections
-                for (const auto& w : wires)
-                {
-                    QVector<QPair<QString, QString>> pr;
-                    for (int d = 0; d < 4; ++d)
-                    {
-                        const auto kit = kind.constFind(pairKey(w.first.x() + dxs[d], w.first.y() + dzs[d]));
-                        bool con = false;
-                        if (kit != kind.constEnd())
-                            con = (*kit == 'W' || *kit == 'L' || (*kit == 'n' && (d & 1) == 0) || (*kit == 'e' && (d & 1) == 1));
-                        pr << qMakePair(QString::fromLatin1(kDn[d]), con ? QStringLiteral("side") : QStringLiteral("none"));
-                    }
-                    CaveState s;
-                    s.name = QStringLiteral("minecraft:redstone_wire");
-                    s.props = pr;
-                    s.props << qMakePair(QStringLiteral("power"), QStringLiteral("0"));
-                    const QString key = caveStateKey(s);
-                    int idx = -1;
-                    for (int i = 0; i < caveSet.states.size(); ++i) if (caveStateKey(caveSet.states[i]) == key) { idx = i; break; }
-                    if (idx < 0) { idx = caveSet.states.size(); caveSet.states.append(s); caveSet.idOf.append(caveStateToId(s, idx)); }
-                    store.set(w.first.x(), y1, w.first.y(), caveSet.idOf[idx]);
-                }
-                // the hatch and a 3×3 carpet above it
-                {
-                    const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
-                    const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
-                    for (int dz = -1; dz <= 1; ++dz)
-                        for (int dx = -1; dx <= 1; ++dx)
-                        {
-                            const int x = bs.hx + dx, z = bs.hz + dz;
-                            if (store.get(x, bs.wy, z) != IdAir) continue;
-                            if (!(dx == 0 && dz == 0) && store.get(x, bs.wy - 1, z) == IdAir) continue;
-                            store.set(x, bs.wy, z, carpet);
-                        }
-                    store.set(bs.hx, bs.wy - 1, bs.hz, IdOakTrapdoor);
-                }
-                // a chest at the start of the corridor (everyday/medium) and candidates for a secret shaft — the end of the corridor
-                chestAt(2, 0, pickChestLoot(colHash(pairKey(bs.hx, bs.hz) ^ 0x1AB5ull), 40, 50));
-                if (deepSpots)
-                {
-                    for (int u = Lc - 1; u >= std::max(4, Lc - 5); --u)
-                    {
-                        int x, z; wxz(u, 1, x, z);
-                        if (store.get(x, y1, z) == IdAir) deepSpots->append(QPoint(x, z));
-                    }
-                    if (deepFloor) *deepFloor = fl;
-                }
-                Q_UNUSED(nMech);
-                return true;
-            }
-            return false;
-        };
-        // We build the church dungeons first; for each we remember the lower-level chests — a secret shaft is hidden under one of them.
-        QVector<QVector<QPoint>> deepSpots(basements.size());
-        QVector<int> deepFloor(basements.size(), 0);
-        for (int i = 0; i < basements.size(); ++i)
-        {
-            if (basements[i].church)
-            {
-                if (!buildChurchDungeon(basements[i], &deepSpots[i], &deepFloor[i])) deepSpots[i].clear();
-            }
-            else if (basements[i].lab)
-            {
-                if (!buildLab(basements[i], &deepSpots[i], &deepFloor[i])) deepSpots[i].clear();
-            }
-        }
-        // SECRET PASSAGES: in the biggest church — a shaft to the End portal (a stronghold room, y≈23), in the second biggest — to the Ancient
-        // City (Deep Dark, y≈-49). The entrance — not in the church itself, but in the maze under it: the floor under one of the chests of the LOWER level is replaced
-        // with a hatch, then a ladder goes down. The structure template is placed so that its entrance column coincides with the shaft; the rectangles of the two
-        // structures do not intersect.
-        if (!lairSet.empty())
-        {
-            QVector<int> order;                                   // churches with a maze, in descending "size" (area × height)
-            for (int i = 0; i < basements.size(); ++i)
-                if (basements[i].church && !deepSpots[i].isEmpty()) order.append(i);
-            std::stable_sort(order.begin(), order.end(), [&](int a, int b)
-            { return basements[a].size != basements[b].size ? basements[a].size > basements[b].size : basements[a].hx < basements[b].hx; });
-            int nChurch = 0;
-            for (const BasementSite& b : basements) if (b.church) ++nChurch;
-            res.lairInfo.prepend(QObject::tr("churches: %1, with a maze: %2").arg(nChurch).arg(order.size()) + ((res.lairInfo.isEmpty() || res.lairInfo.startsWith(QLatin1String("; "))) ? QString() : QStringLiteral("; ")));
-            const int sS = lairSet.find(QStringLiteral("stronghold")), sC = lairSet.find(QStringLiteral("ancient_city"));
-            auto churchCentre = [&](int bi) { return QPointF(basements[bi].cx, basements[bi].cz); };
-            // does dead end c fit under the entrance of structure s (the chunks around the shaft and the whole main hall, the depth) — without regard to the neighboring structure
-            auto candOk = [&](int s2, int bi, const QPoint& c, LairPlace& pl) -> bool
-            {
-                const LairStruct& ls = lairSet.st[s2];
-                if (deepFloor[bi] - ls.floorY < 8) return false;
-                const int X = c.x(), Z = c.y();
-                if (!ground.contains(pairKey(X >> 4, Z >> 4)) || !ground.contains(pairKey((X - 1) >> 4, (Z - 1) >> 4))) return false;
-                pl = LairPlace(); pl.s = s2; pl.tx = X - ls.ex; pl.tz = Z - ls.ez; pl.sx = X; pl.sz = Z;
-                const int rx0 = ((ls.room[0] + pl.tx) >> 4) - 1, rx1 = ((ls.room[3] + pl.tx) >> 4) + 1;
-                const int rz0 = ((ls.room[2] + pl.tz) >> 4) - 1, rz1 = ((ls.room[5] + pl.tz) >> 4) + 1;
-                for (int dcz = rz0; dcz <= rz1; ++dcz)
-                    for (int dcx = rx0; dcx <= rx1; ++dcx)
-                        if (!ground.contains(pairKey(dcx, dcz))) return false;
-                for (int dcz = -1; dcz <= 1; ++dcz)
-                    for (int dcx = -1; dcx <= 1; ++dcx)
-                        if (!ground.contains(pairKey((X >> 4) + dcx, (Z >> 4) + dcz))) return false;
-                return true;
-            };
-            // the shaft of one structure must not pass through the rectangle of another
-            auto conflict = [&](const LairPlace& a, const LairPlace& b) -> bool
-            { return lairSet.rectOf(a).adjusted(-2, -2, 2, 2).contains(b.sx, b.sz) || lairSet.rectOf(b).adjusted(-2, -2, 2, 2).contains(a.sx, a.sz); };
-            // the first suitable dead end of church bi for structure s2; dead ends are tried from the farthest from the point away (the maze "goes away" from the neighboring church)
-            auto planFor = [&](int s2, int bi, const LairPlace* avoid, const QPointF& away, LairPlace& out) -> bool
-            {
-                QVector<QPoint> cands = deepSpots[bi];
-                std::stable_sort(cands.begin(), cands.end(), [&](const QPoint& a, const QPoint& b)
-                { return std::hypot(a.x() - away.x(), a.y() - away.y()) > std::hypot(b.x() - away.x(), b.y() - away.y()); });
-                for (const QPoint& c : cands)
-                {
-                    LairPlace pl;
-                    if (!candOk(s2, bi, c, pl)) continue;
-                    if (avoid && conflict(pl, *avoid)) continue;
-                    out = pl;
-                    return true;
-                }
-                return false;
-            };
-            // a pair: structure s1 in church b1 and s2 in b2 — both are placed together (so that the shaft of the first does not interfere with the second)
-            auto tryPair = [&](int s1, int b1, int s2, int b2, LairPlace& p1, LairPlace& p2) -> bool
-            {
-                QVector<QPoint> cands = deepSpots[b1];
-                const QPointF away = churchCentre(b2);
-                std::stable_sort(cands.begin(), cands.end(), [&](const QPoint& a, const QPoint& b)
-                { return std::hypot(a.x() - away.x(), a.y() - away.y()) > std::hypot(b.x() - away.x(), b.y() - away.y()); });
-                for (const QPoint& c : cands)
-                {
-                    LairPlace pl1;
-                    if (!candOk(s1, b1, c, pl1)) continue;
-                    LairPlace pl2;
-                    if (planFor(s2, b2, &pl1, churchCentre(b1), pl2)) { p1 = pl1; p2 = pl2; return true; }
-                }
-                return false;
-            };
-            auto buildShaft = [&](int bi, const LairPlace& pl)
-            {
-                const LairStruct& ls = lairSet.st[pl.s];
-                const int X = pl.sx, Z = pl.sz, fl = deepFloor[bi], fy = ls.floorY;
-                GroundChunk& g = ground.find(pairKey(X >> 4, Z >> 4)).value();
-                g.top[(Z & 15) * 16 + (X & 15)] = qint16(fy);
-                store.set(X, fy, Z, cobbleB);
-                for (int y = fy + 1; y <= fl - 1; ++y)
-                {
-                    store.set(X, y, Z, IdLadderS);
-                    if (store.get(X, y, Z - 1) == IdAir) store.set(X, y, Z - 1, cobbleB);
-                }
-                store.set(X, fl, Z, IdOakTrapdoor);
-                if (store.get(X, fl + 1, Z) == IdAir)
-                {   // the dead end had no chest — we put it on top of the hatch (the entrance is hidden exactly under the chest)
-                    store.set(X, fl + 1, Z, IdChest);
-                    chests.append(ChestSite{ X, fl + 1, Z, pickChestLoot(colHash(pairKey(X, Z) ^ 0xC4E57ull), 40, 60) });
-                }
-                lairSet.placed.append(pl);
-                if (basements[bi].forced)
-                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)").arg(ls.id).arg(X).arg(Z);
-                else if (basements[bi].lab)
-                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)").arg(ls.id).arg(X).arg(Z);
-                else
-                    res.lairInfo += QObject::tr("; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)")
-                                        .arg(ls.id).arg(X).arg(Z).arg(order.indexOf(bi) + 1).arg(order.size());
-                if (qEnvironmentVariableIsSet("MCX_LAIRDBG"))
-                    std::fprintf(stderr, "[lair] %s shaft x=%d z=%d floorY=%d levelFloor=%d tx=%d tz=%d\n", qPrintable(ls.id), X, Z, fy, fl, pl.tx, pl.tz);
-            };
-            // churches set by the user by chunk coordinates (WorldOptions::lairChurchChunks: "x z; x z" or "x y z; x y z" as in F3)
-            QVector<int> forced;
-            {
-                const QStringList groups = world.lairChurchChunks.split(QRegularExpression(QStringLiteral("[;|\\n]")), Qt::SkipEmptyParts);
-                QVector<QPoint> chunks;
-                static const QRegularExpression numRe(QStringLiteral("-?\\d+"));
-                for (const QString& g : groups)
-                {
-                    QVector<int> nums;
-                    auto it = numRe.globalMatch(g);
-                    while (it.hasNext()) nums.append(it.next().captured().toInt());
-                    if (nums.size() >= 3) chunks.append(QPoint(nums[0], nums[2]));
-                    else if (nums.size() == 2) chunks.append(QPoint(nums[0], nums[1]));
-                }
-                if (groups.size() < 2 && chunks.isEmpty())
-                {   // without ";" — six/four numbers in a row
-                    QVector<int> nums;
-                    auto it = numRe.globalMatch(world.lairChurchChunks);
-                    while (it.hasNext()) nums.append(it.next().captured().toInt());
-                    if (nums.size() == 6) chunks << QPoint(nums[0], nums[2]) << QPoint(nums[3], nums[5]);
-                    else if (nums.size() == 4) chunks << QPoint(nums[0], nums[1]) << QPoint(nums[2], nums[3]);
-                }
-                for (const QPoint& ch : chunks)
-                {
-                    int best = -1; double bd = 1e18;
-                    for (int bi : order)
-                    {
-                        const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
-                        if (d < bd) { bd = d; best = bi; }
-                    }
-                    if (best >= 0 && bd <= 48.0 && !forced.contains(best)) forced.append(best);
-                    else res.lairInfo += QObject::tr("; no church with a maze in chunk (%1, %2)").arg(ch.x()).arg(ch.y());
-                }
-            }
-            // the building separately for the stronghold / the Ancient City (WorldOptions::strongholdChunk / cityChunk: "x z" or "x y z" as in F3): the NEAREST of those that
-            // were marked for the point (any code); if none of them got a maze — the old rule (a church with a maze within 48 blocks of the point)
-            auto churchByChunk = [&](const QString& text, const QString& what, int role) -> int
-            {
-                static const QRegularExpression numRe2(QStringLiteral("-?\\d+"));
-                QVector<int> nums;
-                auto it = numRe2.globalMatch(text);
-                while (it.hasNext()) nums.append(it.next().captured().toInt());
-                if (nums.size() < 2) return -1;
-                const QPoint ch = nums.size() >= 3 ? QPoint(nums[0], nums[2]) : QPoint(nums[0], nums[1]);
-                int best = -1; double bd = 1e18;
-                for (int bi : order)
-                {
-                    if (basements[bi].forced != role) continue;
-                    const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
-                    if (d < bd) { bd = d; best = bi; }
-                }
-                if (best >= 0) return best;
-                for (int bi : order)
-                {
-                    const double d = std::hypot(basements[bi].cx - (ch.x() * 16 + 8), basements[bi].cz - (ch.y() * 16 + 8));
-                    if (d < bd) { bd = d; best = bi; }
-                }
-                if (best >= 0 && (bd <= 48.0 || text.trimmed().startsWith(QLatin1Char('~')))) return best;     // "~" — a choice by a click on the map: just the nearest church
-                res.lairInfo += QObject::tr("; %1: no church with a maze in chunk (%2, %3)").arg(what).arg(ch.x()).arg(ch.y());
-                return -1;
-            };
-            const int fixS = churchByChunk(world.strongholdChunk, QStringLiteral("stronghold"), 1);
-            const int fixC = churchByChunk(world.cityChunk, QStringLiteral("Ancient City"), 2);
-            QVector<int> autoOrder;                                // for the automatic choice — without the buildings that were marked for a point
-            for (int bi : order) if (!basements[bi].forced) autoOrder.append(bi);
-            LairPlace pl1, pl2;
-            bool done = false;
-            if (sS >= 0 && sC >= 0 && (fixS >= 0 || fixC >= 0) && fixS != fixC)
-            {   // buildings are set for specific structures (by points on the map): the second one (if not set) is chosen automatically
-                if (fixS >= 0 && fixC >= 0)
-                {
-                    if (tryPair(sS, fixS, sC, fixC, pl1, pl2)) { buildShaft(fixS, pl1); buildShaft(fixC, pl2); done = true; }
-                    else
-                    {   // the two points are close (the rectangles of the structures get in each other's way): the stronghold stays where the point is,
-                        // the city goes to the nearest marked building where it does not conflict with it
-                        if (planFor(sS, fixS, nullptr, QPointF(-1e9, -1e9), pl1))
-                        {
-                            buildShaft(fixS, pl1);
-                            done = true;
-                            QVector<int> cityCands;
-                            cityCands.append(fixC);
-                            for (int bi : order) if (basements[bi].forced == 2 && bi != fixC) cityCands.append(bi);
-                            bool cityOk = false;
-                            for (int bi : cityCands)
-                                if (bi != fixS && planFor(sC, bi, &pl1, QPointF(pl1.sx, pl1.sz), pl2)) { buildShaft(bi, pl2); cityOk = true; break; }
-                            if (!cityOk) res.lairInfo += QObject::tr("; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other's way");
-                        }
-                    }
-                }
-                else
-                {
-                    for (int k = 0; k < autoOrder.size() && !done; ++k)
-                    {
-                        const int bs_ = fixS >= 0 ? fixS : autoOrder[k];
-                        const int bc_ = fixC >= 0 ? fixC : autoOrder[k];
-                        if (bs_ == bc_) continue;
-                        if (tryPair(sS, bs_, sC, bc_, pl1, pl2)) { buildShaft(bs_, pl1); buildShaft(bc_, pl2); done = true; }
-                    }
-                    if (!done)
-                    {   // there is no suitable second building: we place the chosen structure alone, the other one is left to the fallbacks below
-                        const int fb = fixS >= 0 ? fixS : fixC;
-                        if (planFor(fixS >= 0 ? sS : sC, fb, nullptr, QPointF(-1e9, -1e9), pl1)) { buildShaft(fb, pl1); done = true; }
-                    }
-                }
-                if (!done) res.lairInfo += QObject::tr("; the entrances cannot be placed in the given buildings — choosing automatically");
-            }
-            if (!done && sS >= 0 && sC >= 0 && forced.size() >= 2)
-            {   // two given churches: the stronghold — in the bigger one (if it works out), otherwise vice versa
-                const int bigger = (basements[forced[0]].size >= basements[forced[1]].size) ? forced[0] : forced[1];
-                const int smaller = (bigger == forced[0]) ? forced[1] : forced[0];
-                if (tryPair(sS, bigger, sC, smaller, pl1, pl2)) { buildShaft(bigger, pl1); buildShaft(smaller, pl2); done = true; }
-                else if (tryPair(sS, smaller, sC, bigger, pl1, pl2)) { buildShaft(smaller, pl1); buildShaft(bigger, pl2); done = true; }
-                else res.lairInfo += QObject::tr("; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically");
-            }
-            if (!done)
-            {   // automatically: the biggest by "size"; the stronghold in the biggest of the suitable ones, the city in the next one (together, so as not to interfere)
-                if (sS >= 0 && sC >= 0 && !qEnvironmentVariableIsSet("MCX_CITY_FROM_LAB"))        // debug: the city only through the laboratory
-                {
-                    for (int i = 0; i < autoOrder.size() && !done; ++i)
-                        for (int j = 0; j < autoOrder.size() && !done; ++j)
-                        {
-                            if (i == j) continue;
-                            if (tryPair(sS, autoOrder[i], sC, autoOrder[j], pl1, pl2)) { buildShaft(autoOrder[i], pl1); buildShaft(autoOrder[j], pl2); done = true; }
-                        }
-                }
-                if (!done)
-                {   // at least one structure
-                    bool placedS = false;
-                    for (int bi : autoOrder)
-                        if (sS >= 0 && !placedS && planFor(sS, bi, nullptr, QPointF(-1e9, -1e9), pl1)) { buildShaft(bi, pl1); placedS = true; break; }
-                    if (!placedS) res.lairInfo += QObject::tr("; stronghold — no suitable church was found");
-                }
-            }
-            // FALLBACK for the Ancient City: there is no suitable church — the entrance from the underground laboratory of a research building (the biggest — first), then of a school
-            if (sC >= 0)
-            {
-                bool cityPlaced = false;
-                const LairPlace* strong = nullptr;
-                for (const LairPlace& pp : lairSet.placed) { if (pp.s == sC) cityPlaced = true; else if (pp.s == sS) strong = &pp; }
-                if (!cityPlaced)
-                {
-                    QVector<int> labs;
-                    for (int i = 0; i < basements.size(); ++i) if (basements[i].lab && !deepSpots[i].isEmpty()) labs.append(i);
-                    std::stable_sort(labs.begin(), labs.end(), [&](int a, int b)
-                    {   // research buildings first, schools after them; inside a group — the biggest first
-                        if (basements[a].school != basements[b].school) return !basements[a].school;
-                        return basements[a].size != basements[b].size ? basements[a].size > basements[b].size : basements[a].hx < basements[b].hx;
-                    });
-                    const LairPlace avoidCopy = strong ? *strong : LairPlace();
-                    for (int bi : labs)
-                    {
-                        LairPlace plc;
-                        if (planFor(sC, bi, strong ? &avoidCopy : nullptr, strong ? QPointF(strong->sx, strong->sz) : QPointF(-1e9, -1e9), plc))
-                        {
-                            buildShaft(bi, plc);
-                            cityPlaced = true;
-                            break;
-                        }
-                    }
-                    if (!cityPlaced)
-                        res.lairInfo += QObject::tr("; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)");
-                }
-            }
-        }
-        for (const BasementSite& bs : basements)
-        {
-            if (bs.church || bs.lab) continue;
-            bool ok = true;
-            for (int z = bs.z0 - 1; z <= bs.z1 + 1 && ok; ++z)     // the room + a ring of walls: the ground must be solid down to wy-2
-                for (int x = bs.x0 - 1; x <= bs.x1 + 1; ++x)
-                {
-                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                    if (git == ground.constEnd()) { ok = false; break; }
-                    const int tp = git->top[(z & 15) * 16 + (x & 15)];
-                    if (tp < bs.wy - (bs.church ? 3 : 2) || git->wd[(z & 15) * 16 + (x & 15)] > 0) { ok = false; break; }
-                }
-            if (!ok) continue;
-            if (bs.church)
-                for (int z = bs.z0; z <= bs.z1; ++z)
-                    for (int x = bs.x0; x <= bs.x1; ++x)
-                        store.erase(x, bs.wy - 2, z);                       // the bottom row of the church's double floor slab — into the room
-            for (int z = bs.z0; z <= bs.z1; ++z)
-                for (int x = bs.x0; x <= bs.x1; ++x)
-                {
-                    auto git = ground.find(pairKey(x >> 4, z >> 4));
-                    git->top[(z & 15) * 16 + (x & 15)] = qint16(bs.wy - 5);
-                    store.set(x, bs.wy - 4, z, cobbleB);                    // the basement floor
-                }
-            store.erase(bs.hx, bs.wy - 1, bs.hz);                           // an opening in the house floor
-            for (int y = bs.wy - 3; y <= bs.wy - 2; ++y)
-                store.set(bs.hx, y, bs.hz, IdLadderS);                      // facing south: the holder — north
-            store.set(bs.x0, bs.wy - 3, bs.z1, IdLanternStanding);          // light in two corners by the far wall
-            store.set(bs.x1, bs.wy - 3, bs.z1, IdLanternStanding);
-            // a 3×3 carpet on top of the hatch (the center — the hatch cell): we put it on free cells of the house floor; the hatch itself — always
-            {
-                const quint32 hcar = colHash(pairKey(bs.hx, bs.hz) ^ 0xCA7ull);
-                const quint16 carpet = quint16(int(IdCarpetBase) + int(hcar % quint32(kCarpetsCount)));
-                for (int dz = -1; dz <= 1; ++dz)
-                    for (int dx = -1; dx <= 1; ++dx)
-                    {
-                        const int x = bs.hx + dx, z = bs.hz + dz;
-                        const bool center = (dx == 0 && dz == 0);
-                        if (store.get(x, bs.wy, z) != IdAir) continue;                       // occupied by furniture/a block
-                        if (!center && store.get(x, bs.wy - 1, z) == IdAir) continue;       // no floor under the carpet
-                        store.set(x, bs.wy, z, carpet);
-                    }
-                // The hatch: while it is covered with a carpet (the carpet on the hatch cell always lands — it is free by the search condition), in 30% of cases
-                // we put an ordinary wooden one (opens by hand, no lever is needed); otherwise an iron one + a lever on the ceiling next to
-                // the ladder (powers the hatch through the floor block). A hatch not covered with a carpet is always iron.
-                const bool covered = (store.get(bs.hx, bs.wy, bs.hz) >= IdCarpetBase
-                                      && store.get(bs.hx, bs.wy, bs.hz) < IdCarpetBase + kCarpetsCount);
-                const bool woodHatch = covered && (colHash(pairKey(bs.hx, bs.hz) ^ 0x7A9Dull) % 100u) < 30u;
-                store.set(bs.hx, bs.wy - 1, bs.hz, woodHatch ? IdOakTrapdoor : IdIronTrapdoor);   // flush with the floor
-                if (!woodHatch)
-                    store.set(bs.hx - 1, bs.wy - 2, bs.hz, IdLeverCeil);
-            }
-            const quint32 hc = colHash(pairKey(bs.cx, bs.cz) ^ 0xBA5E1ull);
-            if (bs.content == 0)
-            {
-                const int tbl = bs.church ? pickChestLoot(hc >> 3, 20, 30)    // church: 20% everyday, 30% medium, 50% expensive
-                                          : pickChestLoot(hc >> 3, 30, 35);   // house: 30% everyday, 35% medium, 35% expensive
-                store.set(bs.x1, bs.wy - 3, bs.z0 + 1, IdChest);            // a chest in the corner by the east wall
-                chests.append(ChestSite{ bs.x1, bs.wy - 3, bs.z0 + 1, tbl });
-                if (tbl >= kLootT1)
-                {   // the expensive chest is guarded by 2–3 mobs next to it (the nearest free cells of the room)
-                    QVector<QPoint> near;
-                    for (int z = bs.z0; z <= bs.z1; ++z)
-                        for (int x = bs.x0; x <= bs.x1; ++x)
-                        {
-                            if ((x == bs.hx && z == bs.hz) || (x == bs.x1 && z == bs.z0 + 1)) continue;
-                            if (z == bs.z1 && (x == bs.x0 || x == bs.x1)) continue;     // lanterns
-                            near.append(QPoint(x, z));
-                        }
-                    std::sort(near.begin(), near.end(), [&](const QPoint& p, const QPoint& q)
-                    {
-                        const int dp = std::abs(p.x() - bs.x1) + std::abs(p.y() - (bs.z0 + 1));
-                        const int dq = std::abs(q.x() - bs.x1) + std::abs(q.y() - (bs.z0 + 1));
-                        return dp != dq ? dp < dq : (p.y() != q.y() ? p.y() < q.y() : p.x() < q.x());
-                    });
-                    const int nGuard = std::min(int(near.size()), 2 + int((hc >> 6) % 2u));
-                    for (int i = 0; i < nGuard; ++i)
-                    {
-                        NpcSite m;
-                        m.kind = 4; m.variant = bs.mobType; m.x = near[i].x(); m.z = near[i].y(); m.y = bs.wy - 3;
-                        m.yaw = int((hc >> (16 + i)) % 4u) * 90;
-                        npcs.append(m);
-                    }
-                }
-            }
-            else
-            {
-                QVector<QPoint> cells;                                      // the room cells, except the descent and lanterns
-                for (int z = bs.z0; z <= bs.z1; ++z)
-                    for (int x = bs.x0; x <= bs.x1; ++x)
-                    {
-                        if ((x == bs.hx && z == bs.hz) || (z == bs.z1 && (x == bs.x0 || x == bs.x1))) continue;
-                        cells.append(QPoint(x, z));
-                    }
-                const int area = (bs.x1 - bs.x0 + 1) * (bs.z1 - bs.z0 + 1);
-                const int n = std::min(int(cells.size()), 3 + int((hc >> 4) % 3u) + (area >= 20 ? 2 : 1));   // 4..7 mobs
-                const int st = int((hc >> 9) % quint32(std::max(1, int(cells.size()))));
-                auto gcdI = [](int p, int q) { while (q) { const int r = p % q; p = q; q = r; } return p; };
-                int stp = 1;                                                // the step is coprime with the number of cells — mobs do not coincide
-                for (int cand : { 5, 3, 7, 2, 4 })
-                    if (!cells.isEmpty() && gcdI(cand, int(cells.size())) == 1) { stp = cand; break; }
-                for (int i = 0; i < n; ++i)
-                {
-                    const QPoint c = cells[(st + i * stp) % cells.size()];
-                    NpcSite m;
-                    m.kind = 4; m.variant = bs.mobType;
-                    m.x = c.x(); m.z = c.y(); m.y = bs.wy - 3;
-                    m.yaw = int((hc >> (13 + i)) % 4u) * 90;
-                    npcs.append(m);
-                }
-            }
-        }
-    }
-
+    buildVillages();
     lap("before 3.575");
     buildPointObjects();
     lap("before 3.59");
