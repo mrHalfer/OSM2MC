@@ -1,9 +1,9 @@
 # tMC — developer guide
 
 For the user documentation (features, the window, how to use the program) see [README.md](README.md) / [README.ru.md](README.ru.md).
-This file is for those who build, test or change tMC. It is in English only. Users do not need it: they download a release, unpack it and run `tMC.exe`.
+This file is for those who build, test or change tMC. It is in English only. Users do not need it: they download a release, unpack it and run `OSMC.exe`.
 
-tMC is a standalone Windows program (Qt 5.15.2 / MSVC, qmake, GDAL 3.4). Source strings in the code are English; the Russian translation is a Qt `.ts` file.
+OSMC is a standalone Windows program (Qt 5.15.2 / MSVC, qmake, GDAL 3.4). Source strings in the code are English; the Russian translation is a Qt `.ts` file.
 
 ## Data sources
 
@@ -17,19 +17,19 @@ The `.tqt`/folder input is shown in the window only with `--debug`.
 
 ## Building
 
-You need Qt 5.15.2 (MSVC) and Visual Studio with the MSVC x64 toolset. The GDAL headers and the import library `gdal_i.lib` (GDAL 3.4) are in `third_party/gdal`, so nothing else is needed to build. To RUN the program you need the GDAL 3.4 runtime (`gdal304.dll`, its dependencies and the folders `gdal-data`, `projlib`, `gdalplugins`, about 83 MB): download `gdal-runtime-3.4.zip` from the releases and unpack it into `third_party/gdal/bin` (see `third_party/gdal/README.md`). After every build it is copied next to `tMC.exe` automatically, so the program starts right from Qt Creator.
+You need Qt 5.15.2 (MSVC) and Visual Studio with the MSVC x64 toolset. The GDAL headers and the import library `gdal_i.lib` (GDAL 3.4) are in `third_party/gdal`, so nothing else is needed to build. To RUN the program you need the GDAL 3.4 runtime (`gdal304.dll`, its dependencies and the folders `gdal-data`, `projlib`, `gdalplugins`, about 83 MB): download `gdal-runtime-3.4.zip` from the releases and unpack it into `third_party/gdal/bin` (see `third_party/gdal/README.md`). After every build it is copied next to `OSMC.exe` automatically, so the program starts right from Qt Creator.
 
-**A new machine, in short:** install Qt 5.15.2 (the MSVC 2019 64-bit kit), Visual Studio or Build Tools (the "Desktop development with C++" workload) and, for the tests, Python 3 → clone the repository → run `setup.bat` (it checks the tools and downloads the GDAL runtime into `third_party/gdal/bin`) → open `tMC.pro` in Qt Creator and press Run (or run `build.bat`). `build.bat` finds Visual Studio itself (vswhere) and Qt (`C:\Qt\5.15.2\msvc2019_64` or the `qmake` from `PATH`).
+**A new machine, in short:** install Qt 5.15.2 (the MSVC 2019 64-bit kit), Visual Studio or Build Tools (the "Desktop development with C++" workload) and, for the tests, Python 3 → clone the repository → run `setup.bat` (it checks the tools and downloads the GDAL runtime into `third_party/gdal/bin`) → open `osmc.pro` in Qt Creator and press Run (or run `build.bat`). `build.bat` finds Visual Studio itself (vswhere) and Qt (`C:\Qt\5.15.2\msvc2019_64` or the `qmake` from `PATH`).
 
-`build.bat` makes a shadow build (`qmake` + `nmake release`) in `%TMC_BUILD%` (by default `Builds\tMC` next to the `Projects` folder); the result is `%TMC_BUILD%\release\tMC.exe`, the log is `build_nmake.log`.
+`build.bat` makes a shadow build (`qmake` + `nmake release`) in `%TMC_BUILD%` (by default `Builds\tMC` next to the `Projects` folder); the result is `%TMC_BUILD%\release\OSMC.exe`, the log is `build_nmake.log`.
 The paths are set with the environment variables `VCVARS` (vcvarsall.bat), `QTDIR` (default `C:\Qt\5.15.2\msvc2019_64`), `GDAL_DIR` (optional: another GDAL; by default the headers and `gdal_i.lib` from `third_party/gdal` are used), `TMC_BUILD`.
-After linking, `tMC.pro` copies everything from `resources/` next to the exe. If the exe is running, linking fails (LNK1104) — close the program. Add new files to `tMC.pro`.
+After linking, `osmc.pro` copies everything from `resources/` next to the exe. If the exe is running, linking fails (LNK1104) — close the program. Add new files to `osmc.pro`.
 
-The Russian translation of the interface is `translations/tmc_ru.ts` (embedded into the exe by `lrelease`); to refresh it after changing strings run `lupdate tMC.pro -ts translations/tmc_ru.ts`. When you add a user-visible string, keep it English in the code and add its Russian text to the translation.
+The Russian translation of the interface is `translations/osmc_ru.ts` (embedded into the exe by `lrelease`); to refresh it after changing strings run `lupdate osmc.pro -ts translations/osmc_ru.ts`. When you add a user-visible string, keep it English in the code and add its Russian text to the translation.
 
 ### Version
 
-`VERSION` in `tMC.pro` has the form `1.2.YY.MMDDN`: `YY` — the year, `MMDD` — the month and day, `N` — the number of the build of the day (1–9; a same-day hotfix takes the next digit), for example `1.2.26.10281`, `1.2.26.10282`. The last number must stay ≤ 65535 (a Windows limit). Change only that line. After a version change touch `app/exportmeta.cpp` (its timestamp, not its content) before building: the version reaches the code as a `-D` define and nmake does not recompile sources when only defines change.
+`VERSION` in `osmc.pro` has the form `1.2.YY.MMDDN`: `YY` — the year, `MMDD` — the month and day, `N` — the number of the build of the day (1–9; a same-day hotfix takes the next digit), for example `1.2.26.10281`, `1.2.26.10282`. The last number must stay ≤ 65535 (a Windows limit). Change only that line. After a version change touch `app/exportmeta.cpp` (its timestamp, not its content) before building: the version reaches the code as a `-D` define and nmake does not recompile sources when only defines change.
 
 ## Changelog
 
@@ -38,7 +38,7 @@ The Russian translation of the interface is `translations/tmc_ru.ts` (embedded i
 ## Making a release
 
 `make_release.bat` makes a ready-to-run package in one step: it builds the program, runs `windeployqt` (the Qt DLLs and plugins), adds the Visual C++ runtime (app-local), the GDAL runtime from `third_party/gdal/bin`, the structure templates `*.bin`, `default.t3d`, `osm_rules.json`, `heights.csv`, `tmc_buildings.dat`, the README files with their `images/`, `THIRD_PARTY_NOTICES.md` and `LICENSE`,
-then **starts the result with a clean `PATH`** (no Qt, no GDAL) to be sure it works by itself, and packs it into `Builds/tMC/package/tMC-<version>-win64.zip` (the version is the `VERSION` line of `tMC.pro`).
+then **starts the result with a clean `PATH`** (no Qt, no GDAL) to be sure it works by itself, and packs it into `Builds/tMC/package/OSMC-<version>-win64.zip` (the version is the `VERSION` line of `osmc.pro`).
 `third_party/gdal/make_runtime_zip.bat` makes `gdal-runtime-3.4.zip` (the contents of `third_party/gdal/bin`) for the releases page: it is what `setup.bat` downloads (set its address in `setup.bat` or in the variable `GDAL_RUNTIME_URL`).
 Not part of a release: `tests/`, `docs/`, `DEVELOPING.md`, the sources.
 
@@ -47,8 +47,8 @@ Not part of a release: `tests/`, `docs/`, `DEVELOPING.md`, the sources.
 The pictures in `images/` are made by the program itself (a window screenshot without a human):
 
 ```
-tMC.exe --lang en --gui-screenshot images\online_en.png --gui-online "39.2000 51.6600 15; 39.1950 51.6630; 39.2070 51.6630; 39.2090 51.6570; 39.1960 51.6560"
-tMC.exe some.osm --lang en --gui-screenshot images\data_en.png --gui-click "0.5 0.5"
+OSMC.exe --lang en --gui-screenshot images\online_en.png --gui-online "39.2000 51.6600 15; 39.1950 51.6630; 39.2070 51.6630; 39.2090 51.6570; 39.1960 51.6560"
+OSMC.exe some.osm --lang en --gui-screenshot images\data_en.png --gui-click "0.5 0.5"
 ```
 
 Repeat with `--lang ru`. Refresh them when the window changes noticeably.
@@ -61,7 +61,7 @@ A quick check (the OSM classification and the folder mode): `py -3 tests\run_tes
 ## Command line
 
 ```
-tMC [source] [-o|--out world.zip] [--format 26|1.21] [--flat] [--seed N] [--caves 0|1]
+OSMC [source] [-o|--out world.zip] [--format 26|1.21] [--flat] [--seed N] [--caves 0|1]
     [--climate auto|temperate|boreal|tundra|steppe|mediterranean|desert|savanna|tropical]
     [--clip "lon lat; lon lat; ..."] [--spawn-lonlat "lon lat"]
     [--stronghold "x z"] [--city "x z"] [--pale "x z"] [--no-locate-datapack]
@@ -70,7 +70,7 @@ tMC [source] [-o|--out world.zip] [--format 26|1.21] [--flat] [--seed N] [--cave
     [--lang auto|en|ru] [--theme auto|light|dark] [--debug] [--log log.txt] [--nogui]
 ```
 
-`tMC --help` lists everything (including the `--gui-*` options for tests). Notes:
+`OSMC --help` lists everything (including the `--gui-*` options for tests). Notes:
 
 - `source` is a `.tqt` file, an OSM extract or a folder (default — the current folder). Without arguments the window opens.
 - `--nogui` runs the export without a window; the exit code is 0 on success. The program is a GUI application, so redirected console output may be empty — use `--log`.
@@ -79,7 +79,7 @@ tMC [source] [-o|--out world.zip] [--format 26|1.21] [--flat] [--seed N] [--cave
 - `--dry-run` only loads and classifies the data (a summary "code × count" goes to the log) — handy for tuning the OSM rules.
 - 3D settings are chosen in this order: `--t3d`, any `.t3d` in the shapefile folder, `Wdf3D=` of the `.tqt` project, `default.t3d` next to the exe.
 - The **datapack for finding structures** (on by default; `--no-locate-datapack` turns it off) adds structure sets so that `/locate` and the Eye of Ender find the stronghold, the Ancient City, trial chambers and ruined portals. The structures themselves are written into the chunks and do not depend on it. The price: the game warns about experimental features when opening such a world.
-- Example: `tMC city.osm.pbf --osm-rules osm_rules.json --nogui --log run.log`.
+- Example: `OSMC city.osm.pbf --osm-rules osm_rules.json --nogui --log run.log`.
 
 ## OpenStreetMap rules
 
@@ -106,13 +106,13 @@ The online mode follows the OpenStreetMap policies: map tiles are cached on disk
 
 ## Project files
 
-*Save project…* / *Open project…* store a piece of work in a `.tmc` JSON file: the map view, the boundary, the spawn and entrance marks (in longitude/latitude, independent of the data projection), the OSM file if the data was loaded from one, and the world options. `tMC project.tmc` opens it at start.
+*Save project…* / *Open project…* store a piece of work in a `.tmc` JSON file: the map view, the boundary, the spawn and entrance marks (in longitude/latitude, independent of the data projection), the OSM file if the data was loaded from one, and the world options. `OSMC project.tmc` opens it at start.
 
 ## Source layout
 
 | Folder | Purpose |
 |---|---|
-| `app/` | `main.cpp` (the command line), `mainwindow.*` and `mainwindow.ui` (the window; edit the layout in Qt Designer), `mappreview.*` (the preview of loaded data), `osmtilemap.*` and `osmonlinepanel.*` (the online map, search, boundary, download), `httpclient.*` (WinHTTP client), `osmdownload.*` (OSM download), `i18n.*` (interface language), `theme.*` + `resources/tmc.qss` (light/dark theme), `tmcrun.*` (the whole export cycle shared by the window and the command line) |
+| `app/` | `main.cpp` (the command line), `mainwindow.*` and `mainwindow.ui` (the window; edit the layout in Qt Designer), `mappreview.*` (the preview of loaded data), `osmtilemap.*` and `osmonlinepanel.*` (the online map, search, boundary, download), `httpclient.*` (WinHTTP client), `osmdownload.*` (OSM download), `i18n.*` (interface language), `theme.*` + `resources/osmc.qss` (light/dark theme), `tmcrun.*` (the whole export cycle shared by the window and the command line) |
 | `input/` | `tmcproject.*` — loading a `.tqt`, a shapefile folder or an OSM extract through OGR, reprojection; `t3dsettings.*` — parsing `.t3d` |
 | `osm/` | `tmcosmrules.*` — the "OSM tags → layer/code" rules; `tmcenhancer.*` — the building enhancer; `tmcrel.*` — building heights; `tmcaddress.*` — addresses; `tmcgreen.cpp` — vegetation top-up |
 | `scene/` | `mcscene.*` — collecting the export objects by layers; `modelbuilder.*` — the mesh builder of objects |

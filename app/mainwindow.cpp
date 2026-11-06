@@ -176,7 +176,7 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
     {   // a project file was given as the source (a double click / the command line): the window opens it
         const QString pf = mInit.source;
         ui->sourceEdit->clear();
-        QTimer::singleShot(0, this, [this, pf]() { QString err; readProject(pf, &err); if (!err.isEmpty()) QMessageBox::warning(this, tr("tMC"), err); });
+        QTimer::singleShot(0, this, [this, pf]() { QString err; readProject(pf, &err); if (!err.isEmpty()) QMessageBox::warning(this, tr("OSMC"), err); });
     }
     setOnlineMode(ui->sourceEdit->text().trimmed().isEmpty());
     if (!ui->sourceEdit->text().trimmed().isEmpty() && QFileInfo::exists(ui->sourceEdit->text().trimmed()))
@@ -378,11 +378,11 @@ TmcRunOptions MainWindow::collect() const
 
 void MainWindow::browseProject()
 {
-    // without a chosen source the dialog opens in Documents\tMC (the folder is created on the first click)
+    // without a chosen source the dialog opens in Documents\OSMC (the folder is created on the first click)
     QString start = ui->sourceEdit->text();
     if (start.isEmpty())
     {
-        start = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(QStringLiteral("tMC"));
+        start = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(QStringLiteral("OSMC"));
         QDir().mkpath(start);
     }
     const QString f = mDebug
@@ -484,9 +484,9 @@ void MainWindow::onFinished()
     ui->progressBar->setValue(r.ok ? 100 : 0);
     mFinalState = r.ok ? 1 : (r.cancelled ? 2 : 3);
     updateStageLabel();
-    if (r.ok) showTextDialog(tr("tMC"), r.summary, r.outPath);
-    else if (r.cancelled) QMessageBox::information(this, tr("tMC"), tr("Export cancelled."));
-    else showTextDialog(tr("tMC"), r.error);
+    if (r.ok) showTextDialog(tr("OSMC"), r.summary, r.outPath);
+    else if (r.cancelled) QMessageBox::information(this, tr("OSMC"), tr("Export cancelled."));
+    else showTextDialog(tr("OSMC"), r.error);
 }
 
 void MainWindow::showTextDialog(const QString& title, const QString& text, const QString& file)
@@ -684,7 +684,7 @@ bool MainWindow::readProject(const QString& path, QString* error)
     if (!f.open(QIODevice::ReadOnly)) { *error = tr("Could not open the file: %1").arg(QDir::toNativeSeparators(path)); return false; }
     QJsonParseError pe;
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
-    if (!doc.isObject() || !doc.object().contains(QStringLiteral("tmcProject"))) { *error = tr("This is not a tMC project file: %1").arg(QDir::toNativeSeparators(path)); return false; }
+    if (!doc.isObject() || !doc.object().contains(QStringLiteral("tmcProject"))) { *error = tr("This is not an OSMC project file: %1").arg(QDir::toNativeSeparators(path)); return false; }
     const QJsonObject root = doc.object();
     auto pt = [](const QJsonValue& v, QPointF* out) { const QJsonArray a = v.toArray(); if (a.size() != 2) return false; *out = QPointF(a[0].toDouble(), a[1].toDouble()); return true; };
     // the world options
@@ -733,20 +733,20 @@ void MainWindow::saveProjectFile()
 {
     const QString dir = defaultOutputDir();
     QDir().mkpath(dir);
-    QString f = QFileDialog::getSaveFileName(this, tr("Save the project"), QDir(dir).filePath(QStringLiteral("project.tmc")), tr("tMC project (*.tmc);;All files (*)"));
+    QString f = QFileDialog::getSaveFileName(this, tr("Save the project"), QDir(dir).filePath(QStringLiteral("project.tmc")), tr("OSMC project (*.tmc);;All files (*)"));
     if (f.isEmpty()) return;
     if (QFileInfo(f).suffix().isEmpty()) f += QStringLiteral(".tmc");
-    if (!writeProject(f)) QMessageBox::warning(this, tr("tMC"), tr("Could not write the file: %1").arg(QDir::toNativeSeparators(f)));
+    if (!writeProject(f)) QMessageBox::warning(this, tr("OSMC"), tr("Could not write the file: %1").arg(QDir::toNativeSeparators(f)));
 }
 
 void MainWindow::openProjectFile()
 {
     if (mBusy) return;
-    const QString f = QFileDialog::getOpenFileName(this, tr("Open a project"), defaultOutputDir(), tr("tMC project (*.tmc);;All files (*)"));
+    const QString f = QFileDialog::getOpenFileName(this, tr("Open a project"), defaultOutputDir(), tr("OSMC project (*.tmc);;All files (*)"));
     if (f.isEmpty()) return;
     QString err;
     const bool ok = readProject(f, &err);
-    if (!err.isEmpty()) QMessageBox::warning(this, tr("tMC"), err);
+    if (!err.isEmpty()) QMessageBox::warning(this, tr("OSMC"), err);
     if (!ok) return;
 }
 
@@ -844,12 +844,12 @@ void MainWindow::retranslate()
     updateStageLabel();
 }
 
-//! Where to put the downloaded data: the folder of the chosen world file, otherwise "Documents\tMC"
+//! Where to put the downloaded data: the folder of the chosen world file, otherwise "Documents\OSMC"
 QString MainWindow::defaultOutputDir() const
 {
     const QString out = ui->outEdit->text().trimmed();
     if (!out.isEmpty()) return QFileInfo(out).absolutePath();
-    return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/tMC");
+    return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/OSMC");
 }
 
 //! Online: on the right the OSM map with search and boundary, on the left only the world file choice and the parameters; local: the usual data preview
@@ -955,7 +955,7 @@ void MainWindow::closeEvent(QCloseEvent* e)
 {
     if (mBusy)
     {
-        if (QMessageBox::question(this, tr("tMC"), tr("An export is running. Cancel it and quit?")) != QMessageBox::Yes) { e->ignore(); return; }
+        if (QMessageBox::question(this, tr("OSMC"), tr("An export is running. Cancel it and quit?")) != QMessageBox::Yes) { e->ignore(); return; }
         if (mCancelFlag) *mCancelFlag = true;
         mWatcher->waitForFinished();
     }

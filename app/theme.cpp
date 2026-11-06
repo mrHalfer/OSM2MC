@@ -98,7 +98,7 @@ void apply(QApplication& app, Mode mode)
     pal.setColor(QPalette::Disabled, QPalette::ButtonText, t.muted);
     app.setPalette(pal);
 
-    QFile f(QStringLiteral(":/style/tmc.qss"));
+    QFile f(QStringLiteral(":/style/osmc.qss"));
     if (f.open(QIODevice::ReadOnly))
     {
         QString css = QString::fromUtf8(f.readAll());

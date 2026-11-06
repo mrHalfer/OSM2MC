@@ -1,4 +1,4 @@
-# tMC — a standalone Minecraft exporter: reads a tqt project (.tqt), shapefiles from a folder or an OpenStreetMap extract, builds a model from the .t3d settings and writes a Minecraft world (zip).
+# OSMC — a standalone Minecraft exporter: reads a tqt project (.tqt), shapefiles from a folder or an OpenStreetMap extract, builds a model from the .t3d settings and writes a Minecraft world (zip).
 #
 # Layout:
 #   app/        window, command line, the full export cycle
@@ -9,7 +9,7 @@
 #   core/       base classes: object, layer, height matrix
 #   resources/  icon, default settings, OSM rules, height table, enhancer, *.bin templates
 TEMPLATE = app
-TARGET = tMC
+TARGET = OSMC
 
 DEPENDPATH += .
 INCLUDEPATH += .
@@ -25,7 +25,7 @@ LIBS += winhttp.lib
 
 QT += core gui widgets concurrent
 
-RC_ICONS = $$PWD/resources/tMC.ico
+RC_ICONS = $$PWD/resources/osmc.ico
 RC_LANG = 0x0419
 
 # Sources are UTF-8 without BOM: without this flag MSVC reads non-ASCII characters in string literals using the system code page
@@ -37,7 +37,7 @@ QMAKE_CFLAGS += /utf-8
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
     QMAKE_TARGET_COMPANY = "Denis Rakhmatullin (mrHalfer)"
-    QMAKE_TARGET_PRODUCT = "tMC"
+    QMAKE_TARGET_PRODUCT = "OSMC"
     QMAKE_TARGET_DESCRIPTION = "Minecraft world exporter"
     QMAKE_TARGET_COPYRIGHT = "Copyright (c) 2026 Denis Rakhmatullin (mrHalfer)"
 }
@@ -79,6 +79,7 @@ HEADERS += \
     export/rails.h \
     export/sites.h \
     export/voxelize.h \
+    export/exportrun.h \
     export/mcworldexporter.h \
     export/format/bytes.h \
     export/format/nbtwriter.h \
@@ -92,15 +93,15 @@ HEADERS += \
 FORMS += \
     app/mainwindow.ui
 
-# Translations: the source strings are English; tmc_ru.ts is the Russian translation, tmc_zh.ts is the Chinese one. lrelease compiles them and embed_translations puts the .qm into the executable (:/i18n/tmc_ru.qm, :/i18n/tmc_zh.qm).
-# Update the .ts files with: lupdate tMC.pro
-TRANSLATIONS += translations/tmc_ru.ts \
-    translations/tmc_zh.ts
+# Translations: the source strings are English; osmc_ru.ts is the Russian translation, osmc_zh.ts is the Chinese one. lrelease compiles them and embed_translations puts the .qm into the executable (:/i18n/osmc_ru.qm, :/i18n/osmc_zh.qm).
+# Update the .ts files with: lupdate osmc.pro
+TRANSLATIONS += translations/osmc_ru.ts \
+    translations/osmc_zh.ts
 CONFIG += lrelease embed_translations
 QM_FILES_RESOURCE_PREFIX = /i18n
 
 RESOURCES += \
-    resources/tmc.qrc
+    resources/osmc.qrc
 
 SOURCES += \
     app/main.cpp \
@@ -137,10 +138,11 @@ SOURCES += \
     export/rails.cpp \
     export/sites.cpp \
     export/voxelize.cpp \
+    export/exportrun.cpp \
     export/format/bytes.cpp \
     core/heightraster.cpp
 
-# Copy the resources next to tMC.exe after every build: default settings, OSM rules, height table, enhancer, *.bin templates.
+# Copy the resources next to OSMC.exe after every build: default settings, OSM rules, height table, enhancer, *.bin templates.
 # The program looks for them next to the exe, so nothing has to be copied by hand. Missing files (for example the enhancer) are skipped.
 CONFIG(debug, debug|release): TMC_OUTDIR = $$OUT_PWD/debug
 else: TMC_OUTDIR = $$OUT_PWD/release

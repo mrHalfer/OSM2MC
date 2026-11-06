@@ -211,7 +211,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             }
         }
         if (b.src.vs.colorMode == ModelColorMode::ByClassifier)
-            out.warnings << QObject::tr("Layer '%1': coloring by a classifier is not supported in tMC — the default color is used").arg(s.layer);
+            out.warnings << QObject::tr("Layer '%1': coloring by a classifier is not supported in OSMC — the default color is used").arg(s.layer);
         bound << b;
     }
     if (bound.isEmpty())

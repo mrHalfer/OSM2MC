@@ -15,8 +15,8 @@ void applyLanguage(const QString& lang)
 {
     if (g_translator) { QCoreApplication::removeTranslator(g_translator); delete g_translator; g_translator = nullptr; }
     QString resource;                                                         // English is the source language: nothing to load
-    if (lang == QLatin1String("ru")) resource = QStringLiteral(":/i18n/tmc_ru.qm");
-    else if (lang == QLatin1String("zh")) resource = QStringLiteral(":/i18n/tmc_zh.qm");
+    if (lang == QLatin1String("ru")) resource = QStringLiteral(":/i18n/osmc_ru.qm");
+    else if (lang == QLatin1String("zh")) resource = QStringLiteral(":/i18n/osmc_zh.qm");
     else return;
     auto* tr = new QTranslator(QCoreApplication::instance());
     if (tr->load(resource)) { g_translator = tr; QCoreApplication::installTranslator(tr); }

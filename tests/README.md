@@ -17,13 +17,13 @@ tests\
   local_config.json   optional, not in the repository: machine paths (QT_BIN, GDAL_BIN, TMC_EXE, JAVA, TMC_TEST_SHP)
 ```
 
-The tests run `tMC.exe` with `--lang en`, so the log messages they match are the English ones.
+The tests run `OSMC.exe` with `--lang en`, so the log messages they match are the English ones.
 
 ## Stages of `run_tests.py`
 
 | stage | what it does | time |
 |---|---|---|
-| `osm` | a synthetic OSM (`data/gen_osm_test.py`: 28 buildings with expected codes, roads, rails, parking lots, sites, a square) is built through `tMC.exe` by the working rules `osm_rules.json`; it checks the code of every building (pass 1: tags, POI, plots; pass 2: neighbors and area), the object count and codes in the other layers, no extra "buildings", the fallback Pale Garden; then the same data in 1.21.x and in a superflat world | ~15 s |
+| `osm` | a synthetic OSM (`data/gen_osm_test.py`: 28 buildings with expected codes, roads, rails, parking lots, sites, a square) is built through `OSMC.exe` by the working rules `osm_rules.json`; it checks the code of every building (pass 1: tags, POI, plots; pass 2: neighbors and area), the object count and codes in the other layers, no extra "buildings", the fallback Pale Garden; then the same data in 1.21.x and in a superflat world | ~15 s |
 | `shp` | the "folder with shapefiles" mode (the directory is set by `TMC_TEST_SHP`), `default.t3d`, the result by categories. No data — SKIP | ~10 s |
 | `harness` | building the harness from `mcworldexporter.cpp` of the tMC root, 6 worlds `mc_test*.zip`, the full `verify_mc_export.py` (we expect `RESULT PASS`) | ~10-20 min |
 | `servers` | real servers 26.3 and 1.21.11 open the tMC worlds (`server_check.py`) and the harness noise worlds (`smoke_mc.py`) | ~10 min |
@@ -32,7 +32,7 @@ A quick cycle while editing the OSM rules: `py -3 run_tests.py osm`. Before hand
 
 ## Requirements
 
-- A built `tMC.exe` (`build.bat` in the root); the path is the `TMC_EXE` variable, a `local_config.json` key, or `tMC.exe` from `PATH`.
+- A built `OSMC.exe` (`build.bat` in the root); the path is the `TMC_EXE` variable, a `local_config.json` key, or `OSMC.exe` from `PATH`.
 - Qt and GDAL directories with DLLs: `QT_BIN`, `GDAL_BIN` (environment variables or `local_config.json`); they are added to the `PATH` of the programs that are started.
 - Java for the servers: `JAVA` (a variable or `local_config.json`), otherwise `java` from `PATH`.
 - The Minecraft servers (`server.jar`) are not in the repository: put them into `servers\mc26` and `servers\mc121` (the Mojang EULA).

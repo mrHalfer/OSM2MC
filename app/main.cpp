@@ -63,7 +63,7 @@ int main(int argc, char* argv[])
     qSetGlobalQHashSeed(0);
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("EL-MODS MEDIA"));
-    QCoreApplication::setApplicationName(QStringLiteral("tMC"));
+    QCoreApplication::setApplicationName(QStringLiteral("OSMC"));
     QCoreApplication::setApplicationVersion(QStringLiteral("1.0"));
     setupGdalEnvironment();
     {   // the language must be known before any message is built: look for --lang in the raw arguments
@@ -74,7 +74,7 @@ int main(int argc, char* argv[])
     }
 
     QCommandLineParser p;
-    p.setApplicationDescription(QObject::tr("tMC — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world."));
+    p.setApplicationDescription(QObject::tr("OSMC — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world."));
     p.setSingleDashWordOptionMode(QCommandLineParser::ParseAsLongOptions);      // "-debug" as well as "--debug"
     p.addHelpOption();
     p.addVersionOption();

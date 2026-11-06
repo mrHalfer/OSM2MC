@@ -1,15 +1,15 @@
 # Third-party components
 
-tMC itself is under the MIT license (`LICENSE`, Copyright (c) 2026 Denis Rakhmatullin (mrHalfer)). A release package also contains the components below; each keeps its own license.
+OSMC itself is under the MIT license (`LICENSE`, Copyright (c) 2026 Denis Rakhmatullin (mrHalfer)). A release package also contains the components below; each keeps its own license.
 This list is made in good faith from what the package contains; the license texts of the libraries are those of their projects, check them before redistributing a modified package.
 
 ## Qt 5.15 (LGPL v3)
 
-tMC uses Qt Core, Gui, Widgets, Concurrent (and the SVG module, the `platforms`, `styles`, `imageformats`, `iconengines` plugins loaded by the Qt DLLs).
+OSMC uses Qt Core, Gui, Widgets, Concurrent (and the SVG module, the `platforms`, `styles`, `imageformats`, `iconengines` plugins loaded by the Qt DLLs).
 Qt is used under the **GNU LGPL v3** (https://www.qt.io/licensing, https://www.gnu.org/licenses/lgpl-3.0.html).
-- Qt is linked **dynamically**: the Qt DLLs lie next to `tMC.exe` as separate files and can be replaced by another build of the same Qt version (5.15.x, MSVC 64-bit) — nothing of Qt is built into `tMC.exe`.
-- The Qt source code is available from https://download.qt.io (Qt 5.15.2); the sources of tMC are in this repository, so the program can be relinked with a modified Qt.
-- Qt is a trademark of The Qt Company; tMC is not affiliated with it.
+- Qt is linked **dynamically**: the Qt DLLs lie next to `OSMC.exe` as separate files and can be replaced by another build of the same Qt version (5.15.x, MSVC 64-bit) — nothing of Qt is built into `OSMC.exe`.
+- The Qt source code is available from https://download.qt.io (Qt 5.15.2); the sources of OSMC are in this repository, so the program can be relinked with a modified Qt.
+- Qt is a trademark of The Qt Company; OSMC is not affiliated with it.
 
 ## The GDAL runtime (the DLLs in `third_party/gdal/bin` and in the release `gdal-runtime-3.4`)
 
@@ -30,7 +30,7 @@ Qt is used under the **GNU LGPL v3** (https://www.qt.io/licensing, https://www.g
 | FreeXL (`freexl.dll`) | MPL 1.1 / GPL 2 / LGPL 2.1 (tri-license) |
 | OGDI (`ogdi.dll`) | BSD-like (OGDI license) |
 | libpq (`LIBPQ.dll`) | PostgreSQL license |
-| libmysql (`libmysql.dll`) | GPL 2 with the FLOSS exception of MySQL (it is a dependency of the GDAL build and is loaded by it, tMC itself does not call MySQL) |
+| libmysql (`libmysql.dll`) | GPL 2 with the FLOSS exception of MySQL (it is a dependency of the GDAL build and is loaded by it, OSMC itself does not call MySQL) |
 
 ## Microsoft Visual C++ runtime
 
@@ -41,4 +41,4 @@ Qt is used under the **GNU LGPL v3** (https://www.qt.io/licensing, https://www.g
 - **OpenStreetMap** data (downloaded online or taken from an extract): **Open Database License (ODbL) 1.0**, © OpenStreetMap contributors (https://www.openstreetmap.org/copyright). A world exported from OSM data is a derived database: when you publish it (a server, a download), keep the attribution "Map data © OpenStreetMap contributors (ODbL)" and the share-alike conditions of the ODbL. The exported zip contains the file `ATTRIBUTION.txt` with this line.
 - Map tiles shown in the online mode are provided by the OpenStreetMap Foundation under its tile usage policy.
 
-Minecraft is a trademark of Mojang AB; tMC is not affiliated with Mojang or Microsoft. The structure templates (`*.bin`) were cut out of a game world.
+Minecraft is a trademark of Mojang AB; OSMC is not affiliated with Mojang or Microsoft. The structure templates (`*.bin`) were cut out of a game world.

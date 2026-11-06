@@ -1,14 +1,14 @@
-# tMC — your world in Minecraft
+# OSMC — your world in Minecraft
 
 **English** · [Русский](README.ru.md)
 
-With just a few clicks, tMC turns a real map into a **Minecraft Java Edition** world, so you can walk through your own hometown, block by block. It works right out of the box: no extra dependencies, nothing to install.
+With just a few clicks, OSMC turns a real map into a **Minecraft Java Edition** world, so you can walk through your own hometown, block by block. It works right out of the box: no extra dependencies, nothing to install.
 
 ![The online map and the export boundary](images/online_en.png)
 
 ## Quick start
 
-1. Download the release and run `tMC.exe`. On the right you will find the online OpenStreetMap map with a search box that understands any place name in any language.
+1. Download the release and run `OSMC.exe`. On the right you will find the online OpenStreetMap map with a search box that understands any place name in any language.
 2. Press **Boundary** and outline the area you want with a polygon, up to **25 km²** (its size is shown in the corner of the map).
 3. Optionally, mark the **Spawn** point and the entrances to the **Stronghold**, the **Ancient City** and the **Pale Garden**.
 4. Press **Download the area**: the data is fetched from the OpenStreetMap servers and opens right in the window.
@@ -47,7 +47,7 @@ While the export runs, the log shows its progress; **Cancel** stops it. Only wha
 
 ## Gallery
 
-Pictures of a world made by tMC (click a preview to open the full size).
+Pictures of a world made by OSMC (click a preview to open the full size).
 
 <table>
 <tr><td align="center" width="33%"><a href="images/shots/01_library.jpg"><img src="images/shots/thumbs/01_library.jpg" width="100%" alt="A library with bookshelves and reading tables"></a><br><sub>A library with bookshelves and reading tables</sub></td><td align="center" width="33%"><a href="images/shots/02_classroom.jpg"><img src="images/shots/thumbs/02_classroom.jpg" width="100%" alt="A classroom: desks and a blackboard"></a><br><sub>A classroom: desks and a blackboard</sub></td><td align="center" width="33%"><a href="images/shots/03_park.jpg"><img src="images/shots/thumbs/03_park.jpg" width="100%" alt="A park with a lake and an avenue"></a><br><sub>A park with a lake and an avenue</sub></td></tr>
@@ -62,7 +62,7 @@ Pictures of a world made by tMC (click a preview to open the full size).
 ## Tips
 
 - Start with a small area (1–2 km²): an export takes minutes, while a big area takes much longer and needs more memory.
-- The result depends on how well the area is mapped in OpenStreetMap: heights, floors and building types appear only where mappers entered them; where they are missing, tMC estimates them.
+- The result depends on how well the area is mapped in OpenStreetMap: heights, floors and building types appear only where mappers entered them; where they are missing, OSMC estimates them.
 - If you publish a world made from OpenStreetMap data (a server, a download), keep the attribution - see *License and data*.
 
 ## Command line (pro mode)
@@ -70,17 +70,17 @@ Pictures of a world made by tMC (click a preview to open the full size).
 For scripts there is a mode without a window:
 
 ```
-tMC source.osm -o world.zip --nogui --log run.log
+osmc.exe source.osm -o world.zip --nogui --log run.log
 ```
 
 Main options: `--format 26|1.21`, `--flat`, `--seed N`, `--caves 0|1`, `--climate auto|temperate|boreal|tundra|steppe|mediterranean|desert|savanna|tropical|monsoon|semi-arid|rainforest|dark-forest`,
 `--clip "lon lat; lon lat; ..."` (export only this polygon), `--spawn-lonlat "lon lat"`, `--lang auto|en|ru`, `--theme auto|light|dark`,
-`--download-osm "lon lat; ..." -o area.osm` (download an area of up to 25 km² and exit), `--dry-run` (only load and classify the data). `tMC --help` lists everything.
+`--download-osm "lon lat; ..." -o area.osm` (download an area of up to 25 km² and exit), `--dry-run` (only load and classify the data). `OSMC --help` lists everything.
 A `.tmc` project file passed as the argument opens in the window.
 
 ## Tuning (for true gurus)
 
-These files lie next to `tMC.exe` and can be edited with any text editor:
+These files lie next to `OSMC.exe` and can be edited with any text editor:
 
 - **`osm_rules.json`** - which OpenStreetMap tags make which kind of object; the format is described inside the file (the `_help` section).
 - **`default.t3d`** - the 3D settings: materials, heights, the look of object types.
@@ -89,12 +89,12 @@ These files lie next to `tMC.exe` and can be edited with any text editor:
 
 ## License and data
 
-tMC is free software under the **MIT license** (`LICENSE`); the third-party components shipped with it are listed in `THIRD_PARTY_NOTICES.md`.
+OSMC is free software under the **MIT license** (`LICENSE`); the third-party components shipped with it are listed in `THIRD_PARTY_NOTICES.md`.
 
 Map data © **OpenStreetMap contributors**, under the Open Database License (ODbL) - https://www.openstreetmap.org/copyright.
 **A world made from OSM data is a derived database: when you publish it (a server, a download), keep the attribution "Map data © OpenStreetMap contributors (ODbL)" and follow the ODbL.** The exported zip contains the file `ATTRIBUTION.txt` with this line.
 The online mode follows the OpenStreetMap usage policies: tiles are cached, searches go out at most once per second. Please do not abuse the public servers.
 
-Minecraft is a trademark of Mojang AB; tMC is not affiliated with Mojang or Microsoft. The structure templates were cut out of a game world.
+Minecraft is a trademark of Mojang AB; OSMC is not affiliated with Mojang or Microsoft. The structure templates were cut out of a game world.
 
 Source code, issues and releases: https://github.com/mrHalfer/OSM2MC. How to build the program: [DEVELOPING.md](DEVELOPING.md).
