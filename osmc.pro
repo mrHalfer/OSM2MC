@@ -9,7 +9,7 @@
 #   core/       base classes: object, layer, height matrix
 #   resources/  icon, default settings, OSM rules, height table, enhancer, *.bin templates
 TEMPLATE = app
-TARGET = OSMC
+TARGET = osmc
 
 DEPENDPATH += .
 INCLUDEPATH += .
@@ -142,7 +142,7 @@ SOURCES += \
     export/format/bytes.cpp \
     core/heightraster.cpp
 
-# Copy the resources next to OSMC.exe after every build: default settings, OSM rules, height table, enhancer, *.bin templates.
+# Copy the resources next to osmc.exe after every build: default settings, OSM rules, height table, enhancer, *.bin templates.
 # The program looks for them next to the exe, so nothing has to be copied by hand. Missing files (for example the enhancer) are skipped.
 CONFIG(debug, debug|release): TMC_OUTDIR = $$OUT_PWD/debug
 else: TMC_OUTDIR = $$OUT_PWD/release

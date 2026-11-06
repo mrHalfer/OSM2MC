@@ -8,7 +8,7 @@ With just a few clicks, OSMC turns a real map into a **Minecraft Java Edition** 
 
 ## Quick start
 
-1. Download the release and run `OSMC.exe`. On the right you will find the online OpenStreetMap map with a search box that understands any place name in any language.
+1. Download the release and run `osmc.exe`. On the right you will find the online OpenStreetMap map with a search box that understands any place name in any language.
 2. Press **Boundary** and outline the area you want with a polygon, up to **25 km²** (its size is shown in the corner of the map).
 3. Optionally, mark the **Spawn** point and the entrances to the **Stronghold**, the **Ancient City** and the **Pale Garden**.
 4. Press **Download the area**: the data is fetched from the OpenStreetMap servers and opens right in the window.
@@ -80,7 +80,7 @@ A `.tmc` project file passed as the argument opens in the window.
 
 ## Tuning (for true gurus)
 
-These files lie next to `OSMC.exe` and can be edited with any text editor:
+These files lie next to `osmc.exe` and can be edited with any text editor:
 
 - **`osm_rules.json`** - which OpenStreetMap tags make which kind of object; the format is described inside the file (the `_help` section).
 - **`default.t3d`** - the 3D settings: materials, heights, the look of object types.

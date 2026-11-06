@@ -8,7 +8,7 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ### Changed
 
-- The executable is renamed to `OSMC.exe` (the program is OSMC); the application/settings name is
+- The executable is renamed to `osmc.exe` (the program is OSMC); the application/settings name is
   OSMC too, so the first launch starts with the default settings. The `.tmc` project format is unchanged.
   The project file `osmc.pro`, the icon `osmc.ico` and the translations `osmc_ru.ts`/`osmc_zh.ts`
   are renamed as well.

@@ -1,7 +1,7 @@
-# tMC — developer guide
+# OSMC — developer guide
 
 For the user documentation (features, the window, how to use the program) see [README.md](README.md) / [README.ru.md](README.ru.md).
-This file is for those who build, test or change tMC. It is in English only. Users do not need it: they download a release, unpack it and run `OSMC.exe`.
+This file is for those who build, test or change OSMC. It is in English only. Users do not need it: they download a release, unpack it and run `osmc.exe`.
 
 OSMC is a standalone Windows program (Qt 5.15.2 / MSVC, qmake, GDAL 3.4). Source strings in the code are English; the Russian translation is a Qt `.ts` file.
 
@@ -12,16 +12,16 @@ Besides OpenStreetMap extracts (`.osm`, `.pbf`, `.osm.pbf`) and the area drawn o
 - a **`.tqt` project** (layers `Shape=`, `Rastr=`, `Wkt`, `SpatialFilter`, 3D settings `Wdf3D=`);
 - a **folder with shapefiles** (all `*.shp` and height matrices `*.tif/*.tiff` in the folder; every shapefile needs a `.prj`).
 
-The project CRS is the `Wkt` line of the `.tqt`, otherwise the `.prj` of the first layer; for WGS84 data — EPSG:3395 (or `DefaultCrs=` from `tMC.ini`/`TQT.ini` next to the exe).
+The project CRS is the `Wkt` line of the `.tqt`, otherwise the `.prj` of the first layer; for WGS84 data — EPSG:3395 (or `DefaultCrs=` from `osmc.ini`/`TQT.ini` next to the exe).
 The `.tqt`/folder input is shown in the window only with `--debug`.
 
 ## Building
 
-You need Qt 5.15.2 (MSVC) and Visual Studio with the MSVC x64 toolset. The GDAL headers and the import library `gdal_i.lib` (GDAL 3.4) are in `third_party/gdal`, so nothing else is needed to build. To RUN the program you need the GDAL 3.4 runtime (`gdal304.dll`, its dependencies and the folders `gdal-data`, `projlib`, `gdalplugins`, about 83 MB): download `gdal-runtime-3.4.zip` from the releases and unpack it into `third_party/gdal/bin` (see `third_party/gdal/README.md`). After every build it is copied next to `OSMC.exe` automatically, so the program starts right from Qt Creator.
+You need Qt 5.15.2 (MSVC) and Visual Studio with the MSVC x64 toolset. The GDAL headers and the import library `gdal_i.lib` (GDAL 3.4) are in `third_party/gdal`, so nothing else is needed to build. To RUN the program you need the GDAL 3.4 runtime (`gdal304.dll`, its dependencies and the folders `gdal-data`, `projlib`, `gdalplugins`, about 83 MB): download `gdal-runtime-3.4.zip` from the releases and unpack it into `third_party/gdal/bin` (see `third_party/gdal/README.md`). After every build it is copied next to `osmc.exe` automatically, so the program starts right from Qt Creator.
 
 **A new machine, in short:** install Qt 5.15.2 (the MSVC 2019 64-bit kit), Visual Studio or Build Tools (the "Desktop development with C++" workload) and, for the tests, Python 3 → clone the repository → run `setup.bat` (it checks the tools and downloads the GDAL runtime into `third_party/gdal/bin`) → open `osmc.pro` in Qt Creator and press Run (or run `build.bat`). `build.bat` finds Visual Studio itself (vswhere) and Qt (`C:\Qt\5.15.2\msvc2019_64` or the `qmake` from `PATH`).
 
-`build.bat` makes a shadow build (`qmake` + `nmake release`) in `%TMC_BUILD%` (by default `Builds\tMC` next to the `Projects` folder); the result is `%TMC_BUILD%\release\OSMC.exe`, the log is `build_nmake.log`.
+`build.bat` makes a shadow build (`qmake` + `nmake release`) in `%TMC_BUILD%` (by default `Builds\tMC` next to the `Projects` folder); the result is `%TMC_BUILD%\release\osmc.exe`, the log is `build_nmake.log`.
 The paths are set with the environment variables `VCVARS` (vcvarsall.bat), `QTDIR` (default `C:\Qt\5.15.2\msvc2019_64`), `GDAL_DIR` (optional: another GDAL; by default the headers and `gdal_i.lib` from `third_party/gdal` are used), `TMC_BUILD`.
 After linking, `osmc.pro` copies everything from `resources/` next to the exe. If the exe is running, linking fails (LNK1104) — close the program. Add new files to `osmc.pro`.
 
@@ -47,8 +47,8 @@ Not part of a release: `tests/`, `docs/`, `DEVELOPING.md`, the sources.
 The pictures in `images/` are made by the program itself (a window screenshot without a human):
 
 ```
-OSMC.exe --lang en --gui-screenshot images\online_en.png --gui-online "39.2000 51.6600 15; 39.1950 51.6630; 39.2070 51.6630; 39.2090 51.6570; 39.1960 51.6560"
-OSMC.exe some.osm --lang en --gui-screenshot images\data_en.png --gui-click "0.5 0.5"
+osmc.exe --lang en --gui-screenshot images\online_en.png --gui-online "39.2000 51.6600 15; 39.1950 51.6630; 39.2070 51.6630; 39.2090 51.6570; 39.1960 51.6560"
+osmc.exe some.osm --lang en --gui-screenshot images\data_en.png --gui-click "0.5 0.5"
 ```
 
 Repeat with `--lang ru`. Refresh them when the window changes noticeably.

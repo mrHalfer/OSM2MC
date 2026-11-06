@@ -27,11 +27,11 @@ QString suffixOf(const QString& layerName)
     return layerName.section(QLatin1Char('.'), -1).toLower();
 }
 
-//! Default projection for WGS84 data: the DefaultCrs= line from tMC.ini next to the exe (tqt's TQT.ini works too), otherwise World Mercator
+//! Default projection for WGS84 data: the DefaultCrs= line from osmc.ini next to the exe (tqt's TQT.ini works too), otherwise World Mercator
 QString defaultCrsText()
 {
     QString value;
-    for (const char* name : { "/tMC.ini", "/TQT.ini" })
+    for (const char* name : { "/osmc.ini", "/tMC.ini", "/TQT.ini" })
     {
         QFile f(QCoreApplication::applicationDirPath() + QLatin1String(name));
         if (!f.open(QIODevice::ReadOnly)) continue;
@@ -338,7 +338,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
     if (bn.endsWith(QLatin1String(".osm"), Qt::CaseInsensitive)) bn.chop(4);
     mBaseName = bn;
 
-    // project projection: OSM data in WGS84 -> the default projection (DefaultCrs from tMC.ini, otherwise EPSG:3395)
+    // project projection: OSM data in WGS84 -> the default projection (DefaultCrs from osmc.ini, otherwise EPSG:3395)
     {
         std::unique_ptr<OGRSpatialReference> def(new OGRSpatialReference);
         if (def->SetFromUserInput(defaultCrsText().toUtf8().constData()) != OGRERR_NONE)

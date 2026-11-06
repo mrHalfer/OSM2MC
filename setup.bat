@@ -3,7 +3,7 @@ setlocal
 rem One-step preparation of a new machine for tMC (run it once after cloning):
 rem   1) checks the tools (Visual Studio C++, Qt 5.15.2 MSVC, Python) and says what is missing;
 rem   2) downloads the GDAL 3.4 runtime (about 83 MB) into third_party\gdal\bin if it is not there yet.
-rem Then open osmc.pro in Qt Creator (or run build.bat). The runtime is copied next to OSMC.exe after every build.
+rem Then open osmc.pro in Qt Creator (or run build.bat). The runtime is copied next to osmc.exe after every build.
 rem The download address can be changed with the variable GDAL_RUNTIME_URL.
 cd /d "%~dp0"
 if not defined GDAL_RUNTIME_URL set "GDAL_RUNTIME_URL=https://github.com/mrHalfer/OSM2MC/releases/download/gdal-runtime-3.4/gdal-runtime-3.4.zip"
@@ -38,5 +38,5 @@ if errorlevel 1 (
 )
 :done
 echo.
-echo Next: open osmc.pro in Qt Creator and press Run, or run build.bat ^(the result is Builds\tMC\release\OSMC.exe^).
+echo Next: open osmc.pro in Qt Creator and press Run, or run build.bat ^(the result is Builds\tMC\release\osmc.exe^).
 endlocal

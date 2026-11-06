@@ -7,7 +7,7 @@ This list is made in good faith from what the package contains; the license text
 
 OSMC uses Qt Core, Gui, Widgets, Concurrent (and the SVG module, the `platforms`, `styles`, `imageformats`, `iconengines` plugins loaded by the Qt DLLs).
 Qt is used under the **GNU LGPL v3** (https://www.qt.io/licensing, https://www.gnu.org/licenses/lgpl-3.0.html).
-- Qt is linked **dynamically**: the Qt DLLs lie next to `OSMC.exe` as separate files and can be replaced by another build of the same Qt version (5.15.x, MSVC 64-bit) — nothing of Qt is built into `OSMC.exe`.
+- Qt is linked **dynamically**: the Qt DLLs lie next to `osmc.exe` as separate files and can be replaced by another build of the same Qt version (5.15.x, MSVC 64-bit) — nothing of Qt is built into `osmc.exe`.
 - The Qt source code is available from https://download.qt.io (Qt 5.15.2); the sources of OSMC are in this repository, so the program can be relinked with a modified Qt.
 - Qt is a trademark of The Qt Company; OSMC is not affiliated with it.
 

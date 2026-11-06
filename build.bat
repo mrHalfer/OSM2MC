@@ -5,7 +5,7 @@ rem   VCVARS     path to vcvarsall.bat of Visual Studio
 rem   QTDIR      Qt 5.15.2 MSVC kit, default C:\Qt\5.15.2\msvc2019_64
 rem   GDAL_DIR   another GDAL folder with include and lib (by default third_party\gdal of the project is used, see osmc.pro)
 rem   TMC_BUILD  build folder, default is Builds\tMC next to the Projects folder
-rem Result: %TMC_BUILD%\release\OSMC.exe, log: %TMC_BUILD%\build_nmake.log
+rem Result: %TMC_BUILD%\release\osmc.exe, log: %TMC_BUILD%\build_nmake.log
 rem Visual Studio with the MSVC x64 toolset is found with vswhere (any edition/version); the Qt kit — C:\Qt\5.15.2\msvc2019_64 or the qmake that is in PATH
 if not defined VCVARS call :findvs
 if not defined VCVARS set "VCVARS=C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat"
