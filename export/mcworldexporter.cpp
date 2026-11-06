@@ -59,6 +59,5 @@ McWorldExporter::Result McWorldExporter::Export(const QVector<McObject>& objects
                                                 const ProgressFn& progress,
                                                 const WorldOptions& world)
 {
-    ExportRun run(objectsIn, heightAt, path, levelName, cancel, format, progress, world);
-    return run.run();
+    return exportWorld(objectsIn, heightAt, path, levelName, cancel, format, progress, world);
 }

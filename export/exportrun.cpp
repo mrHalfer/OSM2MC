@@ -58,202 +58,41 @@
 using Result = McWorldExporter::Result;
 using McObject = McWorldExporter::McObject;
 using Format = McWorldExporter::Format;
-ExportRun::ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
-                     const McWorldExporter::HeightSampler& heightAt_,
-                     const QString& path_,
-                     const QString& levelName_,
-                     const std::atomic_bool* cancel_,
-                     McWorldExporter::Format format_,
-                     const McWorldExporter::ProgressFn& progress_,
-                     const McWorldExporter::WorldOptions& world_)
-    : objectsIn(objectsIn_), heightAt(heightAt_), path(path_), levelName(levelName_),
-      cancel(cancel_), format(format_), progress(progress_), world(world_)
+
+// Everything the export needs: the call parameters and the shared state of the
+// stages (promoted from the run() locals); stage methods are added step by step.
+class ExportRun
 {
-}
+public:
+    ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
+              const McWorldExporter::HeightSampler& heightAt_,
+              const QString& path_,
+              const QString& levelName_,
+              const std::atomic_bool* cancel_,
+              McWorldExporter::Format format_,
+              const McWorldExporter::ProgressFn& progress_,
+              const McWorldExporter::WorldOptions& world_);
 
-McWorldExporter::Result ExportRun::run()
-{
-    Result res;
-    const bool legacy = (format == Format::Legacy121x);
+    // Builds the world; returns the result (the former McWorldExporter::Export body).
+    McWorldExporter::Result run();
 
-    // Caves (a user request): we fill the underground of all generated chunks with "casts" from
-    // the game world (cave_templates.bin from extract_caves.py). The loading is here — to fail at once,
-    // before the expensive voxelization; an empty cavesFile — we look for the file next to the exe.
-    // A FLAT WORLD — NO CAVES AT ALL (the user's decision): there is no terrain and no seed there, the underground
-    // is our "analytic" fill, and game-generated caves are not needed in a superflat
-    // (they only bit through the crust under objects — "bad" columns). Caves live only in noise.
-    CaveSet caveSet;
-    QString cavesUsed;
-    if (world.caves && world.normalSurroundings)
-    {
-        QString cavesPath = world.cavesFile;
-        if (cavesPath.isEmpty())
-        {
-            cavesPath = QCoreApplication::applicationDirPath() + QStringLiteral("/cave_templates.bin");
-            if (!QFile::exists(cavesPath))
-                cavesPath = QStringLiteral("cave_templates.bin");   // dev builds/tooling: we look in the cwd
-        }
-        QString cavesErr;
-        cavesUsed = cavesPath;
-        if (!caveSet.load(cavesPath, world.seed, &cavesErr))
-        {
-            res.error = cavesErr;
-            return res;
-        }
-    }
-    // The secret passages of churches to the stronghold and the Ancient City (lair_structures.bin; no file — the feature is simply off).
-    LairSet lairSet;
-    if (!caveSet.empty())
-    {
-        // we look next to the caves file (it is certainly found), next to the exe and in the current folder
-        QString lairPath;
-        const QStringList lairDirs = { QFileInfo(cavesUsed).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() };
-        for (const QString& dir : lairDirs)
-            if (QFile::exists(dir + QStringLiteral("/lair_structures.bin"))) { lairPath = dir + QStringLiteral("/lair_structures.bin"); break; }
-        if (lairPath.isEmpty())
-            res.lairInfo = QObject::tr("lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)").arg(lairDirs.join(QStringLiteral(", ")));
-        else if (!lairSet.load(lairPath, caveSet))
-        {
-            lairSet = LairSet();
-            res.lairInfo = QObject::tr("lair_structures.bin is damaged");
-        }
-    }
-    else
-        res.lairInfo = QObject::tr("caves must be enabled together with the normal surroundings (a noise world)");
-    QVector<PaleDonor> patchesLoaded;                              // outposts and camps (patch_*.bin next to cave_templates.bin)
-    // The real Pale Garden for the Pale Garden forest (no file — a procedural one)
-    PaleDonor paleDonor;
-    if (!caveSet.empty())
-    {
-        const QStringList paleDirs = { QFileInfo(cavesUsed).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() };
-        for (const QString& dir : paleDirs)
-            if (QFile::exists(dir + QStringLiteral("/pale_garden.bin")))
-            {
-                if (!paleDonor.load(dir + QStringLiteral("/pale_garden.bin"), caveSet)) paleDonor = PaleDonor();
-                break;
-            }
-        for (const QString& dir : paleDirs)
-        {
-            const QStringList pf = QDir(dir).entryList(QStringList() << QStringLiteral("patch_*.bin"), QDir::Files, QDir::Name);
-            if (pf.isEmpty()) continue;
-            for (const QString& fn : pf)
-            {
-                PaleDonor pd;
-                if (pd.load(dir + QLatin1Char('/') + fn, caveSet)) { pd.name = fn; patchesLoaded.append(pd); }
-            }
-            break;
-        }
-    }
+private:
+    const QVector<McWorldExporter::McObject>& objectsIn;
+    const McWorldExporter::HeightSampler& heightAt;
+    const QString& path;
+    const QString& levelName;
+    const std::atomic_bool* cancel;
+    McWorldExporter::Format format;
+    const McWorldExporter::ProgressFn& progress;
+    const McWorldExporter::WorldOptions& world;
 
-    tmcStepLog("export: start");
-    // 1. The extent of all objects (in map world coordinates)
-    double mnx = std::numeric_limits<double>::max(), mxx = -mnx;
-    double mny = mnx, mxy = -mny, mnz = mny, mxz = -mnz;
-    int totalVerts = 0;
-    for (const McObject& o : objectsIn)
-    {
-        totalVerts += o.vertices.size();
-        for (const QVector3D& v : o.vertices)
-        {
-            if (!std::isfinite(v.x()) || !std::isfinite(v.y()) || !std::isfinite(v.z())) continue;
-            mnx = std::min(mnx, double(v.x())); mxx = std::max(mxx, double(v.x()));
-            mny = std::min(mny, double(v.y())); mxy = std::max(mxy, double(v.y()));
-            mnz = std::min(mnz, double(v.z())); mxz = std::max(mxz, double(v.z()));
-        }
-    }
-    if (totalVerts == 0)
-    {
-        res.error = QObject::tr("Nothing to export: all meshes are empty.");
-        return res;
-    }
-
-    VxTransform tf;
-    tf.cx0 = (mnx + mxx) / 2.0;
-    tf.cy0 = (mny + mxy) / 2.0;
-    tf.yBase = mnz;
-    // Map units -> meters (1 block = 1 m): without this Mercator inflates the horizontal sizes by 1.77 times.
-    tf.sx = (world.unitsToMetersX > 1e-9) ? world.unitsToMetersX : 1.0;
-    tf.sz = (world.unitsToMetersY > 1e-9) ? world.unitsToMetersY : 1.0;
-    const double span = mxz - mnz;
-    if (span > 240.0) tf.zScale = 240.0 / span;   // height compression to fit into 0..255
-
-    // 2. Voxelization of objects — by role (see McObject::Kind):
-    //    Building/Generic — the mesh shell (floor/walls/roof, empty inside);
-    //    Vegetation       — the mesh is NOT voxelized: the polygon "patch" goes to a forest (there is a REL height)
-    //                       or to grass (without it);
-    //    Road/Railway     — of a road/overpass ribbon only the TOP cell of each
-    //                       column remains: a carpet (the nearest to the layer color) or a rail is laid on it;
-    //    Plate (csrpol)   — with a height like Building, but always brick; without a height — the polygon patch
-    //                       into the surface layer of the ground instead of turf (see colWool, step 3);
-    //    Water (hdrpol/hdrlin) — the mesh is not voxelized: the "patch" goes into a pit with water (see colWater,
-    //                       step 3), the depth = area/6, but 3..15 blocks.
-    VoxelStore store;
-    QHash<ColKey, int> colMin;
-    QHash<ColKey, int> colAnchor;     // the original (before the foundation) bottom of closed objects — the ground level by it
-    // loose — the "small" vegetation of OSM data (tMC adds it itself): a yard between houses (code 71126190, trees like vgbpol but denser) and
-    // forced taiga in the private sector (code 71111111, spruces at any area). Such patches are small and narrow, so the forest's own terrain
-    // (fading out at the boundary over 28 blocks) would be almost flat — they are given the terrain of empty lands and are not counted as "occupied" for it.
     struct VegSite { QVector<ColSpan> spans; int treeH; int minX, maxX, minZ, maxZ; bool spruce = false; bool park = false; bool intra = false; bool loose = false; bool dense = false; int code = 0; };
-    QVector<VegSite> forests;
-    QVector<VegSite> grassPale;       // meadow/grass vegetation without height with an allowed code — spare candidates for the Pale Garden (see the Pale Garden forest choice)
-    QHash<ColKey, quint16> colPlant;  // a column -> the lawn plant (the type by the polygon area, see step 2)
     struct ParkSite { QSet<ColKey> cols; QVector<QVector<QPointF>> rings; };   // rdcpol: the patch and the outlines (block coordinates)
-    QVector<ParkSite> parks;
-    QHash<ColKey, quint16> colWool;   // a column -> the wool id (csrpol plates without height — instead of turf)
-    QVector<BasementSite> basements;  // basements of private houses (built after the ground)
-    QVector<LairZone> lairZones;      // raider spawn zones (large industrial-zone lairs)
-    QVector<IslandSite> islandSites;  // floating islands over kindergartens
-    QVector<BannerSite> bannerSites;  // the banners of bandit lairs (outside and inside)
-    QVector<SignCand> signCands;      // candidates for address plates (the side is chosen after the roads)
-    QVector<QPoint> privCenters;      // the centers of private houses (block X/Z) — the basis for "villages"
-    QVector<QRect> privBoxes;         // their extents in blocks (x0, z0, w, h) — for demolishing a house under a square
-    QVector<QList<qint64>> pads;      // csrpol patches without height — we surround them with a wooden fence with gates
-    QVector<char> padIsLake;          // 1 — this is a lake (csrpol 51480000: water + a fence), 0 — an ordinary plate
-    QSet<ColKey> noTreePadCols;       // the columns of apiaries and farms (csrpol 52400000/52100000): we do not plant trees there
-    QVector<int> padCode;             // the CODE of the plate object (53700000/53710000 — sports/children's: we place equipment)
-    // Objects from points on the map (sources with a modelField, e.g. csrpnt/hdtpnt/rdcpnt): a memorial, a monument,
-    // a fountain, a communication tower, a waste bin, a lighting mast, a bench, a sculpture, a bus stop. The anchor is the center of the point's square; the structure
-    // is built in 3.575 on the ready ground; the model number comes from point_models.csv (the code -> model table).
-    // 1 — a memorial statue, 2 — a monument stele, 3 — a fountain, 4 — a communication tower, 5 — a composter.
     enum SpotModel : int { kStatue = 1, kStele = 2, kFountain = 3, kTower = 4, kComposter = 5,
                            kLightPole = 6, kBench = 7, kSculpture = 8, kBusStop = 9 };
     struct SpotSite { int x, z, model; };
-    QVector<SpotSite> spots;
-    // The swamp biome (sources with ModelEffect::Swamp, e.g. mrspol): every column under the layer's polygons.
-    // An OVERLAY, not an object: the vegetation step turns the trees of any forest under the contour into swamp
-    // oaks with vines, plants rare oaks and mushrooms on the open swamp ground, and skips water/roads/structures.
-    QSet<ColKey> swampCols;
-    QSet<ColKey> cemeteryCols;              // csrpol 53510000 (landuse=cemetery): dark oaks, crosses, jack o'lanterns,
-                                            // monster spawns and rare loot chests (the dark forest biome overlay)
-    // Forests under portals to the Nether (vegpol, CODE 71111110/71126000): the patch columns + the area in REAL m².
-    // The frame is placed in 3.57 (the ground and the trees are ready).
     struct PortalForest { QVector<ColSpan> spans; double areaM2; quint32 h; };
-    QVector<PortalForest> portalForests;
     struct ParkCand { int cx, cz; double areaM2; quint32 h; };
-    QVector<ParkCand> parkCands;                                  // parks 71126000: candidates for floating islands
-    QSet<ColKey> roadCols;            // the columns of the roadway (wool in the ground) — we put lamp posts along them
-    QSet<ColKey> autoRoadCols;        // the roadway of MOTOR roads only (paths and bike lines aside) — bus stops face them
-    QSet<ColKey> platformCols;        // rdcpol 62134000 (railway=platform): the paving columns — half-slab in 3.576
-    QSet<ColKey> railColsAll;         // the rail columns - we plant trees (rule 3.51) without running onto the tracks
-    QVector<QVector<QPoint>> subwayTunnels;   // the underground metro (code 61123100): cell chains in block coords,
-                                              //  the tunnels are dug after the ground fill (the surface is needed)
-    QHash<ColKey, quint16> railBedCols;       // electrified surface rails and trams: the ground block under the
-                                              //  track is replaced (stone; stone bricks for trams) - see makeGround
-    QHash<ColKey, int> colWater;      // a column -> the depth of the water pit (hydrography), blocks
-    QSet<ColKey> colWaterArt;         // the columns of artificial reservoirs (all outline corners are right): without a smooth descent, sandy shores and sandy bottom
-    QSet<ColKey> colWaterNat;         // the columns of natural reservoirs (resolving intersections)
-    QVector<ChestSite> chests;        // chests with loot (the positions of already written IdChest blocks)
-    QVector<PaintingSite> paints;     // the paintings of interiors (the motif is in block_entities)
-    QVector<MannequinSite> mannequins;// mall mannequins (armor_stand entities, not blocks)
-    QVector<NpcSite> npcs;            // villagers/traders/llamas (entities)
-    QVector<FrameSite> frames;        // item frames on mall stands (entities)
-    QVector<SpawnerSite> spawners;    // monster spawners (the monster type is in block_entities)
-    QVector<WaterBodyRec> waterBodies;    // water bodies for the aquatic fauna (lakes and areal rivers, filled by the Water branch)
-    // Road priority (a user request): dark gray roadways and their markings are MORE IMPORTANT than the light gray
-    // pedestrian and bike paths, so drawing is moved out of the common loop into passes after it:
-    // 1) all bodies of "the rest"/highways, 2) their markings, 3) only then pedestrian/bike paths
-    // (they occupy the remaining air cells). In the old order a path met earlier in the list
-    // "ate" the highway cells together with the marking lines.
     struct RoadJob
     {
         QHash<ColKey, int> road;      // a roadway cell (with widening) -> Y above the surface
@@ -270,29 +109,8 @@ McWorldExporter::Result ExportRun::run()
         double endR = 0.0;            // the "end" radius: half the road width + a reserve
         int nameId = -1;              // the index in roadNames (TYSTR+STREET from rdslin), -1 — a street without a name
     };
-    QVector<QPair<QString, QString>> roadNames;     // (TYSTR, STREET) of unique streets
-    QHash<QString, int> roadNameIdx;
     struct RoadLine { int obj; int nameId; bool ped; QVector<QPointF> pts; };   // the axis line of a road in block coordinates
-    QVector<RoadLine> roadLines;                    // ped — a pedestrian/bike path (signs only if it has a name)
-    int roadObjCounter = 0;
     struct JuncPt { int x, z, a, b; };
-    QVector<JuncPt> juncPts;                        // real intersections: crossings of the AXIS lines (a,b — nameId or -1)
-    QVector<RoadJob> roadsHigh;       // dark gray roadways + highways (drawn first)
-    QVector<RoadJob> roadsEarth;      // dirt/field/forest roads (podzol) — the lowest priority: motor roads and pedestrian ones do not overlap
-    QVector<RoadJob> roadsLow;        // pedestrian/bike paths (after the roadway, only air)
-    QVector<QVector<QPointF>> crosswalks;   // pedestrian crossings (rdslin CODE 45262000): axes in block coordinates, across the roadway — drawn as a zebra, see "PEDESTRIAN CROSSINGS"
-    int storyCounter = 0;             // the total floors over the city: every 5th one has a treasure (see voxelizeObject)
-    auto colHash = [](qint64 k) -> quint32
-    {
-        const qint32 x = keyFirst(k), z = keySecond(k);
-        quint32 h = quint32(x) * 374761393u + quint32(z) * 668265263u;
-        h = (h ^ (h >> 13)) * 1274126177u;
-        return h ^ (h >> 16);
-    };
-    // Parallel voxelization of buildings: each building is computed in a private store (VoxJob) in
-    // a thread pool, then the results are MERGED into the common store strictly in the original object order —
-    // the outcome does not depend on thread scheduling. The through floor counter (treasures/spawners) in a batch
-    // is handed out by an estimate (the base of each building), after the merge the real total is taken.
     struct VoxJob
     {
         const McObject* o = nullptr;
@@ -317,15 +135,343 @@ McWorldExporter::Result ExportRun::run()
         QVector<LairZone> zones;
         QVector<IslandSite> islands;
     };
-    // Elevator shafts (bldpol, LIFT=1) are built SEPARATELY and after all buildings: only ABOVE the roof of the building they belong to
-    // (the whole part of the shaft below and inside the owner's roof is discarded). Without a building under the shaft — it is built entirely, as before.
     struct LiftJob { const McObject* o; quint16 id; int sink, extra; quint16 structId; bool woodSingle; int privMode; };
+    struct KindTimer { qint64& ns; QElapsedTimer t; KindTimer(qint64& s) : ns(s) { t.start(); } ~KindTimer() { ns += t.nsecsElapsed(); } };
+    struct StationSite { QRect bb; QPoint c; char canopy = 0; };
+    struct PaleCol { int top; qint16 dy; quint8 w; quint16 surf; qint32 di = 0; qint16 pid = -1; };   // pid >= 0 — a patch (outpost/camp), otherwise the Pale Garden donor
+    struct PatchPlace { int pi; int x0, z0; };
+    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; bool jungle; int palmShare; int bigOakShare; };   // palmShare — the percent of palms among the planted trees (0 — none); bigOakShare — the percent of big oaks in broadleaf forests (0 — none)
+    struct RegionData { QVector<QPair<int, int>> order; QHash<ColKey, QByteArray> payload; };
+    struct ChunkBuild { QByteArray nbt; int blocks = 0; double sumX = 0.0, sumZ = 0.0;
+                        qint64 objBlocks = 0; int maxY = -64; };
+    struct TplInst { QString id; int cx, cz; };
+
+    Result res;
+    bool legacy;
+    CaveSet caveSet;
+    QString cavesUsed;
+    LairSet lairSet;
+    QVector<PaleDonor> patchesLoaded;                              // outposts and camps (patch_*.bin next to cave_templates.bin)
+    PaleDonor paleDonor;
+    double mnx, mxx;
+    double mny, mxy, mnz, mxz;
+    int totalVerts;
+    VxTransform tf;
+    double span;
+    VoxelStore store;
+    QHash<ColKey, int> colMin;
+    QHash<ColKey, int> colAnchor;     // the original (before the foundation) bottom of closed objects — the ground level by it
+    QVector<VegSite> forests;
+    QVector<VegSite> grassPale;       // meadow/grass vegetation without height with an allowed code — spare candidates for the Pale Garden (see the Pale Garden forest choice)
+    QHash<ColKey, quint16> colPlant;  // a column -> the lawn plant (the type by the polygon area, see step 2)
+    QVector<ParkSite> parks;
+    QHash<ColKey, quint16> colWool;   // a column -> the wool id (csrpol plates without height — instead of turf)
+    QVector<BasementSite> basements;  // basements of private houses (built after the ground)
+    QVector<LairZone> lairZones;      // raider spawn zones (large industrial-zone lairs)
+    QVector<IslandSite> islandSites;  // floating islands over kindergartens
+    QVector<BannerSite> bannerSites;  // the banners of bandit lairs (outside and inside)
+    QVector<SignCand> signCands;      // candidates for address plates (the side is chosen after the roads)
+    QVector<QPoint> privCenters;      // the centers of private houses (block X/Z) — the basis for "villages"
+    QVector<QRect> privBoxes;         // their extents in blocks (x0, z0, w, h) — for demolishing a house under a square
+    QVector<QList<qint64>> pads;      // csrpol patches without height — we surround them with a wooden fence with gates
+    QVector<char> padIsLake;          // 1 — this is a lake (csrpol 51480000: water + a fence), 0 — an ordinary plate
+    QSet<ColKey> noTreePadCols;       // the columns of apiaries and farms (csrpol 52400000/52100000): we do not plant trees there
+    QVector<int> padCode;             // the CODE of the plate object (53700000/53710000 — sports/children's: we place equipment)
+    QVector<SpotSite> spots;
+    QSet<ColKey> swampCols;
+    QSet<ColKey> cemeteryCols;              // csrpol 53510000 (landuse=cemetery): dark oaks, crosses, jack o'lanterns,
+    QVector<PortalForest> portalForests;
+    QVector<ParkCand> parkCands;                                  // parks 71126000: candidates for floating islands
+    QSet<ColKey> roadCols;            // the columns of the roadway (wool in the ground) — we put lamp posts along them
+    QSet<ColKey> autoRoadCols;        // the roadway of MOTOR roads only (paths and bike lines aside) — bus stops face them
+    QSet<ColKey> platformCols;        // rdcpol 62134000 (railway=platform): the paving columns — half-slab in 3.576
+    QSet<ColKey> railColsAll;         // the rail columns - we plant trees (rule 3.51) without running onto the tracks
+    QVector<QVector<QPoint>> subwayTunnels;   // the underground metro (code 61123100): cell chains in block coords,
+    QHash<ColKey, quint16> railBedCols;       // electrified surface rails and trams: the ground block under the
+    QHash<ColKey, int> colWater;      // a column -> the depth of the water pit (hydrography), blocks
+    QSet<ColKey> colWaterArt;         // the columns of artificial reservoirs (all outline corners are right): without a smooth descent, sandy shores and sandy bottom
+    QSet<ColKey> colWaterNat;         // the columns of natural reservoirs (resolving intersections)
+    QVector<ChestSite> chests;        // chests with loot (the positions of already written IdChest blocks)
+    QVector<PaintingSite> paints;     // the paintings of interiors (the motif is in block_entities)
+    QVector<MannequinSite> mannequins;// mall mannequins (armor_stand entities, not blocks)
+    QVector<NpcSite> npcs;            // villagers/traders/llamas (entities)
+    QVector<FrameSite> frames;        // item frames on mall stands (entities)
+    QVector<SpawnerSite> spawners;    // monster spawners (the monster type is in block_entities)
+    QVector<WaterBodyRec> waterBodies;    // water bodies for the aquatic fauna (lakes and areal rivers, filled by the Water branch)
+    QVector<QPair<QString, QString>> roadNames;     // (TYSTR, STREET) of unique streets
+    QHash<QString, int> roadNameIdx;
+    QVector<RoadLine> roadLines;                    // ped — a pedestrian/bike path (signs only if it has a name)
+    int roadObjCounter;
+    QVector<JuncPt> juncPts;                        // real intersections: crossings of the AXIS lines (a,b — nameId or -1)
+    QVector<RoadJob> roadsHigh;       // dark gray roadways + highways (drawn first)
+    QVector<RoadJob> roadsEarth;      // dirt/field/forest roads (podzol) — the lowest priority: motor roads and pedestrian ones do not overlap
+    QVector<RoadJob> roadsLow;        // pedestrian/bike paths (after the roadway, only air)
+    QVector<QVector<QPointF>> crosswalks;   // pedestrian crossings (rdslin CODE 45262000): axes in block coordinates, across the roadway — drawn as a zebra, see "PEDESTRIAN CROSSINGS"
+    int storyCounter;             // the total floors over the city: every 5th one has a treasure (see voxelizeObject)
     QVector<LiftJob> liftJobs;
     QVector<VoxJob*> pending;
+    qint64 msFlushRun, msFlushMerge, nFlush;
+    QVector<McObject> objectsRaised;                        // implicit data sharing: only the raised buildings are copied
+    QVector<McObject> objects;
+    QVector<int> deepRoleOf;
+    QVector<QList<qint64>> pre;
+    QVector<QVector<ColSpan>> preSpans;           // forest (height >= 2.5) — by segments, we do not store the column list
+    int objDone;
+    int objTotal;
+    qint64 nsByKind[11] = {}, cntByKind[11] = {};                  // debugging (MCX_LOG_STEPS): the time of sequential object preparation by kind
+    QVector<StationSite> stations;
+    QVector<char> stationBuilt;
+    bool logSteps;
+    QHash<ColKey, QVector<FluidSite>> fluidsByChunk;   // water/lava sources of the junction — fluid_ticks by chunks
+    bool hasTerrain;
+    int yShift;   // the "normal world": by how much the whole export is raised (decided after the survey, below);
+    QList<qint64> touchedChunks;
+    QList<qint64> fillChunks;
+    int rcx0, rcz0;
+    int rcx1, rcz1;
+    int rectM;
+    int gSurvey;
+    int gTotal;
+    qint64 vegCells64;
+    int vegCells;
+    int progTotal;               // the "ground" stage has its own scale; later the steps have their own stages (below)
+    int planeCols;
+    QVector<int> planeSamples;
+    int genGroundTop, planeMax;
+    QSet<ColKey> paleCells;
+    QHash<ColKey, QVector<QPoint3>> heartsByChunk;                // creaking hearts -> block_ticks by chunks
+    QHash<ColKey, QVector<QPair<qint16, quint16>>> paleUnder;     // the donor underground cells under the Pale Garden (pits, voids, water near the surface): column -> (y, id)
+    int paleIdx;
+    QSet<ColKey> taigaCells;
+    QHash<ColKey, quint8> biomeCells;
+    QVector<PatchPlace> patchPlaces;
+    QSet<ColKey> patchCols;                                        // patch columns (with a margin of 3) — trees/flora are not planted there
+    QHash<ColKey, QVector<CaveBe>> extraBesByChunk;                // block entities of the patches (outpost chests)
+    QVector<PortalStartSite> portalStarts;                         // ruined portals in forests (structure starts for /locate)
+    QHash<ColKey, QVector<PortalStartSite>> portalsByChunk;        // the same by chunks touched by the frame
+    QHash<ColKey, PaleCol> paleCol;
+    bool paleDonorUsed;
+    int erX0, erZ0, erW, erH;
+    QVector<qint8> emptyDelta;
+    int efx0, efx1, efz0, efz1;            // the exported rectangle of chunks together with the forest chunks
+    int snX0, snZ0, snW, snH;
+    QVector<quint8> sandNear;                                           // 0 — no water nearby
+    bool sandGrid;
+    QSet<ColKey> chunksMin, chunksWool, chunksWater, chunksBed;
+    QHash<ColKey, GroundChunk> ground;
+    int nStations;
+    QSet<ColKey> sprFill;
+    quint16 birchLogRaw;
+    int vegCols;
+    QVector<BellSite> bellSites;
+    QVector<SignSite> signSites;
+    QHash<ColKey, QVector<BannerSite>> bannersByChunk;
+    QHash<ColKey, QVector<LairZone>> zonesByChunk;          // raider spawn zones -> all the chunks they touch
+    QHash<ColKey, QVector<BellSite>> bellsByChunk;
+    QHash<ColKey, QVector<SignSite>> signsByChunk;
+    QHash<ColKey, QVector<quint8>> taperDrop;   // which columns got a chamfer — needed by pass 3.59c
+    QHash<ColKey, RegionData> regions;
+    QList<qint64> writeChunks;
+    QSet<ColKey> writeSet;
+    bool blendBorder;
+    QHash<ColKey, QVector<ChestSite>> chestsByChunk;   // chests by chunks (block_entities — at the chunk level)
+    QHash<ColKey, QVector<PaintingSite>> paintsByChunk;     // paintings — the same block_entities
+    QHash<ColKey, QVector<FrameSite>> frameByChunk;         // frames with items — also entities/r.*.mca
+    QHash<ColKey, QVector<NpcSite>> npcByChunk;             // villagers/traders/llamas — also entities/r.*.mca
+    QHash<ColKey, QVector<MannequinSite>> menByChunk;       // mannequins — entities/r.*.mca (step 4b)
+    QHash<ColKey, QVector<SpawnerSite>> spawnByChunk;       // spawners — their own block_entities
+    int chunkTotal;
+    std::atomic<int> chunkDone;
+    std::atomic_bool buildAbort;
+    QHash<int, QVector<quint16>> noSections;      // ground-only chunks (the apron) — there are no object sections
+    int cores;
+    int nBlocks;
+    int per;
+    QVector<QVector<ChunkBuild>> blockOut;
+    QVector<QFuture<void>> futs;
+    int blockTotal;
+    double objCx, objCz;
+    qint64 objCount, objMaxY;
+    int idx;
+    int spawnX, spawnY, spawnZ;
+    MiniZip zip;
+    QByteArray levelDat;
+    QVector<TplInst> tplInst;
+    QString regionDir;
+    QHash<ColKey, RegionData> eRegions;
+    int regTotal;
+    int packTotal;
+    int regDone;
+    QByteArray zipData;
+};
+
+ExportRun::ExportRun(const QVector<McWorldExporter::McObject>& objectsIn_,
+                     const McWorldExporter::HeightSampler& heightAt_,
+                     const QString& path_,
+                     const QString& levelName_,
+                     const std::atomic_bool* cancel_,
+                     McWorldExporter::Format format_,
+                     const McWorldExporter::ProgressFn& progress_,
+                     const McWorldExporter::WorldOptions& world_)
+    : objectsIn(objectsIn_), heightAt(heightAt_), path(path_), levelName(levelName_),
+      cancel(cancel_), format(format_), progress(progress_), world(world_)
+{
+}
+
+McWorldExporter::Result ExportRun::run()
+{
+    legacy = (format == Format::Legacy121x);
+
+    // Caves (a user request): we fill the underground of all generated chunks with "casts" from
+    // the game world (cave_templates.bin from extract_caves.py). The loading is here — to fail at once,
+    // before the expensive voxelization; an empty cavesFile — we look for the file next to the exe.
+    // A FLAT WORLD — NO CAVES AT ALL (the user's decision): there is no terrain and no seed there, the underground
+    // is our "analytic" fill, and game-generated caves are not needed in a superflat
+    // (they only bit through the crust under objects — "bad" columns). Caves live only in noise.
+    if (world.caves && world.normalSurroundings)
+    {
+        QString cavesPath = world.cavesFile;
+        if (cavesPath.isEmpty())
+        {
+            cavesPath = QCoreApplication::applicationDirPath() + QStringLiteral("/cave_templates.bin");
+            if (!QFile::exists(cavesPath))
+                cavesPath = QStringLiteral("cave_templates.bin");   // dev builds/tooling: we look in the cwd
+        }
+        QString cavesErr;
+        cavesUsed = cavesPath;
+        if (!caveSet.load(cavesPath, world.seed, &cavesErr))
+        {
+            res.error = cavesErr;
+            return res;
+        }
+    }
+    // The secret passages of churches to the stronghold and the Ancient City (lair_structures.bin; no file — the feature is simply off).
+    if (!caveSet.empty())
+    {
+        // we look next to the caves file (it is certainly found), next to the exe and in the current folder
+        QString lairPath;
+        const QStringList lairDirs = { QFileInfo(cavesUsed).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() };
+        for (const QString& dir : lairDirs)
+            if (QFile::exists(dir + QStringLiteral("/lair_structures.bin"))) { lairPath = dir + QStringLiteral("/lair_structures.bin"); break; }
+        if (lairPath.isEmpty())
+            res.lairInfo = QObject::tr("lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)").arg(lairDirs.join(QStringLiteral(", ")));
+        else if (!lairSet.load(lairPath, caveSet))
+        {
+            lairSet = LairSet();
+            res.lairInfo = QObject::tr("lair_structures.bin is damaged");
+        }
+    }
+    else
+        res.lairInfo = QObject::tr("caves must be enabled together with the normal surroundings (a noise world)");
+    // The real Pale Garden for the Pale Garden forest (no file — a procedural one)
+    if (!caveSet.empty())
+    {
+        const QStringList paleDirs = { QFileInfo(cavesUsed).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() };
+        for (const QString& dir : paleDirs)
+            if (QFile::exists(dir + QStringLiteral("/pale_garden.bin")))
+            {
+                if (!paleDonor.load(dir + QStringLiteral("/pale_garden.bin"), caveSet)) paleDonor = PaleDonor();
+                break;
+            }
+        for (const QString& dir : paleDirs)
+        {
+            const QStringList pf = QDir(dir).entryList(QStringList() << QStringLiteral("patch_*.bin"), QDir::Files, QDir::Name);
+            if (pf.isEmpty()) continue;
+            for (const QString& fn : pf)
+            {
+                PaleDonor pd;
+                if (pd.load(dir + QLatin1Char('/') + fn, caveSet)) { pd.name = fn; patchesLoaded.append(pd); }
+            }
+            break;
+        }
+    }
+
+    tmcStepLog("export: start");
+    // 1. The extent of all objects (in map world coordinates)
+    mnx = std::numeric_limits<double>::max();
+    mxx = -mnx;
+    mny = mnx;
+    mxy = -mny;
+    mnz = mny;
+    mxz = -mnz;
+    totalVerts = 0;
+    for (const McObject& o : objectsIn)
+    {
+        totalVerts += o.vertices.size();
+        for (const QVector3D& v : o.vertices)
+        {
+            if (!std::isfinite(v.x()) || !std::isfinite(v.y()) || !std::isfinite(v.z())) continue;
+            mnx = std::min(mnx, double(v.x())); mxx = std::max(mxx, double(v.x()));
+            mny = std::min(mny, double(v.y())); mxy = std::max(mxy, double(v.y()));
+            mnz = std::min(mnz, double(v.z())); mxz = std::max(mxz, double(v.z()));
+        }
+    }
+    if (totalVerts == 0)
+    {
+        res.error = QObject::tr("Nothing to export: all meshes are empty.");
+        return res;
+    }
+
+    tf.cx0 = (mnx + mxx) / 2.0;
+    tf.cy0 = (mny + mxy) / 2.0;
+    tf.yBase = mnz;
+    // Map units -> meters (1 block = 1 m): without this Mercator inflates the horizontal sizes by 1.77 times.
+    tf.sx = (world.unitsToMetersX > 1e-9) ? world.unitsToMetersX : 1.0;
+    tf.sz = (world.unitsToMetersY > 1e-9) ? world.unitsToMetersY : 1.0;
+    span = mxz - mnz;
+    if (span > 240.0) tf.zScale = 240.0 / span;   // height compression to fit into 0..255
+
+    // 2. Voxelization of objects — by role (see McObject::Kind):
+    //    Building/Generic — the mesh shell (floor/walls/roof, empty inside);
+    //    Vegetation       — the mesh is NOT voxelized: the polygon "patch" goes to a forest (there is a REL height)
+    //                       or to grass (without it);
+    //    Road/Railway     — of a road/overpass ribbon only the TOP cell of each
+    //                       column remains: a carpet (the nearest to the layer color) or a rail is laid on it;
+    //    Plate (csrpol)   — with a height like Building, but always brick; without a height — the polygon patch
+    //                       into the surface layer of the ground instead of turf (see colWool, step 3);
+    //    Water (hdrpol/hdrlin) — the mesh is not voxelized: the "patch" goes into a pit with water (see colWater,
+    //                       step 3), the depth = area/6, but 3..15 blocks.
+    // loose — the "small" vegetation of OSM data (tMC adds it itself): a yard between houses (code 71126190, trees like vgbpol but denser) and
+    // forced taiga in the private sector (code 71111111, spruces at any area). Such patches are small and narrow, so the forest's own terrain
+    // (fading out at the boundary over 28 blocks) would be almost flat — they are given the terrain of empty lands and are not counted as "occupied" for it.
+    // Objects from points on the map (sources with a modelField, e.g. csrpnt/hdtpnt/rdcpnt): a memorial, a monument,
+    // a fountain, a communication tower, a waste bin, a lighting mast, a bench, a sculpture, a bus stop. The anchor is the center of the point's square; the structure
+    // is built in 3.575 on the ready ground; the model number comes from point_models.csv (the code -> model table).
+    // 1 — a memorial statue, 2 — a monument stele, 3 — a fountain, 4 — a communication tower, 5 — a composter.
+    // The swamp biome (sources with ModelEffect::Swamp, e.g. mrspol): every column under the layer's polygons.
+    // An OVERLAY, not an object: the vegetation step turns the trees of any forest under the contour into swamp
+    // oaks with vines, plants rare oaks and mushrooms on the open swamp ground, and skips water/roads/structures.
+                                            // monster spawns and rare loot chests (the dark forest biome overlay)
+    // Forests under portals to the Nether (vegpol, CODE 71111110/71126000): the patch columns + the area in REAL m².
+    // The frame is placed in 3.57 (the ground and the trees are ready).
+                                              //  the tunnels are dug after the ground fill (the surface is needed)
+                                              //  track is replaced (stone; stone bricks for trams) - see makeGround
+    // Road priority (a user request): dark gray roadways and their markings are MORE IMPORTANT than the light gray
+    // pedestrian and bike paths, so drawing is moved out of the common loop into passes after it:
+    // 1) all bodies of "the rest"/highways, 2) their markings, 3) only then pedestrian/bike paths
+    // (they occupy the remaining air cells). In the old order a path met earlier in the list
+    // "ate" the highway cells together with the marking lines.
+    roadObjCounter = 0;
+    storyCounter = 0;
+    auto colHash = [](qint64 k) -> quint32
+    {
+        const qint32 x = keyFirst(k), z = keySecond(k);
+        quint32 h = quint32(x) * 374761393u + quint32(z) * 668265263u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        return h ^ (h >> 16);
+    };
+    // Parallel voxelization of buildings: each building is computed in a private store (VoxJob) in
+    // a thread pool, then the results are MERGED into the common store strictly in the original object order —
+    // the outcome does not depend on thread scheduling. The through floor counter (treasures/spawners) in a batch
+    // is handed out by an estimate (the base of each building), after the merge the real total is taken.
+    // Elevator shafts (bldpol, LIFT=1) are built SEPARATELY and after all buildings: only ABOVE the roof of the building they belong to
+    // (the whole part of the shaft below and inside the owner's roof is discarded). Without a building under the shaft — it is built entirely, as before.
     struct PendingGuard { QVector<VoxJob*>& v; ~PendingGuard() { qDeleteAll(v); } } pendingGuard{ pending };
     QThreadPool voxPool;
     voxPool.setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
-    qint64 msFlushRun = 0, msFlushMerge = 0, nFlush = 0;
+    msFlushRun = 0;
+    msFlushMerge = 0;
+    nFlush = 0;
     auto flushJobs = [&]()
     {
         if (pending.isEmpty()) return;
@@ -334,7 +480,7 @@ McWorldExporter::Result ExportRun::run()
         QVector<QFuture<void>> futs;
         futs.reserve(pending.size());
         for (VoxJob* j : pending)
-            futs << QtConcurrent::run(&voxPool, [j, &tf, this]()
+            futs << QtConcurrent::run(&voxPool, [j, this]()
             {
                 j->storyCounter = j->storyBase;
                 VoxelOut vo;
@@ -394,7 +540,7 @@ McWorldExporter::Result ExportRun::run()
     // on large data) — in advance and in parallel: the objects are independent, and the sequential loop below
     // then only lays the ready lists into maps. Memory: the column lists live until the object is processed.
     // Industrial zone and churches: touching buildings of one code (44340000 / 44319000) are glued into complexes (a common outline, floors and partitions)
-    QVector<McObject> objectsRaised = objectsIn;                        // implicit data sharing: only the raised buildings are copied
+    objectsRaised = objectsIn;
     raiseLowBuildingParts(objectsRaised, tf, 7.6);
     for (McObject& o : objectsRaised)
     {   // small building parts (the area of the plan up to ~400 m² or a narrow one): the walls are 1 block thick
@@ -408,11 +554,11 @@ McWorldExporter::Result ExportRun::run()
         const double w = ax1 - ax0, d = az1 - az0;
         o.thin = std::min(w, d) <= 9.0 || w * d <= 400.0;
     }
-    const QVector<McObject> objects = mergeIndustrial(objectsRaised, tf, cancel);
+    objects = mergeIndustrial(objectsRaised, tf, cancel);
     // The points of the stronghold / the Ancient City set by the user (a chunk "x z" or "x y z" as in F3): the dungeon is built under the NEAREST building
     // whatever its code (a few nearest suitable ones are marked, because a small or cramped building may not fit it; the nearest one that worked is used later).
     // The priority of churches and research buildings is only for the case when no point is set.
-    QVector<int> deepRoleOf(objects.size(), 0);
+    deepRoleOf = QVector<int>(objects.size(), 0);
     {
         auto chunkPoint = [](const QString& text, QPointF* pt) -> bool
         {
@@ -479,8 +625,8 @@ McWorldExporter::Result ExportRun::run()
             for (int k = 0; k < sc.size() && k < 3; ++k) deepRoleOf[sc[k].idx] = 3;
         }
     }
-    QVector<QList<qint64>> pre(objects.size());
-    QVector<QVector<ColSpan>> preSpans(objects.size());           // forest (height >= 2.5) — by segments, we do not store the column list
+    pre = QVector<QList<qint64>>(objects.size());
+    preSpans = QVector<QVector<ColSpan>>(objects.size());
     {
         QVector<int> todo;
         for (int i = 0; i < objects.size(); ++i)
@@ -511,16 +657,12 @@ McWorldExporter::Result ExportRun::run()
         for (QFuture<void>& f : fs) f.waitForFinished();
         if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
     }
-    int objDone = 0;
-    const int objTotal = objects.size();
-    qint64 nsByKind[11] = {}, cntByKind[11] = {};                  // debugging (MCX_LOG_STEPS): the time of sequential object preparation by kind
-    struct KindTimer { qint64& ns; QElapsedTimer t; KindTimer(qint64& s) : ns(s) { t.start(); } ~KindTimer() { ns += t.nsecsElapsed(); } };
+    objDone = 0;
+    objTotal = objects.size();
     // Station buildings (CODE 44330000, building=train_station): the outline bbox and the center in block
     // coordinates. Two consumers: the subway straightener inserts a station center into the line's polyline
     // (every line near a station turns at it and passes exactly under it), the "station halls" pass after the
     // subway tunnels digs a decorated underground hall under the building.
-    struct StationSite { QRect bb; QPoint c; char canopy = 0; };
-    QVector<StationSite> stations;
     for (const McObject& q : objects)
     {
         if (q.code != 44330000) continue;
@@ -544,7 +686,7 @@ McWorldExporter::Result ExportRun::run()
                                std::min(x1 - x0 + 1, z1 - z0 + 1) <= 12) };
         stations.append(site);
     }
-    QVector<char> stationBuilt(stations.size(), 0);
+    stationBuilt = QVector<char>(stations.size(), 0);
     for (const McObject& o : objects)
     {
         KindTimer kindTimer(nsByKind[std::min(10, int(o.kind))]);
@@ -1985,7 +2127,7 @@ McWorldExporter::Result ExportRun::run()
     // (needed to find heavy steps on big projects; in the normal mode it prints nothing).
     tmcStepLog("export: object voxelization finished");
     if (qEnvironmentVariableIsSet("MCX_STOP_AFTER_VOX")) { res.ok = true; return res; }   // debug: measure the voxelization without the rest of the export
-    const bool logSteps = qEnvironmentVariableIsSet("MCX_LOG_STEPS");
+    logSteps = qEnvironmentVariableIsSet("MCX_LOG_STEPS");
     QElapsedTimer stepTimer; stepTimer.start();
     // The start of the step of stage st (the stage name — in the window caption, see the tqt 3D window, updateLoadStatus): without a counter
     // (total=0) the caption just shows WHAT is being done now, not the "hanging" percent of the previous step.
@@ -2009,8 +2151,7 @@ McWorldExporter::Result ExportRun::run()
     // ("the ground is pushed through, a hole through the bedrock"). The flat ground level = the median of the heights under the objects
     // (it also goes to the generator so that neighboring chunks join without steps); the terrain above the
     // level is kept as a hill, below it is filled up to the level (no pits remain).
-    QHash<ColKey, QVector<FluidSite>> fluidsByChunk;   // water/lava sources of the junction — fluid_ticks by chunks
-    const bool hasTerrain = bool(heightAt);
+    hasTerrain = bool(heightAt);
     // FALLBACK PALE GARDEN (data without big forests and meadows, e.g. an OSM extract): if there is neither a forest nor a meadow with an allowed code
     // with an area of 2000 columns or more, we allocate an empty 15×15 chunk site nearest to the data (on the export border or in a big void
     // inside it) and declare it a forest with an allowed code — then it is processed as an ordinary Pale Garden (biome, donor, mansion).
@@ -2140,7 +2281,7 @@ McWorldExporter::Result ExportRun::run()
         for (qint64 k : need)
             store.chunks[k];
     }
-    int yShift = 0;   // the "normal world": by how much the whole export is raised (decided after the survey, below);
+    yShift = 0;
                       // the lambda reads it by reference — the height survey goes before the raise, all the late
                       // calls (fill/vegetation) already get the shifted terrain.
     auto terrainTopBlock = [&](int cx, int cz) -> int
@@ -2152,13 +2293,12 @@ McWorldExporter::Result ExportRun::run()
         if (h <= -9998.0) return std::numeric_limits<int>::min();
         return int(std::floor((h - tf.yBase) * tf.zScale + 1.0)) + yShift;
     };
-    QList<qint64> touchedChunks;
     for (auto tcIt = store.chunks.constBegin(); tcIt != store.chunks.constEnd(); ++tcIt) touchedChunks.append(tcIt.key());   // a snapshot: later sections are added to the existing chunks
     // "Full terrain" (user request, only for the "normal world"): if the crust stands only
     // under the object chunks, the city is a small clearing with a cliff along the perimeter. We cover with our
     // ground an apron M chunks thick around the city rectangle (and the empty holes inside it);
     // beyond the apron — the game's noise terrain (the junction is known, smoothing is a separate future task).
-    QList<qint64> fillChunks = touchedChunks;
+    fillChunks = touchedChunks;
     {   // Spots without buildings (csrpol sites, parking lots, greenhouses, quarries): their chunks must get ground too, otherwise a lone site stays without a surface
         QSet<ColKey> have(fillChunks.constBegin(), fillChunks.constEnd());
         auto addCols = [&](const QList<qint64>& cs)
@@ -2185,14 +2325,16 @@ McWorldExporter::Result ExportRun::run()
     // the "flowing out" water/lava (3.59b/c) are needed only on it. The empty places INSIDE the rectangle (where there are no
     // objects and, in a flat world, no chunks with ground either) — are not an edge: the game itself will finish the same
     // flat ground there (in the "normal world" the holes inside the rectangle are filled with our ground anyway).
-    int rcx0 = std::numeric_limits<int>::max(), rcz0 = std::numeric_limits<int>::max();
-    int rcx1 = std::numeric_limits<int>::min(), rcz1 = std::numeric_limits<int>::min();
+    rcx0 = std::numeric_limits<int>::max();
+    rcz0 = std::numeric_limits<int>::max();
+    rcx1 = std::numeric_limits<int>::min();
+    rcz1 = std::numeric_limits<int>::min();
     for (qint64 ckKey : touchedChunks)
     {
         rcx0 = std::min(rcx0, keyFirst(ckKey)); rcz0 = std::min(rcz0, keySecond(ckKey));
         rcx1 = std::max(rcx1, keyFirst(ckKey)); rcz1 = std::max(rcz1, keySecond(ckKey));
     }
-    const int rectM = world.normalSurroundings ? std::max(0, std::min(world.apronChunks, 64)) : 0;
+    rectM = world.normalSurroundings ? std::max(0, std::min(world.apronChunks, 64)) : 0;
     auto inExportRect = [=](int cx, int cz)
     { return cx >= rcx0 - rectM && cx <= rcx1 + rectM && cz >= rcz0 - rectM && cz <= rcz1 + rectM; };
     if (world.normalSurroundings)
@@ -2303,11 +2445,11 @@ McWorldExporter::Result ExportRun::run()
     // "Ground" is the heaviest phase (every column of every filled chunk), so it is also
     // covered by progress: total = height survey (touched chunks) + fill (in the noise mode —
     // touched + the apron).
-    const int gSurvey = int(touchedChunks.size());
-    const int gTotal = gSurvey + int(fillChunks.size());
+    gSurvey = int(touchedChunks.size());
+    gTotal = gSurvey + int(fillChunks.size());
     // Tree planting (3.5) is part of the same stage: we count the 6×6 grid cells over the forest bbox so that the counter
     // "X of N" goes on and does not freeze after the earth fill (the scale is monotonic: ground, then planting).
-    qint64 vegCells64 = 0;
+    vegCells64 = 0;
     for (const VegSite& site : forests)
     {   // the same clamp as in the planting loops: a site wider than the world must not inflate the counter
         const int vgX0 = std::max(site.minX, (rcx0 - rectM) * 16), vgX1 = std::min(site.maxX, (rcx1 + rectM + 1) * 16 - 1);
@@ -2315,10 +2457,9 @@ McWorldExporter::Result ExportRun::run()
         if (vgX1 < vgX0 || vgZ1 < vgZ0) continue;
         vegCells64 += qint64(vgX1 / 6 - vgX0 / 6 + 2) * qint64(vgZ1 / 6 - vgZ0 / 6 + 2);
     }
-    const int vegCells = int(std::min<qint64>(vegCells64, 1000000000));
-    const int progTotal = gTotal;               // the "ground" stage has its own scale; later the steps have their own stages (below)
-    int planeCols = 0;
-    QVector<int> planeSamples;
+    vegCells = int(std::min<qint64>(vegCells64, 1000000000));
+    progTotal = gTotal;
+    planeCols = 0;
     for (qint64 ckKey : touchedChunks)
     {
         if (progress && (planeCols & 0x3F) == 0)
@@ -2345,7 +2486,8 @@ McWorldExporter::Result ExportRun::run()
     // The reference level ("plane"): under buildings without terrain — the median; with terrain — the lower quartile (20%): the terrain is now kept
     // IN FULL (valleys too), and the plane is needed only as a mark for columns without terrain data, for the junction with the generator and for
     // smoothing the apron (otherwise everything below the median was filled up to it and buildings in valleys ended up walled into the ground).
-    int genGroundTop = 0, planeMax = 0;
+    genGroundTop = 0;
+    planeMax = 0;
     if (!planeSamples.isEmpty())
     {
         const int qi = hasTerrain ? planeSamples.size() / 5 : planeSamples.size() / 2;
@@ -2388,10 +2530,7 @@ McWorldExporter::Result ExportRun::run()
     lap("g0 before the Pale Garden");
     // PALE GARDEN: the biggest forest (by the number of columns) becomes a full "Pale Garden" biome — the biome on
     // 4×4 cells along the forest outline, trees of pale oak (a 2×2 trunk, some with a "creaking heart"), moss, "eyeblossom" flowers.
-    QSet<ColKey> paleCells;
-    QHash<ColKey, QVector<QPoint3>> heartsByChunk;                // creaking hearts -> block_ticks by chunks
-    QHash<ColKey, QVector<QPair<qint16, quint16>>> paleUnder;     // the donor underground cells under the Pale Garden (pits, voids, water near the surface): column -> (y, id)
-    int paleIdx = -1;
+    paleIdx = -1;
     {
         qint64 bestArea = 0;
         // a forest set by the user by chunk (WorldOptions::paleForestChunk): the forest nearest to the chunk center; otherwise — the biggest
@@ -2487,14 +2626,12 @@ McWorldExporter::Result ExportRun::run()
         }
     }
     // Spruce forests (71111110, big): the taiga biome cells along the outline
-    QSet<ColKey> taigaCells;
     for (int fi = 0; fi < forests.size(); ++fi)
         if (forests[fi].spruce && fi != paleIdx)
             for (const ColSpan& c : forests[fi].spans)
                 for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
                     taigaCells.insert(pairKey(c.x >> 2, z4));
     // The single biome map (a 4×4 cell -> 1 pale_garden, 2 taiga, 3 forest, 4 birch_forest, 5 dappled_forest); priority: pale > taiga > zones > forest.
-    QHash<ColKey, quint8> biomeCells;
     // Fields: tall grass (>= 50000 m²) — meadow (at the map edge the game will continue the meadow with flowers and tall grass). Wheat fields and ordinary grass — plains (the default biome, the cells are not written).
     for (auto pit = colPlant.constBegin(); pit != colPlant.constEnd(); ++pit)
         if (pit.value() == quint16(IdTallGrass))
@@ -2527,16 +2664,8 @@ McWorldExporter::Result ExportRun::run()
     for (const qint64 ck : cemeteryCols)
         biomeCells.insert(pairKey(keyFirst(ck) >> 2, keySecond(ck) >> 2), quint8(9));
     // Donor: the terrain of the real Pale Garden instead of the forest terrain (smoothly at the border), trees are carried over together with it.
-    struct PaleCol { int top; qint16 dy; quint8 w; quint16 surf; qint32 di = 0; qint16 pid = -1; };   // pid >= 0 — a patch (outpost/camp), otherwise the Pale Garden donor
     QVector<PaleDonor>& patches = patchesLoaded;                   // terrain patches with structures (patch_*.bin)
-    struct PatchPlace { int pi; int x0, z0; };
-    QVector<PatchPlace> patchPlaces;
-    QSet<ColKey> patchCols;                                        // patch columns (with a margin of 3) — trees/flora are not planted there
-    QHash<ColKey, QVector<CaveBe>> extraBesByChunk;                // block entities of the patches (outpost chests)
-    QVector<PortalStartSite> portalStarts;                         // ruined portals in forests (structure starts for /locate)
-    QHash<ColKey, QVector<PortalStartSite>> portalsByChunk;        // the same by chunks touched by the frame
-    QHash<ColKey, PaleCol> paleCol;
-    bool paleDonorUsed = false;
+    paleDonorUsed = false;
     // FLOATING ISLANDS above parks (71126000): above 70% of the suitable parks (area >= 6000 m²) and above every big one (>= 4 ha), not closer than 250 blocks to each other.
     {
         QVector<int> ord;
@@ -2563,8 +2692,10 @@ McWorldExporter::Result ExportRun::run()
     // The column ground top: the terrain as is (valleys are not filled up to the plane); in the apron (beyond the object rectangle) it smoothly (smoothstep)
     // descends to the reference level — otherwise hills at the export edge would break off as a wall into the flat surroundings. No terrain data — the plane.
     // Light terrain of the "empty lands" (clearings, fields, wastelands between blocks): a dense grid of height additions over the export rectangle (filled after forests and patches).
-    int erX0 = 0, erZ0 = 0, erW = 0, erH = 0;
-    QVector<qint8> emptyDelta;
+    erX0 = 0;
+    erZ0 = 0;
+    erW = 0;
+    erH = 0;
     auto addEmpty = [&](int v, int x, int z) -> int
     {
         if (erW == 0) return v;
@@ -2596,7 +2727,10 @@ McWorldExporter::Result ExportRun::run()
     };
     // The distance (blocks) to the border of the exported rectangle of chunks, mapped to 0..1: the donor mountains slowly come down to the user's ground within 64 blocks of the border,
     // otherwise they are cut by a wall where the generated world of the game begins.
-    int efx0 = rcx0, efx1 = rcx1, efz0 = rcz0, efz1 = rcz1;            // the exported rectangle of chunks together with the forest chunks
+    efx0 = rcx0;
+    efx1 = rcx1;
+    efz0 = rcz0;
+    efz1 = rcz1;
     for (const VegSite& vs : forests)
         for (const ColSpan& c : vs.spans)
         {
@@ -3290,9 +3424,11 @@ McWorldExporter::Result ExportRun::run()
     // (~130 per column, ~170 million calls per noise export with an apron) — the main time cost.
     // Sandy shores: the distance (1..2, Chebyshev) from a dry column to the nearest non-artificial water — on a dense grid over the water frame (+2): on big reservoirs
     // 25 hash queries for every land column were the longest step of the fill.
-    int snX0 = 0, snZ0 = 0, snW = 0, snH = 0;
-    QVector<quint8> sandNear;                                           // 0 — no water nearby
-    bool sandGrid = false;
+    snX0 = 0;
+    snZ0 = 0;
+    snW = 0;
+    snH = 0;
+    sandGrid = false;
     if (!colWater.isEmpty() && g_sandId)
     {
         int ax0 = std::numeric_limits<int>::max(), az0 = std::numeric_limits<int>::max(), ax1 = std::numeric_limits<int>::min(), az1 = std::numeric_limits<int>::min();
@@ -3331,7 +3467,6 @@ McWorldExporter::Result ExportRun::run()
     }
     // The chunks that have any building / wool / water columns at all: the ground fill looks into these hashes for each of tens of millions of columns (cache misses are
     // the longest part of the step on big projects), and the overwhelming majority of chunks (forests, fields) are not touched by them.
-    QSet<ColKey> chunksMin, chunksWool, chunksWater, chunksBed;
     {
         auto addChunks = [](QSet<ColKey>& dst, const auto& m)
         {
@@ -3347,7 +3482,6 @@ McWorldExporter::Result ExportRun::run()
         addChunks(chunksWater, colWater);
         addChunks(chunksBed, railBedCols);
     }
-    QHash<ColKey, GroundChunk> ground;
     ground.reserve(int(fillChunks.size()));
     auto makeGround = [&](qint64 ckKey)
     {
@@ -4730,7 +4864,7 @@ McWorldExporter::Result ExportRun::run()
     // Station halls under the station buildings no line passes (digStationHall above): dug on their own, the
     // floor 12 blocks under the surface (the tunnel floor sits 10 under it), the platform without rails -
     // a concert hall/anticipatory station. The decorated interior is the same as at the line stations.
-    int nStations = 0;
+    nStations = 0;
     for (int si = 0; si < stations.size(); ++si)
     {
         if (stationBuilt[si]) { ++nStations; continue; }
@@ -4779,11 +4913,10 @@ McWorldExporter::Result ExportRun::run()
     };
     // Spruce: a spruce_log trunk (2×2 for big ones), bare at the bottom, then needle tiers from top to bottom with a radius from 0 (the top) to R; even tiers are narrower than
     // odd ones — like a real spruce. The needles cover the trunk up to the very top. The crown must not go beyond the chunks with ground.
-    const QSet<ColKey> sprFill(fillChunks.constBegin(), fillChunks.constEnd());
+    sprFill = QSet<ColKey>(fillChunks.constBegin(), fillChunks.constEnd());
     // Tree species by the climate zone: "oak" and "birch" in the planting code are replaced with the trunk+leaves pairs of the zone, the spruce cone — with a big broadleaf tree
     // where there are no conifers; density — the share of plantings that remain (in the desert and tundra trees are rare)
-    struct ZoneTrees { quint16 oakLog, oakLeaf, birchLog, birchLeaf; int density; bool cone; bool jungle; int palmShare; int bigOakShare; };   // palmShare — the percent of palms among the planted trees (0 — none); bigOakShare — the percent of big oaks in broadleaf forests (0 — none)
-    const quint16 birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
+    birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
     ZoneTrees zt{ IdOakLog, IdOakLeaves, birchLogRaw, IdBirchLeaves, 100, true };
     {
         const quint16 aca = quint16(IdPaletteStart + paletteIndexOf("minecraft:acacia_log"));
@@ -5181,7 +5314,7 @@ McWorldExporter::Result ExportRun::run()
                 }
         }
     };
-    int vegCols = 0;
+    vegCols = 0;
     for (int fidx = 0; fidx < forests.size(); ++fidx)
     {
         const VegSite& site = forests[fidx];
@@ -6419,7 +6552,7 @@ McWorldExporter::Result ExportRun::run()
         QVector<int> padOrder(pads.size());
         for (int i = 0; i < pads.size(); ++i) padOrder[i] = i;
         std::stable_sort(padOrder.begin(), padOrder.end(),
-                         [&pads](int a, int b) { return pads[a].size() < pads[b].size(); });
+                         [this](int a, int b) { return pads[a].size() < pads[b].size(); });
         for (int padIdx : padOrder)
         {
             const QList<qint64>& padCols = pads[padIdx];
@@ -7866,7 +7999,6 @@ McWorldExporter::Result ExportRun::run()
     // (clusters on a 128-block grid) we put a square: a bell, a well, work blocks, lanterns, three villagers and a golem.
     // Villages — NOT closer than 1000 blocks to each other; the square is built at a free place near the cluster center,
     // trees and grass on it are cut down (VoxelStore::erase).
-    QVector<BellSite> bellSites;
     beginStep(10);                                                   // "villages, signs, basements"
     if (!privCenters.isEmpty())
     {
@@ -8098,7 +8230,6 @@ McWorldExporter::Result ExportRun::run()
 
     // SIGNS WITH ADDRESSES: one per house, on the side of the nearest road (searching outward up to 24 blocks over road columns);
     // no road nearby — the first suitable side. Line 1 — TYSTR, line 2 — STREET, line 3 — NUMBR+ADDNUM.
-    QVector<SignSite> signSites;
     {
         static const int sdx[4] = { 0, 1, 0, -1 }, sdz[4] = { -1, 0, 1, 0 };
         for (const SignCand& sc : signCands)
@@ -8120,15 +8251,12 @@ McWorldExporter::Result ExportRun::run()
             signSites.append(SignSite{ x, sc.y, z, sc.l1, sc.l2, sc.l3 });
         }
     }
-    QHash<ColKey, QVector<BannerSite>> bannersByChunk;
     for (const BannerSite& bn : bannerSites)
         bannersByChunk[pairKey(bn.x >> 4, bn.z >> 4)].append(bn);
-    QHash<ColKey, QVector<LairZone>> zonesByChunk;          // raider spawn zones -> all the chunks they touch
     for (const LairZone& z : lairZones)
         for (int zcz = z.z0 >> 4; zcz <= (z.z1 >> 4); ++zcz)
             for (int zcx = z.x0 >> 4; zcx <= (z.x1 >> 4); ++zcx)
                 zonesByChunk[pairKey(zcx, zcz)].append(z);
-    QHash<ColKey, QVector<BellSite>> bellsByChunk;
     for (const BellSite& bl : bellSites)
         bellsByChunk[pairKey(bl.x >> 4, bl.z >> 4)].append(bl);
 
@@ -8284,7 +8412,6 @@ McWorldExporter::Result ExportRun::run()
         }
         Q_UNUSED(posts);
     }
-    QHash<ColKey, QVector<SignSite>> signsByChunk;
     for (const SignSite& sg : signSites)
         signsByChunk[pairKey(sg.x >> 4, sg.z >> 4)].append(sg);
 
@@ -9749,7 +9876,6 @@ McWorldExporter::Result ExportRun::run()
     // our ground steps down toward the border — the column before the last one above the abyss goes down by 1,
     // the outermost — by 2. Pond columns (wd>0) and columns with an object (a structure, a fence,
     // a post, a planting — anything rising up to 7 blocks above the surface) are not lowered.
-    QHash<ColKey, QVector<quint8>> taperDrop;   // which columns got a chamfer — needed by pass 3.59c
     {
         static const qint8 dX[4] = { -1, 1, 0, 0 }, dZ[4] = { 0, 0, -1, 1 };
         for (auto git = ground.begin(); git != ground.end(); ++git)
@@ -10065,12 +10191,10 @@ McWorldExporter::Result ExportRun::run()
     tmcStepLog("post: chunk assembly start");
     // 4. chunks -> regions (r.<chunkX>>5>.<chunkZ>>5>.mca)
     if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
-    struct RegionData { QVector<QPair<int, int>> order; QHash<ColKey, QByteArray> payload; };
-    QHash<ColKey, RegionData> regions;
     // We write the chunks: all that got ground metadata (fillChunks = touched by objects + the apron/
     // finishing of the rectangle in noise), plus the chunks where plantings were added after the fill
     // (store.set creates new keys itself).
-    QList<qint64> writeChunks = fillChunks;
+    writeChunks = fillChunks;
     {
         const QSet<ColKey> inFill(fillChunks.constBegin(), fillChunks.constEnd());
         for (auto it = store.chunks.constBegin(); it != store.chunks.constEnd(); ++it)
@@ -10132,35 +10256,26 @@ McWorldExporter::Result ExportRun::run()
             + QObject::tr("polygon boundary: %1 of %2 chunks written").arg(writeChunks.size()).arg(before);
     }
     // Smoothing the border with the unwritten world (only the noise surroundings): for chunks at the export edge we write blending_data. Disabled by MCX_NOBLEND=1 (for comparison).
-    const QSet<ColKey> writeSet(writeChunks.constBegin(), writeChunks.constEnd());
-    const bool blendBorder = world.normalSurroundings && !qEnvironmentVariableIsSet("MCX_NOBLEND");
-    QHash<ColKey, QVector<ChestSite>> chestsByChunk;   // chests by chunks (block_entities — at the chunk level)
+    writeSet = QSet<ColKey>(writeChunks.constBegin(), writeChunks.constEnd());
+    blendBorder = world.normalSurroundings && !qEnvironmentVariableIsSet("MCX_NOBLEND");
     for (const ChestSite& cs : chests)
         chestsByChunk[pairKey(cs.x >> 4, cs.z >> 4)].append(cs);
-    QHash<ColKey, QVector<PaintingSite>> paintsByChunk;     // paintings — the same block_entities
     for (const PaintingSite& pt : paints)
         paintsByChunk[pairKey(pt.x >> 4, pt.z >> 4)].append(pt);
-    QHash<ColKey, QVector<FrameSite>> frameByChunk;         // frames with items — also entities/r.*.mca
     for (const FrameSite& fr : frames)
         frameByChunk[pairKey(fr.x >> 4, fr.z >> 4)].append(fr);
-    QHash<ColKey, QVector<NpcSite>> npcByChunk;             // villagers/traders/llamas — also entities/r.*.mca
     for (const NpcSite& ns : npcs)
         npcByChunk[pairKey(ns.x >> 4, ns.z >> 4)].append(ns);
-    QHash<ColKey, QVector<MannequinSite>> menByChunk;       // mannequins — entities/r.*.mca (step 4b)
     for (const MannequinSite& ms : mannequins)
         menByChunk[pairKey(ms.x >> 4, ms.z >> 4)].append(ms);
-    QHash<ColKey, QVector<SpawnerSite>> spawnByChunk;       // spawners — their own block_entities
     for (const SpawnerSite& sp : spawners)
         spawnByChunk[pairKey(sp.x >> 4, sp.z >> 4)].append(sp);
     // The chunk assembly is completely independent (store/ground/chestsByChunk are only read), so it
     // runs in several threads; the regions are then assembled sequentially in the SAME order —
     // the archive stays deterministic.
-    const int chunkTotal = int(writeChunks.size());
-    std::atomic<int> chunkDone { 0 };
-    std::atomic_bool buildAbort { false };
-    const QHash<int, QVector<quint16>> noSections;      // ground-only chunks (the apron) — there are no object sections
-    struct ChunkBuild { QByteArray nbt; int blocks = 0; double sumX = 0.0, sumZ = 0.0;
-                        qint64 objBlocks = 0; int maxY = -64; };
+    chunkTotal = int(writeChunks.size());
+    chunkDone = 0;
+    buildAbort = false;
     auto buildOne = [&](qint64 k) -> ChunkBuild
     {
         ChunkBuild cb;
@@ -10217,12 +10332,11 @@ McWorldExporter::Result ExportRun::run()
     // We divide the work into blocks of ~16 chunks: there are not thousands of tasks, the distribution over cores is even.
     // Our own QThreadPool — we do not compete with the global application pool (the export itself runs in it).
     QThreadPool pool;
-    const int cores = std::max(1, QThread::idealThreadCount());
+    cores = std::max(1, QThread::idealThreadCount());
     pool.setMaxThreadCount(cores);
-    const int nBlocks = std::max(1, std::min((chunkTotal + 15) / 16, cores * 4));
-    const int per = (chunkTotal + nBlocks - 1) / nBlocks;
-    QVector<QVector<ChunkBuild>> blockOut(nBlocks);
-    QVector<QFuture<void>> futs;
+    nBlocks = std::max(1, std::min((chunkTotal + 15) / 16, cores * 4));
+    per = (chunkTotal + nBlocks - 1) / nBlocks;
+    blockOut = QVector<QVector<ChunkBuild>>(nBlocks);
     for (int b = 0; b < nBlocks; ++b)
     {
         const int lo = b * per, hi = std::min(chunkTotal, lo + per);
@@ -10240,12 +10354,14 @@ McWorldExporter::Result ExportRun::run()
         res.error = QObject::tr("Export cancelled.");
         return res;
     }
-    int blockTotal = 0;
+    blockTotal = 0;
     // The center of mass of the object blocks (id >= IdPaletteStart — concrete/brick; the ground is metadata, it
     // never entered the center) + the maximal height: the spawn above this point, in the middle of the scene.
-    double objCx = 0.0, objCz = 0.0;
-    qint64 objCount = 0, objMaxY = -64;
-    int idx = 0;
+    objCx = 0.0;
+    objCz = 0.0;
+    objCount = 0;
+    objMaxY = -64;
+    idx = 0;
     for (int b = 0; b < nBlocks; ++b)
         for (const ChunkBuild& cb : blockOut[b])
         {
@@ -10261,7 +10377,9 @@ McWorldExporter::Result ExportRun::run()
         }
     res.blockCount = blockTotal;
 
-    int spawnX = 0, spawnY = 258, spawnZ = 0;
+    spawnX = 0;
+    spawnY = 258;
+    spawnZ = 0;
     // Spawn on the surface: the ground top of the column or the topmost block above it (the roof); if the column is occupied by a building — the nearest free one
     // (a spiral up to 48 blocks), otherwise the player would appear on a roof or (with terrain) underground.
     auto surfaceSpawn = [&](int x0, int z0, int& outX, int& outY, int& outZ) -> bool
@@ -10307,11 +10425,10 @@ McWorldExporter::Result ExportRun::run()
     // WorldGenSettings inside), chunks in region/ in the root. The other state files (game_rules, weather,
     // raids, DIM-1/DIM1, ...) are created by the game itself at the first opening — checked with vanilla servers.
     if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return res; }
-    MiniZip zip;
     MiniDir dir(path);                          // unpackedFolder: the same entries become files under the world folder
     auto addEntry = [&](const QString& name, const QByteArray& data)
     { if (world.unpackedFolder) dir.add(name, data); else zip.add(name, data); };
-    const QByteArray levelDat = buildLevelDat(levelName, spawnX, spawnY, spawnZ, format, genGroundTop, world);
+    levelDat = buildLevelDat(levelName, spawnX, spawnY, spawnZ, format, genGroundTop, world);
     addEntry(QStringLiteral("level.dat"), levelDat);
     addEntry(QStringLiteral("level.dat_old"), levelDat);
     if (!legacy)
@@ -10322,8 +10439,6 @@ McWorldExporter::Result ExportRun::run()
     // chosen salt so that the cell position coincides with the start chunk of our structure. /locate and the Eye of Ender collect the positions
     // of all the structure sets, so they find both ours and the ordinary ones.
     // real trial chambers and cities from the cave template: for /locate each instance gets its own structure_set (mineshafts are searched with the vanilla set: it checks every chunk)
-    struct TplInst { QString id; int cx, cz; };
-    QVector<TplInst> tplInst;
     if (!caveSet.empty() && !caveSet.tplStarts.isEmpty())
     {
         QVector<CaveSet::WorldStart> tmpWs;
@@ -10371,11 +10486,10 @@ McWorldExporter::Result ExportRun::run()
                         .arg(city ? QStringLiteral("ancient_city_here") : QStringLiteral("stronghold_here")), js);
         }
     }
-    const QString regionDir = legacy ? QStringLiteral("region/")
+    regionDir = legacy ? QStringLiteral("region/")
                                      : QStringLiteral("dimensions/minecraft/overworld/region/");
     // We assemble the entities (mannequins, villagers, paintings, frames) into regions IN ADVANCE, so that the "packing" phase counter is one
     // for everything: block regions + entity regions.
-    QHash<ColKey, RegionData> eRegions;
     {
         QSet<ColKey> entChunks;                                   // chunks where there is any entity at all
         for (auto it = menByChunk.constBegin(); it != menByChunk.constEnd(); ++it) entChunks.insert(it.key());
@@ -10396,9 +10510,9 @@ McWorldExporter::Result ExportRun::run()
         }
     }
     tmcStepLog("post: entities assembled into regions");
-    const int regTotal = int(regions.size());
-    const int packTotal = regTotal + int(eRegions.size());
-    int regDone = 0;
+    regTotal = int(regions.size());
+    packTotal = regTotal + int(eRegions.size());
+    regDone = 0;
     for (auto it = regions.constBegin(); it != regions.constEnd(); ++it)
     {
         if (progress && (regDone % 4 == 0 || regDone + 1 == regTotal))
@@ -10461,7 +10575,7 @@ McWorldExporter::Result ExportRun::run()
         return res;
     }
     if (progress) progress(0, 0, 11);                              // the "archive assembly" stage
-    const QByteArray zipData = zip.finish();
+    zipData = zip.finish();
 
     tmcStepLog("post: zip.finish() ready");
     if (progress) progress(0, 0, 12);                              // the "writing the file to disk" stage
@@ -10483,4 +10597,17 @@ McWorldExporter::Result ExportRun::run()
     res.ok = true;
     res.zipBytes = zipData.size();
     return res;
+}
+
+// Builds the world (the former McWorldExporter::Export body).
+McWorldExporter::Result exportWorld(const QVector<McWorldExporter::McObject>& objectsIn,
+                                    const McWorldExporter::HeightSampler& heightAt,
+                                    const QString& path,
+                                    const QString& levelName,
+                                    const std::atomic_bool* cancel,
+                                    McWorldExporter::Format format,
+                                    const McWorldExporter::ProgressFn& progress,
+                                    const McWorldExporter::WorldOptions& world)
+{
+    return ExportRun(objectsIn, heightAt, path, levelName, cancel, format, progress, world).run();
 }
