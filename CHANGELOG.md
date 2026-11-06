@@ -5,19 +5,18 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
-
-### Changed
-
-- The executable is renamed to `osmc.exe` (the program is OSMC); the application/settings name is
-  OSMC too, so the first launch starts with the default settings. The `.tmc` project format is unchanged.
-  The project file `osmc.pro`, the icon `osmc.ico` and the translations `osmc_ru.ts`/`osmc_zh.ts`
-  are renamed as well.
+## [1.4.26.11061] — 2026-11-06
 
 ### Changed
 
 - The product is renamed to **OSMC** (https://osmc.pro) in the user interface, the window title,
   the dialogs, the application description, the classifier warnings, the Russian translation and the READMEs.
-  Technical names (the executable, the project files, the settings) are unchanged.
+- The executable is renamed to `osmc.exe`; the application/settings name is OSMC too, so the first launch
+  starts with the default settings. The `.tmc` project format is unchanged.
+  The project file `osmc.pro`, the icon `osmc.ico`, the style `osmc.qss`/`osmc.qrc` and the translations
+  `osmc_ru.ts`/`osmc_zh.ts` (and the embedded `osmc_ru.qm`/`osmc_zh.qm`) are renamed as well.
+- The build and test environment variables are renamed to `OSMC_BUILD`, `OSMC_EXE` and `OSMC_GDAL`.
+
 ## [1.3.26.11052] — 2026-11-05
 
 ### Added
