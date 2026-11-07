@@ -52,6 +52,9 @@ fi
 "$GDAL_PREFIX/bin/gdal-config" --version
 
 echo "=== 2/5 building osmc ==="
+# always relink: make does not consider the binary stale when qmake only changed the LIBS line (an osmc.pro
+# edit like another curl would otherwise not reach the bundle)
+rm -f "$BUILD/osmc"
 OSMC_BUILD="$BUILD" OSMC_GDAL="$GDAL_PREFIX" bash "$ROOT/build.sh"
 OSMC_BIN="$BUILD/osmc"
 [ -x "$OSMC_BIN" ] || { echo "build failed, see $BUILD/build_make.log"; exit 1; }
@@ -143,7 +146,7 @@ collect_libs() {
     case "$line" in "$APP"/*) continue ;; esac
     is_allowed "$line" && continue
     local path="$APP/usr/lib/$(basename "$line")"
-    if [ ! -f "$path" ]; then cp -L "$line" "$path" 2>/dev/null || continue; basename "$line"; fi
+    if [ ! -f "$path" ]; then cp -L "$line" "$path" 2>/dev/null || continue; echo "$line"; fi
   done
 }
 echo "  libraries:"
@@ -154,8 +157,11 @@ while : ; do
   while read -r b; do
     [ -n "$b" ] || continue
     NEW="$(collect_libs "$b" | tr '\n' ' ')"
-    [ -n "$NEW" ] && { echo "  $NEW"; FOUND="$FOUND $NEW"; }
-  done < <(cat "$BUILD/plugin_list.txt" <<< "$NEWLIST" | tr ' ' '\n'; find "$APP/usr/lib" -maxdepth 1 -name '*.so*'; echo)
+    if [ -n "$NEW" ]; then   # the log shows file names, the list keeps full paths (they are ldd'ed on the next pass)
+      NAMES=""; for f in $NEW; do NAMES="$NAMES$(basename "$f") "; done
+      echo "  $NAMES"; FOUND="$FOUND $NEW"
+    fi
+  done < <({ cat "$BUILD/plugin_list.txt"; echo "$NEWLIST"; } | tr ' ' '\n'; find "$APP/usr/lib" -maxdepth 1 -name '*.so*'; echo)
   [ -z "$FOUND" ] && break
   NEWLIST="$NEWLIST $FOUND"
 done
@@ -166,13 +172,25 @@ patchelf --force-rpath --set-rpath '$ORIGIN/lib' "$APP/usr/osmc" 2>/dev/null || 
 while read -r p; do patchelf --force-rpath --set-rpath '$ORIGIN/../lib' "$p" 2>/dev/null || true; done < "$BUILD/plugin_list.txt"
 
 echo "=== 4/5 checks ==="
-# (a) nothing outside the bundle except the allowed system libraries
-STRAY="$(find "$APP/usr/osmc" "$APP/usr/lib" "$APP/usr/plugins" -type f \( -name '*.so*' -o -name osmc \) -exec LD_LIBRARY_PATH="$APP/usr/lib" ldd {} \; 2>/dev/null | awk '{ if ($1 ~ /^\//) print $1; else if ($2 == "=>") print $3 }' | grep -v '^not' \
-  | sort -u | grep -v "^$APP" | grep -vE 'linux-vdso|ld-linux|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so|libnsl\.so|libresolv\.so|libutil\.so|libanl|libBroken|libSegFault|libgcc_s|libGL|libEGL|libOpenGL|libGLESv|libglapi|libdrm|libLLVM|libvulkan|libwayland|libgallium' || true)"
-[ -z "$STRAY" ] || { echo "NOT PURE, system libraries are still needed:"; echo "$STRAY"; exit 1; }
-MISSING="$(find "$APP/usr/osmc" "$APP/usr/lib" "$APP/usr/plugins" -type f \( -name '*.so*' -o -name osmc \) -exec LD_LIBRARY_PATH="$APP/usr/lib" ldd {} \; 2>/dev/null | grep 'not found' || true)"
-[ -z "$MISSING" ] || { echo "unresolved:"; echo "$MISSING"; exit 1; }
-echo "    purity: ok"
+# (a) purity: every binary of the bundle must find everything either in the bundle or on the is_allowed list
+# (find -exec VAR=x cmd does NOT work — find would exec a program named "VAR=x"; the check runs ldd in a real loop;
+# version errors like "version CURL_OPENSSL_4 not found" are ldd output too — grep 'not found' over merged streams)
+BAD=""
+while read -r b; do
+  ALL="$(LD_LIBRARY_PATH="$APP/usr/lib" ldd "$b" 2>&1 || true)"
+  V="$(printf '%s\n' "$ALL" | grep 'not found' || true)"
+  [ -n "$V" ] && BAD="$BAD$V"$'\n'
+  for p in $(printf '%s\n' "$ALL" | awk '$2 == "=>" && $3 ~ /^\// { print $3 }'); do
+    case "$p" in "$APP"/*) continue ;; esac
+    is_allowed "$p" || BAD="$BAD$(basename "$p") (needed by $(basename "$b"), resolved from $(dirname "$p"))"$'\n'
+  done
+done < <(find "$APP/usr/osmc" "$APP/usr/lib" "$APP/usr/plugins" -type f \( -name '*.so*' -o -name osmc \))
+[ -z "$BAD" ] || { echo "NOT PURE — dependencies outside the bundle (or unresolved):"; printf '%s' "$BAD"; exit 1; }
+# (a2) the floor: nothing in the bundle may require a newer glibc than Debian 11 ships (a dirty build system shows up here)
+FLOOR=2.31
+NEWEST="$(find "$APP/usr/osmc" "$APP/usr/lib" "$APP/usr/plugins" -type f \( -name '*.so*' -o -name osmc \) -print0 | xargs -0 objdump -T 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -V | tail -1 || true)"
+{ [ -n "$NEWEST" ] && [ "$(printf '%s\n%s\n' "$FLOOR" "$NEWEST" | sort -V | tail -1)" = "$FLOOR" ]; } || { echo "the bundle needs GLIBC_$NEWEST — newer than the $FLOOR floor (is the build system a clean Debian 11?)"; exit 1; }
+echo "    purity: ok (the bundle needs at most GLIBC_$NEWEST)"
 # (b) the program must run from the bundle without the system Qt/GDAL
 mkdir -p "$PKG"
 TEST_LOG="$PKG/smoke.log"; rm -f "$TEST_LOG"

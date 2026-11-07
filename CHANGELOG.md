@@ -5,7 +5,7 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
-## [1.5.26.11071] — 2026-11-07
+## [1.5.26.11072] — 2026-11-07
 
 ### Added
 

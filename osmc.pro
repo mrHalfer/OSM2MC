@@ -41,8 +41,14 @@ unix:{
 }
 # HTTPS for the online mode (OSM map tiles, search, data download): Windows uses WinHTTP (system certificates, no OpenSSL);
 # Linux uses the system libcurl (CA bundle and proxy from the system, still no Qt Network and no bundled OpenSSL libraries).
+# Link the gnutls build of curl by its exact file name when it exists: the -lcurl symlink can point to a newer curl than the
+# glibc floor ships, and the binary then requires symbol versions (CURL_OPENSSL_*) a clean Debian 11 does not have; the bundle
+# always carries libcurl-gnutls.so.4 itself, so rpath gives the runtime the very same library.
 win32: LIBS += winhttp.lib
-unix:  LIBS += -lcurl
+unix {
+    exists(/usr/lib/x86_64-linux-gnu/libcurl-gnutls.so.4): LIBS += -L/usr/lib/x86_64-linux-gnu -l:libcurl-gnutls.so.4
+    else: LIBS += -lcurl
+}
 
 QT += core gui widgets concurrent
 
@@ -54,7 +60,7 @@ RC_LANG = 0x0419
 win32: QMAKE_CXXFLAGS += /utf-8
 win32: QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.5.26.11071
+    VERSION = 1.5.26.11072
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
