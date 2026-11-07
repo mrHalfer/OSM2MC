@@ -1,0 +1,24 @@
+# The pinned Linux release environment: Debian 11 (glibc 2.31) is the compatibility floor of the AppImage,
+# so make_release_linux.sh must run on it — this image reproduces the WSL "Debian-11" distro recipe of
+# docs/porting-linux.md for machines with docker (the apt set matches deb11_setup there).
+#
+# Typical run (mirrors what .github/workflows/ci.yml does):
+#   docker build -t osmc-deb11 -f docker/Dockerfile.debian11 .
+#   docker run --rm -v "$PWD:/src" -e OSMC_BUILD=/work -e OSMC_OUT=/src/out osmc-deb11 \
+#     bash -c 'cd /src && bash make_release_linux.sh'
+FROM debian:bullseye
+
+# Debian 11 is EOL: apt goes to the permanent archive (main + updates + the security section named "bullseye-security");
+# trusted=yes because the archive no longer rotates its release keys (same belt as the WSL setup recipe)
+RUN printf 'deb [trusted=yes] http://archive.debian.org/debian bullseye main\ndeb [trusted=yes] http://archive.debian.org/debian bullseye-updates main\ndeb [trusted=yes] http://archive.debian.org/debian-security bullseye-security main\n' > /etc/apt/sources.list \
+ && printf 'Acquire::Check-Valid-Until "false";\nAcquire::Check-Date "false";\n' > /etc/apt/apt.conf.d/90archive \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential make pkg-config ca-certificates wget file \
+      qtbase5-dev qt5-qmake qtbase5-dev-tools qttools5-dev-tools libqt5svg5-dev qtwayland5 \
+      libproj-dev libsqlite3-dev libexpat1-dev libgeos-dev libprotobuf-c-dev \
+      libcurl4-openssl-dev libssl-dev patchelf \
+ && rm -rf /var/lib/apt/lists/*
+
+# the sources are bind-mounted to /src; OSMC_BUILD=/work can cache gdal-prefix/ and dl/ on a volume
+WORKDIR /src

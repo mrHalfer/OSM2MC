@@ -2,6 +2,7 @@
 #include <QSet>
 #include <climits>
 #include <cstring>
+#include <limits>
 
 // The arrays are extern in export/blocks.h: the exporter code indexes them without
 // knowing their size, so the counts are constants there — the asserts at the bottom

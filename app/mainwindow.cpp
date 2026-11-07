@@ -56,7 +56,7 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
     }
     {   // the interface language selector in the header: the choice is saved and takes effect after a restart
         ui->leftLayout->removeWidget(ui->titleLabel);
-        auto* hdrBox = new QWidget;                                       // the header band has the same height as the search row / "Load the map" row on the right
+        auto* hdrBox = new QWidget;                                       // the header band has the same height as the search row / the status row on the right
         hdrBox->setFixedHeight(kHeaderH);
         auto* hdr = new QHBoxLayout(hdrBox);
         hdr->setContentsMargins(0, 0, 0, 0);
@@ -93,8 +93,6 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
         l->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         l->setFixedHeight(kHeaderH);
         l->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);         // the layout defines the width, a long text does not stretch it
-        ui->loadPreviewButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        ui->rowPreviewTop->setAlignment(ui->loadPreviewButton, Qt::AlignVCenter);
     }
     {   // map tools: one is active; a click on the map does what is selected
         auto* group = new QButtonGroup(this);
@@ -148,7 +146,6 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
         ui->cavesCheck->setEnabled(!flat); ui->seedEdit->setEnabled(!flat); ui->genSeedButton->setEnabled(!flat);
     });
 
-    connect(ui->loadPreviewButton, &QPushButton::clicked, this, &MainWindow::loadPreview);
     connect(ui->resetSpawnButton, &QPushButton::clicked, this, &MainWindow::resetSpawn);
     connect(ui->copyTpButton, &QPushButton::clicked, this, &MainWindow::copyTp);
     connect(ui->preview, &MapPreview::spawnPicked, this, &MainWindow::onSpawnPicked);
@@ -433,7 +430,6 @@ void MainWindow::setBusy(bool busy)
     mBusy = busy;
     ui->goButton->setEnabled(!busy && !mOnlineMode);
     ui->cancelButton->setEnabled(busy);
-    ui->loadPreviewButton->setEnabled(!busy && !mPrevWatcher->isRunning());
 }
 
 void MainWindow::appendLog(const QString& s)
@@ -519,11 +515,18 @@ void MainWindow::showTextDialog(const QString& title, const QString& text, const
     {
         st.setValue(QStringLiteral("showFileAfterExport"), show->isChecked());
         if (show->isChecked())
-        {   // explorer.exe /select,"file" opens the folder with the file selected
+        {
+#ifdef Q_OS_WIN
+            // explorer.exe /select,"file" opens the folder with the file selected
             QProcess ex;
             ex.setProgram(QStringLiteral("explorer.exe"));
             ex.setNativeArguments(QStringLiteral("/select,\"") + QDir::toNativeSeparators(file) + QLatin1Char('"'));
             ex.startDetached();
+#else
+            // the Linux desktop has no "reveal this file" (setNativeArguments is Windows-only): open the folder that holds the result
+            const QFileInfo fi(file);
+            QDesktopServices::openUrl(QUrl::fromLocalFile(fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath()));
+#endif
         }
     }
 }
@@ -532,7 +535,6 @@ void MainWindow::loadPreview()
 {
     if (mPrevWatcher->isRunning() || mBusy) return;
     ui->logEdit->clear();
-    ui->loadPreviewButton->setEnabled(false);
     ui->previewStatusLabel->setText(tr("Loading the map…"));
     const TmcRunOptions opt = collect();
     mPrevWatcher->setFuture(QtConcurrent::run([this, opt]() -> TmcPreview
@@ -544,7 +546,6 @@ void MainWindow::loadPreview()
 void MainWindow::onPreviewReady()
 {
     const TmcPreview p = mPrevWatcher->result();
-    ui->loadPreviewButton->setEnabled(!mBusy);
     if (!p.ok)
     {
         ui->previewStatusLabel->setText(tr("Could not load: %1").arg(p.error));
@@ -856,7 +857,7 @@ QString MainWindow::defaultOutputDir() const
 void MainWindow::setOnlineMode(bool online)
 {
     mOnlineMode = online;
-    for (QWidget* w : std::initializer_list<QWidget*>{ ui->loadPreviewButton, ui->previewStatusLabel,
+    for (QWidget* w : std::initializer_list<QWidget*>{ ui->previewStatusLabel,
                                                        ui->toolSpawn, ui->toolClip, ui->toolStronghold, ui->toolCity, ui->toolPale, ui->preview,
                                                        ui->spawnInfoLabel, ui->resetSpawnButton, ui->copyTpButton, ui->clipClearButton, ui->resetMarksButton })
         w->setVisible(!online);
@@ -919,7 +920,7 @@ void MainWindow::updateSpawnInfo()
 {
     if (!ui->preview->hasPreview())
     {
-        ui->spawnInfoLabel->setText(tr("Spawn point: the data center. To choose another, load the map and click on it."));
+        ui->spawnInfoLabel->setText(tr("Spawn point: the data center. To choose another, click on the map."));
         ui->copyTpButton->setEnabled(false);
         ui->resetSpawnButton->setEnabled(false);
         return;

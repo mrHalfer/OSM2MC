@@ -47,6 +47,9 @@ static void setupGdalEnvironment()
     setIfExists("GDAL_DRIVER_PATH", QStringLiteral("gdalplugins"));
     setIfExists("PROJ_DATA", QStringLiteral("projlib"));
     setIfExists("PROJ_LIB", QStringLiteral("projlib"));
+    // shipped fonts (the Linux bundle has none of the system ones): fontconfig reads our list, it adds the system fonts where they exist
+    const QString fontsConf = dir + QStringLiteral("/fonts/fonts.conf");
+    if (QFileInfo::exists(fontsConf)) qputenv("FONTCONFIG_FILE", QDir::toNativeSeparators(fontsConf).toLocal8Bit());
     const QString projDir = dir + QStringLiteral("/projlib");
     if (QFileInfo::exists(projDir + QStringLiteral("/proj.db")))
     {   // explicitly, not only through the variables: the search path of PROJ is set for the whole process
@@ -61,6 +64,13 @@ int main(int argc, char* argv[])
     // Qt shuffles the QHash iteration order on every run; in places the exporter picks the "first suitable" one by that order (for example the church for
     // the stronghold entrance) — the same input gave slightly different worlds. A fixed seed makes the world reproducible (and lets code versions be compared).
     qSetGlobalQHashSeed(0);
+    // headless server runs: --nogui without a desktop session (no X11/Wayland) must work too — pick the bundled
+    // offscreen platform before QApplication is created; an explicit QT_QPA_PLATFORM from the user always wins
+#ifndef Q_OS_WIN
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM") && !qEnvironmentVariableIsSet("DISPLAY") && !qEnvironmentVariableIsSet("WAYLAND_DISPLAY"))
+        for (int i = 1; i < argc; ++i)
+            if (qstrcmp(argv[i], "--nogui") == 0) { qputenv("QT_QPA_PLATFORM", "offscreen"); break; }
+#endif
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("EL-MODS MEDIA"));
     QCoreApplication::setApplicationName(QStringLiteral("OSMC"));

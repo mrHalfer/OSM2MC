@@ -45,7 +45,11 @@ def stage_shp():
 
 def stage_harness():
     out = ''
-    rc, o, t = run(['cmd', '/c', os.path.join(HERE, 'harness', 'build_harness.bat')])
+    if os.name == 'nt':
+        cmd = ['cmd', '/c', os.path.join(HERE, 'harness', 'build_harness.bat')]
+    else:
+        cmd = ['bash', os.path.join(HERE, 'harness', 'build_harness.sh')]
+    rc, o, t = run(cmd)
     out += o
     if 'ALL-OK' not in o:
         return 1, out, t

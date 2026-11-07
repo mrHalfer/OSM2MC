@@ -2,8 +2,7 @@
 build/
 *.user
 *.autosave
-.qmake.stash
-Makefile*
+.qmake.stashMakefile*
 ui_*.h
 moc_*
 *.obj
@@ -20,8 +19,9 @@ tests/servers/*/*
 !tests/servers/README.txt
 tests/local_config.json
 
-# the author's working notes
-docs/
+# the author's working notes; porting-linux.md is the exception: it is the Linux release recipe the scripts refer to
+docs/*
+!docs/porting-linux.md
 
 # a full copy of a GDAL installation (headers and libraries of all its dependencies, hundreds of MB): the project needs only third_party/gdal
 Gdal34vc/
@@ -34,3 +34,10 @@ private/
 images/screen/
 # a local pointer file for the Qwen assistant (AGENTS.md is in the repository)
 QWEN.md
+
+# stray files WSL2 leaves on NTFS drives when both sides touch a directory (each contains a GUID)
+.uuid
+
+# CI scratch (the AppImage job mounts it into docker as the build cache)
+.osmc-cache/
+ci-out/

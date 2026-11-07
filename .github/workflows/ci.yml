@@ -1,0 +1,108 @@
+# CI for both release platforms: the Windows build (MSVC + Qt 5.15.2) and the Linux build (system Qt5/GDAL)
+# run the "osm" test suite; the AppImage job reproduces the release environment (Debian 11 = the glibc floor)
+# and produces the same artifacts make_release_linux.bat makes locally. The harness/shp suites need local data
+# (a Minecraft server with accepted EULA, the author's shapefile) and stay manual, see tests/README.md.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows build + osm tests
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt 5.15.2 (MSVC 2019 64-bit, the same kit as the releases)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          arch: win64_msvc2019_64
+      - name: GDAL runtime into third_party/gdal/bin
+        run: cmd /c setup.bat
+        shell: cmd
+      - name: "Build (build.bat: qmake + nmake)"
+        run: cmd /c build.bat
+        shell: cmd
+        env:
+          QTDIR: ${{ env.QT_ROOT_DIR }}
+          OSMC_BUILD: ${{ github.workspace }}\_build
+      - name: Tests (osm)
+        run: python tests\run_tests.py osm
+        shell: cmd
+        env:
+          OSMC_EXE: ${{ github.workspace }}\_build\release\osmc.exe
+          QT_BIN: ${{ env.QT_ROOT_DIR }}\bin
+      - name: Upload the build log when something broke
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-log
+          path: |
+            ${{ github.workspace }}/_build/build_nmake.log
+            ${{ github.workspace }}/_build/qmake.log
+
+  linux:
+    name: Linux build + osm tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies (Qt 5.15, system GDAL, libcurl)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential qt5-qmake qtbase5-dev qtbase5-dev-tools qtchooser \
+            qttools5-dev-tools libgdal-dev libcurl4-openssl-dev libqt5svg5-dev \
+            zlib1g-dev pkg-config python3
+      - name: "Build (build.sh: qmake + make)"
+        run: bash build.sh
+        env:
+          OSMC_BUILD: ${{ github.workspace }}/.build
+      - name: Tests (osm)
+        run: python3 tests/run_tests.py osm
+        env:
+          OSMC_EXE: ${{ github.workspace }}/.build/osmc
+      - name: Upload the build log when something broke
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build-log
+          path: ${{ github.workspace }}/.build/build_make.log
+
+  appimage:
+    name: AppImage on the Debian 11 floor
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the slim GDAL build and the downloaded tools
+        uses: actions/cache@v4
+        with:
+          path: .osmc-cache
+          key: osmc-deb11-${{ hashFiles('make_release_linux.sh') }}
+          restore-keys: osmc-deb11-
+      - name: Cache layout the release script expects
+        run: mkdir -p .osmc-cache/gdal-prefix .osmc-cache/dl
+      - name: Build the pinned build image
+        run: docker build -t osmc-deb11 -f docker/Dockerfile.debian11 .
+      - name: make_release_linux.sh inside it (bundle purity + dry-run checks run too)
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -v "$PWD/.osmc-cache/gdal-prefix:/work/gdal-prefix" \
+            -v "$PWD/.osmc-cache/dl:/work/dl" \
+            osmc-deb11 bash -c 'OSMC_BUILD=/work OSMC_OUT=/src/ci-out bash /src/make_release_linux.sh && chown -R "$(stat -c "%u:%g" /src)" /work /src/ci-out'
+      - name: Upload the artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: osmc-linux
+          path: |
+            ci-out/package/OSMC-*-x86_64.AppImage
+            ci-out/package/OSMC-*-linux64.tar.gz

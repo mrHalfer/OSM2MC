@@ -1,0 +1,124 @@
+# План портирования OSMC на Linux (Windows x64 + Linux x64, полноценный GUI)
+
+Рабочий документ (папка `docs/` в git не попадает). Вернуться к нему можно из `AGENTS.md`/.agents после завершения.
+
+## Цель
+
+Полноценная GUI-программа для пользователей на двух платформах:
+- Windows x64 — как сейчас (zip-релиз с Qt/GDAL-рантаймом);
+- Linux x64 — распространение через **AppImage** (бандл Qt + GDAL + ресурсы рядом с exe, по образцу Windows-раскладки).
+
+Базовая линия Linux: **Ubuntu 22.04** (glibc 2.35 — «низкая» цель для AppImage; Qt 5.15.3 и GDAL 3.4.1 в репозитории apt). Собирать AppImage в docker-контейнере `ubuntu:22.04`, чтобы не зависеть от версии хост-системы.
+
+## Решения (уже приняты)
+
+- HTTP(S) на Linux: **libcurl** — при разработке/в WSL системная; в AppImage бандлится сама (с OpenSSL и CA-бандлом рядом с exe) — HTTPS не зависит от системы. Решение «без бандла OpenSSL» остаётся только для Windows (там WinHTTP). Реализация — в `app/httpclient_unix.cpp` под тем же интерфейсом `httpRequest()` (httpclient.h не меняем).
+- GDAL на Linux: **системный libgdal 3.4** (apt `libgdal-dev`); `GDAL_DIR` может указать на само сборку (include/ + lib/libgdal.so).
+- Консольное логирование `--nogui`: на Linux бинарь и так консольный, `AttachConsole` (`#ifdef Q_OS_WIN`) не нужен.
+- Тёмная тема: чтение реестра остаётся `Q_OS_WIN`; на Linux — light (позже можно добавить `QT_QPA_PLATFORMTHEME`).
+- Сборка: остаёмся на **qmake** (CMake — отдельная задача, не в этом плане).
+- **Релиз-политика Linux: «ноль зависимостей пользователя»** (решение владельца 2026-11-06): AppImage со всем внутри — Qt + ВСЕ плагины (platforms xcb/wayland, imageformats, iconengines, styles), freetype/fontconfig + свои шрифты, GDAL + gdal-data + proj-базы + его зависимости (sqlite/tiff/...), libcurl + OpenSSL + CA-бандл, ресурсы. Runtime AppImage ≥ v13 (само-распаковка без FUSE). Требования к машине: ядро Linux, X11/Wayland и glibc ≥ 2.35 (собираем в docker ubuntu:22.04; работает на 22.04+/Debian 12/Fedora 37+/Arch, НЕ работает на 20.04). Полностью статический бинарь на musl (работает и без glibc — Alpine/NixOS) — этап 7, только по запросу после рабочего AppImage.
+
+## Этапы
+
+### 1. Пилотная сборка под Linux (WSL2/Ubuntu 22.04) — ГОТОВО (2026-11-07)
+
+- [x] `osmc.pro`: платформы разведены (`win32:`/`unix:`) — GDAL (`-lgdal`), HTTP (WinHTTP/-lcurl), флаг `/utf-8`, пост-сборка `xcopy`→`cp -u`, runtime-GDAL копируется только на Windows;
+- [x] контрольная Windows-сборка не сломана (см. ниже, результат прогонов);
+- [x] Linux-окружение готово 2026-11-07: WSL 3.0.3 + Ubuntu 22.04 импортирован (`wsl --import Ubuntu-22.04 C:\WSL\Ubuntu-22.04 C:\Temp\opencode\jammy-wsl.tar.gz --version 2`, tar.gz принят без переделки), root-вход работает;
+- [x] пакеты: `build-essential qt5-qmake qtbase5-dev qtbase5-dev-tools qtchooser qttools5-dev-tools libgdal-dev libcurl4-openssl-dev libqt5svg5-dev zlib1g-dev pkg-config python3` — APT EXIT 0 (Qt 5.15.3, GDAL 3.4.1, curl 7.81 openssl-dev);
+- [x] копия репозитория в `~/tmc` (375 файлов, 81 МБ; список `tmc_files.zlist` перегенерирован через cmd-редирект — Out-File дописывал \r\n, GNU tar спотыкался о хвост);
+- [x] сборка `~/builds/tmc` (`/usr/lib/qt5/bin/qmake … && make -k -j`) — **зелёная 2026-11-07**: MAKE_EXIT 0, `osmc` 2.8 МБ линкуется;
+- [x] прогоны починены под GCC (ошибки были в 4 местах): (1) заголовки системного GDAL — в `osmc.pro` через `PKGCONFIG += gdal` (`/usr/include/gdal`); (2) `WorldOptions` вынесен из класса в `McWorldOptions` + `using`-алиас (GCC не принимает вложенный struct с NSDMI как аргумент по умолчанию, `mcworldexporter.h`); (3) `<limits>` в `export/blocks.cpp` и `export/geom.cpp`, `<QPointF>` в `input/tmcproject.h`; (4) `QProcess::setNativeArguments` («показать файл после экспорта») под `#ifdef Q_OS_WIN`, на Linux — `QDesktopServices::openUrl` папки результата;
+- [x] пост-сборка ресурсов: на Linux exe лежит в `$$OUT_PWD` без подпапки `release/` — `TMC_OUTDIR` для `unix:` теперь `$$OUT_PWD` (иначе `cp` падал: «target is not a directory»);
+- [x] `--dry-run` и экспорт тестовой сцены (`tests/data/osm_buildings.osm`) через `--nogui --log` **без DISPLAY**: мир 60 МБ, 77 записей, `level.dat` + `world_gen_settings.dat` + `export_info.json` (`exporterVersion 1.4.26.11061`);
+- [x] GUI через WSLg: `--gui-screenshot` даёт корректное окно (в т.ч. русский перевод, SVG-галочки, лог); тема на Linux светлая (реестровое чтение осталось `Q_OS_WIN`) — так и запланировано;
+-   критерий: ✅ бинарь `osmc` собирается и экспортирует тестовую сцену без онлайн-режима.
+
+### 2. HTTPS-клиент на libcurl — КОД РАБОТАЕТ (2026-11-07)
+
+- [x] `app/httpclient_unix.cpp`: GET/POST через easy-handle на запрос; `CURLOPT_CAINFO` не задаём (системный CA bundle), `User-Agent = kTmcUserAgent`, gzip/deflate (`ACCEPT_ENCODING`), `FOLLOWLOCATION`, connect-таймаут 10 с, «звисание» вместо общего таймаута (`LOW_SPEED_LIMIT/TIME = timeoutMs`, как пер-операционные таймауты WinHTTP), отмена через `XFERINFOFUNCTION` по `cancel` (ошибка `cancelled`, как в WinHTTP-версии), `curl_global_init` один раз через `std::call_once`;
+- [x] исправлено при первой же сборке: `CURLOPT_LOW_SPEED_TIME` получал `int`, а curl в variadic-вызове читает `long` → `static_cast<long>` (молча дало бы мусор в таймауте);
+- [x] `--net-test` (именно так опция называется в `main.cpp`, не `--http-probe`): tile `status=200` (11748 байт), Nominatim `status=200` с реальным JSON — HTTPS работает через системный libcurl 7.81/OpenSSL 3.0;
+- [ ] онлайн-карта в GUI вручную (WSLg: загрузка области, тайлы в превью) — проверка глазами владельца;
+-   критерий: ✅ `--net-test` зелёный; загрузка области в GUI — на ручной проверке.
+
+### 3. Тесты под Linux — ГОТОВО (2026-11-07)
+
+- [x] `OSMC_EXE` для WSL — через переменную окружения (в `tcfg.py` env важнее `local_config.json`, файл остаётся Windows-ным);
+- [x] кроссплатформенные правки раннера: `run_tests.py` зовёт `build_harness.sh` вне Windows, `run_test.py` — бинарь без `.exe`;
+- [x] `tests/harness/build_harness.sh` — зеркало `.bat` (те же 15 единиц, pkg-config Qt5/GDAL; `-Wno-stringop-overflow` — ложные срабатывания GCC-11 на Qt5-контейнерах);
+- [x] `run_tests.py osm harness` в WSL — **PASS** (osm ~48 с, harness ~176 с: GCC-харнесс, 6 миров `mc_test*.zip`, полная сверка `verify_mc_export.py`); тот же прогон на Windows — PASS (эталон не сломан правками раннера);
+- [ ] `shp` — только при наличии `TMC_TEST_SHP` (данные на диске владельца); в WSL не гонялся;
+- [ ] серверная часть (Java) — кроссплатформенна, в пилоте не гонялась (долгая, EULA-миры общие с Windows);
+-   критерий: ✅ osm/harness PASS на Linux;
+- ℹ️ Мир из тестовой сцены байтово не совпадает Windows↔Linux и даже Windows↔Windows (в zip соли генератора datapack-паутины из `findPlacementSalt` + шум) — сверка по структуре/классификации, не по байтам (подробно в `.agents/pitfalls.md`).
+
+### 4. Сборка и релиз Linux — «ноль зависимостей» — ГОТОВО (2026-11-07)
+
+- [x] порог совместимости = **Debian 11** (glibc 2.31; Qt 5.15.2 — как на Windows; PROJ 7.2.1 — та же мажорная ветка, что `proj_7_2.dll`) → результат работает на Debian 11/12/13, Ubuntu 20.04+, Fedora 34+. Docker Desktop нет → дистрибутив `Debian-11` в WSL: официальный `debian-11-generic-amd64.tar.xz` (cloud.debian.org, sha512 сверен) → `disk.raw` через loop-монтирование в rootfs.tar.gz → `wsl --import Debian-11 C:\WSL\Debian-11 … --version 2`; в Docker-паритете (этап 5) — то же на `debian:11`;
+- [x] Debian 11 EOL → apt на archive.debian.org: `bullseye` + `bullseye-updates` + `debian-security bullseye-security` (секция называется именно так, не `bullseye/updates`) с `Acquire::Check-Valid-Until=false` — вечный «пин» исходников;
+- [x] пакеты: `build-essential pkg-config qtbase5-dev qt5-qmake qtbase5-dev-tools qttools5-dev-tools libqt5svg5-dev qtwayland5 libproj-dev libsqlite3-dev libexpat1-dev libgeos-dev libprotobuf-c-dev libcurl4-openssl-dev libssl-dev patchelf rsync` (список закреплён в скрипте настройки окружения; wayland-плагины Qt в Debian лежат в отдельном пакете `qtwayland5`, НЕ в `libqt5waylandclient5`);
+- [x] GDAL — НЕ apt (тащит ~130 библиотек: mysql/poppler/netcdf…), а **своя slim-сборка 3.4.3** (та же версия, что `third_party/gdal` на Windows): url+sha256 закреплены, флаги `--with-proj --with-sqlite3 --with-geos --with-libtiff=yes --without-curl --without-hdf4 --without-hdf5 --without-netcdf --without-jasper --without-openjpeg --without-webp --without-xerces --without-xml2 --without-gnm --without-mongocxx --without-pcre2 --without-python`, strip → `libgdal.so.30` ≈ 18 МБ. Ловушки: `--with-libtiff=no` нельзя (обязательная зависимость); **expat** обязателен — OSM-XML-драйвер без него падает только в рантайме («Expat parser not available»); **GEOS** обязателен — в Windows GDAL он есть (`geos_c.dll`), без него путь мультиполигонов OSM сыплет «GEOS support not enabled»;
+- [x] `build.sh` — зеркало `build.bat` (qmake+make в `$OSMC_BUILD`, `OSMC_GDAL=<prefix>` через PKG_CONFIG_PATH); `make_release_linux.sh` — релиз внутри дистрибутива, 5 шагов как в `make_release.bat`: GDAL → сборка → **сбор бандла** (closure по `ldd` плагинов/бинарей + allow-list системного: glibc, vdso, драйверы GL/Vulkan) → проверки → упаковка; `make_release_linux.bat` — хост-вход с Windows: список `git ls-files` → tar-синк в `~/tmc` → запуск (переменные `OSMC_WSL`, `OSMC_BUILD`, `OSMC_OUT`);
+- [x] состав бандла: `usr/osmc` + ресурсы (`osm_rules.json`/`default.t3d`/`heights.csv`/`tmc_buildings.dat`/`point_models.csv`/`templates/*.bin`) + Qt5 и плагины (**platforms: xcb + wayland + offscreen**, imageformats, iconengines, xcbglintegrations, compose-инпут) + `libgdal.so.30` + `gdal-data`/`projlib` (программа сама предпочитает их окружению — `setupGdalEnvironment`) + libcurl/OpenSSL/`ca-certificates.crt` рядом с exe (CAINFO) + DejaVu + `fonts/fonts.conf` (`FONTCONFIG_FILE` рядом с exe, системные шрифты добавляются если есть) + `.desktop`/иконка (`resources/osmc.png` из ico);
+- [x] пути библиотек: `patchelf --force-rpath --set-rpath '$ORIGIN/lib'` (DT_**RPATH**, не RUNPATH — так транзитивные зависимости proj/sqlite видны отовсюду); AppRun дублирует через `LD_LIBRARY_PATH`; поэтому **tar.gz для серверов работает без окружения**: в архиве папка `OSMC/` (та же форма, что в windows-зипе), внутри `osmc` + всё рядом (уровень `usr` остаётся только в AppImage — того требует его runtime);
+- [x] проверки внутри релизного скрипта (падают, если сломано): `ldd` всего бандла — ни одной чужой библиотеки кроме allow-list; нет `not found`; dry-run тестовой сцены из appdir с пустым окружением; dry-run **из самого AppImage** (`APPIMAGE_EXTRACT_AND_RUN=1`, без FUSE);
+- [x] результат: `OSMC-<версия>-x86_64.AppImage` — **84 МБ** (squashfs gzip: 44% от ~190 МБ содержимого; Windows-zip для сравнения 83 МБ) и `OSMC-<версия>-linux64.tar.gz` (84 МБ); ложатся в `E:\Builds\tMC\package` рядом с Windows-zip;
+- [x] ловушки: `VERSION` в osmc.pro с отступом И файл после tar-синка с CRLF — `sed` обязан срезать всю пустоту incl. `\r` (иначе в имени артефакта каретка); `libgdal.so.30` не видна `ldd` до помещения в бандл — копируется явно; STRAY-проверка обязана печатать пути, а не вычисляемое выражение awk (иначе «чисто» при мусоре);
+- [x] кросс-прогон на второй системе (Ubuntu 22.04.5 WSLg, glibc 2.35): tar.gz в `env -i` — dry-run зелёный; AppImage без FUSE — dry-run зелёный; GUI-скриншот из AppImage — русская разметка, тема, SVG-галочки и **загруженные онлайн-тайлы карты** (сеть+TLS из бандла), и через X11 (xcb), и через `QT_QPA_PLATFORM=wayland`; вывод классификации тот же, что Windows-эталон. Найдено по дороге: wayland-плагин ехал в бандле без окружения — в Debian он с интеграциями в пакете `qtwayland5` (не `libqt5waylandclient5`), каталоги `wayland-shell-integration`/`wayland-graphics-integration-client` добавлены в сборку; **сами `libwayland-*` в бандл НЕ кладём** (allow-list, как GL-драйверы): Mesa новых дистрибутивов ищет в них символы новее порога и, находя уже загруженную старую копию из бандла, падает (`wl_proxy_marshal_flags` undefined), а любой десктоп с wayland-сессией эти библиотеки даёт сам;
+- [ ] Debian 12+/Fedora — по желанию, хотя бы dry-run (проверка порога «вверх» на других libc-сборках);
+-   критерий: ✅ бандл автопроверяем (чистота по ldd + dry-run из AppImage), размер ≤ Windows-пакета; ✅ прогон на второй системе (Ubuntu 22.04: dry-run, GUI, онлайн).
+
+### 5. CI (желательно, до релиза) — ГОТОВО (2026-11-07), первый зелёный прогон после push
+
+- [x] `.github/workflows/ci.yml` — три работы на push в main и PR: **windows** (Qt 5.15.2 `win64_msvc2019_64` через `jurplel/install-qt-action@v4` → `setup.bat` + `build.bat` (env `QTDIR=$QT_ROOT_DIR`, `OSMC_BUILD`) → тесты `osm` через `OSMC_EXE`/`QT_BIN`); **linux** (ubuntu-22.04, системные Qt5/GDAL — apt-набор из рецепта этапа 1, `build.sh` → тесты `osm`); **appimage** (сборка `docker/Dockerfile.debian11` и прогон `make_release_linux.sh` внутри неё, кэш slim-GDAL через actions/cache, артефакты в upload); при падении — upload логов сборки;
+- [x] `docker/Dockerfile.debian11` — закреплённая среда релиза (debian:bullseye + archive.debian.org + тот же apt-набор, что WSL-рецепт); набор пакетов проверен симуляцией тех же слоёв в WSL Debian-11 (`DOCKERFILE_APT_SET_RESOLVES`); сам `docker build` локально не проверялся — docker/podman на машине нет, первый прогон в CI;
+- [ ] критерий «оба билда зелёные на push в main» — ждёт первого push (работу не коммитил, коммитит владелец).
+
+Тесты `harness` и `shp` в CI не включены: первому нужен Minecraft-сервер с принятым EULA, второму — shapefile-данные владельца (ручные, `tests/README.md`).
+
+### 6. Документация и финализация
+
+- [ ] README.md/README.ru.md: секция про Linux (требования, AppImage, запуск);
+- [x] DEVELOPING.md + AGENTS.md/.agents: «только Windows» → «Windows + Linux», добавить build.sh/qmake-команды, правки в ловушки по факту найденного (DEVELOPING: «Building on Linux» + запуск из-под Windows через `run_linux.bat` + «Continuous integration»; «Making a release» — обе платформы; AGENTS.md: строка про платформы + §5 оба скрипта; ловушки — в скиллах и в этом файле);
+- [ ] CHANGELOG: Added «Linux (x86-64) build with GUI (AppImage)»;
+- [ ] версия/релиз по обычной процедуре (по команде владельца).
+
+### 7. (Опционально, по запросу) Статический бинарь на musl
+
+Абсолютный ноль: запуск даже на Alpine/NixOS/Ubuntu 20.04 без glibc. Alpine-docker, пересборка Qt 5.15/GDAL/curl/OpenSSL в `.a`, плагины Qt через `Q_IMPORT_PLUGIN`, статические xcb/X11 (`libxcb-static` в Alpine). Дни отладки; LGPL-статика требует опубликовать объектные файлы/инструкцию перелинковки. Делать только если будет реальный спрос.
+
+## Риски / заметки
+
+- Реестровый QSettings → на Linux ini (`~/.config/...`) — настройки «с нуля», это нормально.
+- Регистрозависимая ФС: имена `resources/*` и шаблонов сверить с фактическими (список `TMC_RES`).
+- Регла OSM (User-Agent) — curl шлёт тот же `kTmcUserAgent`.
+- Тесты без сети в CI — как и сейчас.
+- AppImage: Wayland/X11 — обычная Qt-проблематика (флаги `QT_QPA_PLATFORM=xcb` при проблемах); High-DPI на Wayland — позже.
+- `third_party/gdal/include` (MSVC-заголовки) на Linux НЕ подмешиваем (в .pro уже `win32:`), иначе versions-mismatch с системным 3.4.x.
+- Серверная CLI-only версия (вход — готовый `.osm` от web-стороны, без GUI/онлайна) — отдельный план `docs/porting-linux-cli.md`; по решению владельца 2026-11-06 приостановлен: сначала десктоп. Подготовка при правках кода — в нём и в AGENTS.md §4.
+
+## Ход работ
+
+- 2026-11-06: .pro-правки и заглушка сделаны (см. этап 1); Windows-сборка чистая (прогон `build.bat`: в логе ни `error`, ни `LNK`); WSL: установлено ядро WSL, дистрибутивов нет — ждём решения о установке Ubuntu.
+- 2026-11-06: заглушка заменена настоящей реализацией на libcurl (этап 2, код); проверок в Linux ещё нет. Скачаны и сверены по sha256: rootfs Ubuntu 22.04 для `wsl --import` и MSI WSL 3.0.3. Выяснено: inbox wsl.exe Win10 не умеет `--import` (`import exit=1` + справка), `HyperVisorPresent=False`, winget нет → нужен один elevated-прогон `enable-wsl2.ps1` + перезагрузка (ждёт владельца).
+- 2026-11-06: повышенный скрипт отработал (DISM 3010, bcdedit 0, MSI 0): WSL 3.0.3 установлен (`wsl --version` даёт ядро 6.18.54.1 + WSLg 1.0.79), компоненты включены, `hypervisorlaunchtype auto` — но без перезагрузки гипervisor не грузится: `wsl --import` → `WSL_E_WSLOPTIONAL_COMPONENT_REQUIRED`. Ждём ребута. Решения владельца: релиз — AppImage с полным бандлом (этап 4 переписан под «ноль зависимостей»), TLS в бандл; статика на musl — этап 7 по запросу. CA-рядом-с-exe добавлен в httpclient_unix.cpp (CAINFO, если файл есть).
+- 2026-11-07: серверная стратегия изменена владельцем — НЕ отдельная CLI-сборка, а то же приложение в `--nogui` на headless-сервере. Авто-выбор `QT_QPA_PLATFORM=offscreen` при `--nogui` без DISPLAY/WAYLAND_DISPLAY добавлен в `app/main.cpp` (вне Windows, явная переменная побеждает); контрольная Windows-сборка чистая. `docs/porting-linux-cli.md` переписан под «серверный режим»; для сервера будет и tar.gz-вариант бандла («распаковал — запустил») наряду с AppImage.
+- 2026-11-07 (вечер): этапы 1–2 закрыты (детали в разделах этапов): сборка GCC зелёная, экспорт без дисплея, HTTPS через libcurl (`--net-test`), GUI через WSLg с корректным скриншотом. Этап 3: харнесс портирован (`build_harness.sh`, dispatch в `run_tests.py`, суффикс `.exe` в `run_test.py`), `run_tests.py osm` в WSL — PASS; контрольная сборка Windows зелёная. Найдено: два не-отслеживаемых git файла в корне `tests/` (`test_harness.cpp`, `tests.pro`) исчезли с диска вне git — по всему old-копии актуального `tests/harness/` (тот в git и цел); к работе не относятся, но владельцу на заметку.
+- 2026-11-07 (итог этапа 3): тесты закрыты — в WSL `run_tests.py osm harness` PASS (osm ~48 с, harness ~176 с, `verify_mc_export.py` RESULT PASS), эталонный прогон той же процедуры на Windows — тоже PASS (правки раннера его не сломали). `shp` (нет данных `TMC_TEST_SHP`) и серверная Java-часть в пилоте не гонялись. Linux-ветка: этапы 1–3 готовы, дальше этап 4 (AppImage).
+- 2026-11-07 (этап 4): закрыт — окружение релиза (`Debian-11` в WSL из официального cloud-образа, apt на archive.debian.org), slim GDAL 3.4.3 с геозависимостями по факту нужд (expat/GEOS найдены по рантайм-ошибкам), `build.sh` + `make_release_linux.sh/.bat` (5 шагов, автопроверки чистоты и dry-run из AppImage), бандл на DT_RPATH. Артефакты: AppImage 84 МБ + tar.gz 84 МБ, оба smoke-прогона зелёные, легли в `E:\Builds\tMC\package`. Документация для людей — в `DEVELOPING.md` («Building on Linux», «Making a release» — теперь обе платформы), для агентов — `AGENTS.md` §5. Не проверено: запуск AppImage на системе отличной от Debian 11 (GUI-прогон владельцем — следующий шаг).
+- 2026-11-07 (этап 4, GEOS и паритет): первая сборка была без GEOS — в dry-run сыпало «GEOS support not enabled» на мультиполигонах, и это был НЕ косметический шум: классификация тестовой сцены отличалась от Windows-эталона (13 «зданий без знаков» вместо 8, другие коды `4431*` в `osm.bldpol`). slim-GDAL пересобран с `--with-geos` (в Windows GDAL geos_c.dll есть), релиз пересобран: dry-run без ошибок, строки классификации и все счётчики слоёв **байт-в-байт совпали с Windows smoke.log** — паритет платформ подтверждён. Размер AppImage 84 МБ (GEOS добавил ~1 МБ).
+- 2026-11-07 (этап 4, кросс-прогон): артефакты проверены на Ubuntu 22.04.5 WSLg (система НОВОЕ порога, glibc 2.35): tar.gz из `env -i` и AppImage без FUSE — dry-run зелёные, числа совпадают с Windows; GUI-скриншоты из AppImage — русская разметка/тема/SVG и загруженные онлайн-тайлы (сеть и TLS из бандла), и через xcb, и через wayland (`QT_QPA_PLATFORM=wayland`; EGL на WSLg не поднялся из-за отсутствия в WSL-образе `swrast_dri.so` — Qt ушёл в софт-рендер, окно живое; на реальных десктопах DRI есть). Найдено: Qt не находил wayland-плагин, потом его shell/graphics-интеграции (в Debian всё в пакете `qtwayland5`, каталоги добавлены в сборку), а когда libwayland был в бандле — Mesa Ubuntu падала на `wl_proxy_marshal_flags` (бандловый libwayland 1.18 перекрывал системный 1.21): libwayland переведён в allow-list (библиотека окружения, как GL). Итоговые артефакты перепроверены тем же прогоном.
+- 2026-11-07 (запускатель): по просьбе владельца — `run_linux.bat` + `run_linux_wsl.sh`: запуск линуксовой сборки из-под Windows через WSL (окно через WSLg). Берёт свежий AppImage из `E:\Builds\tMC\package` (переменные `OSMC_WSL`/`OSMC_PACKAGE`/`OSMC_APPIMAGE`/`OSMC_DIR`), прокидывает аргументы osmc: котировка в батнике (wsl передаёт командную строку в шелл одной строкой — незакрытые кавычки съедали backslash), в шелле backslash → slash и `wslpath` для `E:\...`, рабочая папка вызывающего — тоже через `wslpath %CD%` (иначе относительные пути ломались). Проверено: относительный dry-run тестовой сцены и `--gui-screenshot C:\...` из-под Windows. Известно: `!` в аргументах съедает delayed expansion, UNC-пути не конвертируются — для разработческого запуска приемлемо. Заодно: вычищены 315 `.uuid` (файлы WSL2 на NTFS), в `.gitignore` добавлены `.uuid`, `.osmc-cache/`, `ci-out/`; `docs/` → `docs/*` + `!docs/porting-linux.md` (рецепт релиза на него ссылается — должен быть в репозитории).
+- 2026-11-07 (этап 5, CI): `.github/workflows/ci.yml` — windows (install-qt-action → setup.bat → build.bat → osm-тесты), linux (ubuntu-22.04, системные Qt5/GDAL → build.sh → osm-тесты), appimage (docker-образ `docker/Dockerfile.debian11` → `make_release_linux.sh` внутри, кэш gdal-prefix, upload артефактов); ENV-ы (`QTDIR`, `OSMC_BUILD`, `OSMC_EXE`, `QT_BIN`) — под уже существующие механизмы build.bat/tcfg.py. YAML распарсен, `run:`-строка докера проверена `bash -n`. `Dockerfile.debian11`: apt-набор собранного образа проверен симуляцией идентичных слоёв в WSL Debian-11 (`DOCKERFILE_APT_SET_RESOLVES`); сам `docker build` локально не выполнялся (контейнерного рантайма на машине нет) — первый реальный прогон в CI после push. Документация: DEVELOPING.md — абзац про `run_linux.bat` + секция «Continuous integration», AGENTS.md — строка платформ «Windows + Linux». Не коммитилось (коммитит владелец).
+- 2026-11-07 (tar.gz: wrapper-папка): владелец заметил, что tar.gz распаковывается в голый `usr/` — выглядит как «распаковывать в /usr». Упаковка переложена в свою папку `OSMC-<ver>-linux64/` (одна строка в make_release_linux.sh: GNU tar `--transform`); поведение бандла не меняется (rpath/qt.conf — от корня бандла, он просто стал уровнем глубже). Проверено на Debian 11: transform-тест (_symlinks и roundtrip ок_), полная пересборка релиза зелёная (purity/dry-run из бандла/AppImage), артефакты в `E:\Builds\tMC\package` заменены, smoke-логи обновлены; лаунчер с `OSMC_DIR`, указывающим на распакованную папку, — dry-run зелёный. Там же: `run_linux.bat` теперь понимает распакованный tar.gz (через `OSMC_DIR`) — и выяснено, что `WSLENV` с `/u` на этой сборке WSL пути НЕ конвертирует (приходит windows-путь как есть), конверсия сделана в `run_linux_wsl.sh` через `wslpath`.
+- 2026-11-07 (tar.gz: форма windows-зипа): владелец попросил максимального сходства с windows-архивом — финальная раскладка tar.gz: в корне папка **`OSMC/`** (как в `OSMC-<ver>-win64.zip`), в ней `osmc` + `lib`/`plugins`/ресурсы рядом, уровня `usr` в tar.gz больше нет (он остаётся только внутри AppImage — требует runtime). Реализация — два `--transform` в pack-строке; ловушка GNU tar: `|` внутри regex-альтернативы `(/|$)` ломает разбор transform-выражения («Unknown flag», regex режется по первому `|` внутри) — якоря разнесены по двум выражениям без альтернансов. `run_linux_wsl.sh` принимает `OSMC_DIR` и на распакованный корень, и внутрь `OSMC/`. Проверено: пересборка зелёная; в новом архиве корень — `OSMC/` (top-level один), лаунчер с `OSMC_DIR` в обоих режимах — dry-run зелёный; GUI из распакованного архива проверен скриншотом (русская разметка, тема/SVG, онлайн-тайлы загружены — сеть и TLS из бандла) и виден владельцем вживую. Smoke-логи в package обновлены.
+
+## Следующие шаги (после закрытия этапа 5)
+
+1. Push и первый прогон CI (коммит/push — за владельцем): работа windows/linux/appimage; сборка `Dockerfile.debian11` выполняется впервые — при падении смотреть лог докер-стейпа.
+2. Ручная проверка владельцем на реальном Linux-десктопе (опционально: на Ubuntu 22.04 WSLg зелёные и dry-run, и GUI через xcb/wayland с тайлами). Nice-to-have: dry-run артефактов на Debian 12+/Fedora rootfs.
+3. ✅ Скриншоты онлайн-карты из GUI (этап 2) — сняты из AppImage под WSLg, русская разметка, тайлы загружаются.
+4. Этап 6: README.md/README.ru.md (секция про Linux), CHANGELOG Added, версия и двойной релиз — по команде владельца.
+5. (Опционально) этап 7 — статический musl-бинарь, только при реальном спросе.

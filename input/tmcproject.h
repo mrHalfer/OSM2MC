@@ -4,6 +4,7 @@
 #include <QStringList>
 #include <QSet>
 #include <QVector>
+#include <QPointF>
 #include <QByteArray>
 #include <memory>
 #include <functional>

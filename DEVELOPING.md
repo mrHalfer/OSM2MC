@@ -27,6 +27,16 @@ After linking, `osmc.pro` copies everything from `resources/` next to the exe. I
 
 The Russian translation of the interface is `translations/osmc_ru.ts` (embedded into the exe by `lrelease`); to refresh it after changing strings run `lupdate osmc.pro -ts translations/osmc_ru.ts`. When you add a user-visible string, keep it English in the code and add its Russian text to the translation.
 
+### Building on Linux
+
+The same sources build a Linux (x86-64) GUI binary with qmake + make: Qt 5.15 (`qtbase5-dev`, `qt5-qmake`, `libqt5svg5-dev`), the dev packages listed in `docs/porting-linux.md`, and GDAL — either the system `libgdal-dev` (pkg-config finds it) or a custom build in `OSMC_GDAL=<prefix>`. `./build.sh` shadows into `$OSMC_BUILD` (default `~/builds/tmc`); the binary `osmc` and the resources land together. HTTP on Linux goes through libcurl (on Windows it stays WinHTTP); the online features are identical. The Linux build is a support matrix for the AppImage release, see `docs/porting-linux.md` for the full environment recipe (there is a pinned Debian 11 WSL/docker for the release; a development machine may use any Ubuntu/Debian with Qt 5.15).
+
+From Windows you can RUN the Linux build without leaving Windows: `run_linux.bat` starts the newest AppImage from `Builds\tMC\package` inside WSL (the window shows through WSLg). It takes the same arguments as `osmc` and converts Windows paths automatically: `run_linux.bat tests\data\osm_buildings.osm --dry-run --nogui` checks the data, `run_linux.bat` alone opens the GUI. Distro and package folder: variables `OSMC_WSL` (default `Ubuntu-22.04`) and `OSMC_PACKAGE`.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` builds and tests both platforms on every push to `main` and on pull requests: Windows (Qt 5.15.2 MSVC through `jurplel/install-qt-action`, then `setup.bat` + `build.bat` + the `osm` suite), Linux (Ubuntu 22.04 with the system Qt5/GDAL, `build.sh` + the `osm` suite), and an AppImage job that builds `docker/Dockerfile.debian11` (the pinned Debian 11 compatibility floor, the same apt set as the WSL recipe) and runs `make_release_linux.sh` inside it — the very script a real release uses, with the slim GDAL build cached between runs; its artifacts are uploaded. The `harness` and `shp` suites stay manual: they need a Minecraft server with the EULA accepted and local shapefile data (see `tests/README.md`).
+
 ### Version
 
 `VERSION` in `osmc.pro` has the form `1.2.YY.MMDDN`: `YY` — the year, `MMDD` — the month and day, `N` — the number of the build of the day (1–9; a same-day hotfix takes the next digit), for example `1.2.26.10281`, `1.2.26.10282`. The last number must stay ≤ 65535 (a Windows limit). Change only that line. After a version change touch `app/exportmeta.cpp` (its timestamp, not its content) before building: the version reaches the code as a `-D` define and nmake does not recompile sources when only defines change.
@@ -37,8 +47,14 @@ The Russian translation of the interface is `translations/osmc_ru.ts` (embedded 
 
 ## Making a release
 
+A release is made for BOTH platforms: the Windows zip AND the Linux AppImage (plus the server tar.gz). Both scripts read the version from the `VERSION` line of `osmc.pro`, so bump the version once and run the two scripts:
+
+1. Windows: `make_release.bat` → `Builds/tMC/package/OSMC-<version>-win64.zip`.
+2. Linux: `make_release_linux.bat` → `Builds/tMC/package/OSMC-<version>-x86_64.AppImage` and `OSMC-<version>-linux64.tar.gz`.
+
 `make_release.bat` makes a ready-to-run package in one step: it builds the program, runs `windeployqt` (the Qt DLLs and plugins), adds the Visual C++ runtime (app-local), the GDAL runtime from `third_party/gdal/bin`, the structure templates `*.bin`, `default.t3d`, `osm_rules.json`, `heights.csv`, `tmc_buildings.dat`, the README files with their `images/`, `THIRD_PARTY_NOTICES.md` and `LICENSE`,
 then **starts the result with a clean `PATH`** (no Qt, no GDAL) to be sure it works by itself, and packs it into `Builds/tMC/package/OSMC-<version>-win64.zip` (the version is the `VERSION` line of `osmc.pro`).
+`make_release_linux.bat` runs the whole Linux release inside the pinned **Debian 11** WSL distro (that glibc is the compatibility floor: the AppImage runs on Debian 11/12/13, Ubuntu 20.04+, Fedora 34+): it syncs the sources (`git ls-files` list) into the distro, builds the slim GDAL 3.4.3 from source (only OSM/PBF/Shapefile/GPKG/MEM, pinned url+sha256, cached), builds `osmc` against it, then collects the bundle — Qt 5.15.2 runtime and the plugins (xcb, wayland, offscreen, imageformats, svg icons), GDAL/PROJ with their data folders (`gdal-data`, `projlib`, which the program itself prefers over the environment), libcurl + OpenSSL + a CA bundle (`ca-certificates.crt`), DejaVu fonts with a shipped `fonts.conf`, the resources — verifies with `ldd` that nothing outside the bundle is needed except glibc and the video drivers, dry-run exports the test scene from the bundle, and packs `OSMC-<version>-x86_64.AppImage` (runs without FUSE) plus `OSMC-<version>-linux64.tar.gz` (for servers: the same shape as the Windows zip — an `OSMC/` folder, run `OSMC/osmc` after unpacking). It needs the WSL distro `Debian-11` once prepared: import the Debian 11 cloud rootfs (`wsl --import`) and run the apt setup documented in `docs/porting-linux.md`; the script prints where its artifacts land (`E:\Builds\tMC\package` by default, variables `OSMC_WSL`, `OSMC_BUILD`, `OSMC_OUT`).
 `third_party/gdal/make_runtime_zip.bat` makes `gdal-runtime-3.4.zip` (the contents of `third_party/gdal/bin`) for the releases page: it is what `setup.bat` downloads (set its address in `setup.bat` or in the variable `GDAL_RUNTIME_URL`).
 Not part of a release: `tests/`, `docs/`, `DEVELOPING.md`, the sources.
 

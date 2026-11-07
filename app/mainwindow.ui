@@ -403,13 +403,6 @@
         <item>
          <layout class="QHBoxLayout" name="rowPreviewTop">
           <item>
-           <widget class="QPushButton" name="loadPreviewButton">
-            <property name="text">
-             <string>Load the map</string>
-            </property>
-           </widget>
-          </item>
-          <item>
            <widget class="QLabel" name="previewStatusLabel">
             <property name="text">
              <string/>
@@ -609,7 +602,6 @@
   <tabstop>datapackCheck</tabstop>
   <tabstop>goButton</tabstop>
   <tabstop>cancelButton</tabstop>
-  <tabstop>loadPreviewButton</tabstop>
   <tabstop>toolClip</tabstop>
   <tabstop>toolSpawn</tabstop>
   <tabstop>toolStronghold</tabstop>

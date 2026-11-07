@@ -432,7 +432,7 @@ void MapPreview::paintEvent(QPaintEvent*)
     if (!mHave)
     {
         p.setPen(col.muted);
-        p.drawText(rect().adjusted(24, 24, -24, -24), Qt::AlignCenter | Qt::TextWordWrap, tr("The preview is not loaded.\nPress \"Load map\", then click on the map\nto choose the spawn point."));
+        p.drawText(rect().adjusted(24, 24, -24, -24), Qt::AlignCenter | Qt::TextWordWrap, tr("The preview is not loaded yet.\nIt loads automatically when the data is ready."));
         return;
     }
     const QRect r = imageRect();

@@ -147,13 +147,13 @@
     </message>
     <message>
         <location filename="../app/mainwindow.ui" line="46"/>
-        <location filename="../app/mainwindow.cpp" line="179"/>
-        <location filename="../app/mainwindow.cpp" line="487"/>
-        <location filename="../app/mainwindow.cpp" line="488"/>
-        <location filename="../app/mainwindow.cpp" line="489"/>
-        <location filename="../app/mainwindow.cpp" line="739"/>
-        <location filename="../app/mainwindow.cpp" line="749"/>
-        <location filename="../app/mainwindow.cpp" line="958"/>
+        <location filename="../app/mainwindow.cpp" line="176"/>
+        <location filename="../app/mainwindow.cpp" line="483"/>
+        <location filename="../app/mainwindow.cpp" line="484"/>
+        <location filename="../app/mainwindow.cpp" line="485"/>
+        <location filename="../app/mainwindow.cpp" line="740"/>
+        <location filename="../app/mainwindow.cpp" line="750"/>
+        <location filename="../app/mainwindow.cpp" line="959"/>
         <source>OSMC</source>
         <translation>OSMC</translation>
     </message>
@@ -202,7 +202,7 @@
         <location filename="../app/mainwindow.ui" line="139"/>
         <location filename="../app/mainwindow.ui" line="164"/>
         <location filename="../app/mainwindow.ui" line="189"/>
-        <location filename="../app/mainwindow.cpp" line="764"/>
+        <location filename="../app/mainwindow.cpp" line="765"/>
         <source>Browse…</source>
         <translation>Обзор…</translation>
     </message>
@@ -308,7 +308,7 @@
     </message>
     <message>
         <location filename="../app/mainwindow.ui" line="360"/>
-        <location filename="../app/mainwindow.cpp" line="301"/>
+        <location filename="../app/mainwindow.cpp" line="298"/>
         <source>Export: local zip</source>
         <translation>Экспорт: локально (zip)</translation>
     </message>
@@ -333,77 +333,76 @@
         <translation>Отмена</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="408"/>
         <source>Load the map</source>
-        <translation>Загрузить карту</translation>
+        <translation type="vanished">Загрузить карту</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="442"/>
+        <location filename="../app/mainwindow.ui" line="435"/>
         <source>A click on the map — the point where the player appears</source>
         <translation>Клик по карте — точка появления игрока</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="445"/>
+        <location filename="../app/mainwindow.ui" line="438"/>
         <source>Spawn</source>
         <translation>Спавн</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="426"/>
+        <location filename="../app/mainwindow.ui" line="419"/>
         <source>Draw a polygon: only what is inside it is exported</source>
         <translation>Нарисовать многоугольник: экспортируется только то, что внутри него</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="429"/>
+        <location filename="../app/mainwindow.ui" line="422"/>
         <source>Boundary</source>
         <translation>Граница</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="455"/>
+        <location filename="../app/mainwindow.ui" line="448"/>
         <source>A click on the map — the church with the stronghold entrance is chosen nearby (without a choice — the largest one)</source>
         <translation>Клик по карте — рядом выбирается церковь со входом в стронгхолд (без выбора — самая крупная)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="458"/>
+        <location filename="../app/mainwindow.ui" line="451"/>
         <source>Stronghold</source>
         <translation>Стронгхолд</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="468"/>
+        <location filename="../app/mainwindow.ui" line="461"/>
         <source>A click on the map — the church with the Ancient City entrance is chosen nearby (without a choice — the next by size)</source>
         <translation>Клик по карте — рядом выбирается церковь со входом в Древний город (без выбора — следующая по размеру)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="471"/>
+        <location filename="../app/mainwindow.ui" line="464"/>
         <source>Ancient City</source>
         <translation>Древний город</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="481"/>
+        <location filename="../app/mainwindow.ui" line="474"/>
         <source>A click on the map — the forest near this point becomes the Pale Garden (without a choice — the largest suitable one)</source>
         <translation>Клик по карте — лес рядом с этой точкой станет лесом скрипунов (без выбора — самый большой подходящий)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="484"/>
+        <location filename="../app/mainwindow.ui" line="477"/>
         <source>Pale Garden</source>
         <translation>Лес скрипунов</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="534"/>
+        <location filename="../app/mainwindow.ui" line="527"/>
         <source>Spawn at the data center</source>
         <translation>Спавн в центре данных</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="541"/>
+        <location filename="../app/mainwindow.ui" line="534"/>
         <source>Copy /tp</source>
         <translation>Копировать /tp</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="548"/>
+        <location filename="../app/mainwindow.ui" line="541"/>
         <source>Remove the boundary</source>
         <translation>Убрать границу</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="555"/>
+        <location filename="../app/mainwindow.ui" line="548"/>
         <source>Reset the entrances</source>
         <translation>Сбросить входы</translation>
     </message>
@@ -475,331 +474,335 @@
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="64"/>
-        <location filename="../app/mainwindow.cpp" line="833"/>
+        <location filename="../app/mainwindow.cpp" line="834"/>
         <source>Open project…</source>
         <translation>Открыть проект…</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="65"/>
-        <location filename="../app/mainwindow.cpp" line="834"/>
+        <location filename="../app/mainwindow.cpp" line="835"/>
         <source>Save project…</source>
         <translation>Сохранить проект…</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="66"/>
-        <location filename="../app/mainwindow.cpp" line="835"/>
+        <location filename="../app/mainwindow.cpp" line="836"/>
         <source>Open a project file: the map view, the boundary, the marks and the world options</source>
         <translation>Открыть файл проекта: положение карты, границу, отметки и параметры мира</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="67"/>
-        <location filename="../app/mainwindow.cpp" line="836"/>
+        <location filename="../app/mainwindow.cpp" line="837"/>
         <source>Save the map view, the boundary, the marks and the world options into a project file</source>
         <translation>Сохранить положение карты, границу, отметки и параметры мира в файл проекта</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="73"/>
-        <location filename="../app/mainwindow.cpp" line="832"/>
+        <location filename="../app/mainwindow.cpp" line="833"/>
         <source>Language:</source>
         <translation>Язык:</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="76"/>
-        <location filename="../app/mainwindow.cpp" line="837"/>
+        <location filename="../app/mainwindow.cpp" line="838"/>
         <source>Auto (system language)</source>
         <translation>Авто (язык системы)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="120"/>
-        <location filename="../app/mainwindow.cpp" line="838"/>
+        <location filename="../app/mainwindow.cpp" line="118"/>
+        <location filename="../app/mainwindow.cpp" line="839"/>
         <source>Climate:</source>
         <translation>Климат:</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="124"/>
-        <location filename="../app/mainwindow.cpp" line="811"/>
+        <location filename="../app/mainwindow.cpp" line="122"/>
+        <location filename="../app/mainwindow.cpp" line="812"/>
         <source>Auto (by data coordinates)</source>
         <translation>Авто (по координатам данных)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="126"/>
-        <location filename="../app/mainwindow.cpp" line="839"/>
+        <location filename="../app/mainwindow.cpp" line="124"/>
+        <location filename="../app/mainwindow.cpp" line="840"/>
         <source>Tree species, surface and biome inside the export area; the world around the area is not changed by this.</source>
         <translation>Породы деревьев, поверхность и биом внутри области экспорта; мир вокруг области этим не меняется.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="296"/>
+        <location filename="../app/mainwindow.cpp" line="293"/>
         <source>The export destination chosen in &quot;Export settings&quot; overrides this field: %1</source>
         <translation>Назначение из «Настроек экспорта» перекрывает это поле: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="302"/>
+        <location filename="../app/mainwindow.cpp" line="299"/>
         <source>Export: launcher</source>
         <translation>Экспорт: в лаунчер</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="303"/>
+        <location filename="../app/mainwindow.cpp" line="300"/>
         <source>Export: Modrinth</source>
         <translation>Экспорт: в Modrinth</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="304"/>
+        <location filename="../app/mainwindow.cpp" line="301"/>
         <source>Export: CurseForge</source>
         <translation>Экспорт: в CurseForge</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="306"/>
+        <location filename="../app/mainwindow.cpp" line="303"/>
         <source>A zip file next to the source data (or the chosen output file)</source>
         <translation>Zip-файл рядом с исходными данными (или в выбранном файле вывода)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="308"/>
+        <location filename="../app/mainwindow.cpp" line="305"/>
         <source>Click to open the folder.</source>
         <translation>Нажмите, чтобы открыть папку.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="389"/>
+        <location filename="../app/mainwindow.cpp" line="386"/>
         <source>tqt project file or OSM extract</source>
         <translation>Файл проекта tqt или выгрузка OSM</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="390"/>
+        <location filename="../app/mainwindow.cpp" line="387"/>
         <source>tqt project, OSM extract (*.tqt *.osm *.pbf);;tqt project (*.tqt);;OSM extract (*.osm *.pbf);;All files (*)</source>
         <translation>Проект tqt, выгрузка OSM (*.tqt *.osm *.pbf);;Проект tqt (*.tqt);;Выгрузка OSM (*.osm *.pbf);;Все файлы (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="391"/>
+        <location filename="../app/mainwindow.cpp" line="388"/>
         <source>OpenStreetMap extract</source>
         <translation>Выгрузка OpenStreetMap</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="392"/>
+        <location filename="../app/mainwindow.cpp" line="389"/>
         <source>OSM extract (*.osm *.pbf);;All files (*)</source>
         <translation>Выгрузка OSM (*.osm *.pbf);;Все файлы (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="398"/>
+        <location filename="../app/mainwindow.cpp" line="395"/>
         <source>Folder with shapefiles</source>
         <translation>Папка с shape-файлами</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="404"/>
+        <location filename="../app/mainwindow.cpp" line="401"/>
         <source>3D model settings</source>
         <translation>Настройки 3D-модели</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="404"/>
+        <location filename="../app/mainwindow.cpp" line="401"/>
         <source>3D model settings (*.t3d);;All files (*)</source>
         <translation>Настройки 3D-модели (*.t3d);;Все файлы (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="410"/>
+        <location filename="../app/mainwindow.cpp" line="407"/>
         <source>OSM rules</source>
         <translation>Правила OSM</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="410"/>
+        <location filename="../app/mainwindow.cpp" line="407"/>
         <source>OSM rules (*.json);;All files (*)</source>
         <translation>Правила OSM (*.json);;Все файлы (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="416"/>
+        <location filename="../app/mainwindow.cpp" line="413"/>
         <source>Enhancer file</source>
         <translation>Файл улучшайзера</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="416"/>
+        <location filename="../app/mainwindow.cpp" line="413"/>
         <source>Enhancer (*.dat);;All files (*)</source>
         <translation>Улучшайзер (*.dat);;Все файлы (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="422"/>
+        <location filename="../app/mainwindow.cpp" line="419"/>
         <source>Save the Minecraft world (zip archive)</source>
         <translation>Сохранение Minecraft (zip-архив)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="422"/>
+        <location filename="../app/mainwindow.cpp" line="419"/>
         <source>ZIP archive (*.zip)</source>
         <translation>ZIP-архив (*.zip)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="476"/>
+        <location filename="../app/mainwindow.cpp" line="472"/>
         <source>Cancelling…</source>
         <translation>Отмена…</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="488"/>
+        <location filename="../app/mainwindow.cpp" line="484"/>
         <source>Export cancelled.</source>
         <translation>Экспорт отменён.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="505"/>
+        <location filename="../app/mainwindow.cpp" line="501"/>
         <source>Show the file in the folder</source>
         <translation>Показать файл в папке</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="536"/>
+        <location filename="../app/mainwindow.cpp" line="538"/>
         <source>Loading the map…</source>
         <translation>Загрузка карты…</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="550"/>
+        <location filename="../app/mainwindow.cpp" line="551"/>
         <source>Could not load: %1</source>
         <translation>Не удалось загрузить: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="684"/>
+        <location filename="../app/mainwindow.cpp" line="685"/>
         <source>Could not open the file: %1</source>
         <translation>Не удалось открыть файл: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="687"/>
+        <location filename="../app/mainwindow.cpp" line="688"/>
         <source>This is not an OSMC project file: %1</source>
         <translation>Это не файл проекта OSMC: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="728"/>
+        <location filename="../app/mainwindow.cpp" line="729"/>
         <source>The data file of the project was not found: %1</source>
         <translation>Файл данных проекта не найден: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="736"/>
+        <location filename="../app/mainwindow.cpp" line="737"/>
         <source>Save the project</source>
         <translation>Сохранить проект</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="736"/>
-        <location filename="../app/mainwindow.cpp" line="745"/>
+        <location filename="../app/mainwindow.cpp" line="737"/>
+        <location filename="../app/mainwindow.cpp" line="746"/>
         <source>OSMC project (*.tmc);;All files (*)</source>
         <translation>Проект OSMC (*.tmc);;Все файлы (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="739"/>
+        <location filename="../app/mainwindow.cpp" line="740"/>
         <source>Could not write the file: %1</source>
         <translation>Не удалось записать файл: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="745"/>
+        <location filename="../app/mainwindow.cpp" line="746"/>
         <source>Open a project</source>
         <translation>Открыть проект</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="762"/>
+        <location filename="../app/mainwindow.cpp" line="763"/>
         <source>OSM file:</source>
         <translation>Файл OSM:</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="763"/>
+        <location filename="../app/mainwindow.cpp" line="764"/>
         <source>Export an OpenStreetMap area to a Minecraft world</source>
         <translation>Экспорт карты OpenStreetMap в мир Minecraft</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="765"/>
+        <location filename="../app/mainwindow.cpp" line="766"/>
         <source>an OpenStreetMap extract (.osm / .pbf)</source>
         <translation>выгрузка OpenStreetMap (.osm / .pbf)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="766"/>
+        <location filename="../app/mainwindow.cpp" line="767"/>
         <source>empty — &lt;file name&gt;.zip in the folder of the OSM file</source>
         <translation>пусто — &lt;имя файла&gt;.zip в папке с файлом OSM</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="776"/>
+        <location filename="../app/mainwindow.cpp" line="777"/>
         <source>default: %1</source>
         <translation>по умолчанию: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="811"/>
+        <location filename="../app/mainwindow.cpp" line="812"/>
         <source>Auto: %1</source>
         <translation>Авто: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="819"/>
+        <location filename="../app/mainwindow.cpp" line="820"/>
         <source>Done</source>
         <translation>Готово</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="819"/>
+        <location filename="../app/mainwindow.cpp" line="820"/>
         <source>Cancelled</source>
         <translation>Отменено</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="819"/>
+        <location filename="../app/mainwindow.cpp" line="820"/>
         <source>Error</source>
         <translation>Ошибка</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="824"/>
+        <location filename="../app/mainwindow.cpp" line="825"/>
         <source>%1 — %2%</source>
         <translation>%1 — %2%</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="899"/>
+        <location filename="../app/mainwindow.cpp" line="900"/>
         <source>Spawn: click on the map — the player will appear here.</source>
         <translation>Спавн: клик по карте — здесь появится игрок.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="900"/>
+        <location filename="../app/mainwindow.cpp" line="901"/>
         <source>Boundary: clicks add vertices, a click on the first (large) one closes it. Vertices can be dragged, a click on an edge adds a vertex, the right button deletes.</source>
         <translation>Граница: клики — вершины, клик по первой (крупной) замыкает. Вершины тянутся, клик по ребру добавляет вершину, правая кнопка удаляет.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="901"/>
+        <location filename="../app/mainwindow.cpp" line="902"/>
         <source>Stronghold: click — the entrance will be in the church nearest to this place. The right button removes the mark.</source>
         <translation>Стронгхолд: клик — вход будет в ближайшей к этому месту церкви. Правая кнопка снимает отметку.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="902"/>
+        <location filename="../app/mainwindow.cpp" line="903"/>
         <source>Ancient City: click — the entrance will be in the church nearest to this place. The right button removes the mark.</source>
         <translation>Древний город: клик — вход будет в ближайшей к этому месту церкви. Правая кнопка снимает отметку.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="903"/>
+        <location filename="../app/mainwindow.cpp" line="904"/>
         <source>Pale Garden: click — the forest nearest to this place becomes the Pale Garden. The right button removes the mark.</source>
         <translation>Лес скрипунов: клик — лесом скрипунов станет ближайший к этому месту лес. Правая кнопка снимает отметку.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="905"/>
+        <location filename="../app/mainwindow.cpp" line="906"/>
         <source> The export covers only the inside of the boundary; the world origin is the center of the clipped data.</source>
         <translation> Экспорт — только внутри границы; начало координат мира — центр вырезанных данных.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="906"/>
+        <location filename="../app/mainwindow.cpp" line="907"/>
         <source>Objects on the map: %1. </source>
         <translation>Объектов на карте: %1. </translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="922"/>
-        <source>Spawn point: the data center. To choose another, load the map and click on it.</source>
-        <translation>Точка спавна: центр данных. Чтобы выбрать другую, загрузите карту и кликните по ней.</translation>
+        <location filename="../app/mainwindow.cpp" line="923"/>
+        <source>Spawn point: the data center. To choose another, click on the map.</source>
+        <translation>Точка спавна: центр данных. Чтобы выбрать другую, кликните по карте.</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="934"/>
+        <source>Spawn point: the data center. To choose another, load the map and click on it.</source>
+        <translation type="vanished">Точка спавна: центр данных. Чтобы выбрать другую, загрузите карту и кликните по ней.</translation>
+    </message>
+    <message>
+        <location filename="../app/mainwindow.cpp" line="935"/>
         <source>Spawn point chosen: </source>
         <translation>Точка спавна выбрана: </translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="934"/>
+        <location filename="../app/mainwindow.cpp" line="935"/>
         <source>Spawn point: the data center. </source>
         <translation>Точка спавна: центр данных. </translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="935"/>
+        <location filename="../app/mainwindow.cpp" line="936"/>
         <source>latitude %1, longitude %2; </source>
         <translation>широта %1, долгота %2; </translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="936"/>
+        <location filename="../app/mainwindow.cpp" line="937"/>
         <source>in the world roughly block X=%1, Z=%2 (the data center is 0, 0).</source>
         <translation>в мире примерно блок X=%1, Z=%2 (центр данных — 0, 0).</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="951"/>
+        <location filename="../app/mainwindow.cpp" line="952"/>
         <source>Copied: %1</source>
         <translation>Скопировано: %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="958"/>
+        <location filename="../app/mainwindow.cpp" line="959"/>
         <source>An export is running. Cancel it and quit?</source>
         <translation>Идёт экспорт. Прервать и выйти?</translation>
     </message>
@@ -807,13 +810,19 @@
 <context>
     <name>MapPreview</name>
     <message>
-        <location filename="../app/mappreview.cpp" line="435"/>
         <source>The preview is not loaded.
 Press &quot;Load map&quot;, then click on the map
 to choose the spawn point.</source>
-        <translation>Предпросмотр не загружен.
+        <translation type="vanished">Предпросмотр не загружен.
 Нажмите «Загрузить карту», затем кликните по карте,
 чтобы выбрать точку спавна.</translation>
+    </message>
+    <message>
+        <location filename="../app/mappreview.cpp" line="435"/>
+        <source>The preview is not loaded yet.
+It loads automatically when the data is ready.</source>
+        <translation>Предпросмотр пока не загружен.
+Он загрузится автоматически, когда данные будут готовы.</translation>
     </message>
     <message>
         <location filename="../app/mappreview.cpp" line="499"/>
@@ -1064,167 +1073,167 @@ to choose the spawn point.</source>
 <context>
     <name>QObject</name>
     <message>
-        <location filename="../app/main.cpp" line="77"/>
+        <location filename="../app/main.cpp" line="87"/>
         <source>OSMC — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world.</source>
         <translation>OSMC — экспорт данных tqt (проект .tqt или shape-файлы папки) в мир Minecraft.</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="81"/>
+        <location filename="../app/main.cpp" line="91"/>
         <source>a .tqt project file, an OSM extract (.osm/.pbf) or a folder with shapefiles (default — the current folder)</source>
         <translation>файл проекта .tqt, выгрузка OSM (.osm/.pbf) или папка с shape-файлами (по умолчанию — текущая папка)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="82"/>
+        <location filename="../app/main.cpp" line="92"/>
         <source>3D settings file (.t3d); by default the .t3d from the shapefile folder, otherwise the settings of the .tqt project, otherwise default.t3d next to the program</source>
         <translation>файл настроек 3D (.t3d); по умолчанию .t3d из папки с shape-файлами, иначе настройки из проекта .tqt, иначе default.t3d рядом с программой</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="83"/>
+        <location filename="../app/main.cpp" line="93"/>
         <source>world zip archive</source>
         <translation>zip-архив мира</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="84"/>
+        <location filename="../app/main.cpp" line="94"/>
         <source>world version: 26 (default) or 1.21</source>
         <translation>версия мира: 26 (по умолчанию) или 1.21</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="85"/>
+        <location filename="../app/main.cpp" line="95"/>
         <source>superflat outside the area (default — a normal seed-based world)</source>
         <translation>суперплоскость вне области (по умолчанию — обычный мир по сиду)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="86"/>
+        <location filename="../app/main.cpp" line="96"/>
         <source>world seed (random by default)</source>
         <translation>сид мира (по умолчанию случайный)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="87"/>
+        <location filename="../app/main.cpp" line="97"/>
         <source>caves: 1 (default) or 0</source>
         <translation>пещеры: 1 (по умолчанию) или 0</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="88"/>
+        <location filename="../app/main.cpp" line="98"/>
         <source>convert map units to meters using the projection: 1 (default) or 0</source>
         <translation>привести единицы карты к метрам: 1 (по умолчанию) или 0</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="89"/>
+        <location filename="../app/main.cpp" line="99"/>
         <source>church chunk for the stronghold, F3 format: &quot;x z&quot; or &quot;x y z&quot;</source>
         <translation>чанк церкви для стронгхолда, формат F3: «x z» или «x y z»</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="90"/>
+        <location filename="../app/main.cpp" line="100"/>
         <source>church chunk for the Ancient City</source>
         <translation>чанк церкви для Древнего города</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="91"/>
+        <location filename="../app/main.cpp" line="101"/>
         <source>a chunk inside the forest that becomes the Pale Garden</source>
         <translation>чанк внутри леса, который станет лесом скрипунов</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="92"/>
+        <location filename="../app/main.cpp" line="102"/>
         <source>JSON with the &quot;OSM tags -&gt; layer and codes&quot; rules for an .osm/.pbf source (default: osm_rules.json next to the file/program)</source>
         <translation>JSON с правилами «теги OSM -&gt; слой и коды» для источника .osm/.pbf (по умолчанию osm_rules.json рядом с файлом/программой)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="93"/>
+        <location filename="../app/main.cpp" line="103"/>
         <source>a custom osmconf.ini for the OSM driver (by default generated from the tags used by the rules)</source>
         <translation>свой osmconf.ini для драйвера OSM (по умолчанию генерируется по тегам из правил)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="94"/>
+        <location filename="../app/main.cpp" line="104"/>
         <source>export boundary — a polygon of WGS84 longitudes and latitudes: &quot;lon lat; lon lat; lon lat …&quot; (in the window — &quot;Boundary&quot;)</source>
         <translation>граница экспорта — многоугольник из долгот и широт WGS84: «lon lat; lon lat; lon lat …» (в окне — «Нарисовать границу»)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="95"/>
+        <location filename="../app/main.cpp" line="105"/>
         <source>save the world UNPACKED into this saves folder (a launcher or an instance folder), no zip — the world folder &lt;name&gt; is created inside it (in the window — &quot;Export settings&quot;)</source>
         <translation>сохранять мир в распакованном виде в эту папку saves (папка лаунчера или инстанса), без архива — внутри неё будет создана папка мира &lt;name&gt; (в окне — «Настройки экспорта»)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="96"/>
+        <location filename="../app/main.cpp" line="106"/>
         <source>copy the log to a text file (UTF-8), handy with --nogui</source>
         <translation>дублировать журнал в текстовый файл (UTF-8), удобно с --nogui</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="97"/>
+        <location filename="../app/main.cpp" line="107"/>
         <source>enhancer .dat file (fallback building type/height for OSM data); by default tmc_buildings.dat next to the program</source>
         <translation>файл улучшайзера .dat (запасные тип/высота зданий для данных OSM); по умолчанию tmc_buildings.dat рядом с программой</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="98"/>
+        <location filename="../app/main.cpp" line="108"/>
         <source>do not use the enhancer</source>
         <translation>не использовать улучшайзер</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="99"/>
+        <location filename="../app/main.cpp" line="109"/>
         <source>spawn point as WGS84 longitude and latitude: &quot;lon lat&quot; (in the window — a click on the map preview)</source>
         <translation>точка спавна по долготе и широте WGS84: «lon lat» (в окне — клик по предпросмотру карты)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="100"/>
+        <location filename="../app/main.cpp" line="110"/>
         <source>save the map preview to a PNG and exit (no window)</source>
         <translation>сохранить предпросмотр карты в PNG и выйти (без окна)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="101"/>
+        <location filename="../app/main.cpp" line="111"/>
         <source>(for testing) open the window, load the map, save a window screenshot to a PNG and exit</source>
         <translation>(для проверки) открыть окно, загрузить карту, сохранить снимок окна в PNG и выйти</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="102"/>
+        <location filename="../app/main.cpp" line="112"/>
         <source>(for testing, with --gui-screenshot) &quot;click&quot; on the map: fractions of width and height, for example &quot;0.4 0.6&quot;</source>
         <translation>(для проверки, с --gui-screenshot) «кликнуть» по карте: доли ширины и высоты, например «0.4 0.6»</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="103"/>
+        <location filename="../app/main.cpp" line="113"/>
         <source>do not put the /locate and eye-of-ender datapack in the world (stronghold, Ancient City …): the game will not ask for experimental features, but these structures cannot be found with a command</source>
         <translation>не класть в мир датапак для /locate и глаза Эндера (стронгхолд, Древний город …): игра не будет просить экспериментальных функций, но эти структуры нельзя найти командой</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="104"/>
+        <location filename="../app/main.cpp" line="114"/>
         <source>do not top up vegetation for OSM data (yards, taiga, forests, parks)</source>
         <translation>не достраивать растительность для данных OSM (дворы, тайга, леса, парки)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="105"/>
+        <location filename="../app/main.cpp" line="115"/>
         <source>only load and classify the data (summary in the log), do not build the world</source>
         <translation>только загрузить данные и классифицировать (сводка в журнале), мир не строить</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="106"/>
+        <location filename="../app/main.cpp" line="116"/>
         <source>window theme: auto (as in Windows, default), light or dark</source>
         <translation>тема окна: auto (как в Windows, по умолчанию), light или dark</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="107"/>
+        <location filename="../app/main.cpp" line="117"/>
         <source>show the service fields in the window: paths to .t3d, the OSM rules and the enhancer, &quot;real meters&quot; (without the key the default files are always used)</source>
         <translation>показать в окне служебные поля: пути к .t3d, правилам OSM и улучшайзеру, «реальные метры» (без ключа всегда файлы по умолчанию)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="108"/>
+        <location filename="../app/main.cpp" line="118"/>
         <source>(for testing, with --gui-screenshot) online mode: &quot;lon lat zoom; lon lat; lon lat; …&quot; — map view and boundary vertices</source>
         <translation>(для проверки, с --gui-screenshot) онлайн-режим: «lon lat zoom; lon lat; lon lat; …» — вид карты и вершины границы</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="109"/>
+        <location filename="../app/main.cpp" line="119"/>
         <source>download OSM data for the polygon &quot;lon lat; lon lat; …&quot; (up to 25 km²) into the --out file and exit; the result goes to the --log file</source>
         <translation>скачать данные OSM по многоугольнику «lon lat; lon lat; …» (до 25 км²) в файл --out и выйти; результат — в файл --log</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="110"/>
+        <location filename="../app/main.cpp" line="120"/>
         <source>climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid</source>
         <translation>климатическая зона: auto (по координатам, по умолчанию), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="112"/>
+        <location filename="../app/main.cpp" line="122"/>
         <source>(for testing, with --gui-screenshot) switch the interface language at run time (en, ru or zh) before the screenshot; the saved choice is not changed</source>
         <translation>(для проверки, вместе с --gui-screenshot) переключить язык интерфейса во время работы (en, ru или zh) перед снимком; сохранённый выбор не меняется</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="114"/>
+        <location filename="../app/main.cpp" line="124"/>
         <source>interface language: auto (the system one, default), en, ru or zh; not saved</source>
         <translation>язык интерфейса: auto (системный, по умолчанию), en, ru или zh; не сохраняется</translation>
     </message>
@@ -1233,7 +1242,7 @@ to choose the spawn point.</source>
         <translation type="vanished">климатическая зона: auto (по координатам, по умолчанию), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="111"/>
+        <location filename="../app/main.cpp" line="121"/>
         <source>(for testing) download a test OSM tile and a Nominatim reply, write the response codes to a file and exit</source>
         <translation>(для проверки) скачать тестовый тайл OSM и ответ Nominatim, записать коды ответов в файл и выйти</translation>
     </message>
@@ -1242,7 +1251,7 @@ to choose the spawn point.</source>
         <translation type="vanished">(для проверки, вместе с --gui-screenshot) переключить язык интерфейса во время работы (en или ru) перед снимком; сохранённый выбор не меняется</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="113"/>
+        <location filename="../app/main.cpp" line="123"/>
         <source>(for testing, with --gui-screenshot) &quot;open:file&quot; or &quot;save:file&quot; — open or save a project file around the screenshot</source>
         <translation>(для проверки, вместе с --gui-screenshot) &quot;open:файл&quot; или &quot;save:файл&quot; — открыть или сохранить файл проекта вокруг снимка</translation>
     </message>
@@ -1251,19 +1260,19 @@ to choose the spawn point.</source>
         <translation type="vanished">язык интерфейса: auto (системный, по умолчанию), en или ru; не сохраняется</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="115"/>
+        <location filename="../app/main.cpp" line="125"/>
         <source>no window: run the export and exit (code 0 — success)</source>
         <translation>без окна: выполнить экспорт и выйти (код 0 — успех)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="237"/>
+        <location filename="../app/main.cpp" line="247"/>
         <location filename="../app/tmcrun.cpp" line="45"/>
         <location filename="../app/tmcrun.cpp" line="138"/>
         <source>Error: %1</source>
         <translation>Ошибка: %1</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="269"/>
+        <location filename="../app/main.cpp" line="279"/>
         <source>Online</source>
         <translation>Онлайн</translation>
     </message>
@@ -1449,18 +1458,18 @@ to choose the spawn point.</source>
     <message>
         <location filename="../app/tmcrun.cpp" line="177"/>
         <location filename="../app/tmcrun.cpp" line="312"/>
-        <location filename="../export/mcworldexporter.cpp" line="8650"/>
-        <location filename="../export/mcworldexporter.cpp" line="8693"/>
-        <location filename="../export/mcworldexporter.cpp" line="9448"/>
-        <location filename="../export/mcworldexporter.cpp" line="9713"/>
-        <location filename="../export/mcworldexporter.cpp" line="11578"/>
-        <location filename="../export/mcworldexporter.cpp" line="13274"/>
-        <location filename="../export/mcworldexporter.cpp" line="14264"/>
-        <location filename="../export/mcworldexporter.cpp" line="17657"/>
-        <location filename="../export/mcworldexporter.cpp" line="17733"/>
-        <location filename="../export/mcworldexporter.cpp" line="17906"/>
-        <location filename="../export/mcworldexporter.cpp" line="17975"/>
-        <location filename="../export/mcworldexporter.cpp" line="18076"/>
+        <location filename="../export/exportrun.cpp" line="400"/>
+        <location filename="../export/exportrun.cpp" line="560"/>
+        <location filename="../export/exportrun.cpp" line="638"/>
+        <location filename="../export/exportrun.cpp" line="735"/>
+        <location filename="../export/exportrun.cpp" line="1377"/>
+        <location filename="../export/exportrun.cpp" line="4699"/>
+        <location filename="../export/exportrun.cpp" line="5853"/>
+        <location filename="../export/exportrun.cpp" line="7651"/>
+        <location filename="../export/exportrun.cpp" line="9273"/>
+        <location filename="../export/exportrun.cpp" line="9312"/>
+        <location filename="../export/exportrun.cpp" line="10104"/>
+        <location filename="../export/exportrun.cpp" line="10369"/>
         <source>Export cancelled.</source>
         <translation>Экспорт отменён.</translation>
     </message>
@@ -1576,283 +1585,283 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
         <translation> (сид %1)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="1315"/>
+        <location filename="../export/caveset.cpp" line="95"/>
         <source>Could not open the cave template file: %1</source>
         <translation>Не открыть файл пещерных шаблонов: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="1320"/>
+        <location filename="../export/caveset.cpp" line="100"/>
         <source>Cave templates: %1</source>
         <translation>Пещерные шаблоны: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="8264"/>
+        <location filename="../export/exportrun.cpp" line="8974"/>
         <source>lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)</source>
         <translation>не найден lair_structures.bin (положите рядом с cave_templates.bin; искал в: %1)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="8268"/>
+        <location filename="../export/exportrun.cpp" line="8978"/>
         <source>lair_structures.bin is damaged</source>
         <translation>lair_structures.bin повреждён</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="8272"/>
+        <location filename="../export/exportrun.cpp" line="8982"/>
         <source>caves must be enabled together with the normal surroundings (a noise world)</source>
         <translation>нужны включённые пещеры и обычное окружение (noise-мир)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="8316"/>
+        <location filename="../export/exportrun.cpp" line="9028"/>
         <source>Nothing to export: all meshes are empty.</source>
         <translation>Нечего экспортировать: все меши пусты.</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="9856"/>
+        <location filename="../export/exportrun.cpp" line="10513"/>
         <source>; road width trimmed near buildings: %1 sections, cells under buildings removed: %2</source>
         <translation>; ширина дорог урезана у зданий: %1 участков, убрано клеток под зданиями: %2</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10001"/>
+        <location filename="../export/exportrun.cpp" line="10659"/>
         <source>; zebra on the roads: crossings %1 of %2 (cells %3)</source>
         <translation>; зебра на дорогах: переходов %1 из %2 (клеток %3)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10079"/>
+        <location filename="../export/exportrun.cpp" line="10737"/>
         <source>Could not voxelize a single object (empty or too huge meshes).</source>
         <translation>Не удалось вокселизировать ни один объект (пустые или слишком огромные меши).</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10209"/>
+        <location filename="../export/exportrun.cpp" line="6395"/>
         <source>%1Pale Garden: there is no suitable vegetation in the data — an empty site of %2×%2 chunks was allocated (chunks %3…%4 along X, %5…%6 along Z, gap to the data %7 chunks)</source>
         <translation>%1лес скрипунов: в данных нет подходящей растительности — выделена пустая площадка %2×%2 чанков (чанки %3…%4 по X, %5…%6 по Z, зазор до данных %7 чанк.)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10398"/>
+        <location filename="../export/exportrun.cpp" line="6574"/>
         <source>; fields and grass extended to the chunk edge on the export border: %1 chunks</source>
         <translation>; поля и трава продлены до края чанка на границе экспорта: %1 чанков</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10400"/>
+        <location filename="../export/exportrun.cpp" line="6576"/>
         <source>; forest extended to the chunk edge on the export border: %1 chunks</source>
         <translation>; лес продлён до края чанка на границе экспорта: %1 чанков</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10532"/>
+        <location filename="../export/exportrun.cpp" line="6705"/>
         <source>%1Pale Garden: there is no forest near the given chunk</source>
         <translation>%1лес скрипунов: рядом с заданным чанком леса нет</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10558"/>
+        <location filename="../export/exportrun.cpp" line="6731"/>
         <source>%1Pale Garden: meadow vegetation was chosen (%2 m², more than twice the best forest with height — %3 m²)</source>
         <translation>%1лес скрипунов: выбрана луговая растительность (%2 м², более чем вдвое больше лучшего леса с высотой — %3 м²)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10577"/>
+        <location filename="../export/exportrun.cpp" line="6750"/>
         <source>%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10</source>
         <translation>%1лес скрипунов: %2 м², центр x=%3 z=%4 (чанк %5 %6), границы x %7…%8, z %9…%10</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10585"/>
+        <location filename="../export/exportrun.cpp" line="6758"/>
         <source>%1Pale Garden: no suitable forest</source>
         <translation>%1лес скрипунов: подходящего леса нет</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10792"/>
+        <location filename="../export/exportrun.cpp" line="6939"/>
         <source>; forest mansion: 1 of %1 kept</source>
         <translation>; лесной особняк: оставлен 1 из %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10841"/>
+        <location filename="../export/exportrun.cpp" line="6988"/>
         <source>; Pale Garden: pale_garden.bin was not found next to cave_templates.bin — a procedural forest without the donor terrain</source>
         <translation>; лес скрипунов: pale_garden.bin не найден рядом с cave_templates.bin — процедурный лес без донорного рельефа</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="10913"/>
+        <location filename="../export/exportrun.cpp" line="7060"/>
         <source>; terrain in forests: %1 columns</source>
         <translation>; рельеф в лесах: %1 колонок</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11084"/>
+        <location filename="../export/exportrun.cpp" line="7231"/>
         <source>; forest mansion (cut out of the game world) placed: center x=%1 z=%2 (chunk %3 %4)</source>
         <translation>; лесной особняк (вырезан из мира игры) поставлен: центр x=%1 z=%2 (чанк %3 %4)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11087"/>
+        <location filename="../export/exportrun.cpp" line="7234"/>
         <source>; forest mansion: no place was found in the Pale Garden</source>
         <translation>; лесной особняк: в лесу скрипунов не нашлось места</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11110"/>
+        <location filename="../export/exportrun.cpp" line="7257"/>
         <source>; bandit outposts: %1, abandoned camps: %2</source>
         <translation>; аванпостов разбойников: %1, заброшенных лагерей: %2</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11183"/>
+        <location filename="../export/exportrun.cpp" line="7330"/>
         <source>; quarries: %1 columns of the stepped excavation</source>
         <translation>; карьеры: %1 колонок ступенчатой выемки</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11184"/>
+        <location filename="../export/exportrun.cpp" line="7331"/>
         <source>; spoil heaps: %1 columns of the mound</source>
         <translation>; терриконы: %1 колонок насыпи</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11249"/>
+        <location filename="../export/exportrun.cpp" line="7396"/>
         <source>; terrain of the empty lands: %1 columns</source>
         <translation>; рельеф пустых земель: %1 колонок</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11278"/>
+        <location filename="../export/exportrun.cpp" line="7425"/>
         <source>; climate zone: %1</source>
         <translation>; климатическая зона: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11539"/>
+        <location filename="../export/exportrun.cpp" line="7617"/>
         <source>; road columns moved onto the relief: %1</source>
         <translation>; колонок дорог перенесено на рельеф: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11611"/>
+        <location filename="../export/exportrun.cpp" line="7684"/>
         <source>; bridge columns over water (roads and railways): %1</source>
         <translation>; колонок мостов над водой (дороги и железные дороги): %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11684"/>
+        <location filename="../export/exportrun.cpp" line="7757"/>
         <source>; mansion inhabitants: %1</source>
         <translation>; обитателей особняка: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11699"/>
+        <location filename="../export/exportrun.cpp" line="7772"/>
         <source>; outpost and camp blocks: %1</source>
         <translation>; блоков аванпостов и лагерей: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11791"/>
+        <location filename="../export/exportrun.cpp" line="7864"/>
         <source>; shipwrecks in big water bodies: %1 (on the bottom %2, on the water %3)</source>
         <translation>; кораблекрушения в больших водоёмах: %1 (на дне %2, на воде %3)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11820"/>
+        <location filename="../export/exportrun.cpp" line="7893"/>
         <source>; seaweed: kelp %1, seagrass %2 columns</source>
         <translation>; водоросли: ламинария %1, морская трава %2 колонок</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="11888"/>
+        <location filename="../export/exportrun.cpp" line="7961"/>
         <source>; terrain and trees of the real Pale Garden: %1 blocks</source>
         <translation>; рельеф и деревья настоящего бледного сада: %1 блоков</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="12697"/>
+        <location filename="../export/exportrun.cpp" line="8770"/>
         <source>; subway: %1 tunnels, %2 rails (%3 electrified), %4 lamps</source>
         <translation>; метро: тоннелей %1, рельсов %2 (электрофицировано %3), светильников %4</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="12822"/>
+        <location filename="../export/exportrun.cpp" line="8895"/>
         <source>; secret rooms in the metro: %1</source>
         <translation>; секретные комнаты в метро: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="12859"/>
+        <location filename="../export/exportrun.cpp" line="8932"/>
         <source>; station halls: %1</source>
         <translation>; залы вокзалов: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="13478"/>
+        <location filename="../export/exportrun.cpp" line="4913"/>
         <source>; creaking hearts: %1 (extra removed %2, added %3)</source>
         <translation>; сердец скрипунов: %1 (убрано лишних %2, добавлено %3)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14075"/>
+        <location filename="../export/exportrun.cpp" line="5662"/>
         <source>; animals in forests: %1</source>
         <translation>; зверей в лесах: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="14165"/>
+        <location filename="../export/exportrun.cpp" line="5752"/>
         <source>; aquatic fauna: %1</source>
         <translation>; водная фауна: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="15326"/>
+        <location filename="../export/exportrun.cpp" line="2689"/>
         <source>; equipment on sports grounds: %1 items</source>
         <translation>; снаряжение на спортивных площадках: %1 предметов</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="16911"/>
+        <location filename="../export/exportrun.cpp" line="4266"/>
         <source>churches: %1, with a maze: %2</source>
         <translation>церквей: %1, с лабиринтом: %2</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="16987"/>
+        <location filename="../export/exportrun.cpp" line="4342"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (здание, ближайшее к точке на карте)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="16989"/>
+        <location filename="../export/exportrun.cpp" line="4344"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (лаборатория под научным зданием или школой, запасной вход)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="16991"/>
+        <location filename="../export/exportrun.cpp" line="4346"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (церковь №%4 из %5 по размеру)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17027"/>
+        <location filename="../export/exportrun.cpp" line="4382"/>
         <source>; no church with a maze in chunk (%1, %2)</source>
         <translation>; в чанке (%1, %2) нет церкви с лабиринтом</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17054"/>
+        <location filename="../export/exportrun.cpp" line="4409"/>
         <source>; %1: no church with a maze in chunk (%2, %3)</source>
         <translation>; %1: в чанке (%2, %3) нет церкви с лабиринтом</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17081"/>
+        <location filename="../export/exportrun.cpp" line="4436"/>
         <source>; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other&apos;s way</source>
         <translation>; ancient_city — точка на карте слишком близко к стронгхолду: входы мешали бы друг другу</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17100"/>
+        <location filename="../export/exportrun.cpp" line="4455"/>
         <source>; the entrances cannot be placed in the given buildings — choosing automatically</source>
         <translation>; входы не удаётся разместить в заданных зданиях — выбираю автоматически</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17108"/>
+        <location filename="../export/exportrun.cpp" line="4463"/>
         <source>; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically</source>
         <translation>; в заданных церквях оба входа не разместить (мало чанков вокруг или шахты мешают друг другу) — выбираю автоматически</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17126"/>
+        <location filename="../export/exportrun.cpp" line="4481"/>
         <source>; stronghold — no suitable church was found</source>
         <translation>; стронгхолд — не нашлось подходящей церкви</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17156"/>
+        <location filename="../export/exportrun.cpp" line="4511"/>
         <source>; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)</source>
         <translation>; ancient_city — не нашлось ни подходящей церкви, ни научного здания, ни школы с лабораторией (край экспорта или шахты мешают друг другу)</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17795"/>
+        <location filename="../export/exportrun.cpp" line="459"/>
         <source>chunks added so that the buildings and lakes on the boundary stay whole: %1</source>
         <translation>чанков добавлено, чтобы здания и озёра на границе остались целыми: %1</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="17798"/>
+        <location filename="../export/exportrun.cpp" line="462"/>
         <source>polygon boundary: %1 of %2 chunks written</source>
         <translation>граница-многоугольник: записано %1 из %2 чанков</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="18123"/>
+        <location filename="../export/exportrun.cpp" line="782"/>
         <source>The scene is too big for a save zip archive (%1 region files, ~%2 MB). Export a smaller area.</source>
         <translation>Сцена слишком велика для zip-архива сохранений (%1 region-файлов, ~%2 МБ). Экспортируйте меньшую область.</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="18108"/>
-        <location filename="../export/mcworldexporter.cpp" line="18137"/>
+        <location filename="../export/exportrun.cpp" line="767"/>
+        <location filename="../export/exportrun.cpp" line="796"/>
         <source>Could not write the file %1: %2</source>
         <translation>Не удалось записать файл %1: %2</translation>
     </message>
     <message>
-        <location filename="../export/mcworldexporter.cpp" line="18142"/>
+        <location filename="../export/exportrun.cpp" line="801"/>
         <source>The file %1 was not written completely (quota/disk?).</source>
         <translation>Файл %1 записан не полностью (квота/диск?).</translation>
     </message>

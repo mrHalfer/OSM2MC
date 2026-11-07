@@ -36,9 +36,68 @@
  * Export() is pure math/file I/O without QWidget/Qt3D — it is safe to run in a background
  * thread (see the tqt 3D window, exportMinecraftSave()).
  */
+//! The world OUTSIDE the exported area (our chunks are marked full and the game does not touch them,
+//! the rest is generated with these settings): normalSurroundings=false — the familiar superflat
+//! generator (the neighbors join our "ground crust" without steps); true — a normal
+//! seed-based noise world (terrain, caves, villages), but there will be cliffs at the export border.
+//! The struct lives at file scope, not inside the class: GCC rejects a nested struct with
+//! default member initializers used as a default argument of a member function (Export below).
+//! The class keeps the old name through the alias below, so McWorldExporter::WorldOptions still works.
+struct McWorldOptions
+{
+    quint64 seed = 1234567890ull;   //!< world seed (the shape of the surroundings and the future caves under the export)
+    bool normalSurroundings = false;//!< true — minecraft:noise + structures, false — superflat
+    //! The thickness of the "apron" — chunks of our ground around the rectangle of objects, beyond which
+    //! the game-generated terrain begins (normalSurroundings only): 0 — the joint is right at the city
+    //! (the generator completes everything itself, the export is noticeably smaller/faster), 8 — thin, 16 — full.
+    int apronChunks = 16;
+    //! Caves (a user request): fill the underground part of ALL generated chunks
+    //! with "casts" from the game world (extract_caves.py) — repeats and crooked joints are acceptable,
+    //! the main thing is the variety of caves underground.
+    bool caves = false;
+    QString cavesFile;                  //!< cave_templates.bin; empty — next to the exe
+    //! Churches for the secret entrances to the stronghold and the Ancient City — by chunks (F3 format: "x y z; x y z" or "x z; x z"); empty — the two largest
+    //! by "size" (area × height). The entrance is placed in the labyrinth of the church nearest to the chunk center.
+    QString lairChurchChunks;
+    //! Chunks (F3 format "x y z" or "x z") separately: the church with the entrance to the stronghold, the church with the entrance to the Ancient City,
+    //! the Pale Garden (the forest nearest to the chunk center instead of the largest one). Empty — automatic.
+    QString strongholdChunk, cityChunk, paleForestChunk;
+    //! No forest/meadow with an allowed code (>= 2000 columns) — allocate an empty 15×15 chunk plot near the data for the Pale Garden
+    //! (added in tMC: OSM data may contain no large forests). Not used in tqt by default.
+    bool paleForestFallback = true;
+    //! A datapack in the world (datapacks/tmc_lairs): separate structure sets so that /locate and the eye of ender find the stronghold, the Ancient City,
+    //! the trial chambers and the ruined portals that the exporter wrote into the chunks. The structures themselves do not depend on it. Needed only for searching, but with
+    //! custom structure sets the game shows an experimental features warning — hence it is optional.
+    bool locateDatapack = true;
+    //! Meters per one map coordinate unit along the X and Y axes (at the scene center). 1.0 — the units are meters
+    //! (local CRSs, UTM). For Mercator EPSG:3395 at 56° N it is ≈0.565: without the correction the horizontal
+    //! sizes are inflated 1.77 times (areas — 3.1 times), while the heights stay real meters. The 3D window computes
+    //! the values from the project projection (the tqt 3D window, exportMinecraftSave) and puts them here.
+    double unitsToMetersX = 1.0;
+    double unitsToMetersY = 1.0;
+    //! The player spawn point — in map coordinates (the view center of the 3D window/map). Without it the spawn is placed
+    //! above the center of mass of all buildings (the middle of the whole area, which in large projects is far from where one works).
+    bool hasSpawnPoint = false;
+    double spawnMapX = 0.0;
+    double spawnMapY = 0.0;
+    //! The export boundary — a polygon in map coordinates (the data projection): only the chunks it touches are written into the world
+    //! (the game generates the rest itself). Fewer than 3 vertices — no restriction. Buildings on the boundary stay whole in their chunks.
+    QVector<QPointF> clipPolygon;
+    //! The climate zone of the export area (export/climate.h, Climate::Zone): tree species, surface and chunk biome. 0 — temperate (as before).
+    int climateZone = 0;
+    //! The attribution of the source data (for OpenStreetMap — the ODbL line): if not empty, it is written into the root of the zip as ATTRIBUTION.txt
+    QString attribution;
+    //! The JSON info about this export (app/exportmeta.h): if not empty, it is written into the root of the zip (or of the unpacked saves folder) as export_info.json
+    QString exportInfo;
+    //! true — the world is written UNPACKED into the folder given as the output path (a saves folder of the launcher/an instance), no zip archive
+    bool unpackedFolder = false;
+};
+
 class McWorldExporter
 {
 public:
+    //! The world generation options (the struct is declared above the class, see the note there)
+    using WorldOptions = McWorldOptions;
     //! One exported object — a triangle mesh in world coordinates (X,Y as on the map, Z is the
     //! honest height in the same units, without zExaggeration) + the average color + a closedness flag.
     struct McObject
@@ -136,60 +195,6 @@ public:
     //! 2 — chunk assembly, 3 — zip writing).
     //! Called from a background thread — the receiving side decides how to bring it to the GUI.
     using ProgressFn = std::function<void(int done, int total, int stage)>;
-
-    //! The world OUTSIDE the exported area (our chunks are marked full and the game does not touch them,
-    //! the rest is generated with these settings): normalSurroundings=false — the familiar superflat
-    //! generator (the neighbors join our "ground crust" without steps); true — a normal
-    //! seed-based noise world (terrain, caves, villages), but there will be cliffs at the export border.
-    struct WorldOptions
-    {
-        quint64 seed = 1234567890ull;   //!< world seed (the shape of the surroundings and the future caves under the export)
-        bool normalSurroundings = false;//!< true — minecraft:noise + structures, false — superflat
-        //! The thickness of the "apron" — chunks of our ground around the rectangle of objects, beyond which
-        //! the game-generated terrain begins (normalSurroundings only): 0 — the joint is right at the city
-        //! (the generator completes everything itself, the export is noticeably smaller/faster), 8 — thin, 16 — full.
-        int apronChunks = 16;
-        //! Caves (a user request): fill the underground part of ALL generated chunks
-        //! with "casts" from the game world (extract_caves.py) — repeats and crooked joints are acceptable,
-        //! the main thing is the variety of caves underground.
-        bool caves = false;
-        QString cavesFile;                  //!< cave_templates.bin; empty — next to the exe
-        //! Churches for the secret entrances to the stronghold and the Ancient City — by chunks (F3 format: "x y z; x y z" or "x z; x z"); empty — the two largest
-        //! by "size" (area × height). The entrance is placed in the labyrinth of the church nearest to the chunk center.
-        QString lairChurchChunks;
-        //! Chunks (F3 format "x y z" or "x z") separately: the church with the entrance to the stronghold, the church with the entrance to the Ancient City,
-        //! the Pale Garden (the forest nearest to the chunk center instead of the largest one). Empty — automatic.
-        QString strongholdChunk, cityChunk, paleForestChunk;
-        //! No forest/meadow with an allowed code (>= 2000 columns) — allocate an empty 15×15 chunk plot near the data for the Pale Garden
-        //! (added in tMC: OSM data may contain no large forests). Not used in tqt by default.
-        bool paleForestFallback = true;
-        //! A datapack in the world (datapacks/tmc_lairs): separate structure sets so that /locate and the eye of ender find the stronghold, the Ancient City,
-        //! the trial chambers and the ruined portals that the exporter wrote into the chunks. The structures themselves do not depend on it. Needed only for searching, but with
-        //! custom structure sets the game shows an experimental features warning — hence it is optional.
-        bool locateDatapack = true;
-        //! Meters per one map coordinate unit along the X and Y axes (at the scene center). 1.0 — the units are meters
-        //! (local CRSs, UTM). For Mercator EPSG:3395 at 56° N it is ≈0.565: without the correction the horizontal
-        //! sizes are inflated 1.77 times (areas — 3.1 times), while the heights stay real meters. The 3D window computes
-        //! the values from the project projection (the tqt 3D window, exportMinecraftSave) and puts them here.
-        double unitsToMetersX = 1.0;
-        double unitsToMetersY = 1.0;
-        //! The player spawn point — in map coordinates (the view center of the 3D window/map). Without it the spawn is placed
-        //! above the center of mass of all buildings (the middle of the whole area, which in large projects is far from where one works).
-        bool hasSpawnPoint = false;
-        double spawnMapX = 0.0;
-        double spawnMapY = 0.0;
-        //! The export boundary — a polygon in map coordinates (the data projection): only the chunks it touches are written into the world
-        //! (the game generates the rest itself). Fewer than 3 vertices — no restriction. Buildings on the boundary stay whole in their chunks.
-        QVector<QPointF> clipPolygon;
-        //! The climate zone of the export area (export/climate.h, Climate::Zone): tree species, surface and chunk biome. 0 — temperate (as before).
-        int climateZone = 0;
-        //! The attribution of the source data (for OpenStreetMap — the ODbL line): if not empty, it is written into the root of the zip as ATTRIBUTION.txt
-        QString attribution;
-        //! The JSON info about this export (app/exportmeta.h): if not empty, it is written into the root of the zip (or of the unpacked saves folder) as export_info.json
-        QString exportInfo;
-        //! true — the world is written UNPACKED into the folder given as the output path (a saves folder of the launcher/an instance), no zip archive
-        bool unpackedFolder = false;
-    };
 
     struct Result
     {

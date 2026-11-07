@@ -5,6 +5,24 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.5.26.11071] — 2026-11-07
+
+### Added
+
+- **Linux (x64) support.** The same exporter now builds and runs on Linux: the GUI window on X11/Wayland desktops
+  and the batch mode (`--nogui`) on servers without a display. Two artifacts are released next to the Windows zip:
+  `OSMC-<version>-x86_64.AppImage` (double-clickable, runs even without FUSE) and `OSMC-<version>-linux64.tar.gz`
+  (a server bundle in the same shape as the Windows zip: unpack and run `OSMC/osmc`). All Qt/GDAL/PROJ libraries,
+  plugins, fonts and resources are bundled — nothing to install. The floor is glibc 2.31 (Debian 11 and newer).
+- Continuous integration: every push and pull request builds and tests on Windows and Linux, and the Linux AppImage
+  is built in a Debian 11 Docker container so the artifacts stay compatible with the declared glibc floor.
+
+### Changed
+
+- The "Load the map" button is gone: the data preview loads automatically as soon as the source file is ready
+  (opening a file or a project, changing the path, finishing a download), so the button had nothing left to do.
+  The status line above the preview and the hint texts are updated accordingly.
+
 ## [1.4.26.11061] — 2026-11-06
 
 ### Changed

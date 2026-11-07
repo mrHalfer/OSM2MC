@@ -14,14 +14,35 @@ TARGET = osmc
 DEPENDPATH += .
 INCLUDEPATH += .
 
-# GDAL: the headers and the import library gdal_i.lib are in third_party/gdal (the project builds out of the box); another GDAL can be used
+# GDAL: on Windows the headers and the import library gdal_i.lib are in third_party/gdal (the project builds out of the box); another GDAL can be used
 # through the GDAL_DIR environment variable (a directory with include and lib subfolders). The DLLs are needed only to run (see README).
+# On Linux GDAL comes from the system (libgdal-dev, 3.4 API); GDAL_DIR may point to a custom build with include/ and lib/libgdal.so.
 OSMC_GDAL = $$(GDAL_DIR)
-isEmpty(OSMC_GDAL): OSMC_GDAL = $$PWD/third_party/gdal
-INCLUDEPATH += $$OSMC_GDAL/include
-LIBS += $$OSMC_GDAL/lib/gdal_i.lib
-# WinHTTP: online mode (OSM map tiles, search, data download) — HTTPS through the system certificates, no OpenSSL
-LIBS += winhttp.lib
+win32:{
+    isEmpty(OSMC_GDAL): OSMC_GDAL = $$PWD/third_party/gdal
+    INCLUDEPATH += $$OSMC_GDAL/include
+    LIBS += $$OSMC_GDAL/lib/gdal_i.lib
+}
+unix:{
+    !isEmpty(OSMC_GDAL) {
+        INCLUDEPATH += $$OSMC_GDAL/include
+        LIBS += -L$$OSMC_GDAL/lib -lgdal
+    } else {
+        # the system libgdal-dev: pkg-config gives the header folder (on Ubuntu the headers are in /usr/include/gdal,
+        # which is not in the default include path); without gdal.pc — the classic layout with -lgdal
+        system(pkg-config --exists gdal) {
+            CONFIG += link_pkgconfig
+            PKGCONFIG += gdal
+        } else {
+            INCLUDEPATH += /usr/include/gdal
+            LIBS += -lgdal
+        }
+    }
+}
+# HTTPS for the online mode (OSM map tiles, search, data download): Windows uses WinHTTP (system certificates, no OpenSSL);
+# Linux uses the system libcurl (CA bundle and proxy from the system, still no Qt Network and no bundled OpenSSL libraries).
+win32: LIBS += winhttp.lib
+unix:  LIBS += -lcurl
 
 QT += core gui widgets concurrent
 
@@ -29,10 +50,11 @@ RC_ICONS = $$PWD/resources/osmc.ico
 RC_LANG = 0x0419
 
 # Sources are UTF-8 without BOM: without this flag MSVC reads non-ASCII characters in string literals using the system code page
-QMAKE_CXXFLAGS += /utf-8
-QMAKE_CFLAGS += /utf-8
+# (GCC/Clang treat sources as UTF-8 by default, so the flag is Windows-only)
+win32: QMAKE_CXXFLAGS += /utf-8
+win32: QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.4.26.11061
+    VERSION = 1.5.26.11071
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
@@ -111,7 +133,6 @@ SOURCES += \
     app/tmcrun.cpp \
     app/mappreview.cpp \
     app/theme.cpp \
-    app/httpclient.cpp \
     app/i18n.cpp \
     app/osmdownload.cpp \
     app/osmonlinepanel.cpp \
@@ -142,13 +163,29 @@ SOURCES += \
     export/format/bytes.cpp \
     core/heightraster.cpp
 
+# The HTTPS client is platform-specific (common interface in app/httpclient.h): WinHTTP on Windows, system libcurl on Linux.
+win32: SOURCES += app/httpclient.cpp
+unix:  SOURCES += app/httpclient_unix.cpp
+
 # Copy the resources next to osmc.exe after every build: default settings, OSM rules, height table, enhancer, *.bin templates.
 # The program looks for them next to the exe, so nothing has to be copied by hand. Missing files (for example the enhancer) are skipped.
+# MSVC puts the executable in a debug/release subfolder, the Unix make — straight into OUT_PWD, so the copy target differs.
 CONFIG(debug, debug|release): TMC_OUTDIR = $$OUT_PWD/debug
 else: TMC_OUTDIR = $$OUT_PWD/release
+unix: TMC_OUTDIR = $$OUT_PWD
 TMC_RES = default.t3d osm_rules.json heights.csv tmc_buildings.dat point_models.csv
-for(f, TMC_RES): exists($$PWD/resources/$$f): QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/$$f)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)
-QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/templates/*.bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)
+for(f, TMC_RES) {
+    exists($$PWD/resources/$$f) {
+        win32: QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/$$f)\" \"$$shell_path($$TMC_OUTDIR)\" >nul
+        else:  QMAKE_POST_LINK += cp -u $$shell_path($$PWD/resources/$$f) $$shell_path($$TMC_OUTDIR)
+        QMAKE_POST_LINK += $$escape_expand(\n\t)
+    }
+}
+# (the glob is left unquoted on purpose: the shell expands it, cp has no wildcard support of its own)
+win32: QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/templates/*.bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul
+else:  QMAKE_POST_LINK += cp -u $$PWD/resources/templates/*.bin $$shell_path($$TMC_OUTDIR)
+QMAKE_POST_LINK += $$escape_expand(\n\t)
 # The GDAL runtime (gdal.dll and its dependencies, gdal-data, projlib, gdalplugins) is not in the repository (about 100 MB): if it is put into <GDAL folder>/bin
 # (third_party/gdal/bin by default, see third_party/gdal/README.md), it is copied next to the exe too, so the program starts right from Qt Creator.
-exists($$OSMC_GDAL/bin): QMAKE_POST_LINK += xcopy /E /Y /D /Q /I \"$$shell_path($$OSMC_GDAL/bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)
+# Windows only: on Linux the system libgdal already brings its own data files.
+win32: exists($$OSMC_GDAL/bin): QMAKE_POST_LINK += xcopy /E /Y /D /Q /I \"$$shell_path($$OSMC_GDAL/bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul $$escape_expand(\n\t)

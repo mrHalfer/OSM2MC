@@ -2,6 +2,7 @@
 #include "export/colkey.h"
 #include <QHash>
 #include <cstring>
+#include <limits>
 
 
 //! Clip a 3D polygon by a half-plane (y >= plane for minY, otherwise y <= plane) — the polygon is convex,
