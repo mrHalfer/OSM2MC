@@ -228,6 +228,9 @@ private:
     int yShift;   // the "normal world": by how much the whole export is raised (decided after the survey, below);
     QList<qint64> touchedChunks;
     QList<qint64> fillChunks;
+    // The fill set BEFORE the clip to the polygon boundary (clipFillToBoundary()): stages 3.x check with it
+    // whether a tree crown may reach a chunk whose ground exists. Only fillChunks (the clipped set) is processed.
+    QSet<ColKey> fillAllChunks;
     int rcx0, rcz0;
     int rcx1, rcz1;
     int rectM;
@@ -374,6 +377,9 @@ private:
     void lap(const char* name);
     // 3. Ground: the terrain crust, caves, station halls, metro tunnels.
     bool buildGround();
+    // Cuts the fill set down to the polygon boundary + the boundary objects kept whole + a one-chunk ring;
+    // called in buildGround before the fill (assembleChunks stays the final word on what is written).
+    void clipFillToBoundary();
 
     // 1. Caves/lairs/pale-garden loading and the extent of all objects.
     bool prepareObjects();
@@ -412,9 +418,10 @@ bool ExportRun::assembleChunks()
     {
         QPolygonF poly;
         for (const QPointF& p : world.clipPolygon) poly << QPointF(toBlockX(tf, p.x()), toBlockZ(tf, p.y()));
+        clipPath = QPainterPath();      // rebuilt here; clipFillToBoundary() may have set the same path already
         clipPath.addPolygon(poly);
         clipPath.closeSubpath();
-        const int before = int(writeChunks.size());
+        const int before = qMax(int(writeChunks.size()), int(fillAllChunks.size()));   // the pre-clip count for the log
         const QSet<ColKey> allChunks(writeChunks.constBegin(), writeChunks.constEnd());
         writeChunks.erase(std::remove_if(writeChunks.begin(), writeChunks.end(), [&](qint64 k)
         { return !clipPath.intersects(QRectF(keyFirst(k) * 16.0, keySecond(k) * 16.0, 16.0, 16.0)); }), writeChunks.end());
@@ -4635,7 +4642,7 @@ bool ExportRun::buildVegetation()
     // Nothing is planted on the occupied columns (structures).
     // Spruce: a spruce_log trunk (2×2 for big ones), bare at the bottom, then needle tiers from top to bottom with a radius from 0 (the top) to R; even tiers are narrower than
     // odd ones — like a real spruce. The needles cover the trunk up to the very top. The crown must not go beyond the chunks with ground.
-    sprFill = QSet<ColKey>(fillChunks.constBegin(), fillChunks.constEnd());
+    sprFill = fillAllChunks;      // crowns are checked against the pre-clip fill (see clipFillToBoundary())
     // Tree species by the climate zone: "oak" and "birch" in the planting code are replaced with the trunk+leaves pairs of the zone, the spruce cone — with a big broadleaf tree
     // where there are no conifers; density — the share of plantings that remain (in the desert and tundra trees are rare)
     birchLogRaw = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
@@ -5348,7 +5355,9 @@ void ExportRun::buildUserTrees()
     // only through the air. Before the grass is scattered: the grass looks at the store air and will not climb into the trunk.
     {
         // ATTENTION: fillChunks are the keys of CHUNKS (store.chunks), not columns!
-        const QSet<ColKey> fillChunkSet(fillChunks.constBegin(), fillChunks.constEnd());
+        // The crown checks use the pre-clip fill (a boundary tree sticks its crown out the same way as before
+        // the clip, see clipFillToBoundary()), while the grid below is enumerated over the clipped fillChunks.
+        const QSet<ColKey> fillChunkSet = fillAllChunks;
         auto inFill = [&](qint64 ck)
         { return fillChunkSet.contains(pairKey(keyFirst(ck) >> 4, keySecond(ck) >> 4)); };
         auto flat5 = [&](qint64 ck)
@@ -5445,7 +5454,7 @@ void ExportRun::buildUserTrees()
         constexpr int kGrid = 14;
         auto fdivG = [](int v, int d) { return v >= 0 ? v / d : -((-v + d - 1) / d); };
         QSet<ColKey> cells32;
-        cells32.reserve(qsizetype(fillChunkSet.size()) * 4);
+        cells32.reserve(qsizetype(fillChunks.size()) * 4);
         for (qint64 ck : fillChunks)
         {
             const int cx = keyFirst(ck), cz = keySecond(ck);
@@ -5504,7 +5513,7 @@ void ExportRun::buildUserTrees()
     // — trees around schools (birches, the birch_forest biome) and kindergartens (multicolored poplars, the dappled_forest biome): a 9×9 grid, ~35% of the cells (crowns do not form a solid canopy),
     // within kZoneR of the walls, not on structures/roads/water/forests/lawns (a buffer of ±3, like the other trees).
     {
-        const QSet<ColKey> zoneFill(fillChunks.constBegin(), fillChunks.constEnd());
+        const QSet<ColKey> zoneFill = fillAllChunks;      // the crown checks on the pre-clip fill (see above)
         QVector<ColSpan> forestAll;
         for (const VegSite& vs2 : forests) forestAll += vs2.spans;
         forestAll = mergeSpans(forestAll);
@@ -6287,6 +6296,81 @@ void ExportRun::lap(const char* name)
     else fprintf(stderr, "[mcx] %s %lld ms\n", name, (long long)ms);
 }
 
+void ExportRun::clipFillToBoundary()
+{
+    // fillAllChunks — the pre-clip set — is read by stages 3.x to decide whether a tree crown may reach a
+    // chunk with ground: near the boundary a crown still sticks out the same way as before (into chunks that
+    // do not reach the archive — that part is dropped at the assembly), so the clipped set alone is wrong there.
+    fillAllChunks = QSet<ColKey>(fillChunks.constBegin(), fillChunks.constEnd());
+    if (world.clipPolygon.size() < 3)
+        return;
+    // The same geometry and the same "stays whole" rules as in assembleChunks(): a building or a small lake
+    // that the boundary crosses is not cut, so all its chunks get written and must get ground here too.
+    QPolygonF poly;
+    for (const QPointF& p : world.clipPolygon)
+        poly << QPointF(toBlockX(tf, p.x()), toBlockZ(tf, p.y()));
+    clipPath = QPainterPath();
+    clipPath.addPolygon(poly);
+    clipPath.closeSubpath();
+    QSet<ColKey> all = fillAllChunks;
+    for (auto it = store.chunks.constBegin(); it != store.chunks.constEnd(); ++it)
+        all.insert(it.key());
+    QSet<ColKey> keep;
+    for (const qint64 k : fillChunks)
+        if (clipPath.intersects(QRectF(keyFirst(k) * 16.0, keySecond(k) * 16.0, 16.0, 16.0)))
+            keep.insert(ColKey(k));
+    int nWhole = 0;
+    auto keepWhole = [&](const McObject& o, qint64 maxSpan)
+    {
+        double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+        for (const QVector3D& v : o.vertices)
+        {
+            const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+            ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx);
+            az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+        }
+        const int c0 = int(std::floor(ax0)) >> 4, c1 = int(std::floor(ax1)) >> 4;
+        const int d0 = int(std::floor(az0)) >> 4, d1 = int(std::floor(az1)) >> 4;
+        if (maxSpan > 0 && qint64(c1 - c0 + 1) * (d1 - d0 + 1) > maxSpan)
+            return;                                           // a big reservoir is cut as before
+        for (int cz = d0; cz <= d1; ++cz)
+            for (int cx = c0; cx <= c1; ++cx)
+            {
+                const qint64 k = pairKey(cx, cz);
+                if (all.contains(k) && !keep.contains(k)) { keep.insert(ColKey(k)); ++nWhole; }
+            }
+    };
+    for (const McObject& o : objects)
+    {
+        if (o.kind == McObject::Building && o.closed && !o.vertices.isEmpty())
+            keepWhole(o, 0);
+        else if (o.kind == McObject::Water && !o.linear && !o.vertices.isEmpty())
+            keepWhole(o, 10000);
+    }
+    // The ring: every kept chunk's neighbors (a crown of a tree whose center stands in a kept chunk pokes
+    // into the neighbor by at most a couple of columns; a tree centered in a ring chunk keeps its old ground).
+    const QList<ColKey> keepNow = keep.values();
+    for (const ColKey& k : keepNow)
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx)
+            {
+                const qint64 nk = pairKey(keyFirst(k) + dx, keySecond(k) + dz);
+                if (fillAllChunks.contains(nk))
+                    keep.insert(ColKey(nk));
+            }
+    QList<qint64> cut;
+    cut.reserve(keep.size());
+    for (const ColKey& k : keep)
+        cut.append(k);
+    std::sort(cut.begin(), cut.end());                        // a deterministic order (a QSet gives none)
+    const int before = int(fillChunks.size());
+    fillChunks = cut;
+    char buf[160];
+    snprintf(buf, sizeof buf, "ground: fill clipped to the boundary polygon: %d of %d chunks kept (+%d whole-boundary)",
+             int(fillChunks.size()), before, nWhole);
+    tmcStepLog(buf);
+}
+
 bool ExportRun::buildGround()
 {
     // 3. Ground: we fill ALL the columns of ALL the chunks touched by objects. Earlier the ground was
@@ -6575,6 +6659,10 @@ bool ExportRun::buildGround()
         }
         if (nExt > 0) res.lairInfo += QObject::tr("; forest extended to the chunk edge on the export border: %1 chunks").arg(nExt);
     }
+    // POLYGON BOUNDARY: the ground fill and all the plantings below must not build the chunks that can not
+    // reach the archive — the clip by writeChunks in assembleChunks happens after them, and until it the
+    // ground of every rectangle chunk was built for nothing (hours and gigabytes on big projects).
+    clipFillToBoundary();
     // "Ground" is the heaviest phase (every column of every filled chunk), so it is also
     // covered by progress: total = height survey (touched chunks) + fill (in the noise mode —
     // touched + the apron).

@@ -5,6 +5,18 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.5.26.11073] — 2026-11-07
+
+### Fixed
+
+- **Exports with a boundary polygon (`--clip`) no longer build the whole data rectangle.** Before, the ground,
+  trees, turf and every planting stage were built for ALL chunks of the noise-data rectangle and the polygon was
+  applied only when writing the archive — hours of work and gigabytes of memory on big clips (the peak could reach
+  tens of GB). The fill set is now clipped to the polygon right before the heavy stages (keeping boundary
+  buildings and small lakes whole and the crowns of boundary trees exactly as before); the exported world is the
+  same. A small clip went from ~13 minutes to ~13 seconds, a big one from ~39 minutes to ~3.5 minutes, the peak
+  memory fell from ~26 GB (and ~51 GB of commit) to ~0.4 GB and ~8.6 GB respectively.
+
 ## [1.5.26.11072] — 2026-11-07
 
 ### Added

@@ -30,13 +30,13 @@
 | `input/` | `tmcproject.cpp` — чтение OSM/.tqt/shape через GDAL, применение правил, **здесь же обработка `building:part`, высот, крыш (`roof:*`)**; `t3dsettings.*` |
 | `osm/` | `tmcosmrules.*` (правила из JSON), `tmcrel.*` (высоты), `tmcaddress.*`, `tmcgreen.cpp`, улучшайзер |
 | `scene/` | `mcscene.*` — собирает объекты экспорта по слоям (поля слоя → свойства `McObject`); `modelbuilder.*` — сетки |
-| `export/mcworldexporter.cpp/.h` | **Главный экспортёр мира (~16 000 строк).** Вокселизация, здания, интерьеры, дороги, деревья, структуры, запись чанков. Не читай целиком — ищи нужное через `grep`/поиск |
+| `export/` | **Главный экспортёр мира.** `exportrun.cpp/.h` — конвейер `ExportRun` (этапы 1–5, ~13 000 строк: земля, деревья, дороги, структуры, граница-полигон, запись чанков); `voxelize.cpp` — здания в блоки; `anvil.cpp` — NBT/чанки; `blocks.*` — палитра; `mcworldexporter.cpp` — тонкая обёртка входа. Не читай целиком — ищи нужное через `grep`/поиск |
 | `resources/` | `osm_rules.json` (правила тегов), `default.t3d` (3D-настройки), `heights.csv`, `*.dat` (готовые ресурсы, не менять), `templates/*.bin` (не трогать), `osmc.qss`, иконка `osmc.ico` |
 | `translations/osmc_ru.ts` | Русский перевод интерфейса |
 | `tests/` | Тесты (`tests/README.md`), `tests/data/osm_buildings.osm` — тестовая сцена |
 | `images/` | Скриншоты для README (`online_*.png`, `data_*.png`, `shots/` — галерея 1600×800 + `shots/thumbs/` 400×200) |
 
-Как идут данные: **OSM-теги → правила `osm_rules.json` → слои (`bldpol`, `vegpol`, `rdslin`…) с полями `CODE`, `REL` (высота), `MAT` (материал) и служебными (`MINH`, `ROOF…`, `PART`) → `scene/mcscene.cpp` превращает слои в `McObject` → `export/mcworldexporter.cpp` строит блоки`.
+Как идут данные: **OSM-теги → правила `osm_rules.json` → слои (`bldpol`, `vegpol`, `rdslin`…) с полями `CODE`, `REL` (высота), `MAT` (материал) и служебными (`MINH`, `ROOF…`, `PART`) → `scene/mcscene.cpp` превращает слои в `McObject` → `export/exportrun.cpp` строит блоки**.
 
 ---
 
