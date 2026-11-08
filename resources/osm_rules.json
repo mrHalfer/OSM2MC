@@ -3,7 +3,7 @@
   "Rules that turn OpenStreetMap tags into tqt layers (the working file of tMC). Edited by hand; the program does not read the \"examples\" array.",
   "The rules are checked from top to bottom; an object goes into the layer of the FIRST matching rule (unless \"continue\": true is set).",
   "from  : the OSM driver layer — multipolygons (buildings, plots, sites), lines (roads, rails), points (points).",
-  "layer : the tqt layer suffix: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin, csrpnt (point cultural/industrial objects), hdtpnt (point hydrography objects), mrspol (wetlands and salt flats); \"-\" — drop the object (no further rules are checked).",
+  "layer : the tqt layer suffix: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin, csrlin (linear cultural objects, by CODE: 82200000 — a fence), csrpnt (point cultural/industrial objects), hdtpnt (point hydrography objects), mrspol (wetlands and salt flats); \"-\" — drop the object (no further rules are checked).",
   "as    : polygon (a closed line -> a polygon), line (a polygon boundary -> a line), square:N (a point -> a square with a side of N meters), crosswalk:N (a crossing node -> a line of N meters across the nearest motor road).",
   "pass  : 1 (default) — by tags; 2 — a \"guess\" for buildings not recognized on the 1st pass: they see the nb:* tags about the neighbors.",
   "when  : conditions on tags (all at once). \"v\" — equals; \"*\" — the tag exists; \"-\" or null — no tag; \"!v\" — the tag exists and is not equal to v;",
@@ -1444,6 +1444,17 @@
    },
    "fields": {
     "CODE": "61124000"
+   }
+  },
+  {
+   "note": "A fence (OSM barrier=fence, a user request): a wooden fence along the line - csrlin 82200000; touching ways, site fences and walls join into one fence",
+   "from": "lines",
+   "layer": "csrlin",
+   "when": {
+    "barrier": "fence"
+   },
+   "fields": {
+    "CODE": "82200000"
    }
   },
   {

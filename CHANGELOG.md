@@ -5,6 +5,51 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.5.26.11081] — 2026-11-08
+
+### Added
+
+- **Wooden fences are built from OSM lines tagged `barrier=fence`** (a user request). The line is laid out as
+  a fence of oak fence blocks along its axis; lines that touch each other, csrpol site fences and house walls
+  join into one continuous fence (the connection properties are stitched in one pass). The fence skips
+  roadways, rails, structures and water - where the barrier breaks in OSM, it breaks in the world too.
+- **Brick private houses now have a furnished mansard.** The second floor of a brick house gets a bed, bookshelves
+  and a table; kitchens, workshops, residents and pets stay on the 1st floor. Earlier the upstairs was left an
+  empty attic — and houses whose gable stands only one or two rows above the eaves (the common OSM case) now get
+  a livable low mansard too, since a bed and a shelf fit under the rafters. Carpet compositions now also dress the
+  1st floor of a private house, wherever the furniture leaves free space.
+- **Every private house has 1–2 working stoves on the 1st floor** (a user request). The furnaces stand along the
+  walls with their fronts facing the room, and each one is filled through its block entity: 1–4 pieces of coal or
+  charcoal in the fuel slot, and in about half of them some raw food (beef, pork, chicken, mutton, potatoes,
+  carrots) in the cooking slot. These are the only stoves of a private house: the random kitchen corners no longer
+  add extra furnaces there, so a house never gets more than two.
+- **A basement mob nest now has a real spawner block** in the middle of the room — the pile of mobs is no longer a
+  one-off, the block keeps spawning its monster: a zombie, a skeleton, a spider or a witch (the witch joined the
+  spawner types for this).
+
+### Changed
+
+- **Half of private houses now have a basement** (earlier it was about every third): the private sector got
+  noticeably more hatches and cellar mob nests.
+- **No monster spawners stand above ground in private houses any more** — in the private sector they live only in
+  the basements now. Public buildings and utility sheds keep theirs as before.
+- **Private houses split about half-and-half between brick and logs.** Earlier a house was brick only when its
+  walls could hold a real second storey (about 9 block rows), so almost every house came out logs. A brick house
+  is now any house with a second storey (wall height >= 9) OR a big one (>= 6 rows and a footprint of about
+  200 m2 or more): the slab and the mansard fit there even though the gable is short. Small and low houses remain
+  log ones with a plank ceiling, as before.
+
+### Fixed
+
+- **Private houses rotated off the axes are now straightened reliably.** The rotation had the wrong sign for
+  footprints tilted more than 45°, so those houses were turned FURTHER from the axis instead of toward it; and
+  footprints leaning on the north-south axis were silently skipped altogether. Every tilted private house except
+  the almost axis-aligned ones is now snapped to the nearest axis, which restores the window grid on its facades.
+- **Electrified rails are now active in the exported world.** A powered rail stood on its redstone block but was
+  written with `powered=false` — and a chunk loaded from the world file gets no block update, so the rail stayed
+  in its braking state until something nearby changed. The block state now carries the power itself: the rails
+  glow and boost minecarts right after the world is loaded (metro tunnels, `electrified` railways and trams).
+
 ## [1.5.26.11073] — 2026-11-07
 
 ### Fixed

@@ -53,6 +53,7 @@ private:
     QVector<BannerSite>* banners;
     QVector<LairZone>* zones;
     QVector<IslandSite>* islands;
+    int* privMats;
 
 
     // The rasterized mesh (filled by buildGrid()): the grid cell (x,y,z) sits at
@@ -195,7 +196,7 @@ ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const Vx
       chests(out_.chests), paints(out_.paints), mannequins(out_.mannequins),
       spawners(out_.spawners), storyCounter(out_.storyCounter),
       npcs(out_.npcs), frames(out_.frames), basements(out_.basements),
-      signs(out_.signs), banners(out_.banners), zones(out_.zones), islands(out_.islands)
+      signs(out_.signs), banners(out_.banners), zones(out_.zones), islands(out_.islands), privMats(out_.privMats)
 {
     // A part raised above the ground (min_height): a floating body - no foundation into the ground,
     // the ground under it is not touched and not raised (colMin/colAnchor stay without it),
@@ -295,16 +296,28 @@ bool ObjectVoxelizer::buildGrid()
             const int ry = (cell / sx) % sy;
             rowLo = std::min(rowLo, ry); rowHi = std::max(rowHi, ry);
         }
-    // A private house 44400002/44400100 (privMode): the material is decided by the PRESENCE of a floor slab — exactly the condition by
-    // which the slab is built below (it lies at lyLow+5 and must be no higher than lyHigh-1, i.e. rowHi-rowLo >= 6
-    // is needed). If there is a slab — the walls are BRICK, the foundation/slab gray concrete; if there is no slab —
-    // the walls are LOGS, the ceiling is planks (the gables and the roof are planks in both cases).
+    // A private house 44400002/44400100 (privMode): BRICK for a REAL second storey (walls high enough for the
+    // slab (lyLow+5) plus a full floor over it: rowHi - rowLo >= 9) OR for a large enough house with a slab
+    // height (dh >= 6 and footprint >= the calibration threshold, 200 m2 — calibrated on the Verbilki-mini clip
+    // to ~50/50, a user request; MCX_PRIVBRICK overrides it for tuning without a rebuild). A small or low house stands LOGS;
+    // for the log ones nStories is forced to 1 below, so no second-floor slab is built and the interior stays
+    // one tall room. With a slab — the walls are BRICK, the foundation/slab gray concrete; without — LOGS with
+    // a plank ceiling (the gables and the roof are planks in both cases).
     if (privMode)
     {
-        const bool slabNeeded = (rowHi - rowLo) >= 6;
+        static const double kBrickArea = []
+        {
+            bool ok = false;
+            const double v = qgetenv("MCX_PRIVBRICK").toDouble(&ok);
+            return (ok && v > 0.0) ? v : 200.0;
+        }();
+        const int dh = rowHi - rowLo;
+        const double footprint = double(std::max(sx - 2, 1)) * double(std::max(sz - 2, 1));   // XZ cells of the extent, the 1-cell shell excluded
+        const bool slabNeeded = dh >= 9 || (dh >= 6 && footprint >= kBrickArea);
         id = slabNeeded ? quint16(IdPaletteStart + paletteIndexOf("minecraft:bricks")) : quint16(IdOakLog);
         structId = slabNeeded ? quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete")) : quint16(0);
         woodSingle = !slabNeeded;
+        if (privMats) ++privMats[slabNeeded ? 0 : 1];
     }
     return true;
 }
@@ -1492,7 +1505,8 @@ void ObjectVoxelizer::buildPartitions()
             // (seeded by the geometry + the floor number) so that the chest layout does not shift.
             // Sheds/utility structures (CODE 44000000, a request): spawners twice as often — the second slot of the cycle
             // (every 15th floor of the city + shifted by 7), the rest of the choice (50/50, the type) is the same.
-            if (*storyCounter % 15 == 0 || (obj.code == 44000000 && *storyCounter % 15 == 7))
+            // PRIVATE houses (a request): NO spawners above ground — the cellar with its mob pile is their place for that.
+            if (!priv && (*storyCounter % 15 == 0 || (obj.code == 44000000 && *storyCounter % 15 == 7)))
             {
                 quint32 sh = 2166136261u;
                 auto smix = [&sh](long long v)
@@ -1877,7 +1891,9 @@ void ObjectVoxelizer::buildInteriors()
     if (floors && obj.closed && storyP > 0
         && (priv || panor || office || obj.code == 44340000 || (!obj.lift && !bigWin && !noWin)))
     {
-        const int nFin = priv ? 1 : qMax(1, nStories);          // the private sector — only the 1st floor
+        const int nFin = qMax(1, nStories);           // the private sector too: brick houses furnish the 2nd floor
+                                                      //  as well (the MANSARD, a user request: beds/bookshelves/carpets upstairs);
+                                                      //  log houses have nStories = 1, so they stay one-storey
         struct FinPt { int x, y, z; };
         QVector<FinPt> finPts;                                  // what is already furnished (distances)
         QSet<ColKey> occ;                                       // the furniture cells (repeats)
@@ -1911,7 +1927,12 @@ void ObjectVoxelizer::buildInteriors()
         for (int k = 0; k < nFin; ++k)
         {
             const int lyF = (lowF && k == 0 ? lyLow + 1 : lyLow + 2) + k * storyP;
-            if (lyF > lyHigh - 2) continue;
+            // The MANSARD of a brick private house (a user request): such OSM houses are often "~1.5 storeys" —
+            // the gable stands only 1-2 rows above the eaves, and the strict margin cut the 2nd floor off
+            // completely (0 furnished mansards). For the upper private floors the margin is relaxed to 1 row:
+            // low headroom is not a problem — cellFree rejects cells under the roof lining and in the walls, so
+            // only what really fits (a bed, a bookshelf, a carpet) is placed up there.
+            if (lyF > lyHigh - (priv && k > 0 ? 1 : 2)) continue;
             // IN FRONT OF THE STAIRS AND UNDER THEM — ALWAYS FREE (a requirement): furniture/decor is not placed within a radius of 1 cell of any step or ladder
             // (in height — from the slab of this floor to the top of the flight), i.e. neither approaches, nor landings, nor the space under the flight are cluttered.
             static const bool noStairFree = qEnvironmentVariableIsSet("MCX_NO_STAIRFREE");   // debugging: switch the rule off (to check the gate)
@@ -1960,6 +1981,14 @@ void ObjectVoxelizer::buildInteriors()
                 if (vid == IdBarrel && chests)                     // a barrel is a container with loot (the BE barrel)
                     chests->append(ChestSite{ bx, byc - sink,
                                               bz, int(lineHash(pairKey(bx, bz) ^ (qint64(byc) << 32) ^ 0xBA77E1ull) % quint32(kBarrelLootCount)), true });
+                if (priv && chests && (vid == IdFurnace || (vid >= IdFurnaceBase && vid < IdFurnaceMax)))
+                {   // a private-house stove is a WORKING one (a user request): the BE carries fuel (and often food),
+                    // the contents are a hash of the cell — stable between the runs of the same seed
+                    ChestSite st;
+                    st.x = bx; st.y = byc - sink; st.z = bz;
+                    st.stove = 1 + int(finHash(bx, bz, byc, 0x570C9u) % 256u);
+                    chests->append(st);
+                }
                 occ.insert(dkey(bx, byc, bz));
                 finPts.append(FinPt{ bx, byc, bz });
                 ++*placed; ++added;
@@ -2162,6 +2191,7 @@ void ObjectVoxelizer::buildInteriors()
             for (int lz = 2; lz < sz - 2; ++lz)
                 for (int lx = 2; lx < sx - 2; ++lx)
                     if (cellFree(lx, lz, 0)) { open[lz * sx + lx] = 1; ++openN; }
+            if (priv && k == 1 && privMats && openN >= 5) ++privMats[2];  // the mansard of a brick house is REAL (furniture can stand on it)
             QVector<int> roomOf(sx * sz, -1);
             QVector<QVector<int>> rooms;
             {   // DFS labeling (the stack is a QVector; the room order = the order of the first cells)
@@ -2966,7 +2996,7 @@ void ObjectVoxelizer::buildInteriors()
                             }
                             continue;
                         }
-                        if (h2 < 52 && cellFree(lx + s0, lz + s1, 0))
+                        if (h2 < 52 && !(priv && k > 0) && cellFree(lx + s0, lz + s1, 0))
                         {   // a workplace: a crafting table + a second block (4 kinds, the grindstone as a "straw")
                             const int sec2[4] = { int(IdCartographyTable), int(IdLoom),
                                                   int(IdSmithingTable), int(IdGrindstone) };
@@ -2977,7 +3007,7 @@ void ObjectVoxelizer::buildInteriors()
                                 put(lx + dvec[cd][0], lz + dvec[cd][1], 0, stairId[cd], &floorBlocks);
                             continue;
                         }
-                        if (h2 < 58)
+                        if (h2 < 58 && !(priv && k > 0))
                         {   // a barrel cabinet (50% a second tier, 75% a partner along the wall)
                             put(lx, lz, 0, IdBarrel, &floorBlocks);
                             if (twoUp && cellFree(lx, lz, 1)) put(lx, lz, 1, IdBarrel, &floorBlocks);
@@ -2985,14 +3015,15 @@ void ObjectVoxelizer::buildInteriors()
                                 put(lx + s0, lz + s1, 0, IdBarrel, &floorBlocks);
                             continue;
                         }
-                        if (h2 < 66 && cellFree(lx + s0, lz + s1, 0))
-                        {   // a kitchen corner: a stove + a barrel/cauldron/composter
+                        if (h2 < 66 && !priv && cellFree(lx + s0, lz + s1, 0))
+                        {   // a kitchen corner: a stove + a barrel/cauldron/composter (private houses get NONE:
+                            //   their stoves come only from the dedicated pass below, so a house cannot exceed its 1..2)
                             const int kit[3] = { int(IdBarrel), int(IdCauldron), int(IdComposter) };
                             put(lx, lz, 0, IdFurnace, &floorBlocks);
                             put(lx + s0, lz + s1, 0, quint16(kit[int((h >> 9) % 3u)]), &floorBlocks);
                             continue;
                         }
-                        if (h2 < 72)
+                        if (h2 < 72 && !(priv && k > 0))
                         {   // a seat by a wall: a step with the back to the wall (the bottom into the room)
                             put(lx, lz, 0, stairId[wd], &floorBlocks);
                             continue;
@@ -3128,8 +3159,8 @@ void ObjectVoxelizer::buildInteriors()
                         if (cellFree(lx, lz + 1, 0)) put(lx, lz + 1, 0, IdComposter, &floorBlocks);
                         continue;
                     }
-                    if (h3 < 80 && !resid)
-                    {   // a 2×2 carpet
+                    if (h3 < 80 && !resid && !(priv && k > 0))
+                    {   // a 2×2 carpet (in the mansard the carpets are laid by the compositions below)
                         if (!(cellFree(lx + 1, lz, 0) && cellFree(lx, lz + 1, 0)
                               && cellFree(lx + 1, lz + 1, 0)))
                         { put(lx, lz, 0, IdComposter, &floorBlocks); continue; }
@@ -3442,10 +3473,49 @@ void ObjectVoxelizer::buildInteriors()
                     }
                 }
             }
+            // ——— STOVES of private houses (a user request): 1..2 furnaces on the 1st floor along the walls, every one
+            // with fuel in the block entity (put() registers the ChestSite::stove for any furnace it places here).
+            // The random kitchen-corner stoves are switched off for priv above, so this pass is the only source. ———
+            if (priv && k == 0 && chests)
+            {
+                int haveSt = 0;
+                for (int lz = 1; lz < sz - 1; ++lz)
+                    for (int lx = 1; lx < sx - 1; ++lx)
+                    {
+                        const quint16 b0 = store.get(minx + lx, miny + lyF - sink, minz + lz);
+                        if (b0 == IdFurnace || (b0 >= IdFurnaceBase && b0 < IdFurnaceMax)) ++haveSt;
+                    }
+                const int wantStoves = 1 + int(finHash(minx, minz, miny + lyF, 0x570C1u) % 2u);   // 1..2 (a request: not more than two stoves in a house)
+                if (haveSt < wantStoves)
+                {
+                    QVector<int> cand;
+                    for (int lz = 1; lz < sz - 1; ++lz)
+                        for (int lx = 1; lx < sx - 1; ++lx)
+                            if (cellFree(lx, lz, 0) && cellFree(lx, lz, 1) &&
+                                (wallAt(lx, lz, 0) || wallAt(lx, lz, 1) || wallAt(lx, lz, 2) || wallAt(lx, lz, 3)))
+                                cand.append(lz * sx + lx);
+                    const int nC = cand.size();
+                    const int st0 = nC ? int(finHash(minx, minz, miny + lyF, 0x570C2u) % quint32(nC)) : 0;
+                    int dummySt = 0;
+                    for (int t = 0; t < nC && haveSt < wantStoves; ++t)
+                    {
+                        const int idx = cand[(st0 + t * 5) % nC];
+                        const int lx = idx % sx, lz = idx / sx;
+                        if (!cellFree(lx, lz, 0) || !cellFree(lx, lz, 1)) continue;   // the cell could have been taken by the previous stove
+                        int wd = -1;
+                        for (int d = 0; d < 4; ++d) if (wallAt(lx, lz, d)) { wd = d; break; }
+                        if (wd < 0) continue;
+                        const int bx = minx + lx, bz = minz + lz, byc = miny + lyF;
+                        if (!farOtherFin(bx, byc, bz, 2)) continue;
+                        put(lx, lz, 0, quint16(int(IdFurnaceBase) + (wd + 2) % 4), &dummySt);   // the front into the room
+                        ++haveSt;
+                    }
+                }
+            }
             // ——— CARPET COMPOSITIONS in residential multi-storey buildings: instead of random squares — a whole carpet in a free part of the room: a runner
             // with an edging, a large carpet in a checkerboard of contrasting colors or a carpet with a double border. They do not cover everything: a passage
             // remains along the edges, and furniture cells and door openings are not affected (cellFree). ———
-            if (resid && !qEnvironmentVariableIsSet("MCX_NORUGS"))
+            if ((resid || priv) && !qEnvironmentVariableIsSet("MCX_NORUGS"))
             {
                 // pairs of contrasting colors (the kCarpets indices): white/black, red/white, blue/light blue, green/lime, purple/pink,
                 // brown/orange, cyan/white, gray/light gray, black/yellow, red/black, blue/white, brown/white
@@ -3546,12 +3616,18 @@ void ObjectVoxelizer::buildInteriors()
                 };
                 const int wantBeds = hospital ? qBound(2, openN / 28, 10) : (openN >= 90 ? 2 : 1);
                 int have = bedsOnFloor();
+                // A LOW mansard (a brick house "~1.5 storeys"): the row above the attic floor is the top mesh row
+                // and is NEVER a cavity, so the 2-row headroom would ban beds even though a bed fits (it is one
+                // block tall). Up there only the walking row is checked — the bed stands under the rafters.
+                const bool lowAttic = (priv && k > 0 && lyF >= lyHigh - 1);
+                auto headClear = [&](int ax, int az)
+                { return lowAttic || cellFree(ax, az, 1); };
                 if (have < wantBeds)
                 {
                     QVector<int> cand;
                     for (int lz = 1; lz < sz - 1; ++lz)
                         for (int lx = 1; lx < sx - 1; ++lx)
-                            if (cellFree(lx, lz, 0) && cellFree(lx, lz, 1)) cand.append(lz * sx + lx);
+                            if (cellFree(lx, lz, 0) && headClear(lx, lz)) cand.append(lz * sx + lx);
                     const int nC = cand.size();
                     const int st0 = nC ? int(finHash(minx, minz, miny + lyF, 0xBED1u) % quint32(nC)) : 0;
                     for (int pass = 0; pass < 2 && have < wantBeds; ++pass)    // pass 0 — only by a wall/furniture, pass 1 — anywhere
@@ -3559,11 +3635,11 @@ void ObjectVoxelizer::buildInteriors()
                         {
                             const int idx = cand[(st0 + t * 5) % nC];
                             const int lx = idx % sx, lz = idx / sx;
-                            if (!cellFree(lx, lz, 0) || !cellFree(lx, lz, 1)) continue;
+                            if (!cellFree(lx, lz, 0) || !headClear(lx, lz)) continue;
                             for (int outD = 0; outD < 4; ++outD)
                             {
                                 const int hx = lx + dvec[outD][0], hz = lz + dvec[outD][1];
-                                if (!cellFree(hx, hz, 0) || !cellFree(hx, hz, 1)) continue;
+                                if (!cellFree(hx, hz, 0) || !headClear(hx, hz)) continue;
                                 if (pass == 0 && cellFree(lx - dvec[outD][0], lz - dvec[outD][1], 0)) continue;   // a wall behind
                                 const int col = int(finHash(minx + lx, minz + lz, miny + lyF, 0xBED0u) % quint32(kBedsCount));
                                 const int base = int(IdBedBase) + col * 8 + outD * 2;
@@ -3592,7 +3668,7 @@ void ObjectVoxelizer::buildInteriors()
                 else if (hospital) nWant = openN >= 200 ? 3 : 2;           // doctors and nurses (the cleric profession)
                 else if (school)  nWant = openN >= 150 ? 7 : 5;           // a teacher + pupils (children) at desks
                 else if (kinder)  nWant = openN >= 150 ? 14 : (openN >= 70 ? 10 : 7);   // a kindergarten: many children
-                else if (priv)    nWant = openN >= 70 ? 3 : (openN >= 30 ? 2 : 1);
+                else if (priv)    nWant = k == 0 ? (openN >= 70 ? 3 : (openN >= 30 ? 2 : 1)) : 0;  // the family lives on the 1st floor, the mansard is furniture only
                 else if (industrialF) nWant = openN >= 200 ? 3 : (openN >= 80 ? 2 : 1);   // workshop workers
                 else if (office)  nWant = openN >= 150 ? 2 : 1;
                 else              nWant = (k % 3 == 0) ? 1 : 0;           // apartment buildings: a resident every other floor or two
@@ -3913,7 +3989,7 @@ void ObjectVoxelizer::buildRaiderZone()
 
 void ObjectVoxelizer::buildBasement()
 {
-    // A BASEMENT (a request): in ~30% of private houses — a room from 18 cells (5×5, 5×4, 4×5, 6×3, 3×6 — the first that fits) with a ceiling of 2 blocks under the floor of the 1st floor, a descent by a vertical
+    // A BASEMENT (a request): in ~50% of private houses — a room from 18 cells (5×5, 5×4, 4×5, 6×3, 3×6 — the first that fits) with a ceiling of 2 blocks under the floor of the 1st floor, a descent by a vertical
     // ladder through a hatch opening in the floor. Inside either a chest with valuable loot or a heap of mobs. The place is chosen after the furniture:
     // 9 cells of the room — there is a floor, under it is empty (neither a foundation nor a past basement); the descent cell is free 2 blocks upward,
     // on the north side of it — the ladder holder (the house floor). The room itself is carved out later (the top of the ground is lowered).
@@ -3925,7 +4001,7 @@ void ObjectVoxelizer::buildBasement()
             h ^= h >> 15; h *= 2246822519u; return h ^ (h >> 13);
         };
         const quint32 hb = bHash(minx, minz, miny, 0xBA5E7u);
-        const bool churchB = (obj.code == 44319000) || deepRole == 1 || deepRole == 2;        // a church: a basement in 85% (private houses 30%), the floor level a row higher; a building chosen by a point on the map — always, whatever its code
+        const bool churchB = (obj.code == 44319000) || deepRole == 1 || deepRole == 2;        // a church: a basement in 85% (private houses 50%), the floor level a row higher; a building chosen by a point on the map — always, whatever its code
         const bool labB = (obj.code == 44315000 || obj.code == 44312000) && (deepRole == 0 || deepRole == 3);       // deepRole 3 — one of the biggest schools: a laboratory is guaranteed            // a scientific building: an underground laboratory (as with a church — a 3×3 descent, everything else is built later)
         const bool deepB = churchB || labB;
         const int ly0 = deepB ? lyLow + 2 : lyLow + 1;
@@ -3950,7 +4026,7 @@ void ObjectVoxelizer::buildBasement()
                     const char gc = grid[lz * sxy + ly0 * sx + lx];
                     if (gc == char(3) || gc == char(4)) ++churchArea;
                 }
-        if (deepRole || hb % 100u < (churchB ? 85u : (labB ? (obj.code == 44312000 ? 0u : 100u) : 30u)))       // schools get a laboratory only when they are chosen in advance (deepRole 3, see the reserve for the Ancient City)
+        if (deepRole || hb % 100u < (churchB ? 85u : (labB ? (obj.code == 44312000 ? 0u : 100u) : 50u)))       // schools get a laboratory only when they are chosen in advance (deepRole 3, see the reserve for the Ancient City)
         {
             static const int kSzP[5][2] = { { 5, 5 }, { 5, 4 }, { 4, 5 }, { 6, 3 }, { 3, 6 } };   // the width along X, the depth along Z
             static const int kSzC[5][2] = { { 3, 3 }, { 3, 3 }, { 3, 3 }, { 3, 3 }, { 3, 3 } };   // a church: only a descent is needed (the labyrinth is built later)

@@ -605,6 +605,36 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
         for (const ChestSite& cs : chestsHere)
         {
             w.beginCompound(nullptr);
+            if (cs.stove > 0)
+            {   // a working stove of a private house (a user request): fuel in slot 1, sometimes food in slot 0
+                // (the item format of 1.20.5+: id/count; Slot — a byte, as a vanilla container dumps it)
+                static const char* const kStoveFood[6] = { "minecraft:raw_beef", "minecraft:raw_porkchop", "minecraft:raw_chicken",
+                                                           "minecraft:raw_mutton", "minecraft:potato", "minecraft:carrot" };
+                const int s = cs.stove - 1;
+                const bool food = (s & 2) != 0;
+                w.writeString("id", QStringLiteral("minecraft:furnace"));
+                w.writeInt("x", cs.x);
+                w.writeInt("y", cs.y);
+                w.writeInt("z", cs.z);
+                w.beginList("Items", Nbt::Compound, food ? 2 : 1);
+                if (food)
+                {
+                    w.beginCompound(nullptr);
+                    w.writeByte("Slot", 0);
+                    w.writeString("id", QLatin1String(kStoveFood[(s >> 3) % 6]));
+                    w.writeByte("count", 1);
+                    w.endCompound();
+                }
+                {
+                    w.beginCompound(nullptr);
+                    w.writeByte("Slot", 1);
+                    w.writeString("id", (s & 1) ? QStringLiteral("minecraft:coal") : QStringLiteral("minecraft:charcoal"));
+                    w.writeByte("count", qint8(1 + ((s >> 6) & 3)));
+                    w.endCompound();
+                }
+                w.endCompound();                              // a list element
+                continue;
+            }
             if (cs.lectern >= 0)
             {   // a lectern with a written book (the item format of 1.20.5+: id/count/components)
                 const BookText& bk = cs.lectern >= 1000 ? kSciBooks[(cs.lectern - 1000) % kSciBooksCount] : kBooks[cs.lectern % kBooksCount];

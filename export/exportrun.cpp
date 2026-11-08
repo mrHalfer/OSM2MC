@@ -134,6 +134,7 @@ private:
         QVector<BannerSite> banners;
         QVector<LairZone> zones;
         QVector<IslandSite> islands;
+        int privMats[3] = { 0, 0, 0 };       // private sector material split: [0] brick, [1] log, [2] brick with a real mansard floor
     };
     struct LiftJob { const McObject* o; quint16 id; int sink, extra; quint16 structId; bool woodSingle; int privMode; };
     struct KindTimer { qint64& ns; QElapsedTimer t; KindTimer(qint64& s) : ns(s) { t.start(); } ~KindTimer() { ns += t.nsecsElapsed(); } };
@@ -186,6 +187,7 @@ private:
     QSet<ColKey> autoRoadCols;        // the roadway of MOTOR roads only (paths and bike lines aside) — bus stops face them
     QSet<ColKey> platformCols;        // rdcpol 62134000 (railway=platform): the paving columns — half-slab in 3.576
     QSet<ColKey> railColsAll;         // the rail columns - we plant trees (rule 3.51) without running onto the tracks
+    QSet<ColKey> fenceLineCols;       // csrlin 82200000 (OSM barrier=fence): the cells of the fence axes, laid in 3.577
     QVector<QVector<QPoint>> subwayTunnels;   // the underground metro (code 61123100): cell chains in block coords,
     QHash<ColKey, quint16> railBedCols;       // electrified surface rails and trams: the ground block under the
     QHash<ColKey, int> colWater;      // a column -> the depth of the water pit (hydrography), blocks
@@ -325,6 +327,8 @@ private:
     void buildChamfer();
     // 3.576 Rail platforms stage (the former inline block).
     void connectFences();
+    // 3.577 Fences from OSM lines (csrlin 82200000); laid BEFORE connectFences() stamps their connections.
+    void buildFenceLines();
     // 3.576 Rail platforms stage (the former inline block).
     bool buildTurf();
     // 3.576 Rail platforms stage (the former inline block).
@@ -1259,6 +1263,36 @@ void ExportRun::buildChamfer()
 
 }
 
+void ExportRun::buildFenceLines()
+{
+    // 3.577 Fences from OSM lines (csrlin 82200000, the user request "barrier=fence"): the dispatcher has already
+    // rasterized the fence axes into side-connected cell chains (railCellChain); here, over the ready ground, every
+    // cell gets a wooden fence at its own surface top + 1 (the same surfaceTop() as the site fences, so the late
+    // ground fill 3.59 catches the edge chunks with the same formulas). Columns with water, a roadway, rails or a
+    // structure are skipped — the fence has a gap there, as such is the break in OSM; cells already occupied by a
+    // planting or street furniture are not touched. The CONNECTIONS are stamped by the next stage connectFences()
+    // (3.58) from the written store: our fences join each other (also from different, merely touching ways), the
+    // csrpol site fences (3.57), the gates and the full walls of houses — no special casing here.
+    int laid = 0, skipped = 0;
+    for (const qint64 ck : fenceLineCols)
+    {
+        const int x = keyFirst(ck), z = keySecond(ck);
+        if (colMin.contains(ck) || colWater.contains(ck) || roadCols.contains(ck) || railColsAll.contains(ck))
+            { ++skipped; continue; }                                  // neither roads, rails, structures nor water
+        const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+        if (git != ground.constEnd() && git->wd[(z & 15) * 16 + (x & 15)] > 0)
+            { ++skipped; continue; }                                  // the surface water of a built water body
+        const int y = surfaceTop(ck) + 1;
+        if (y > 254 || store.get(x, y, z) != IdAir)
+            { ++skipped; continue; }                                  // the cell is already occupied
+        store.set(x, y, z, IdFence);
+        ++laid;
+    }
+    char buf[128];
+    snprintf(buf, sizeof buf, "3.577 fences from OSM lines: laid %d, skipped %d", laid, skipped);
+    tmcStepLog(buf);
+}
+
 void ExportRun::connectFences()
 {
     // 3.58 Fence connections: the fence connections are a PERSISTENT block state (Properties
@@ -1528,8 +1562,9 @@ quint32 ExportRun::colHash(qint64 k)
 int ExportRun::addEmpty(int v, int x, int z)
 {
     if (erW == 0) return v;
-    const int gx = x - erX0, gz = z - erZ0;
-    if (gx < 0 || gx >= erW || gz < 0 || gz >= erH) return v;
+    const int dx = x - erX0, dz = z - erZ0;               // the 4-block cell grid (kEGrid of the empty lands block)
+    if (dx < 0 || dz < 0 || dx / 4 >= erW || dz / 4 >= erH) return v;
+    const int gx = dx / 4, gz = dz / 4;
     return std::max(0, std::min(255, v + int(emptyDelta[qsizetype(gz) * erW + gx])));
 }
 
@@ -2656,11 +2691,12 @@ void ExportRun::buildStreetFurniture()
                             barAt.append(QPoint(u, v));
                             return true;
                         }
-                        {   // a balance log: a row of slabs on low supports
+                        {   // a balance log: a row of slabs on the ground (BOTTOM type: a top one over the ground
+                            //  block stands half a block above it and reads as a "flying" slab — the user bug report)
                             bool ok = true;
                             for (int uu = u; uu < u + 5 && ok; ++uu) ok = freeCol(uu, v, 2);
                             if (!ok) return false;
-                            for (int uu = u; uu < u + 5; ++uu) put1(uu, v, 0, IdSlabTop);
+                            for (int uu = u; uu < u + 5; ++uu) put1(uu, v, 0, IdSlabBottom);
                             return true;
                         }
                     };
@@ -2679,12 +2715,18 @@ void ExportRun::buildStreetFurniture()
                                     if (occupiedAt(uu, vv)) { has = true; break; }
                                 }
                             if (has || interior < 20) continue;
+                            // a pad WITH a court (tennis/football/... — the user request): equipment only in every third
+                            // window and without the balance logs — the court is the main thing there, not a scatter of
+                            // small pieces; children's pads without a court keep the full set
+                            if (courtBuilt && colHash(pairKey(u0, v0) ^ 0x71C1ull) % 3u != 0u) continue;
                             for (int t = 0; t < 48; ++t)
                             {
                                 const quint32 hq = colHash(pairKey(u0 * 31 + t, v0 * 17) ^ ring.first() ^ 0x5CA9ull);
                                 const int u = u0 + int(hq % quint32(kWin)), v = v0 + int((hq >> 8) % quint32(kWin));
                                 static const int kSportKinds[8] = { 0, 3, 0, 2, 3, 0, 1, 3 };       // a bench, a balance beam, a pull-up bar, parallel bars (rare)
-                                const int pickK = kids ? int(((hq >> 16) + quint32(t)) % quint32(nKinds)) : kSportKinds[((hq >> 16) + quint32(t)) % 8u];
+                                static const int kSportKindsCourt[8] = { 0, 2, 0, 0, 1, 0, 2, 0 };  // the same, no balance beams
+                                const int pickK = kids ? int(((hq >> 16) + quint32(t)) % quint32(nKinds))
+                                                       : (courtBuilt ? kSportKindsCourt : kSportKinds)[((hq >> 16) + quint32(t)) % 8u];
                                 if (tryPiece(pickK, u, v)) { ++nEq; break; }
                             }
                         }
@@ -4613,6 +4655,13 @@ void ExportRun::buildVillages()
                         if ((x == bs.hx && z == bs.hz) || (z == bs.z1 && (x == bs.x0 || x == bs.x1))) continue;
                         cells.append(QPoint(x, z));
                     }
+                // The nest: a spawner block in the middle of the room (a request: in private houses spawners live ONLY
+                // in the basement) — the mob pile here is not a one-off, the block keeps spawning the same mob.
+                if (store.get(bs.cx, bs.wy - 3, bs.cz) == IdAir)
+                {
+                    store.set(bs.cx, bs.wy - 3, bs.cz, IdSpawner);
+                    spawners.append(SpawnerSite{ bs.cx, bs.wy - 3, bs.cz, bs.mobType });
+                }
                 const int area = (bs.x1 - bs.x0 + 1) * (bs.z1 - bs.z0 + 1);
                 const int n = std::min(int(cells.size()), 3 + int((hc >> 4) % 3u) + (area >= 20 ? 2 : 1));   // 4..7 mobs
                 const int st = int((hc >> 9) % quint32(std::max(1, int(cells.size()))));
@@ -5669,6 +5718,59 @@ void ExportRun::buildUserTrees()
             }
         }
         if (nAnimals > 0) res.lairInfo += QObject::tr("; animals in forests: %1").arg(nAnimals);
+    }
+
+    // HOUSEHOLD PETS (a user request): private houses keep animals — a cat by the steps, a dog-wolf, poultry and
+    // livestock in the yard (about 45% of the houses, 1..3 heads). The spot is a point of the house bbox perimeter
+    // enlarged by 1..4 blocks, so the animal stands by its own house; the usual yard checks apply (not a road, not
+    // water, not a neighbor's building, two blocks of air above the ground).
+    {
+        static const char* const kPets[] = { "cat", "cat", "cat", "wolf", "wolf", "chicken", "chicken", "pig",
+                                             "sheep", "sheep", "goat", "cow", "rabbit" };
+        int nPets = 0;
+        for (const McObject& o : objects)
+        {
+            if (o.kind != McObject::Building || !o.closed || o.vertices.isEmpty()) continue;
+            if (o.code != 44400002 && o.code != 44400100 && o.code != 44400110) continue;
+            const quint32 hh = colHash(pairKey(qint32(std::floor(toBlockX(tf, o.vertices[0].x()))),
+                                               qint32(std::floor(toBlockZ(tf, o.vertices[0].y()))) ^ 0x9E17));
+            if (hh % 100u >= 45u || nPets >= 1200) continue;                 // ~45% of the houses, the cap per export
+            double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+            for (const QVector3D& v : o.vertices)
+            {
+                const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx);
+                az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+            }
+            const int bx0 = int(std::floor(ax0)), bx1 = int(std::ceil(ax1)), bz0 = int(std::floor(az0)), bz1 = int(std::ceil(az1));
+            const int nHead = 1 + int((hh >> 9) % 3u);                        // 1..3 heads per yard
+            int got = 0;
+            for (int t = 0; t < 6 && got < nHead && nPets < 1200; ++t)
+            {   // a point of the enlarged bbox perimeter: the ring side and the offset on it by the head's hash
+                const quint32 hs = colHash(pairKey(bx0 + t, bz1 - t) ^ (quint64(t) * 0x9E3779B97F4A7C15ull) ^ 0x1357ull);
+                const int r = 1 + int(hs % 4u);                               // 1..4 blocks from the wall
+                const int W = bx1 - bx0 + 2 * r + 1, H = bz1 - bz0 + 2 * r + 1;
+                int s = int((hs >> 4) % quint32(2 * (W + H)));
+                int x, z;
+                if (s < W) { x = bx0 - r + s; z = bz0 - r; }
+                else if ((s -= W) < H) { x = bx1 + r; z = bz0 - r + s; }
+                else if ((s -= H) < W) { x = bx0 - r + s; z = bz1 + r; }
+                else { s -= W; x = bx0 - r; z = bz0 - r + s; }
+                const qint64 ck = pairKey(x, z);
+                if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck)
+                    || roadCols.contains(ck) || railColsAll.contains(ck) || patchCols.contains(ck)) continue;
+                const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                if (git == ground.constEnd() || git->wd[(z & 15) * 16 + (x & 15)] > 0) continue;
+                const int top = git->top[(z & 15) * 16 + (x & 15)];
+                if (store.get(x, top + 1, z) != IdAir || store.get(x, top + 2, z) != IdAir) continue;
+                NpcSite a;
+                a.kind = 5; a.animal = QStringLiteral("minecraft:") + QLatin1String(kPets[(hs >> 12) % 13u]);
+                a.x = x; a.z = z; a.y = top + 1; a.yaw = int((hs >> 24) % 4u) * 90;
+                npcs.append(a);
+                ++nPets; ++got;
+            }
+        }
+        if (nPets > 0) res.lairInfo += QObject::tr("; household pets: %1").arg(nPets);
     }
 
     // 3.586 AQUATIC FAUNA: fish live in the water as REAL entities (like the animals in the forest), they are not spawner-born.
@@ -7418,17 +7520,20 @@ bool ExportRun::buildGround()
         if (nQuarry > 0) res.lairInfo += QObject::tr("; quarries: %1 columns of the stepped excavation").arg(nQuarry);
         if (nHeap > 0) res.lairInfo += QObject::tr("; spoil heaps: %1 columns of the mound").arg(nHeap);
     }
-    {   // LIGHT TERRAIN OF THE EMPTY LANDS: big free places (where single oaks/birches are planted, fields, wastelands) get soft hills (±4), like parks and forests.
-        // The distance to the occupied (buildings, roads, rails, water, sites, forests and patches) is computed on a dense grid; near the occupied and the export edge the addition smoothly fades out (24 blocks).
+    {   // LIGHT TERRAIN OF THE EMPTY LANDS: big free places (where single oaks/birches are planted, fields, wastelands) get soft hills (±5, like parks).
+        // The distance to the occupied (buildings, roads, rails, water, sites, forests and patches) is computed on a 4-block grid (the raw column
+        // grid did not fit into the memory limit on big projects and the terrain silently stayed flat — the user complaint); near the occupied and the
+        // export edge the addition smoothly fades out (24 blocks).
         const int ex0 = rcx0 * 16, ez0 = rcz0 * 16;
         const qint64 eW = qint64(rcx1 - rcx0 + 1) * 16, eH = qint64(rcz1 - rcz0 + 1) * 16;
-        if (eW > 0 && eH > 0 && eW * eH <= 400000000ll)
+        constexpr int kEGrid = 4;                                             // the grid step, columns
+        const int W3 = int((eW + kEGrid - 1) / kEGrid), H3 = int((eH + kEGrid - 1) / kEGrid);
+        if (eW > 0 && eH > 0 && qint64(W3) * H3 <= 100000000ll)
         {
-            const int W3 = int(eW), H3 = int(eH);
-            QVector<quint8> ed(qsizetype(W3) * H3, 255);                       // 0 — occupied / outside the export, otherwise the distance
+            QVector<quint8> ed(qsizetype(W3) * H3, 255);                      // 0 — occupied / outside the export, otherwise the distance (in cells)
             auto mark = [&](qint64 k)
             {
-                const int gx = keyFirst(k) - ex0, gz = keySecond(k) - ez0;
+                const int gx = (keyFirst(k) - ex0) / kEGrid, gz = (keySecond(k) - ez0) / kEGrid;
                 if (gx >= 0 && gx < W3 && gz >= 0 && gz < H3) ed[qsizetype(gz) * W3 + gx] = 0;
             };
             for (auto it = colMin.constBegin(); it != colMin.constEnd(); ++it) mark(it.key());
@@ -7440,10 +7545,10 @@ bool ExportRun::buildGround()
             for (const VegSite& vs : forests)
                 if (!vs.loose)                                                  // yards and taiga of the private sector (OSM) are not counted as "occupied": hills under their trees too
                     for (const ColSpan& c : vs.spans)
-                        for (int z = c.z0; z <= c.z1; ++z) mark(pairKey(c.x, z));
+                        for (int z = c.z0; z <= c.z1; z += kEGrid) mark(pairKey(c.x, z));
             for (int x = 0; x < W3; ++x) { ed[x] = 0; ed[qsizetype(H3 - 1) * W3 + x] = 0; }
             for (int z = 0; z < H3; ++z) { ed[qsizetype(z) * W3] = 0; ed[qsizetype(z) * W3 + W3 - 1] = 0; }
-            for (int z = 1; z < H3; ++z)                                         // forward pass (Manhattan)
+            for (int z = 1; z < H3; ++z)                                        // forward pass (Manhattan)
                 for (int x = 1; x < W3; ++x)
                 {
                     quint8& dv = ed[qsizetype(z) * W3 + x];
@@ -7458,19 +7563,18 @@ bool ExportRun::buildGround()
                     dv = quint8(std::min<int>(dv, std::min(ed[qsizetype(z) * W3 + x + 1], ed[qsizetype(z + 1) * W3 + x]) + 1));
                 }
             QVector<qint8> delta(qsizetype(W3) * H3, 0);
-            const double A = hasTerrain ? 2.5 : 4.5;                              // with a ready terrain (DTM) — more careful
-            constexpr double kBlendE = 24.0;
+            const double A = hasTerrain ? 3.0 : 5.0;                             // with a ready terrain (DTM) — more careful
+            constexpr double kBlendE = 20.0;
             QVector<int> rows;
             for (int z = 0; z < H3; ++z) rows.append(z);
             QtConcurrent::blockingMap(rows, [&](int gz)
             {
-                const int z = gz + ez0;
                 for (int gx = 0; gx < W3; ++gx)
                 {
                     const quint8 dv = ed[qsizetype(gz) * W3 + gx];
-                    if (dv < 3) continue;
-                    const int x = gx + ex0;
-                    double wv = std::min(1.0, double(dv) / kBlendE);
+                    if (dv < 2) continue;                                        // closer than ~8 blocks to the occupied — the place is used, not a free land
+                    const int x = gx * kEGrid + ex0, z = gz * kEGrid + ez0;
+                    double wv = std::min(1.0, double(dv) * kEGrid / kBlendE);
                     wv = wv * wv * (3.0 - 2.0 * wv);
                     const double n = 0.45 * std::sin(x / 19.0 + 1.3) * std::cos(z / 23.0 + 2.1) + 0.35 * std::sin((x + z) / 31.0 + 0.7)
                                    + 0.25 * std::sin(x / 9.5 + 4.2) * std::sin(z / 10.5 + 1.9) + 0.15 * std::cos((x - z) / 14.0 + 3.3);
@@ -7481,7 +7585,7 @@ bool ExportRun::buildGround()
             for (qsizetype i = 0; i < delta.size(); ++i) if (delta[i]) ++nEmpty;
             erX0 = ex0; erZ0 = ez0; erW = W3; erH = H3;
             emptyDelta = std::move(delta);
-            if (nEmpty > 0) res.lairInfo += QObject::tr("; terrain of the empty lands: %1 columns").arg(nEmpty);
+            if (nEmpty > 0) res.lairInfo += QObject::tr("; terrain of the empty lands: %1 cells").arg(nEmpty);
         }
     }
     g_sandId = quint16(IdPaletteStart + paletteIndexOf("minecraft:sand"));
@@ -9175,6 +9279,7 @@ bool ExportRun::buildObjects()
     msFlushRun = 0;
     msFlushMerge = 0;
     nFlush = 0;
+    int nPrivBrick = 0, nPrivLog = 0, nPrivMans = 0;           // the private sector brick/log/mansard split of all batches
     auto flushJobs = [&]()
     {
         if (pending.isEmpty()) return;
@@ -9194,6 +9299,7 @@ bool ExportRun::buildObjects()
                 if (j->building) vo.storyCounter = &j->storyCounter;
                 vo.npcs = &j->npcs; vo.frames = &j->frames; vo.basements = &j->basements;
                 vo.signs = &j->signs; vo.banners = &j->banners; vo.zones = &j->zones; vo.islands = &j->islands;
+                vo.privMats = j->privMats;
                 j->added = voxelizeObject(*j->o, tf, j->id, j->store, vo, cancel, j->sink,
                                           j->extraBlocks, j->building,
                                           j->structId, j->woodSingle, j->privMode, j->deepRole);
@@ -9234,6 +9340,7 @@ bool ExportRun::buildObjects()
             mannequins += j->mannequins; spawners += j->spawners; npcs += j->npcs; frames += j->frames;
             basements += j->basements; signCands += j->signs; bannerSites += j->banners; lairZones += j->zones; islandSites += j->islands;
             if (j->building) storyCounter += j->storyCounter - j->storyBase;
+            nPrivBrick += j->privMats[0]; nPrivLog += j->privMats[1]; nPrivMans += j->privMats[2];
         }
         qDeleteAll(pending);
         pending.clear();
@@ -9390,6 +9497,61 @@ bool ExportRun::buildObjects()
         stations.append(site);
     }
     stationBuilt = QVector<char>(stations.size(), 0);
+    // AXIS SNAP OF SMALL PRIVATE HOUSES (a user request): the private-sector footprints come from OSM rotated
+    // by their real azimuth, and a rotated small house rasterizes into staircase walls with almost no windows.
+    // Every house-sized closed object of the private codes is turned to the nearest block axis around its
+    // block-space centroid (heights untouched; the centroid does not move, so every center-based consumer is
+    // unaffected). Only near-axis-parallel footprints (< 1 degree) stay as they are.
+    {
+        constexpr double kPi = 3.14159265358979323846;
+        int nSnapped = 0;
+        for (McObject& o : objects)
+        {
+            if (o.kind != McObject::Building || !o.closed || o.vertices.size() < 4) continue;
+            if (o.code != 44400002 && o.code != 44400100 && o.code != 44400110) continue;
+            QVector<QPointF> bp;                                          // the outline in block coordinates
+            bp.reserve(o.vertices.size());
+            double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+            for (const QVector3D& v : o.vertices)
+            {
+                const QPointF b(float(toBlockX(tf, v.x())), float(toBlockZ(tf, v.y())));
+                bp.append(b);
+                ax0 = std::min(ax0, double(b.x())); ax1 = std::max(ax1, double(b.x()));
+                az0 = std::min(az0, double(b.y())); az1 = std::max(az1, double(b.y()));
+            }
+            if (ax1 - ax0 > 60 || az1 - az0 > 60) continue;               // only house-sized footprints
+            double ex = 0, ez = 0, eBest = 0;
+            for (int i = 0; i < bp.size(); ++i)
+            {   // the longest outline edge = the wall direction to snap
+                const double dx = bp[(i + 1) % bp.size()].x() - bp[i].x(), dz = bp[(i + 1) % bp.size()].y() - bp[i].y();
+                const double len = std::hypot(dx, dz);
+                if (len > eBest) { eBest = len; ex = dx; ez = dz; }
+            }
+            if (eBest <= 0) continue;
+            double ang = std::atan2(ez, ex) * 180.0 / kPi;                // [0, 180)
+            ang = std::fmod(std::fmod(ang, 180.0) + 180.0, 180.0);
+            // The SHORTEST turn to the nearest axis, |rot| <= 45. The first version used (ang - 90) for
+            // ang > 45 — the wrong SIGN: those houses were turned further from the axis instead of onto it
+            // (user: "the houses are still barely straightened"), and the 15-degree cutoff additionally
+            // skipped every footprint lying near the Y axis (its deviation from X is ~90 there).
+            const double rot = 90.0 * std::round(ang / 90.0) - ang;
+            if (std::abs(rot) < 1.0) continue;                            // already axis-parallel
+            double cx = 0, cz = 0;
+            for (const QPointF& b : bp) { cx += b.x(); cz += b.y(); }
+            cx /= bp.size(); cz /= bp.size();
+            const double cs = std::cos(rot), sn = std::sin(rot);
+            for (QVector3D& v : o.vertices)                               // rotate x,y about the centroid, keep z
+            {
+                const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                const double rx = cx + (bx - cx) * cs - (bz - cz) * sn;
+                const double rz = cz + (bx - cx) * sn + (bz - cz) * cs;
+                v.setX(tf.cx0 + rx / tf.sx);
+                v.setY(tf.cy0 - rz / tf.sz);
+            }
+            ++nSnapped;
+        }
+        if (nSnapped > 0) res.lairInfo += QObject::tr("; houses straightened to the axes: %1").arg(nSnapped);
+    }
     for (const McObject& o : objects)
     {
         KindTimer kindTimer(nsByKind[std::min(10, int(o.kind))]);
@@ -9477,6 +9639,25 @@ bool ExportRun::buildObjects()
             for (int x = x0 - 3; x <= x1 + 3; ++x)
                 for (int z = z0 - 3; z <= z1 + 3; ++z)
                     noTreePadCols.insert(pairKey(x, z));   // +3: the crowns (even the wide swamp oak ones) do not overhang a statue
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::CSRLine)
+        {   // a linear cultural object (csrlin). CODE 82200000 — a FENCE (the user request "barrier=fence"): only
+            // the axis cells are gathered here; railCellChain makes them side-connected, so a diagonal OSM line
+            // becomes a stair chain of cells, not a broken dashed line. The fence itself is laid in 3.577 over
+            // the ready ground; its connections are stamped in 3.58 - touching ways join automatically there.
+            if (o.code != 82200000) { ++res.skippedCount; continue; }   // an unknown csrlin code - nothing is built
+            bool any = false;
+            for (const QVector<QPointF>& pl : o.paths)
+            {
+                QVector<QPointF> bp;
+                for (const QPointF& w : pl) bp << QPointF(toBlockX(tf, w.x()), toBlockZ(tf, w.y()));
+                const QVector<QPoint> chain = railCellChain(bp);
+                for (const QPoint& c : chain) fenceLineCols.insert(pairKey(c.x(), c.y()));
+                any = any || !chain.isEmpty();
+            }
+            if (!any) { ++res.skippedCount; continue; }
             ++res.objectCount;
             continue;
         }
@@ -10206,6 +10387,9 @@ bool ExportRun::buildObjects()
         tmcStepLog(buf);
     }
     flushJobs();
+    if (nPrivBrick + nPrivLog > 0)
+        res.lairInfo += QObject::tr("; private houses: %1 brick (%2 with a mansard floor), %3 log")
+                            .arg(nPrivBrick).arg(nPrivMans).arg(nPrivLog);
     // The bottom row of the walls of a raised part (the tier border, for example of a church): concrete instead of the wall material.
     {
         const quint16 baseId = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
@@ -10863,6 +11047,8 @@ McWorldExporter::Result ExportRun::run()
     buildVillages();
     lap("before 3.575");
     buildPointObjects();
+    lap("before 3.577");
+    buildFenceLines();                                    // csrlin 82200000: fences from OSM lines (connectFences() below stamps the joins)
     lap("before 3.59");
     beginStep(9);
     buildLateGroundFill();

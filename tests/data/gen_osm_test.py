@@ -117,6 +117,10 @@ node(8100, 60, {'highway': 'crossing'})
 line([(8000, 180), (8200, 180)], {'highway': 'residential', 'tunnel': 'yes'})                      # skip
 line([(8000, 200), (8300, 200)], {'railway': 'rail'}, 'rrslin', '61111000')
 line([(8000, 220), (8300, 220)], {'railway': 'abandoned'})                                         # skip
+# two TOUCHING barrier=fence ways (an L, x~760, empty field south of the buildings): csrlin 82200000,
+# the exporter lays a wooden fence along them and stitches the two ways into one fence (their ends share a cell)
+line([(0.011 * mx, -0.0003 * my), (0.011 * mx, -0.00002 * my)], {'barrier': 'fence'}, 'csrlin', '82200000')
+line([(0.011 * mx, -0.00002 * my), (0.01145 * mx, -0.00002 * my)], {'barrier': 'fence'}, 'csrlin', '82200000')
 area(8500, 0, 60, 40, {'amenity': 'parking'}, 'rdcpol', '62230000')
 area(8500, 100, 60, 40, {'amenity': 'parking', 'parking': 'underground'})                          # skip
 area(8700, 0, 40, 30, {'leisure': 'playground'}, 'csrpol', '53710000')

@@ -110,6 +110,10 @@ public:
         //!                               (tall_grass), >100000 m² — ripe wheat (wheat age=7);
         //!  Road       (rdslin)          — a road: the top face of the ribbon -> colored carpet by the layer color;
         //!  Railway    (rrslin)          — a railway: the top face of the ribbon -> rail;
+        //!  CSRLine    (csrlin)          — a linear cultural object by CODE: 82200000 — a wooden FENCE along the
+        //!                               axis (OSM barrier=fence): the paths give the axis, the export lays the
+        //!                               fence in 3.577 and its connections are stamped in 3.58 (touching ways,
+        //!                               site fences and walls join into one fence);
         //!  Plate      (csrpol)          — with a height (REL) — a brick structure (like bldpol, but always
         //!                               brick); without a height — a "plate": over the polygon patch the top
         //!                               ground layer (turf) is replaced by wool of a random color;
@@ -127,7 +131,8 @@ public:
                     ParkingLot = 7,
                     BlockCover = 8,   //!< BlockCover (blkpol, only CODE 62231000 asphalt without markings and 45300000 square): a surface instead of turf — gray concrete / stone bricks
                     Spot = 9,         //!< Spot (a source with a modelField) — see above
-                    Biome = 10 };     //!< Biome (a source with ModelEffect::Swamp) — a wetland overlay, see above
+                    Biome = 10,       //!< Biome (a source with ModelEffect::Swamp) — a wetland overlay, see above
+                    CSRLine = 11 };   //!< CSRLine (csrlin) — a linear cultural object by CODE (82200000 — a fence), see above
         //! ParkingLot (rdcpol) — a surface: dark gray concrete instead of turf + parking place markings; the outlines are in paths
 
         QVector<QVector3D> vertices;

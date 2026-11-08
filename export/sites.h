@@ -39,6 +39,8 @@ struct ChestSite
     int tbl = 0;
     bool barrel = false;                  //!< true — this is a barrel (minecraft:barrel), the table is from kBarrelLoot
     int lectern = -1;                     //!< >= 0 — this is a lectern (minecraft:lectern) with the book kBooks[lectern]
+    int stove = 0;                        //!< > 0 — this is a stove (minecraft:furnace) loaded with fuel: the hash of the contents
+                                          //!<  (bit0 — coal/charcoal, bit1 — food in the lower slot, bits 3..5 — the food, bits 6..7 — its amount)
 };
 
 //! The books on the lecterns of churches: short passages of the Gospel and Revelation (the Synodal translation, in Russian), chosen by a hash.
@@ -174,7 +176,7 @@ extern const char* const kToolMatNames[5];
 extern const char* const kToolKindNames[5];
 extern const char* const kProfs[];
 extern const char* const kVTypes[];
-constexpr int kSpawnerTypesCount = 3;
+constexpr int kSpawnerTypesCount = 4;                 // zombie / skeleton / spider / witch (witch — only the basement nests)
 constexpr int kBooksCount = 8;
 constexpr int kSciBooksCount = 6;
 constexpr int kBarrelLootCount = 8;

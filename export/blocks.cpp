@@ -321,6 +321,7 @@ QString blockName(quint16 id)
     if (id == IdBlackGlass) return QLatin1String("minecraft:black_stained_glass");
     if (id >= IdAnvilBase && id < IdAnvilMax) return QLatin1String("minecraft:anvil");
     if (id >= IdBlastFurnaceBase && id < IdBlastFurnaceMax) return QLatin1String("minecraft:blast_furnace");
+    if (id >= IdFurnaceBase && id < IdFurnaceMax) return QLatin1String("minecraft:furnace");
     if (id >= IdGrindstoneBase && id < IdGrindstoneMax) return QLatin1String("minecraft:grindstone");
     if (id >= IdStonecutterBase && id < IdStonecutterMax) return QLatin1String("minecraft:stonecutter");
     if (id == IdLavaCauldron) return QLatin1String("minecraft:lava_cauldron");
@@ -436,6 +437,12 @@ void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
             << qMakePair(QStringLiteral("lit"), QStringLiteral("false"));
         return;
     }
+    if (id >= IdFurnaceBase && id < IdFurnaceMax)
+    {
+        out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdFurnaceBase)) & 3]))
+            << qMakePair(QStringLiteral("lit"), QStringLiteral("false"));
+        return;
+    }
     if (id >= IdGrindstoneBase && id < IdGrindstoneMax)
     {
         out << qMakePair(QStringLiteral("face"), QStringLiteral("floor"))
@@ -506,8 +513,12 @@ void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
         return;
     }
     if (id >= IdPoweredRailShapeBase && id < IdPoweredRailShapeMax)
-    {   // an electrified rail (the metro tunnels): the same shapes as a plain rail, powered=false by default
-        out << qMakePair(QStringLiteral("shape"), QLatin1String(kRailShapes[int(id) - int(IdPoweredRailShapeBase)]))
+    {   // an electrified rail (the metro tunnels): the same shapes as a plain rail. POWERED=true is written into
+        // the state on purpose: electrifyRails always puts a redstone block under the rail, but the exporter's
+        // chunks never get a block update at world load — with the default powered=false the rail sat on redstone
+        // inactive until someone touched it (a user remark), so the state must carry the power itself.
+        out << qMakePair(QStringLiteral("powered"), QStringLiteral("true"))
+            << qMakePair(QStringLiteral("shape"), QLatin1String(kRailShapes[int(id) - int(IdPoweredRailShapeBase)]))
             << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
         return;
     }

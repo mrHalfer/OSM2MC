@@ -239,6 +239,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
         else if (sfx == QLatin1String("vegpol") || sfx == QLatin1String("vgbpol")) kind = Kind::Vegetation;
         else if (sfx == QLatin1String("rdslin")) kind = Kind::Road;
         else if (sfx == QLatin1String("rrslin")) kind = Kind::Railway;
+        else if (sfx == QLatin1String("csrlin")) kind = Kind::CSRLine;
         else if (sfx == QLatin1String("csrpol")) kind = Kind::Plate;
         else if (sfx == QLatin1String("rdcpol")) kind = Kind::ParkingLot;
         else if (sfx == QLatin1String("blkpol")) kind = Kind::BlockCover;
@@ -587,7 +588,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                     for (int k = 0; k < mp->getNumGeometries(); ++k) addPoly(static_cast<OGRPolygon*>(mp->getGeometryRef(k)));
                 }
             }
-            if (e.kind == Kind::Railway || e.kind == Kind::Road)
+            if (e.kind == Kind::Railway || e.kind == Kind::Road || e.kind == Kind::CSRLine)
                 ModelBuilder::ExtractLinePaths(e.obj, mo.paths);
             mo.lift = e.lift;
             mo.onionRoof = e.onion;

@@ -43,6 +43,7 @@ Select-String -Path E:\Builds\tMC\build_nmake.log -Pattern ' error |fatal error|
 - `LNK1104 ... osmc.exe` — программа запущена: закрой её (см. выше) и повтори.
 - Новый `.cpp/.h/.ui` нужно вписать в `osmc.pro` (SOURCES/HEADERS/FORMS).
 - Если правился только `resources/osm_rules.json` или другой файл из `resources/`: они копируются рядом с exe при сборке; для быстрой проверки скопируй вручную в `E:\Builds\tMC\release\`.
+- При замене `resources/osmc.ico` nmake НЕ пересоберёт ресурс (правило `release\osmc_resource.res` зависит только от `OSMC_resource.rc`): удали `E:\Builds\tMC\release\osmc_resource.res` перед сборкой и заодно удали/переименуй старый `release\osmc.exe` (make_release.bat упаковал бы и его при неудачной сборке). Проверка вшивки: искать в файле exe куски байтов изображений из нового ico (для PNG-сжатого ico побайтов не совпадут — rc.exe перекодирует в DIB); старый ico из `git show HEAD:resources/osmc.ico` должен НЕ находиться, новый — находиться. Linux-иконка (`resources/osmc.png`) в AppImage кладётся напрямую, к `.res` отношения не имеет.
 
 ### Тесты (обязательно после любой правки экспортёра и правил)
 ```powershell

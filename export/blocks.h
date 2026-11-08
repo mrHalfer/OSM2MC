@@ -202,6 +202,9 @@ enum : quint16
                                           //   stairwell ledges (a request: "hang torches on the column")
     IdJackLanternBase,                    // IdJackLanternBase + i = 'minecraft:jack_o_lantern' facing north/east/
                                           //   south/west — a lit jack o'lantern on a post by a grave cross (3.5)
+    IdFurnaceBase,                        // 'minecraft:furnace' facing = N/E/S/W (+0..3), lit=false — the stove of a
+                                          //   private house turned to the room (fuel — in the block entity, see ChestSite::stove)
+    IdFurnaceMax = int(IdFurnaceBase) + 4,
     IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
                                           //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
 };

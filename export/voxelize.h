@@ -30,6 +30,8 @@ struct VoxelOut
     QVector<BannerSite>* banners = nullptr;
     QVector<LairZone>* zones = nullptr;
     QVector<IslandSite>* islands = nullptr;
+    int* privMats = nullptr;                        // the private sector material split: [0] brick houses, [1] log houses,
+                                                    //  [2] brick houses with a WALKABLE 2nd story (wall >= 8 rows: slab + a 3-row room)
 };
 
 
