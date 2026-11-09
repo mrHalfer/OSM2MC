@@ -5,6 +5,48 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.5.26.11091] — 2026-11-09
+
+### Added
+
+- **Ruined portals cut out of a real game world** (a user request): ruined portals are extracted from generated
+  Minecraft worlds (tests/tools/extract_ruins.py, PGD2 patch) and rarely placed in forests from 5000 m2 - a snowy
+  portal goes to taiga forests, and a snow-free version of the same ruin to forests of any type. Each one brings its
+  netherrack apron, magma, obsidian frame and a chest holding the real `ruined_portal` loot.
+- **Spruce (taiga) forests are livelier** (a user request): big spruce forests now get three times as many abandoned
+  camps (bandit outposts are left as they were), and their undergrowth is rich - berry bushes stand ripe (with
+  berries on them, not empty shrubs) and are ~3.5x more frequent, mushrooms are ~3x more frequent.
+
+### Changed
+
+- **OSMC is now licensed under the GNU GPL v3** (GPL-3.0-or-later, was MIT): the program stays free, but any modified
+  or derived version that is distributed must remain open under the same license (copyleft). Commercial licensing is
+  available from the copyright holder on request.
+- **Villages and the private sector are greener** (a user request): the single trees on the empty lands (where the
+  map has no vegetation at all) are ~2.7x more frequent near the private sector - within 48 blocks of a private
+  house, as long as no multi-storey building (5+ floors) stands within 40 blocks and the climate is not the desert.
+- **The fences from OSM `barrier=fence` lines are now two-storey stone brick walls** instead of one-storey wooden
+  fences (a user request); the lower wall of a two-storey run renders as one continuous two-block fence.
+- **Private houses are straightened to the block axes only when it is safe** (a user request): the snap is skipped
+  when the turned footprint would land on a building of another type. Houses of the private sector may still
+  overlap each other (they merge into one building) and may climb over a shed (44000000) - only that is allowed.
+- **Windows on the staircase walls of rotated private houses** (a user request): a window may now stand on a step
+  of a rotated footprint and is cut through the WHOLE wall thickness with glass (not a "shiny facade" with a wall
+  right behind the pane); the walk stops at the interior air. Only the true corners of the outline stay blind (they
+  are taken from the mesh hull, not from the raster); a rare thin tooth may still end as a single pane.
+- **A fence is stronger than a road**: the roadway no longer erases fence lines - where a widening or a wide ribbon
+  of a road would step onto a fence, the road width is trimmed instead. A road may still cross a fence: where the
+  road axis pierces the fence line, the width is kept and the fence itself breaks there.
+
+### Fixed
+
+- Fixed the axis snap of private houses (a user report: "the houses are still barely straightened"): the turn angle
+  was computed from an arbitrary mesh edge (the mesh vertices are not ordered as a polygon) and then passed in
+  degrees to `cos`/`sin` without converting to radians - so the houses were turned by a random angle. The angle now
+  comes from the longest edge of the convex hull of the outline and is converted to radians.
+- Fixed the lit jack o'lanterns on cemetery posts being saved as unlit furnaces (a regression introduced in
+  1.5.26.11081 together with the house stoves: the furnace block range overlapped the jack o'lantern rotations).
+
 ## [1.5.26.11081] — 2026-11-08
 
 ### Added

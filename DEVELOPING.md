@@ -141,4 +141,4 @@ The online mode follows the OpenStreetMap policies: map tiles are cached on disk
 
 ## License
 
-MIT (`LICENSE`); the third-party components are listed in `THIRD_PARTY_NOTICES.md`. The Minecraft server files used by the tests are not included (the Mojang EULA).
+GPL-3.0-or-later (`LICENSE`); the third-party components are listed in `THIRD_PARTY_NOTICES.md`. The Minecraft server files used by the tests are not included (the Mojang EULA).

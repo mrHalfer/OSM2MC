@@ -89,7 +89,10 @@ These files lie next to `osmc.exe` and can be edited with any text editor:
 
 ## License and data
 
-OSMC is free software under the **MIT license** (`LICENSE`); the third-party components shipped with it are listed in `THIRD_PARTY_NOTICES.md`.
+OSMC is free software under the **GNU GPL v3 license** (GPL-3.0-or-later, `LICENSE`): you may run, study, modify and
+share it freely, but every modified or derived version that you distribute must stay under the same license (copyleft).
+Commercial licensing is available from the copyright holder on request. The third-party components shipped with OSMC
+are listed in `THIRD_PARTY_NOTICES.md`.
 
 Map data © **OpenStreetMap contributors**, under the Open Database License (ODbL) - https://www.openstreetmap.org/copyright.
 **A world made from OSM data is a derived database: when you publish it (a server, a download), keep the attribution "Map data © OpenStreetMap contributors (ODbL)" and follow the ODbL.** The exported zip contains the file `ATTRIBUTION.txt` with this line.

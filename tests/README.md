@@ -9,7 +9,7 @@ tests\
   run_tests.py        a single entry point: py -3 run_tests.py [osm shp harness servers | all] [-v]
   tools\              checks and helpers (Python)
   harness\            the C++ exporter harness: mc_export_test.cpp, mc_scene_run.cpp, build_harness.bat
-  data\               test data: gen_osm_test.py -> osm_buildings.osm + osm_buildings.expected.json
+  data\               test data: gen_osm_test.py -> osm_buildings.osm + osm_buildings.expected.json (a hand-made .osm: all <node> go BEFORE <way>, and a closed way repeats its first ref — otherwise the GDAL OSM driver drops the feature)
   servers\mc26\       the Minecraft 26.3 server (server.jar; working files are created on start)
   servers\mc121\      the Minecraft 1.21.11 server
   worlds\             generated worlds (zip) and their logs; unpacked copies are not kept
@@ -50,8 +50,9 @@ A quick cycle while editing the OSM rules: `py -3 run_tests.py osm`. Before hand
 - `tools\scan_points.py <zip> [marker ...]`, `tools\scan_zone.py <zip> [log ...]`, `tools\count_blocks.py <zip ...> [name part ...]`, `tools\chunk_range.py <zip>` - world scans: point-structure markers, zone trees, block counts, the real world size.
 - `tools\steps_report.py <mcx log ...>` - the step table over `MCX_LOG_STEPS` logs (the last one is compared with the first - speed regressions).
 - `tools\bench_scenes.py <dir> [scene ...]` - the bench/probe .osm scenes (s1..s6, bench, p1..p5; see the speed check in DEVELOPING/AGENTS); `tools\check_zones.py` - the climate zone of the world at real city coordinates.
+- `tools\extract_ruins.py gen|extract` — ruined portals from REAL generated worlds into `resources\templates\patch_ruins_portal_*.bin` (PGD2): `gen` starts a server (121 by default) on a fresh noise world, finds portals with `locate` from several points and forceloads them; `extract` (offline, no server) cuts the portal blocks together with the terrain out of the saved region files. A snowy donor also gets a `_green` copy with the snow/ice stripped; the exporter places the snowy ones in taiga forests only and the green ones in forests of any type.
 - With `TMC_OSM_DEBUG=1` the tMC log has a line per building: the tags the rules saw and the resulting layer/code.
 
 ## What was not carried over
 
-The template extraction scripts (`extract_*.py`, `gen_*.py`) are not part of the project: they are not tests but generators of `resources/templates/*.bin` from a donor world.
+The template extraction scripts (`extract_*.py`, `gen_*.py`) are not part of the project: they are not tests but generators of `resources/templates/*.bin` from a donor world. The exception is `tools\extract_ruins.py` — the ruined portals of the forests (a user feature), so that the `patch_ruins_portal*.bin` files can be regenerated from any seed.

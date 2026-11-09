@@ -187,8 +187,10 @@ enum : quint16
     IdCarrots,                            // 'minecraft:carrots' age=7
     IdPotatoes,                           // 'minecraft:potatoes' age=7
     IdBeetroots,                          // 'minecraft:beetroots' age=3
-    IdStoneFence,                         // 'minecraft:stone_brick_wall' — the BASE of a stone fence: id = IdStoneFence + conn (north=1, east=2, south=4, west=8), pass 3.58
-    IdStoneFenceMax = int(IdStoneFence) + 16,
+    IdStoneFence,                         // 'minecraft:stone_brick_wall' — the BASE of a stone fence: id = IdStoneFence + conn
+                                          //  (north=1, east=2, south=4, west=8; bit 16 — another wall stands on top, the fence
+                                          //  is two storeys high: the sides become "tall" and upside_down=true), pass 3.58
+    IdStoneFenceMax = int(IdStoneFence) + 32,
     IdPoweredRailShapeBase,               // IdPoweredRailShapeBase + k, k=0..9: 'minecraft:powered_rail'
                                           //  with the shape kRailShapes[k] (electrified rails of the metro tunnels)
     IdPoweredRailShapeMax = int(IdPoweredRailShapeBase) + 10,
@@ -202,9 +204,15 @@ enum : quint16
                                           //   stairwell ledges (a request: "hang torches on the column")
     IdJackLanternBase,                    // IdJackLanternBase + i = 'minecraft:jack_o_lantern' facing north/east/
                                           //   south/west — a lit jack o'lantern on a post by a grave cross (3.5)
-    IdFurnaceBase,                        // 'minecraft:furnace' facing = N/E/S/W (+0..3), lit=false — the stove of a
-                                          //   private house turned to the room (fuel — in the block entity, see ChestSite::stove)
+    IdJackLanternMax = int(IdJackLanternBase) + 4,
+    IdFurnaceBase = IdJackLanternMax,     // 'minecraft:furnace' facing = N/E/S/W (+0..3), lit=false — the stove of a
+                                          //   private house turned to the room (fuel — in the block entity, see ChestSite::stove).
+                                          //   ⚠ Ranges of multi-variant blocks (Base + i) never overlap: every Base gets
+                                          //   its explicit Max line, the next Base starts AT the Max (a lost gap turned
+                                          //   3 of 4 cemetery jack o'lanterns into furnaces — blockName checks ranges in order)
     IdFurnaceMax = int(IdFurnaceBase) + 4,
+    IdBerryRipe,                          // 'minecraft:sweet_berry_bush' age=3 — a berry bush of the taiga undergrowth
+                                          //   (the palette entry writes age=0, the game shows an empty green bush there)
     IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
                                           //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
 };

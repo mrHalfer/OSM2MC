@@ -8,6 +8,7 @@
 #include "export/sites.h"
 #include "export/voxelstore.h"
 #include <QHash>
+#include <QSet>
 #include <QVector>
 #include <atomic>
 
@@ -18,6 +19,7 @@ struct VoxelOut
 {
     QHash<ColKey, int>* colMin = nullptr;            // min voxel Y per XZ column (mandatory)
     QHash<ColKey, int>* colAnchor = nullptr;
+    QSet<ColKey>* colTall = nullptr;                 // the columns of multi-storey buildings (5+ floors) — the greenery boost keeps away from them
     QVector<ChestSite>* chests = nullptr;
     QVector<PaintingSite>* paints = nullptr;
     QVector<MannequinSite>* mannequins = nullptr;

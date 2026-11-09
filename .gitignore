@@ -22,6 +22,7 @@ tests/local_config.json
 # the author's working notes; porting-linux.md is the exception: it is the Linux release recipe the scripts refer to
 docs/*
 !docs/porting-linux.md
+!docs/CLA.md
 
 # a full copy of a GDAL installation (headers and libraries of all its dependencies, hundreds of MB): the project needs only third_party/gdal
 Gdal34vc/

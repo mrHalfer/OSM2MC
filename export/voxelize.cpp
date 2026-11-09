@@ -3,6 +3,7 @@
 #include <QSet>
 #include <QString>
 #include <QVector3D>
+#include <QPointF>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -41,6 +42,7 @@ private:
     const bool raisedObj;
     QHash<ColKey, int>& colMin;
     QHash<ColKey, int>* colAnchor;
+    QSet<ColKey>* colTall;
     QVector<ChestSite>* chests;
     QVector<PaintingSite>* paints;
     QVector<MannequinSite>* mannequins;
@@ -80,6 +82,7 @@ private:
     int nWindows = 0;                                           // the windows (0 - cobwebs inside)
     QVector<qint64> entranceKeys;                               // the entrance cells (furniture keeps out)
     QSet<int> forcedWall;                                       // the outer cells where a window is forbidden
+    QSet<qint64> cornerCols;                                    // the REAL corners of the footprint (the hull of the outline): no windows there
     QSet<ColKey> stairXZ;                                       // the cells (lx,lz) of flights and ladders: furniture is not placed in front of or under them
     QSet<ColKey> doorCells;
     QSet<ColKey> partSet;                 // the blocks of inter-room partitions — we hang paintings on them
@@ -148,6 +151,8 @@ private:
         auto it = colMin.find(ck);
         if (it == colMin.end() || sy2 < it.value())
             colMin[ck] = sy2;
+        if (colTall && obj.kind == McWorldExporter::McObject::Building && nStories >= 5)
+            colTall->insert(ck);                                  // a multi-storey building: the greenery boost of the empty lands stays away
         if (colAnchor)                                        // the ORIGINAL (not sunk) bottom boundary —
         {                                                     // we use it to check the ground level around the object
             auto a = colAnchor->find(ck);
@@ -192,7 +197,7 @@ ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const Vx
       sink(sink_), extraBlocks(extraBlocks_), floors(floors_), structId(structId_),
       woodSingle(woodSingle_), privMode(privMode_), deepRole(deepRole_),
       raisedObj(obj_.kind == McWorldExporter::McObject::Building && obj_.raised > 0.0),
-      colMin(*out_.colMin), colAnchor(out_.colAnchor),
+      colMin(*out_.colMin), colAnchor(out_.colAnchor), colTall(out_.colTall),
       chests(out_.chests), paints(out_.paints), mannequins(out_.mannequins),
       spawners(out_.spawners), storyCounter(out_.storyCounter),
       npcs(out_.npcs), frames(out_.frames), basements(out_.basements),
@@ -275,6 +280,39 @@ bool ObjectVoxelizer::buildGrid()
 
     sx = int(sxl); sy = int(syl); sz = int(szl);
     minx = int(gx0); miny = int(gy0); minz = int(gz0);
+    {   // The REAL corners of the footprint (the convex hull of the projected outline): a window may stand on a
+        // staircase step of a rotated wall, but the true corners stay blind (a user request).
+        QVector<QPointF> hp;
+        hp.reserve(nv);
+        for (const QVector3D& v : bc) hp << QPointF(v.x(), v.z());
+        std::sort(hp.begin(), hp.end(), [](const QPointF& a, const QPointF& b)
+                  { return a.x() != b.x() ? a.x() < b.x() : a.y() < b.y(); });
+        auto cross = [](const QPointF& o, const QPointF& a, const QPointF& b)
+                     { return (a.x() - o.x()) * (b.y() - o.y()) - (a.y() - o.y()) * (b.x() - o.x()); };
+        QVector<QPointF> hull;
+        for (int pass = 0; pass < 2 && hp.size() > 1; ++pass)
+        {
+            const int start = hull.size();
+            for (const QPointF& p : hp)
+            {
+                while (hull.size() >= start + 2 && cross(hull[hull.size() - 2], hull[hull.size() - 1], p) <= 0.0)
+                    hull.removeLast();
+                hull << p;
+            }
+            hull.removeLast();
+            std::reverse(hp.begin(), hp.end());
+        }
+        for (const QPointF& p : hull)
+        {
+            const int cx0 = int(std::floor(p.x())) - minx, cz0 = int(std::floor(p.y())) - minz;
+            for (int dz = -1; dz <= 0; ++dz)
+                for (int dx = -1; dx <= 0; ++dx)
+                {
+                    const int lx = cx0 + dx, lz = cz0 + dz;
+                    if (lx >= 0 && lx < sx && lz >= 0 && lz < sz) cornerCols.insert(pairKey(lx, lz));
+                }
+        }
+    }
 
     grid.fill(0, volI);
 
@@ -581,7 +619,34 @@ int ObjectVoxelizer::windowDir(int lx, int ly, int lz) const
             if ((((along + ph) % P) + P) % P == 0) return 0;    // one column of the period is a mullion
             return useX ? (xn ? 1 : -1) : (zn ? sxy : -sxy);
         }
-        if (xw == zw) return 0;                                 // a corner (both) or a lining (neither) — blind
+        if (xw == zw)
+        {
+            if (!xw || !priv) return 0;                         // a lining/pocket; the other buildings keep the old rule
+            if (cornerCols.contains(pairKey(lx, lz))) return 0; // a REAL corner — blind (a user request)
+            // A staircase step of a rotated private house: windows ARE allowed here (a user request). The direction
+            // is chosen so that the window can be cut THROUGH the wall: prefer the axis that reaches the interior
+            // air (3) through the fewest wall cells; a wall that ends in the outside air (2) is a thin tooth.
+            auto runTo = [&](int dx, int dz) -> int
+            {
+                int x = lx, z = lz;
+                for (int k = 1; k <= 4; ++k)
+                {
+                    x += dx; z += dz;
+                    if (x < 0 || x >= sx || z < 0 || z >= sz) return -2;
+                    const int i2 = z * sxy + ly * sx + x;
+                    if (grid[i2] == char(3)) return k;            // the interior air after k-1 wall cells
+                    if (grid[i2] == char(1) || grid[i2] == char(4)) continue;
+                    if (grid[i2] == char(2)) return -3;           // the outside air — a thin tooth
+                    return -4;
+                }
+                return -1;
+            };
+            const int candX = xn ? 1 : -1, candZ = zn ? 1 : -1;   // into the wall along X and along Z
+            const int rX = runTo(candX, 0), rZ = runTo(0, candZ);
+            auto score = [](int r) { return r > 0 ? r : (r == -3 ? 10 : 20); };
+            const bool useX = score(rX) <= score(rZ);
+            return useX ? candX : (candZ == 1 ? sxy : -sxy);
+        }
         const int along = xw ? lz : lx;                         // the facade column runs along the second axis
         const int m = (((along % 4) + 4) % 4);                  // columns of period 4
         if (wide2 ? (m != 1 && m != 2) : m != 1) return 0;      // 44400000 — a square 2×2 (a pair of glass
@@ -603,6 +668,15 @@ void ObjectVoxelizer::buildWalls()
             continue;                                     // the private sector: we write the flat cap
                                                           // only on the wall ring (the slopes hold onto it)
         const int dir = forcedWall.contains(cell) ? 0 : windowDir(lx, ly, lz);   // there are no windows at an entrance
+        bool stepWin = false;                                   // a window on a staircase step of a rotated private house
+        if (dir && priv)
+        {
+            const bool xn = (lx == 0 || grid[cell - 1] == char(0) || grid[cell - 1] == char(2));
+            const bool xp = (lx == sx - 1 || grid[cell + 1] == char(0) || grid[cell + 1] == char(2));
+            const bool zn = (lz == 0 || grid[cell - sxy] == char(0) || grid[cell - sxy] == char(2));
+            const bool zp = (lz == sz - 1 || grid[cell + sxy] == char(0) || grid[cell + sxy] == char(2));
+            stepWin = (xn || xp) && (zn || zp) && !cornerCols.contains(pairKey(lx, lz));
+        }
         addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : IdGlass) : structFor(ly));
         if (dir) ++nWindows;
         if (dir)                                                // a window all the way through (a user request):
@@ -611,29 +685,48 @@ void ObjectVoxelizer::buildWalls()
                          || (dir == sxy && lz + 1 < sz) || (dir == -sxy && lz > 0);
             if (ok)
             {
-                const int inner = cell + dir;
-                if (grid[inner] == char(4))
-                {
-                    grid[inner] = char(5);                      // 5 — a hole behind the glass (a skip in the lining)
-                    // A flower pot on the windowsill (a user request): with a 30% chance behind the
-                    // LOWER glass of the strip a flower_pot with a random flower appears — it is visible from
-                    // the street through the glass, it stands on the wall block of the row under the window. The exception is malls.
-                    // A holder is mandatory: the row under the hole must be written (4) or be blind (1).
-                    const quint32 hp = lineHash(pairKey(minx + lx, minz + lz) ^ (qint64(ly) << 32)
-                                                 ^ 0xF10E5ull);
-                    const int below = grid[inner - sx];         // ly>=1: the window is not in the bottom row
-                    // In a 2×2 window the windowsill is under the LEFT glass of the pair (a window = one planter, not
-                    // two; this also keeps the pot density from eating the "see-through" of the windows in the big-check).
-                    const int alongP = (dir == 1 || dir == -1) ? lz : lx;
-                    const bool potCol = !wide2 || ((((alongP % 4) + 4) % 4) == 1);
-                    if (!panor && !obj.lift && potCol && (hp % 100u) < 30u
-                        && (ly - lyLow - (lowF ? 1 : 2)) % storyP == 1  // the pot — under the LOWER glass of the strip
-                        && (below == char(4) || below == char(1)))
+                if (stepWin)
+                {   // the staircase step: cut the WHOLE wall thickness through with glass (a user request:
+                    // "not a shiny facade" - a real window); the walk stops at the interior air (3) or the outside (2)
+                    const int dx = (dir == 1) ? 1 : (dir == -1) ? -1 : 0;
+                    const int dz = (dir == sxy) ? 1 : (dir == -sxy) ? -1 : 0;
+                    int x = lx, z = lz;
+                    for (int k = 0; k < 4; ++k)
                     {
-                        const int px = minx + lx + (dir == 1 ? 1 : dir == -1 ? -1 : 0);
-                        const int pz = minz + lz + (dir == sxy ? 1 : dir == -sxy ? -1 : 0);
-                        const int fl = int((hp >> 8) % quint32(kFlowersCount));
-                        addVoxel(px, miny + ly, pz, quint16(IdFlowerPotBase + fl));
+                        x += dx; z += dz;
+                        if (x < 0 || x >= sx || z < 0 || z >= sz) break;
+                        const int i2 = z * sxy + ly * sx + x;
+                        if (grid[i2] != char(1) && grid[i2] != char(4)) break;
+                        grid[i2] = char(5);                     // 5 — a written hole (the lining/wall pass skips it)
+                        addVoxel(minx + x, miny + ly, minz + z, lair ? IdBlackGlass : IdGlass);
+                    }
+                }
+                else
+                {
+                    const int inner = cell + dir;
+                    if (grid[inner] == char(4))
+                    {
+                        grid[inner] = char(5);                  // 5 — a hole behind the glass (a skip in the lining)
+                        // A flower pot on the windowsill (a user request): with a 30% chance behind the
+                        // LOWER glass of the strip a flower_pot with a random flower appears — it is visible from
+                        // the street through the glass, it stands on the wall block of the row under the window. The exception is malls.
+                        // A holder is mandatory: the row under the hole must be written (4) or be blind (1).
+                        const quint32 hp = lineHash(pairKey(minx + lx, minz + lz) ^ (qint64(ly) << 32)
+                                                     ^ 0xF10E5ull);
+                        const int below = grid[inner - sx];         // ly>=1: the window is not in the bottom row
+                        // In a 2×2 window the windowsill is under the LEFT glass of the pair (a window = one planter, not
+                        // two; this also keeps the pot density from eating the "see-through" of the windows in the big-check).
+                        const int alongP = (dir == 1 || dir == -1) ? lz : lx;
+                        const bool potCol = !wide2 || ((((alongP % 4) + 4) % 4) == 1);
+                        if (!panor && !obj.lift && potCol && (hp % 100u) < 30u
+                            && (ly - lyLow - (lowF ? 1 : 2)) % storyP == 1  // the pot — under the LOWER glass of the strip
+                            && (below == char(4) || below == char(1)))
+                        {
+                            const int px = minx + lx + (dir == 1 ? 1 : dir == -1 ? -1 : 0);
+                            const int pz = minz + lz + (dir == sxy ? 1 : dir == -sxy ? -1 : 0);
+                            const int fl = int((hp >> 8) % quint32(kFlowersCount));
+                            addVoxel(px, miny + ly, pz, quint16(IdFlowerPotBase + fl));
+                        }
                     }
                 }
             }

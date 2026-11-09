@@ -339,7 +339,8 @@ QString blockName(quint16 id)
     if (id == IdSpruceLeaves) return QLatin1String("minecraft:spruce_leaves");
     if (id == IdBirchLeaves) return QLatin1String("minecraft:birch_leaves");
     if (id == IdDarkOakLeaves) return QLatin1String("minecraft:dark_oak_leaves");
-    if (id >= IdJackLanternBase && id < IdJackLanternBase + 4) return QLatin1String("minecraft:jack_o_lantern");
+    if (id >= IdJackLanternBase && id < IdJackLanternMax) return QLatin1String("minecraft:jack_o_lantern");
+    if (id == IdBerryRipe) return QLatin1String("minecraft:sweet_berry_bush");
     if (id == IdRedPoplarLeaves) return QLatin1String("minecraft:red_poplar_leaves");
     if (id == IdOrangePoplarLeaves) return QLatin1String("minecraft:orange_poplar_leaves");
     if (id == IdYellowPoplarLeaves) return QLatin1String("minecraft:yellow_poplar_leaves");
@@ -421,9 +422,14 @@ void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
         out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[(int(id) - int(IdWallBannerBase)) & 3]));
         return;
     }
-    if (id >= IdJackLanternBase && id < IdJackLanternBase + 4)
+    if (id >= IdJackLanternBase && id < IdJackLanternMax)
     {   // a jack o'lantern: the carved face looks to `facing` (a cemetery lantern post)
         out << qMakePair(QStringLiteral("facing"), QString::fromLatin1(kDirNames[int(id) - int(IdJackLanternBase)]));
+        return;
+    }
+    if (id == IdBerryRipe)
+    {   // a ripe berry bush: age=3, otherwise the game renders an empty age=0 shrub without berries
+        out << qMakePair(QStringLiteral("age"), QStringLiteral("3"));
         return;
     }
     if (id >= IdAnvilBase && id < IdAnvilMax)
@@ -540,14 +546,19 @@ void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out)
         return;
     }
     if (id >= IdStoneFence && id < IdStoneFenceMax)
-    {   // a stone fence: the sides low/none by the connection bitmask; the post (up) — everywhere except straight segments
+    {   // a stone fence: the sides low/none by the connection bitmask; the post (up) — everywhere except straight segments;
+        // bit 16 means the SECOND STOREY stands on top (the two-storey fence of 3.577): the lower wall then renders
+        // with "tall" sides and upside_down=true, as the game itself states it when a wall is built upon a wall.
         const int conn = int(id) - int(IdStoneFence);
-        out << qMakePair(QStringLiteral("north"), (conn & 1) ? QStringLiteral("low") : QStringLiteral("none"))
-            << qMakePair(QStringLiteral("east"),  (conn & 2) ? QStringLiteral("low") : QStringLiteral("none"))
-            << qMakePair(QStringLiteral("south"), (conn & 4) ? QStringLiteral("low") : QStringLiteral("none"))
-            << qMakePair(QStringLiteral("west"),  (conn & 8) ? QStringLiteral("low") : QStringLiteral("none"))
-            << qMakePair(QStringLiteral("up"), (conn == 5 || conn == 10) ? QStringLiteral("false") : QStringLiteral("true"))
+        const QString side = (conn & 16) ? QStringLiteral("tall") : QStringLiteral("low");
+        out << qMakePair(QStringLiteral("north"), (conn & 1) ? side : QStringLiteral("none"))
+            << qMakePair(QStringLiteral("east"),  (conn & 2) ? side : QStringLiteral("none"))
+            << qMakePair(QStringLiteral("south"), (conn & 4) ? side : QStringLiteral("none"))
+            << qMakePair(QStringLiteral("west"),  (conn & 8) ? side : QStringLiteral("none"))
+            << qMakePair(QStringLiteral("up"), ((conn & 15) == 5 || (conn & 15) == 10) ? QStringLiteral("false") : QStringLiteral("true"))
             << qMakePair(QStringLiteral("waterlogged"), QStringLiteral("false"));
+        if (conn & 16)
+            out << qMakePair(QStringLiteral("upside_down"), QStringLiteral("true"));
         return;
     }
     if (id >= IdPainting && id < IdPaintingMax)
@@ -733,6 +744,7 @@ bool isVegBlockId(quint16 bid)
     if (bid == IdOakLog || bid == IdOakLeaves || bid == IdSpruceLeaves || bid == IdBirchLeaves || bid == IdDarkOakLeaves || bid == IdAcaciaLeaves || bid == IdJungleLeaves || bid == IdRedPoplarLeaves || bid == IdOrangePoplarLeaves
         || bid == IdYellowPoplarLeaves || bid == IdPaleLog || bid == IdPaleLeaves || bid == IdPaleMossCarpet || bid == IdLeafLitter || bid == IdPaleHangingMoss || bid == IdVine
         || bid == IdEyeOpen || bid == IdEyeClosed || bid == IdGrassPlant || bid == IdTallGrass || bid == IdTallGrassUpper || bid == IdWheat
+        || bid == IdBerryRipe    // the ripe taiga bush is the vegetation the palette sweet_berry_bush used to be (see isForestExtraVeg)
         || (bid >= IdFlowerBase && bid < IdFlowerMax) || isForestExtraVeg(bid)) return true;
     if (bid >= IdCaveBase && g_caveStates)
     {   // a template state (the Pale Garden scatters its leaf litter and grass through the template palette):
