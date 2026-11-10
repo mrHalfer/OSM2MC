@@ -3147,6 +3147,7 @@ void ExportRun::buildStreetFurniture()
     {
         quint16 lgCarpet = 0;
         int nParkWall = 0, nParkCars = 0;
+        int nSlot = 0, nSlotFull = 0, nSlotWide = 0, nSlotTilt = 0, nSlotFloor = 0, nSlotBusy = 0, nSlotAir = 0;
         for (int i = 0; i < kCarpetsCount; ++i)
             if (qstrcmp(kCarpets[i].name, "minecraft:white_carpet") == 0) lgCarpet = quint16(IdCarpetBase + i);   // the parking marking — white
         if (lgCarpet)
@@ -3157,9 +3158,9 @@ void ExportRun::buildStreetFurniture()
                 // CARS (a user request): the 7-block gap between two marking lines is a parking
                 // spot where an EXACT copy of a donor city-map car (car_templates.bin from extract_cars.py)
                 // stands: the model and the nose direction come from the spot hash, the lot density from the lot
-                // hash (some lots are almost empty, some are crowded). Every template is 5 cells wide - the
-                // 7-cell spot leaves a 1-cell margin; a long car is pulled towards the aisle so that its tail
-                // matches the end of the marking line. The rotated grids of the template are stamped in the
+                // hash (45..90% of the spots taken); a spot that refuses its car tries two more models. The
+                // templates are 3..7 cells wide - the 7-cell spot keeps a margin; a long car is pulled towards
+                // the aisle so that its tail matches the end of the marking line. The rotated grids of the template are stamped in the
                 // WORLD axes as is and NEVER transposed (a transpose mirrors the car and tears its buttons and
                 // wall signs off the host blocks - the facings stop pointing at a block); r is picked so that
                 // the car's long axis lies along the lot normal. Tilted lot edges do not give the exact box -
@@ -3170,71 +3171,83 @@ void ExportRun::buildStreetFurniture()
                 QSet<qint64> takenCells;                                   // the cells reserved by the accepted cars
                 const qint64 r0 = ps.rings.isEmpty() ? 0 : pairKey(int(std::floor(ps.rings.first().first().x())),
                                                                    int(std::floor(ps.rings.first().first().y())));
-                const quint32 lotFill = 25u + colHash(r0 ^ 0xF111ull) % 61u;      // 25..85% of the spots are taken
+                const quint32 lotFill = 45u + colHash(r0 ^ 0xF111ull) % 46u;      // 45..90% of the spots are taken
                 auto trySlot = [&](const QPointF& q0, double ex, double ez, double nx2, double nz2, double tt, double side)
                 {
                     if (carSet.empty()) return;                            // no templates - the lot stays empty
+                    ++nSlot;
                     const double ec = tt + side * 3.5;                     // the spot's middle between the lines
                     const qint64 mid = pairKey(int(std::floor(q0.x() + ex * ec + nx2 * 6.0)),
                                                int(std::floor(q0.y() + ez * ec + nz2 * 6.0)));
                     const quint32 h = colHash(mid ^ r0 ^ 0xCA7Cull);
-                    if (h % 100u >= lotFill) return;
-                    const CarSet::Car& car = carSet.cars[int((h >> 7) % quint32(carSet.cars.size()))];
-                    const bool noseOut = ((h >> 13) & 1u) != 0;            // the nose lies towards the aisle
-                    const bool edgeEw = std::fabs(ex) > std::fabs(ez);     // the marking line runs east-west?
-                    const int r = ((edgeEw == (car.sx >= car.sz)) ? 1 : 0) + (noseOut ? 0 : 2);   // the quarter
-                            // turns bringing the long axis to the lot normal (odd when the edge runs across the
-                            // car's native one), the +180 half-turn parks the car the other way round; the grid
-                            // of rot r then stays in the world axes (east = its x, south = its z) as is
-                    const CarSet::Rot& rot = car.rots[r];
-                    const int bx = (r % 2) ? car.sz : car.sx;              // the stamped box in the world axes
-                    const int bz = (r % 2) ? car.sx : car.sz;
-                    const int aLen = qMax(bx, bz), wLen = qMin(bx, bz);    // along the normal / along the marking line
-                    if (wLen > 7) return;                                  // the spot between the lines is 7 cells wide
-                    const double a0 = std::min(3.5, 12.5 - aLen);          // a long car is pulled towards the aisle
-                    const double e0 = ec - (wLen - 1) * 0.5;               // so that its tail matches the line end
+                    if (h % 100u >= lotFill) { ++nSlotFull; return; }
                     auto cellPt = [&](double across, double along)         // the cell of the spot grid (x, z)
                     {
                         return QPoint(int(std::floor(q0.x() + ex * across + nx2 * along)),
                                       int(std::floor(q0.y() + ez * across + nz2 * along)));
                     };
-                    int x0 = std::numeric_limits<int>::max(), z0 = x0;
-                    int x1 = std::numeric_limits<int>::min(), z1 = x1;
-                    const double cA[2] = { e0, e0 + wLen - 1 }, cL[2] = { a0, a0 + aLen - 1 };
-                    for (int i = 0; i < 2; ++i)                            // the spot rectangle in the world axes
-                        for (int j = 0; j < 2; ++j)
-                        {
-                            const QPoint p = cellPt(cA[i], cL[j]);
-                            x0 = qMin(x0, p.x()); x1 = qMax(x1, p.x());
-                            z0 = qMin(z0, p.y()); z1 = qMax(z1, p.y());
-                        }
-                    if (x1 - x0 + 1 != bx || z1 - z0 + 1 != bz) return;    // a tilted edge - the exact box does not fit
-                    int y0 = -1;
-                    bool ok = true;
-                    for (int gx = 0; gx < bx && ok; ++gx)                  // the footprint: inside the lot, free, flat
-                        for (int gz = 0; gz < bz && ok; ++gz)
-                        {
-                            const qint64 ck = pairKey(x0 + gx, z0 + gz);
-                            if (!ps.cols.contains(ck) || takenCells.contains(ck) || owner.contains(ck)) { ok = false; break; }
-                            const int yy = int(surfaceTop(ck)) + 1;
-                            if (y0 < 0) y0 = yy;
-                            else if (yy != y0) { ok = false; break; }             // the lot floor is not flat here
-                        }
-                    if (!ok || y0 + car.sy > 254) return;
-                    for (const CarSet::Cell& cell : rot.cells)             // every cell of the donor grid must be free
+                    for (int k = 0; k < 3; ++k)                            // a refused spot gets two more cars to try
                     {
-                        if (store.get(x0 + cell.x, y0 + cell.y, z0 + cell.z) != IdAir) { ok = false; break; }
+                        const quint32 hk = k ? colHash(mid ^ r0 ^ (0xCA7Cull + quint64(k) * 0x9E3779B9ull)) : h;
+                        const CarSet::Car& car = carSet.cars[int((hk >> 7) % quint32(carSet.cars.size()))];
+                        const bool noseOut = ((hk >> 13) & 1u) != 0;       // the nose lies towards the aisle
+                        const bool edgeEw = std::fabs(ex) > std::fabs(ez); // the marking line runs east-west?
+                        const int r = ((edgeEw == (car.sx >= car.sz)) ? 1 : 0) + (noseOut ? 0 : 2);   // the quarter
+                                // turns bringing the long axis to the lot normal (odd when the edge runs across the
+                                // car's native one), the +180 half-turn parks the car the other way round; the grid
+                                // of rot r then stays in the world axes (east = its x, south = its z) as is
+                        const CarSet::Rot& rot = car.rots[r];
+                        const int bx = (r % 2) ? car.sz : car.sx;          // the stamped box in the world axes
+                        const int bz = (r % 2) ? car.sx : car.sz;
+                        const int aLen = qMax(bx, bz), wLen = qMin(bx, bz);    // along the normal / along the marking line
+                        if (wLen > 7) { if (k == 2) ++nSlotWide; continue; }   // the spot between the lines is 7 cells wide
+                        const double a0 = std::min(3.5, 12.5 - aLen);      // a long car is pulled towards the aisle
+                        const double e0 = ec - (wLen - 1) * 0.5;           // so that its tail matches the line end
+                        int x0 = std::numeric_limits<int>::max(), z0 = x0;
+                        int x1 = std::numeric_limits<int>::min(), z1 = x1;
+                        const double cA[2] = { e0, e0 + wLen - 1 }, cL[2] = { a0, a0 + aLen - 1 };
+                        for (int i = 0; i < 2; ++i)                        // the spot rectangle in the world axes
+                            for (int j = 0; j < 2; ++j)
+                            {
+                                const QPoint p = cellPt(cA[i], cL[j]);
+                                x0 = qMin(x0, p.x()); x1 = qMax(x1, p.x());
+                                z0 = qMin(z0, p.y()); z1 = qMax(z1, p.y());
+                            }
+                        if (x1 - x0 + 1 != bx || z1 - z0 + 1 != bz) { if (k == 2) ++nSlotTilt; continue; }  // a tilted edge
+                        int y0 = -1;
+                        bool ok = true;
+                        char why = 0;                                      // 1 busy, 2 floor, 3 blocked (for the log)
+                        for (int gx = 0; gx < bx && ok; ++gx)              // the footprint: inside the lot, free, flat
+                            for (int gz = 0; gz < bz && ok; ++gz)
+                            {
+                                const qint64 ck = pairKey(x0 + gx, z0 + gz);
+                                if (!ps.cols.contains(ck) || takenCells.contains(ck) || owner.contains(ck)) { ok = false; why = 1; break; }
+                                const int yy = int(surfaceTop(ck)) + 1;
+                                if (y0 < 0) y0 = yy;
+                                else if (yy != y0) { ok = false; why = 2; break; }   // the lot floor is not flat here
+                            }
+                        if (ok && y0 + car.sy > 254) { ok = false; why = 2; }
+                        if (ok)
+                            for (const CarSet::Cell& cell : rot.cells)     // every cell of the donor grid must be free
+                            {
+                                if (store.get(x0 + cell.x, y0 + cell.y, z0 + cell.z) != IdAir) { ok = false; why = 3; break; }
+                            }
+                        if (!ok)
+                        {
+                            if (k == 2) { if (why == 1) ++nSlotBusy; else if (why == 2) ++nSlotFloor; else ++nSlotAir; }
+                            continue;
+                        }
+                        for (int gx = 0; gx < bx; ++gx)
+                            for (int gz = 0; gz < bz; ++gz) takenCells.insert(pairKey(x0 + gx, z0 + gz));
+                        for (const CarSet::Cell& cell : rot.cells)
+                            lotCars.append({ x0 + cell.x, y0 + cell.y, z0 + cell.z, cell.id });
+                        // CORE: extract_cars.py baked a TNT block into the middle of every car - a careless player
+                        // breaking into it punches into the dynamite (the trap file anchors its checks on these cells, writeZip).
+                        carCores << x0 + rot.cx << y0 + rot.cy << z0 + rot.cz;
+                        ++carTntCores;
+                        ++nParkCars;
+                        return;
                     }
-                    if (!ok) return;
-                    for (int gx = 0; gx < bx; ++gx)
-                        for (int gz = 0; gz < bz; ++gz) takenCells.insert(pairKey(x0 + gx, z0 + gz));
-                    for (const CarSet::Cell& cell : rot.cells)
-                        lotCars.append({ x0 + cell.x, y0 + cell.y, z0 + cell.z, cell.id });
-                    // CORE: extract_cars.py baked a TNT block into the middle of every car - a careless player
-                    // breaking into it punches into the dynamite (the trap file anchors its checks on these cells, writeZip).
-                    carCores << x0 + rot.cx << y0 + rot.cy << z0 + rot.cz;
-                    ++carTntCores;
-                    ++nParkCars;
                 };
                 for (const QVector<QPointF>& ring : ps.rings)
                     for (int e = 0; e < ring.size(); ++e)
@@ -3361,6 +3374,10 @@ void ExportRun::buildStreetFurniture()
                     nParkWall += nWall;
                 }
             }
+        if (nSlot)                                                 // the tuning readout: which check eats the empty spots
+            tmcStepLog(QString("cars: %1 cars on %2 spots (skipped: lot full %3, tilted edge %4, overlap %5, floor %6, blocked %7, wide %8)")
+                       .arg(nParkCars).arg(nSlot).arg(nSlotFull).arg(nSlotTilt).arg(nSlotBusy).arg(nSlotFloor).arg(nSlotAir).arg(nSlotWide)
+                       .toUtf8().constData());
     }
 
 }

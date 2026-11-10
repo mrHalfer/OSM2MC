@@ -30,7 +30,8 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   towards the aisle. A TNT block is baked into the middle of every car: the world's datapack (the same
   one that answers /locate) relights a TNT core punched loose right in its socket (only car cores: any other TNT in
   the world behaves as usual), so breaking carelessly into someone's car blows it up together with the burglar.
-  Every lot gets its own fullness (from nearly empty to crowded); a car needs the whole lot floor under its
+  Every lot gets its own fullness (from half empty to packed), and a spot that refuses its first car tries two
+  more; a car needs the whole lot floor under its
   footprint flat and free, so lots with tilted edges stay car-free. The cars reuse the cave block-state registry,
   so they appear in worlds exported with caves.
 - Flat roofs are readable from above (a user request): the roof cap is now a dark membrane concrete (a light one
