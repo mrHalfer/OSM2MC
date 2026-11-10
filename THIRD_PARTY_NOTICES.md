@@ -42,5 +42,8 @@ Qt is used under the **GNU LGPL v3** (https://www.qt.io/licensing, https://www.g
 
 - **OpenStreetMap** data (downloaded online or taken from an extract): **Open Database License (ODbL) 1.0**, © OpenStreetMap contributors (https://www.openstreetmap.org/copyright). A world exported from OSM data is a derived database: when you publish it (a server, a download), keep the attribution "Map data © OpenStreetMap contributors (ODbL)" and the share-alike conditions of the ODbL. The exported zip contains the file `ATTRIBUTION.txt` with this line.
 - Map tiles shown in the online mode are provided by the OpenStreetMap Foundation under its tile usage policy.
+- **Vehicle models** of the parking-lot cars (template `car_templates.bin`): the block-built car and motorcycle
+  shapes are made by **Nordic_Studios** (https://www.curseforge.com/members/nordic_studios). OSMC re-saves them in
+  its own template format and stamps them into parking lots as they stand; the author of the models gets the credit.
 
 Minecraft is a trademark of Mojang AB; OSMC is not affiliated with Mojang or Microsoft. The structure templates (`*.bin`) were cut out of a game world.

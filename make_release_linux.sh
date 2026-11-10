@@ -67,7 +67,8 @@ cp -u "$OSMC_BIN" "$APP/usr/osmc"
 for f in default.t3d osm_rules.json heights.csv point_models.csv tmc_buildings.dat; do
   [ -f "$ROOT/resources/$f" ] && cp -u "$ROOT/resources/$f" "$APP/usr/"
 done
-cp -u "$ROOT"/resources/templates/*.bin "$APP/usr/"
+mkdir -p "$APP/usr/assets"
+cp -u "$ROOT"/resources/templates/*.bin "$APP/usr/assets/"
 for f in README.md README.ru.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md; do
   [ -f "$ROOT/$f" ] && cp -u "$ROOT/$f" "$APP/usr/"
 done

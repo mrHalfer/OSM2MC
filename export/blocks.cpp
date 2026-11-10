@@ -136,6 +136,10 @@ const NamedColor kBlockPalette[] = {
     { "minecraft:carved_pumpkin",        196, 124,  18 },
     // Rail platforms (rdcpol 62134000): a half-block step over the stone-brick paving (a user request)
     { "minecraft:stone_brick_slab",      122, 122, 122 },
+    // Parking cars (rdcpol): the hidden "core" deep inside every car — 80% a live TNT block
+    { "minecraft:tnt",                   165,  50,  45 },
+    // Roof gear (a user request): the antenna mast on flat roofs
+    { "minecraft:lightning_rod",          85,  68,  56 },
 };
 
 

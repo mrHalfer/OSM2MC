@@ -23,7 +23,7 @@ You need Qt 5.15.2 (MSVC) and Visual Studio with the MSVC x64 toolset. The GDAL 
 
 `build.bat` makes a shadow build (`qmake` + `nmake release`) in `%OSMC_BUILD%` (by default `Builds\tMC` next to the `Projects` folder); the result is `%OSMC_BUILD%\release\osmc.exe`, the log is `build_nmake.log`.
 The paths are set with the environment variables `VCVARS` (vcvarsall.bat), `QTDIR` (default `C:\Qt\5.15.2\msvc2019_64`), `GDAL_DIR` (optional: another GDAL; by default the headers and `gdal_i.lib` from `third_party/gdal` are used), `OSMC_BUILD`.
-After linking, `osmc.pro` copies everything from `resources/` next to the exe. If the exe is running, linking fails (LNK1104) — close the program. Add new files to `osmc.pro`.
+After linking, `osmc.pro` copies everything from `resources/` next to the exe (the `templates/*.bin` structure templates go into the `assets/` subfolder). If the exe is running, linking fails (LNK1104) — close the program. Add new files to `osmc.pro`.
 
 The Russian translation of the interface is `translations/osmc_ru.ts` (embedded into the exe by `lrelease`); to refresh it after changing strings run `lupdate osmc.pro -ts translations/osmc_ru.ts`. When you add a user-visible string, keep it English in the code and add its Russian text to the translation.
 
@@ -114,7 +114,7 @@ Objects are read by the GDAL OSM driver; then the rules of **`osm_rules.json`** 
 
 ## What is in the world
 
-Besides the exported objects, the world contains: caves under the ground (from templates of a real game world), a Pale Garden with a mansion, bandit outposts and camps, shipwrecks in big water bodies, ruined portals in forests, floating islands above parks, villages from clusters of private houses, church dungeons with secret passages to a stronghold and an Ancient City, science-building laboratories with redstone mechanisms, furniture, villagers, mannequins and chests with vanilla loot. The structure templates are `resources/templates/*.bin`; without a template the corresponding feature is skipped or simplified (the reason is written in the final log line).
+Besides the exported objects, the world contains: caves under the ground (from templates of a real game world), a Pale Garden with a mansion, bandit outposts and camps, shipwrecks in big water bodies, ruined portals in forests, floating islands above parks, villages from clusters of private houses, church dungeons with secret passages to a stronghold and an Ancient City, science-building laboratories with redstone mechanisms, furniture, villagers, mannequins and chests with vanilla loot. The structure templates are `resources/templates/*.bin`, deployed into the `assets/` folder next to the executable; without a template the corresponding feature is skipped or simplified (the reason is written in the final log line).
 
 ## Network
 

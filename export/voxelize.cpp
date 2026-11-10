@@ -17,7 +17,8 @@ public:
     ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
                     VoxelStore& store_, const VoxelOut& out_, const std::atomic_bool* cancel_,
                     int sink_, int extraBlocks_, bool floors_,
-                    quint16 structId_, bool woodSingle_, int privMode_, int deepRole_);
+                    quint16 structId_, bool woodSingle_, int privMode_, int deepRole_, quint16 roofId_,
+                    quint16 trimId_);
 
     // Voxelizes the object; returns the number of written blocks (0 - skipped).
     int run();
@@ -36,6 +37,8 @@ private:
     bool woodSingle;
     int privMode;
     int deepRole;
+    quint16 roofId;                                   // the flat-roof membrane block (0 - no roof finishing, a user request)
+    quint16 trimId;                                   // the facade trim stone (sills/corner pilasters, a user request; 0 - none)
 
     // The collected outputs, aliased from `out` once: the same names as the
     // old parameters, so the stage methods read/write them directly.
@@ -108,6 +111,10 @@ private:
     int windowDir(int lx, int ly, int lz) const;
     // Writes the wall patch and the windows into the store (entrances already marked).
     void buildWalls();
+    // The parapet of wall material along the edge of a flat roof (a user request, walls of roofTop cells).
+    void buildParapet();
+    // The rare small gear on a flat roof: a stair hut, a vent pipe, antennas (a user request).
+    void buildRoofGear();
     // Computes the facade rectangle and the ridge axis of the wall patch.
     void calcPatch();
     // Places the entrances (doors, buttons, plates) and marks forcedWall.
@@ -176,6 +183,14 @@ private:
         return grid[c - sx] == char(3) || grid[c - 2 * sx] == char(3);
     }
 
+    // Nothing is rasterized above the cell - the top of a mesh column: with a cavity below this is
+    // the flat roof cap, with a wall below - its edge (the parapet line). A user request.
+    bool roofTop(int cell) const
+    {
+        const int ly = (cell / sx) % sy;
+        return ly + 1 >= sy || grid[cell + sx] == char(0) || grid[cell + sx] == char(2);
+    }
+
     // The key of a world cell in doorCells: (x+32768)<<29 | (z+32768)<<12 | y.
     static qint64 dkey(int bx, int by, int bz)
     { return (qint64(bx + 32768) << 29) | (qint64(bz + 32768) << 12) | qint64(by); };
@@ -192,10 +207,11 @@ private:
 ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
                                  VoxelStore& store_, const VoxelOut& out_, const std::atomic_bool* cancel_,
                                  int sink_, int extraBlocks_, bool floors_,
-                                 quint16 structId_, bool woodSingle_, int privMode_, int deepRole_)
+                                 quint16 structId_, bool woodSingle_, int privMode_, int deepRole_, quint16 roofId_,
+                                 quint16 trimId_)
     : obj(obj_), tf(tf_), id(id_), store(store_), out(out_), cancel(cancel_),
       sink(sink_), extraBlocks(extraBlocks_), floors(floors_), structId(structId_),
-      woodSingle(woodSingle_), privMode(privMode_), deepRole(deepRole_),
+      woodSingle(woodSingle_), privMode(privMode_), deepRole(deepRole_), roofId(roofId_), trimId(trimId_),
       raisedObj(obj_.kind == McWorldExporter::McObject::Building && obj_.raised > 0.0),
       colMin(*out_.colMin), colAnchor(out_.colAnchor), colTall(out_.colTall),
       chests(out_.chests), paints(out_.paints), mannequins(out_.mannequins),
@@ -215,10 +231,10 @@ ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const Vx
 int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransform& tf, quint16 id,
                    VoxelStore& store, const VoxelOut& out, const std::atomic_bool* cancel,
                    int sink, int extraBlocks, bool floors,
-                   quint16 structId, bool woodSingle, int privMode, int deepRole)
+                   quint16 structId, bool woodSingle, int privMode, int deepRole, quint16 roofId, quint16 trimId)
 {
     return ObjectVoxelizer(obj, tf, id, store, out, cancel, sink, extraBlocks, floors,
-                           structId, woodSingle, privMode, deepRole).run();
+                           structId, woodSingle, privMode, deepRole, roofId, trimId).run();
 }
 
 bool ObjectVoxelizer::buildGrid()
@@ -677,7 +693,20 @@ void ObjectVoxelizer::buildWalls()
             const bool zp = (lz == sz - 1 || grid[cell + sxy] == char(0) || grid[cell + sxy] == char(2));
             stepWin = (xn || xp) && (zn || zp) && !cornerCols.contains(pairKey(lx, lz));
         }
-        addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : IdGlass) : structFor(ly));
+        quint16 wallId = structFor(ly);
+        // The facade trim (a user request): the wall row UNDER a window (a sill course) is painted with
+        // the contrast stone of the membrane. The wall material from the OSM tag stays everywhere else;
+        // schools/kindergartens/malls/private houses never get it (trimId = 0). The corner pilasters the
+        // first version added were dropped: the owner found them too much (schools keep their own look).
+        if (trimId && !dir && !forcedWall.contains(cell)
+            && ly + 1 < sy && ly + 1 < lyHigh && !forcedWall.contains(cell + sx)
+            && windowDir(lx, ly + 1, lz) != 0)
+            wallId = trimId;
+        // The flat roof membrane (a user request): the roof cap is a dark concrete (facades are usually light),
+        // not the wall/structural color; every tier of a stepped complex gets its own cap.
+        if (roofId && !priv && !dir && ly >= 2 && roofTop(cell) && interiorCol(lx, ly, lz))
+            wallId = roofId;
+        addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : IdGlass) : wallId);
         if (dir) ++nWindows;
         if (dir)                                                // a window all the way through (a user request):
         {                                                       // the second block of the two-layer wall behind the glass
@@ -732,6 +761,149 @@ void ObjectVoxelizer::buildWalls()
             }
         }
         ++added;
+    }
+}
+
+void ObjectVoxelizer::buildParapet()
+{
+    // The parapet (a user request): a 1-block wall of the wall material above the edge of a flat roof -
+    // the roof stops being a "sheet of the facade color": a readable city silhouette from above. Private
+    // houses (gable roof), churches (the dome) and thin parts (an elevator shaft is not fenced in) are not
+    // fenced; every tier of a stepped complex gets its own edge.
+    if (!roofId || priv || thinW)
+        return;
+    const quint16 mat = structId ? structId : id;
+    for (int cell : surfaceCells)
+    {
+        if (grid[cell] == char(5)) continue;                // a written hole
+        const int lx = cell % sx;
+        const int ly = (cell / sx) % sy;
+        const int lz = cell / sxy;
+        if (!roofTop(cell)) continue;                       // not the top of the column
+        if (ly >= 2 && interiorCol(lx, ly, lz)) continue;   // the cap middle - the roof itself
+        addVoxel(minx + lx, miny + ly + 1, minz + lz, mat);
+        ++added;
+    }
+}
+
+void ObjectVoxelizer::buildRoofGear()
+{
+    // Roof gear (a user request): rare small things on flat roofs - a stair hut,
+    // a vent pipe, a TV antenna, a satellite dish. Chosen by the building's hash, "not too
+    // often": about half of the roofs stay clean, small roofs always. Everything stands a row above the
+    // membrane (the dark solar plates of the first version were dropped - the owner called them black specks).
+    if (!roofId || priv || thinW)
+        return;
+    QHash<qint64, int> capLy;                                   // roof cap cells (their ly); a stepped tier takes the higher one
+    QVector<qint64> capKeys;
+    for (int cell : surfaceCells)
+    {
+        if (grid[cell] == char(5)) continue;                    // a written hole
+        const int lx = cell % sx;
+        const int ly = (cell / sx) % sy;
+        const int lz = cell / sxy;
+        if (ly < 2 || !roofTop(cell) || !interiorCol(lx, ly, lz)) continue;   // not the roof cap
+        const qint64 k = pairKey(lx, lz);
+        if (!capLy.contains(k)) { capLy.insert(k, ly); capKeys.append(k); }
+        else if (ly > capLy.value(k)) capLy[k] = ly;
+    }
+    if (capKeys.size() < 20) return;                            // a small roof stays clean
+    const quint32 rh = lineHash(pairKey(minx, minz) ^ 0x6E2F5ull);
+    if (rh % 100u < 45u) return;                                // the gear is not on every roof
+    const int nMax = capKeys.size() >= 80 ? 3 : capKeys.size() >= 40 ? 2 : 1;
+    const quint16 mat    = structId ? structId : id;            // the hut takes the wall material
+    const quint16 kGray  = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
+    const quint16 kRod   = quint16(IdPaletteStart + paletteIndexOf("minecraft:lightning_rod"));
+    const quint16 kSlab  = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_brick_slab"));
+    QVector<QPoint> used;                                       // item anchors: items do not stand closer than 5 cells apart
+    auto freeFoot = [&](int lx, int lz, int w, int d) -> int    // the footprint lies on caps of one tier and is free; the cap's ly, -1 otherwise
+    {
+        const qint64 k0 = pairKey(lx, lz);
+        if (!capLy.contains(k0)) return -1;
+        const int ly0 = capLy.value(k0);
+        for (int dx = 0; dx < w; ++dx)
+            for (int dz = 0; dz < d; ++dz)
+            {
+                const qint64 k = pairKey(lx + dx, lz + dz);
+                if (!capLy.contains(k) || capLy.value(k) != ly0) return -1;
+            }
+        for (const QPoint& u : used)
+        {
+            int adx = u.x() - lx, adz = u.y() - lz;
+            if (adx < 0) adx = -adx;
+            if (adz < 0) adz = -adz;
+            if (adx + adz < 5) return -1;
+        }
+        return ly0;
+    };
+    for (int n = 0; n < nMax; ++n)
+    {
+        const quint32 h2 = lineHash(pairKey(minx + n * 7 + 3, minz) ^ ((qint64(miny + n) << 21) ^ 0x6E2F6ull));
+        const int type = int((h2 >> 6) % 100u);
+        for (int tries = 0; tries < 8; ++tries)
+        {
+            const qint64 k = capKeys[int((h2 >> (2 + 3 * tries)) % quint32(capKeys.size()))];
+            const int lx = int(keyFirst(k)), lz = int(keySecond(k));
+            int ly = -1;
+            if (type < 30)
+            {   // the stair hut: a 2x2 box of the wall material, a stone-slab top, a stone plate as a doormat
+                if ((ly = freeFoot(lx, lz, 2, 2)) < 0) continue;
+                for (int dx = 0; dx < 2; ++dx)
+                    for (int dz = 0; dz < 2; ++dz)
+                    {
+                        addVoxel(minx + lx + dx, miny + ly + 1, minz + lz + dz, mat);
+                        addVoxel(minx + lx + dx, miny + ly + 2, minz + lz + dz, mat);
+                        addVoxel(minx + lx + dx, miny + ly + 3, minz + lz + dz, kSlab);
+                    }
+                const int side = int((h2 >> 13) % 4u);
+                const int px = lx + (side == 0 ? -1 : side == 1 ? 2 : 0);
+                const int pz = lz + (side == 2 ? -1 : side == 3 ? 2 : 0);
+                if (capLy.contains(pairKey(px, pz)))
+                    addVoxel(minx + px, miny + ly + 1, minz + pz, IdPressurePlateStone);
+                used.append(QPoint(lx, lz));
+                break;
+            }
+            if (type < 60)
+            {   // the vent pipe: a gray column of 1-2 blocks under a slab cap
+                if ((ly = freeFoot(lx, lz, 1, 1)) < 0) continue;
+                const int tall = int((h2 >> 13) & 1u);
+                addVoxel(minx + lx, miny + ly + 1, minz + lz, kGray);
+                if (tall) addVoxel(minx + lx, miny + ly + 2, minz + lz, kGray);
+                addVoxel(minx + lx, miny + ly + 2 + tall, minz + lz, kSlab);
+                used.append(QPoint(lx, lz));
+                break;
+            }
+            if (type < 80)
+            {   // the TV antenna: a post, two masts above it and stone buttons on the sides as the horns
+                if ((ly = freeFoot(lx, lz, 1, 1)) < 0) continue;
+                addVoxel(minx + lx, miny + ly + 1, minz + lz, kGray);
+                addVoxel(minx + lx, miny + ly + 2, minz + lz, kRod);
+                addVoxel(minx + lx, miny + ly + 3, minz + lz, kRod);
+                if ((h2 >> 15) & 1u)
+                {
+                    if (capLy.contains(pairKey(lx - 1, lz)))
+                        addVoxel(minx + lx - 1, miny + ly + 1, minz + lz, quint16(IdStoneButtonBase + 3));
+                    if (capLy.contains(pairKey(lx + 1, lz)))
+                        addVoxel(minx + lx + 1, miny + ly + 1, minz + lz, quint16(IdStoneButtonBase + 1));
+                }
+                else
+                {
+                    if (capLy.contains(pairKey(lx, lz - 1)))
+                        addVoxel(minx + lx, miny + ly + 1, minz + lz - 1, quint16(IdStoneButtonBase));
+                    if (capLy.contains(pairKey(lx, lz + 1)))
+                        addVoxel(minx + lx, miny + ly + 1, minz + lz + 1, quint16(IdStoneButtonBase + 2));
+                }
+                used.append(QPoint(lx, lz));
+                break;
+            }
+            {   // the satellite dish: a post and an iron hatch as the flat "dish" on it
+                if ((ly = freeFoot(lx, lz, 1, 1)) < 0) continue;
+                addVoxel(minx + lx, miny + ly + 1, minz + lz, kGray);
+                addVoxel(minx + lx, miny + ly + 2, minz + lz, IdIronTrapdoor);
+                used.append(QPoint(lx, lz));
+                break;
+            }
+        }
     }
 }
 
@@ -1992,6 +2164,7 @@ void ObjectVoxelizer::buildInteriors()
         QSet<ColKey> occ;                                       // the furniture cells (repeats)
         int npcTotal = 0;                                       // how many residents have already been settled in the building
         int petTotal = 0;                                       // pets in the building: cats in apartment blocks, dogs (wolves) in private houses
+        int creeperTotal = 0;                                   // creepers in the building (a user request: danger on the floors)
         bool lecternDone = false;                               // a church: a lectern with a book — one per building
         int lairCapsLeft = -1;                                  // how many standard-bearers are still to be assigned (computed from the building area on first use)
         auto doorNear = [&](int bx, int by, int bz)
@@ -3880,6 +4053,28 @@ void ObjectVoxelizer::buildInteriors()
                         ++petTotal;
                     }
                 }
+                // CREEPERS (a user request): apartment blocks and offices - roughly every fifth floor stands a
+                // random room with a creeper, up to 5 per building. Schools/kindergartens/science buildings,
+                // hospitals, churches, malls and lairs stay without them (there the residents are the scenery).
+                if (!lair && !panor && (resid || office) && !school && !kinder && !hospital && !church
+                    && creeperTotal < 5)
+                {
+                    const quint32 hcr = finHash(minx + 61, minz + k * 17, miny + lyF, 0xC4EE7u);
+                    if (hcr % 100u < 21u)
+                    {
+                        int lx = 0, lz = 0;
+                        if (findCell(hcr, lx, lz, 2) && !occ.contains(dkey(minx + lx, miny + lyF, minz + lz)))
+                        {
+                            NpcSite cr;
+                            cr.kind = 4; cr.variant = 9;            // the entity writer in anvil.cpp: 9 - a creeper
+                            cr.x = minx + lx; cr.z = minz + lz; cr.y = miny + lyF - sink;
+                            cr.yaw = int((hcr >> 9) % 4u) * 90;
+                            npcs->append(cr);
+                            occ.insert(dkey(cr.x, miny + lyF, cr.z));
+                            ++creeperTotal;
+                        }
+                    }
+                }
                 if (hospital)
                 {   // patients: on beds (by the head part of the bed), up to 6 per floor; without a profession, in ordinary clothes
                     int np = 0;
@@ -4261,6 +4456,8 @@ int ObjectVoxelizer::run()
 
     buildEntrances();
     buildWalls();
+    buildParapet();
+    buildRoofGear();
     buildLining();
     buildStairs();
     buildSlabs();

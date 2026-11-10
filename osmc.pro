@@ -60,7 +60,7 @@ RC_LANG = 0x0419
 win32: QMAKE_CXXFLAGS += /utf-8
 win32: QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.5.26.11091
+    VERSION = 1.5.26.11101
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
@@ -99,6 +99,7 @@ HEADERS += \
     export/colkey.h \
     export/facade.h \
     export/voxelstore.h \
+    export/carset.h \
     export/caveset.h \
     export/geom.h \
     export/ground.h \
@@ -156,6 +157,7 @@ SOURCES += \
     export/anvil.cpp \
     export/blocks.cpp \
     export/buildingmerge.cpp \
+    export/carset.cpp \
     export/caveset.cpp \
     export/facade.cpp \
     export/geom.cpp \
@@ -173,7 +175,8 @@ SOURCES += \
 win32: SOURCES += app/httpclient.cpp
 unix:  SOURCES += app/httpclient_unix.cpp
 
-# Copy the resources next to osmc.exe after every build: default settings, OSM rules, height table, enhancer, *.bin templates.
+# Copy the resources next to osmc.exe after every build: default settings, OSM rules, height table, enhancer; the
+# *.bin structure templates go into the "assets" subfolder (the pile of templates next to the exe looked untidy).
 # The program looks for them next to the exe, so nothing has to be copied by hand. Missing files (for example the enhancer) are skipped.
 # MSVC puts the executable in a debug/release subfolder, the Unix make — straight into OUT_PWD, so the copy target differs.
 CONFIG(debug, debug|release): TMC_OUTDIR = $$OUT_PWD/debug
@@ -187,9 +190,9 @@ for(f, TMC_RES) {
         QMAKE_POST_LINK += $$escape_expand(\n\t)
     }
 }
-# (the glob is left unquoted on purpose: the shell expands it, cp has no wildcard support of its own)
-win32: QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/templates/*.bin)\" \"$$shell_path($$TMC_OUTDIR)\" >nul
-else:  QMAKE_POST_LINK += cp -u $$PWD/resources/templates/*.bin $$shell_path($$TMC_OUTDIR)
+# (the glob is left unquoted on purpose: the shell expands it, cp has no wildcard support of its own; mkdir comes first because cp cannot create the target folder)
+win32: QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/templates/*.bin)\" \"$$shell_path($$TMC_OUTDIR/assets)\" >nul
+else:  QMAKE_POST_LINK += mkdir -p $$shell_path($$TMC_OUTDIR/assets) && cp -u $$PWD/resources/templates/*.bin $$shell_path($$TMC_OUTDIR/assets)
 QMAKE_POST_LINK += $$escape_expand(\n\t)
 # The GDAL runtime (gdal.dll and its dependencies, gdal-data, projlib, gdalplugins) is not in the repository (about 100 MB): if it is put into <GDAL folder>/bin
 # (third_party/gdal/bin by default, see third_party/gdal/README.md), it is copied next to the exe too, so the program starts right from Qt Creator.

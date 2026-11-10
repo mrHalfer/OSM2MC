@@ -16,6 +16,7 @@ cl /c %CXXFLAGS% /Fobytes.obj "%ROOT%\export\format\bytes.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foblocks.obj "%ROOT%\export\blocks.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foanvil.obj "%ROOT%\export\anvil.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fobuildingmerge.obj "%ROOT%\export\buildingmerge.cpp" || goto :fail
+cl /c %CXXFLAGS% /Focarset.obj "%ROOT%\export\carset.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foground.obj "%ROOT%\export\ground.cpp" || goto :fail
 cl /c %CXXFLAGS% /Focaveset.obj "%ROOT%\export\caveset.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fofacade.obj "%ROOT%\export\facade.cpp" || goto :fail
@@ -27,11 +28,12 @@ cl /c %CXXFLAGS% /Forails.obj "%ROOT%\export\rails.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fomcworldexporter.obj "%ROOT%\export\mcworldexporter.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fovoxelize.obj "%ROOT%\export\voxelize.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foexportrun.obj "%ROOT%\export\exportrun.cpp" || goto :fail
-cl %CXXFLAGS% /Fomc_export_test.obj /Fe:mc_export_test.exe "%~dp0mc_export_test.cpp" mcworldexporter.obj voxelize.obj exportrun.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj facade.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
-cl %CXXFLAGS% /Fomc_scene_run.obj /Fe:mc_scene_run.exe "%~dp0mc_scene_run.cpp" mcworldexporter.obj voxelize.obj exportrun.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj facade.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
+cl %CXXFLAGS% /Fomc_export_test.obj /Fe:mc_export_test.exe "%~dp0mc_export_test.cpp" mcworldexporter.obj voxelize.obj exportrun.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj carset.obj facade.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
+cl %CXXFLAGS% /Fomc_scene_run.obj /Fe:mc_scene_run.exe "%~dp0mc_scene_run.cpp" mcworldexporter.obj voxelize.obj exportrun.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj carset.obj facade.obj ground.obj paledonor.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
 popd
-rem Export templates (caves, lairs, pale forest, wrecks ...) must lie next to the exe
-copy /y "%ROOT%\resources\templates\*.bin" "%OUT%\" >nul
+rem Export templates (caves, lairs, pale forest, wrecks ...) lie in the "assets" folder next to the exe (the old flat copy is still searched)
+if not exist "%OUT%\assets" mkdir "%OUT%\assets"
+copy /y "%ROOT%\resources\templates\*.bin" "%OUT%\assets\" >nul
 echo ALL-OK
 exit /b 0
 :fail

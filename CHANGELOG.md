@@ -5,6 +5,49 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.5.26.11101] — 2026-11-10
+
+### Added
+
+- High-rise facades read better (a user request): residential and office towers stand their window rows on a
+  sill course of a stone that contrasts with the wall colour. The wall material from the OSM tags stays
+  everywhere else; schools,
+  kindergartens, malls and private houses are untouched.
+- Flat roofs gain rare rooftop gear (a user request): a stair hut with a slab top
+  and a plate doormat, a vent pipe under a slab cap, a TV antenna with horns, a satellite
+  dish - small, sparse, never on small roofs.
+- Apartment blocks and offices grew dangerous (a user request): on roughly every fifth floor a random room
+  holds a creeper - schools, kindergartens, hospitals, churches and malls stay safe.
+- Cemetery grave rows get two new gravestone shapes: a small polished obelisk (diorite or granite, some with a
+  lantern on top) and a broken cross stump; the old two-block stone wall remains the most common gravestone, and
+  the stone crosses between the dark oaks are untouched.
+- Parking lots are no longer empty (a user request): the marked spots between the white lines now hold exact copies
+  of fifty-nine donor city-map vehicles - sedans in eight colours, an SUV, campers, pickups, hot rods, police cars
+  and delivery vans, motorcycles, ATVs and go-karts, taxis, jeeps, an ambulance, a firetruck, police and garbage
+  trucks, food trucks, tractors and a couple of construction machines. Every car is the donor block grid re-saved as
+  our template (car_templates.bin), with the donors' panes, slabs, stairs, buttons and carpets exactly where they
+  stand in the donor, kept in four rotations so cars park nose-in or back-in per spot; the long ones park pulled
+  towards the aisle. A TNT block is baked into the middle of every car: the world's datapack (the same
+  one that answers /locate) relights a TNT core punched loose right in its socket (only car cores: any other TNT in
+  the world behaves as usual), so breaking carelessly into someone's car blows it up together with the burglar.
+  Every lot gets its own fullness (from nearly empty to crowded); a car needs the whole lot floor under its
+  footprint flat and free, so lots with tilted edges stay car-free. The cars reuse the cave block-state registry,
+  so they appear in worlds exported with caves.
+- Flat roofs are readable from above (a user request): the roof cap is now a dark membrane concrete (a light one
+  where the facade is dark, so the contrast always holds) ringed by a parapet of the wall material; stepped
+  building complexes fence every tier. Private houses, churches and domes keep their own roofs untouched.
+- Sports grounds and children's playgrounds get one featured build each (a user request): in a free part of the
+  site outside the courts stands a play tower with a platform, a lantern roof and a hidden chest, a log fort with
+  a gate and a fenced parapet walk, or a plank bridge between two towers - the small equipment fills the rest.
+- Three real green ruined portals (non-snowy, temperate-grass originals with crying obsidian in their frames)
+  extracted from fresh donor worlds join the forest ruins, so temperate forests get true green ruins instead of
+  only the snow-stripped copies.
+
+### Changed
+
+- The `.bin` structure templates moved out of the program folder into a new `assets` subfolder next to the
+  executable - the release packs read cleaner (the old layout with the files straight next to the program keeps working)
+
 ## [1.5.26.11091] — 2026-11-09
 
 ### Added

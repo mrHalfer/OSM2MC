@@ -10,6 +10,7 @@
 #include "export/caveset.h"
 #include "export/lairset.h"
 #include "export/paledonor.h"
+#include "export/carset.h"
 #include "export/sites.h"
 #include "export/geom.h"
 #include "export/rails.h"
@@ -120,6 +121,8 @@ private:
         int privMode = 0;
         int deepRole = 0;                 // see BasementSite::forced
         quint16 structId = 0;
+        quint16 roofId = 0;               // the flat roof membrane (0 — no finishing, see voxelizeObject)
+        quint16 trimId = 0;               // the facade trim (sills and corner pilasters, see voxelizeObject)
         int storyBase = 0, storyCounter = 0, added = 0;
         VoxelStore store;
         QHash<ColKey, int> colMin, colAnchor;
@@ -137,7 +140,7 @@ private:
         QVector<IslandSite> islands;
         int privMats[3] = { 0, 0, 0 };       // private sector material split: [0] brick, [1] log, [2] brick with a real mansard floor
     };
-    struct LiftJob { const McObject* o; quint16 id; int sink, extra; quint16 structId; bool woodSingle; int privMode; };
+    struct LiftJob { const McObject* o; quint16 id; int sink, extra; quint16 structId; bool woodSingle; int privMode; quint16 roofId = 0; };
     struct KindTimer { qint64& ns; QElapsedTimer t; KindTimer(qint64& s) : ns(s) { t.start(); } ~KindTimer() { ns += t.nsecsElapsed(); } };
     struct StationSite { QRect bb; QPoint c; char canopy = 0; };
     struct PaleCol { int top; qint16 dy; quint8 w; quint16 surf; qint32 di = 0; qint16 pid = -1; };   // pid >= 0 — a patch (outpost/camp), otherwise the Pale Garden donor
@@ -155,6 +158,7 @@ private:
     LairSet lairSet;
     QVector<PaleDonor> patchesLoaded;                              // outposts and camps (patch_*.bin next to cave_templates.bin)
     PaleDonor paleDonor;
+    CarSet carSet;                                                     // parking-lot cars copied from the donor city-map schematics (car_templates.bin)
     double mnx, mxx;
     double mny, mxy, mnz, mxz;
     int totalVerts;
@@ -257,6 +261,8 @@ private:
     QHash<ColKey, QVector<CaveBe>> extraBesByChunk;                // block entities of the patches (outpost chests)
     QVector<PortalStartSite> portalStarts;                         // ruined portals in forests (structure starts for /locate)
     QHash<ColKey, QVector<PortalStartSite>> portalsByChunk;        // the same by chunks touched by the frame
+    int carTntCores = 0;                                           // TNT cores inside parked cars (the punch trap, see writeZip)
+    QVector<int> carCores;                                         // the same cores' world cells, x,y,z triples (the trap anchors on them)
     QHash<ColKey, PaleCol> paleCol;
     bool paleDonorUsed;
     int erX0, erZ0, erW, erH;
@@ -679,7 +685,8 @@ bool ExportRun::writeZip()
         addEntry(QStringLiteral("ATTRIBUTION.txt"), world.attribution.toUtf8());       // Minecraft ignores unknown files in the save folder
     if (!world.exportInfo.isEmpty())
         addEntry(QStringLiteral("export_info.json"), world.exportInfo.toUtf8());       // the info about this export (app/exportmeta.h)
-    if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()))
+    if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()
+                                 || carTntCores > 0))             // cars with TNT cores alone also need the pack (the punch trap)
     {
         for (int ti = 0; ti < tplInst.size(); ++ti)
         {
@@ -689,7 +696,7 @@ bool ExportRun::writeZip()
             addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/tpl_%1_%2.json").arg(tplInst[ti].id.section(QLatin1Char(':'), -1)).arg(ti), js);
         }
         addEntry(QStringLiteral("datapacks/tmc_lairs/pack.mcmeta"),
-                QByteArray("{\"pack\":{\"description\":\"OSMC: strongholds, ancient cities and ruined portals located\",\"min_format\":82,\"max_format\":121}}"));
+                QByteArray("{\"pack\":{\"description\":\"OSMC: strongholds, ancient cities and ruined portals located; punched car TNT detonates\",\"min_format\":82,\"max_format\":121}}"));
         // ruined portals in forests: each gets its own structure_set with a salt at which the cell position coincides with the start chunk (/locate structure minecraft:ruined_portal)
         for (int pi = 0; pi < portalStarts.size(); ++pi)
         {
@@ -708,6 +715,25 @@ bool ExportRun::writeZip()
                                                  "\"structures\":[{\"structure\":\"minecraft:%2\",\"weight\":1}]}").arg(salt).arg(s.id).toUtf8();
             addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/worldgen/structure_set/%1.json")
                         .arg(city ? QStringLiteral("ancient_city_here") : QStringLiteral("stronghold_here")), js);
+        }
+        if (carTntCores > 0)
+        {   // TNT punch trap (a user request): a car's TNT core has hardness 0, so the first punch knocks it out
+            // as an ITEM. The trap is POSITIONAL: the export knows every core cell and the tick function only
+            // relights a TNT item lying within 1.5 blocks of one of them (primed TNT, fuse 10 t = 0.5 s) - the
+            // careless puncher blows up the car with himself, while any other TNT in the world behaves as usual.
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/minecraft/tags/function/tick.json"),
+                    QByteArray("{\"values\":[\"tmc:car_tnt_trap\"]}"));
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/function/car_tnt_trap.mcfunction"),
+                    QByteArray("# only the cores of parked cars detonate: skip the scan while no dropped TNT lies around\n"
+                               "execute if entity @e[type=minecraft:item,nbt={Item:{id:\"minecraft:tnt\"}}] run function tmc:car_tnt_check\n"));
+            QString chk = QStringLiteral("# generated by OSMC: %1 car TNT core cells; an item within 1.5 blocks of one is relit\n").arg(carTntCores);
+            for (int i = 0; i + 2 < carCores.size(); i += 3)
+                chk += QStringLiteral("execute positioned %1 %2 %3 as @e[type=minecraft:item,nbt={Item:{id:\"minecraft:tnt\"}},limit=1,sort=nearest] "
+                                       "if entity @s[distance=..1.5] run function tmc:car_tnt_boom\n")
+                         .arg(carCores[i] + 0.5, 0, 'f', 1).arg(carCores[i + 1] + 0.5, 0, 'f', 1).arg(carCores[i + 2] + 0.5, 0, 'f', 1);
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/function/car_tnt_check.mcfunction"), chk.toUtf8());
+            addEntry(QStringLiteral("datapacks/tmc_lairs/data/tmc/function/car_tnt_boom.mcfunction"),
+                    QByteArray("summon minecraft:tnt ~ ~ ~ {Fuse:10}\nkill @s\n"));
         }
     }
     regionDir = legacy ? QStringLiteral("region/")
@@ -2024,9 +2050,13 @@ void ExportRun::buildStreetFurniture()
                     switch (padKind)
                     {
                     case 53510000:
-                    {   // CEMETERY: rows of graves every 3 blocks along and 4 across: a gravestone (a stone wall 2 blocks) or a cross (a fence), in front of it a mound of coarse dirt; rare flowers
+                    {   // CEMETERY: rows of graves every 3 blocks along and 4 across: a gravestone (a stone wall 2 blocks) or a cross (a fence),
+                        // rarer shapes add variety (a user request): a polished obelisk with a lantern, a stump of a broken cross;
+                        // in front of every grave a mound of coarse dirt; rare flowers
                         const quint16 paveA = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
                         const quint16 paveB = quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+                        const quint16 pillarA = quint16(IdPaletteStart + paletteIndexOf("minecraft:polished_diorite"));
+                        const quint16 pillarB = quint16(IdPaletteStart + paletteIndexOf("minecraft:polished_granite"));
                         auto pavedC = [&](int u, int v) -> bool
                         {   // a roadway, a paved square or water under the grave spot (a request: roads cross the cemetery);
                             // the surface row is checked too: paving can get there without leaving a mark in the maps
@@ -2050,9 +2080,24 @@ void ExportRun::buildStreetFurniture()
                                 if (!(freeCol(u, v, 3) && freeCol(u, v + 1, 1) && freeCol(u, v + 2, 1))) continue;
                                 if (pavedC(u, v) || pavedC(u, v + 1) || pavedC(u, v + 2)) continue;   // no grave across a road (a request)
                                 if ((hq >> 8) % 100u < 55u)
-                                {   // a gravestone
-                                    put1(u, v, 0, IdStoneBrickWall);
-                                    put1(u, v, 1, IdStoneBrickWall);
+                                {   // a gravestone: the old stone wall and two new shapes (a user request)
+                                    // a separate hash for the shape: hq's high 8 bits would wrap over %100 (a trap)
+                                    const quint32 g = colHash(pairKey(u * 31, v * 17) ^ ring.first() ^ 0x5EEDull) % 100u;
+                                    if (g < 55u)
+                                    {   // the old one: a stone brick wall 2 blocks high
+                                        put1(u, v, 0, IdStoneBrickWall);
+                                        put1(u, v, 1, IdStoneBrickWall);
+                                    }
+                                    else if (g < 85u)
+                                    {   // a small obelisk: a polished pillar with a wall cap, a lantern on top in half the cases
+                                        put1(u, v, 0, (g & 1u) ? pillarA : pillarB);
+                                        put1(u, v, 1, IdStoneBrickWall);
+                                        if (g >= 70u) put1(u, v, 2, IdLanternStanding);
+                                    }
+                                    else
+                                    {   // a broken cross: a stump of the old cobblestone one
+                                        put1(u, v, 0, IdCobbleWall);
+                                    }
                                 }
                                 else
                                 {   // a cross
@@ -2713,6 +2758,52 @@ void ExportRun::buildStreetFurniture()
                     };
                     constexpr int kWin = 8;
                     const int nKinds = kids ? 5 : 4;
+                    // City-style playground structures (a user request): a play tower (pg1), a log fort (pg2),
+                    // a tower bridge (pg3) — one "featured" build per site into a free window OUTSIDE the court.
+                    bool haveFort = false;
+                    static const int kW2[3] = { 3, 5, 7 }, kD2[3] = { 3, 4, 3 };    // structure footprints
+                    auto playAt = [&](int sk, int u, int v) -> bool
+                    {
+                        static const int kHi[3] = { 7, 4, 5 };
+                        for (int uu = u; uu < u + kW2[sk]; ++uu)
+                            for (int vv = v; vv < v + kD2[sk]; ++vv)
+                                if (!freeCol(uu, vv, kHi[sk])) return false;
+                        if (sk == 0)
+                        {   // the play tower: log posts, a plank platform, a roof ring with a lantern, a hidden chest
+                            for (int cu : { u, u + 2 }) for (int cv : { v, v + 2 }) { put1(cu, cv, 0, IdOakLog); put1(cu, cv, 1, IdOakLog); }
+                            for (int uu = u; uu <= u + 2; ++uu) for (int vv = v; vv <= v + 2; ++vv) put1(uu, vv, 2, IdSlabBottom);
+                            put1(u + 1, v + 1, 3, IdOakLog); put1(u + 1, v + 1, 4, IdLanternStanding);
+                            for (int uu = u; uu <= u + 2; ++uu) for (int vv = v; vv <= v + 2; ++vv)
+                                if (!(uu == u + 1 && vv == v + 1)) put1(uu, vv, 4, IdSlabTop);
+                            if (colHash(pairKey(u, v) ^ 0xC0DEull) % 100u < 60u) put1(u, v + 2, 3, IdChest);
+                            if (freeCol(u + 1, v - 1, 2)) put1(u + 1, v - 1, 0, IdStairsS);      // a step to the tower
+                        }
+                        else if (sk == 1)
+                        {   // the log fort: a wall ring, a plank floor, a gate, a fence railing, a lantern inside
+                            for (int uu = u; uu < u + 5; ++uu) for (int vv = v; vv < v + 4; ++vv)
+                            {
+                                if (uu == u || uu == u + 4 || vv == v || vv == v + 3)
+                                { put1(uu, vv, 0, IdOakLog); put1(uu, vv, 1, IdOakLog); }
+                                else put1(uu, vv, 1, IdOakPlanks);
+                            }
+                            put1(u + 2, v, 0, IdGateN);                                          // the gate in the north wall
+                            for (int uu = u; uu < u + 5; ++uu) for (int vv = v; vv < v + 4; ++vv)
+                                if (uu == u || uu == u + 4 || vv == v || vv == v + 3) put1(uu, vv, 2, IdFence);
+                            put1(u + 2, v + 1, 2, IdLanternStanding);
+                        }
+                        else
+                        {   // the tower bridge: two platforms on fence posts and a passage with railings between them
+                            for (int tu : { u, u + 4 })
+                            {
+                                for (int cu : { tu, tu + 2 }) for (int cv : { v, v + 2 }) { put1(cu, cv, 0, IdFence); put1(cu, cv, 1, IdFence); }
+                                for (int uu = tu; uu <= tu + 2; ++uu) for (int vv = v; vv <= v + 2; ++vv) put1(uu, vv, 2, IdOakPlanks);
+                            }
+                            put1(u + 3, v + 1, 2, IdOakPlanks);
+                            put1(u + 3, v, 3, IdFence); put1(u + 3, v + 2, 3, IdFence);
+                            put1(u + 3, v + 1, 3, IdLanternStanding);
+                        }
+                        return true;
+                    };
                     for (int v0 = 1; v0 < Wd - 1; v0 += kWin)
                         for (int u0 = 1; u0 < L - 1; u0 += kWin)
                         {
@@ -2730,6 +2821,17 @@ void ExportRun::buildStreetFurniture()
                             // window and without the balance logs — the court is the main thing there, not a scatter of
                             // small pieces; children's pads without a court keep the full set
                             if (courtBuilt && colHash(pairKey(u0, v0) ^ 0x71C1ull) % 3u != 0u) continue;
+                            if (!haveFort && colHash(pairKey(u0 * 7 + 1, v0 * 13) ^ ring.first() ^ 0xA11Cull) % 3u == 0u)
+                            {   // the featured structure before the small pieces: ~1/3 of the free windows
+                                const quint32 hs = colHash(pairKey(u0, v0) ^ 0x517Aull);
+                                const int sk = int(hs % 3u);
+                                if (u0 + 1 + kW2[sk] < L - 1 && v0 + 1 + kD2[sk] < Wd - 1)
+                                {
+                                    const int ua = u0 + 1 + int((hs >> 8) % quint32(kWin - kW2[sk]));
+                                    const int va = v0 + 1 + int((hs >> 16) % quint32(kWin - kD2[sk]));
+                                    if (playAt(sk, ua, va)) { haveFort = true; ++nEq; continue; }
+                                }
+                            }
                             for (int t = 0; t < 48; ++t)
                             {
                                 const quint32 hq = colHash(pairKey(u0 * 31 + t, v0 * 17) ^ ring.first() ^ 0x5CA9ull);
@@ -3044,7 +3146,7 @@ void ExportRun::buildStreetFurniture()
     // if a line touches another object (a building, a road, rails, water, any block at the carpet height) — it is not drawn at all.
     {
         quint16 lgCarpet = 0;
-        int nParkWall = 0;
+        int nParkWall = 0, nParkCars = 0;
         for (int i = 0; i < kCarpetsCount; ++i)
             if (qstrcmp(kCarpets[i].name, "minecraft:white_carpet") == 0) lgCarpet = quint16(IdCarpetBase + i);   // the parking marking — white
         if (lgCarpet)
@@ -3052,6 +3154,88 @@ void ExportRun::buildStreetFurniture()
             {
                 QHash<ColKey, int> owner;                                  // a marking cell -> the line number
                 int lineNo = 0;
+                // CARS (a user request): the 7-block gap between two marking lines is a parking
+                // spot where an EXACT copy of a donor city-map car (car_templates.bin from extract_cars.py)
+                // stands: the model and the nose direction come from the spot hash, the lot density from the lot
+                // hash (some lots are almost empty, some are crowded). Every template is 5 cells wide - the
+                // 7-cell spot leaves a 1-cell margin; a long car is pulled towards the aisle so that its tail
+                // matches the end of the marking line. The rotated grids of the template are stamped in the
+                // WORLD axes as is and NEVER transposed (a transpose mirrors the car and tears its buttons and
+                // wall signs off the host blocks - the facings stop pointing at a block); r is picked so that
+                // the car's long axis lies along the lot normal. Tilted lot edges do not give the exact box -
+                // no car there. The car cells are reserved when accepted; the blocks are written after the
+                // marking is drawn. No car templates (no file, caves off) - the lots simply stay without cars.
+                struct CarCell { int x, y, z; quint16 id; };
+                QVector<CarCell> lotCars;
+                QSet<qint64> takenCells;                                   // the cells reserved by the accepted cars
+                const qint64 r0 = ps.rings.isEmpty() ? 0 : pairKey(int(std::floor(ps.rings.first().first().x())),
+                                                                   int(std::floor(ps.rings.first().first().y())));
+                const quint32 lotFill = 25u + colHash(r0 ^ 0xF111ull) % 61u;      // 25..85% of the spots are taken
+                auto trySlot = [&](const QPointF& q0, double ex, double ez, double nx2, double nz2, double tt, double side)
+                {
+                    if (carSet.empty()) return;                            // no templates - the lot stays empty
+                    const double ec = tt + side * 3.5;                     // the spot's middle between the lines
+                    const qint64 mid = pairKey(int(std::floor(q0.x() + ex * ec + nx2 * 6.0)),
+                                               int(std::floor(q0.y() + ez * ec + nz2 * 6.0)));
+                    const quint32 h = colHash(mid ^ r0 ^ 0xCA7Cull);
+                    if (h % 100u >= lotFill) return;
+                    const CarSet::Car& car = carSet.cars[int((h >> 7) % quint32(carSet.cars.size()))];
+                    const bool noseOut = ((h >> 13) & 1u) != 0;            // the nose lies towards the aisle
+                    const bool edgeEw = std::fabs(ex) > std::fabs(ez);     // the marking line runs east-west?
+                    const int r = ((edgeEw == (car.sx >= car.sz)) ? 1 : 0) + (noseOut ? 0 : 2);   // the quarter
+                            // turns bringing the long axis to the lot normal (odd when the edge runs across the
+                            // car's native one), the +180 half-turn parks the car the other way round; the grid
+                            // of rot r then stays in the world axes (east = its x, south = its z) as is
+                    const CarSet::Rot& rot = car.rots[r];
+                    const int bx = (r % 2) ? car.sz : car.sx;              // the stamped box in the world axes
+                    const int bz = (r % 2) ? car.sx : car.sz;
+                    const int aLen = qMax(bx, bz), wLen = qMin(bx, bz);    // along the normal / along the marking line
+                    if (wLen > 7) return;                                  // the spot between the lines is 7 cells wide
+                    const double a0 = std::min(3.5, 12.5 - aLen);          // a long car is pulled towards the aisle
+                    const double e0 = ec - (wLen - 1) * 0.5;               // so that its tail matches the line end
+                    auto cellPt = [&](double across, double along)         // the cell of the spot grid (x, z)
+                    {
+                        return QPoint(int(std::floor(q0.x() + ex * across + nx2 * along)),
+                                      int(std::floor(q0.y() + ez * across + nz2 * along)));
+                    };
+                    int x0 = std::numeric_limits<int>::max(), z0 = x0;
+                    int x1 = std::numeric_limits<int>::min(), z1 = x1;
+                    const double cA[2] = { e0, e0 + wLen - 1 }, cL[2] = { a0, a0 + aLen - 1 };
+                    for (int i = 0; i < 2; ++i)                            // the spot rectangle in the world axes
+                        for (int j = 0; j < 2; ++j)
+                        {
+                            const QPoint p = cellPt(cA[i], cL[j]);
+                            x0 = qMin(x0, p.x()); x1 = qMax(x1, p.x());
+                            z0 = qMin(z0, p.y()); z1 = qMax(z1, p.y());
+                        }
+                    if (x1 - x0 + 1 != bx || z1 - z0 + 1 != bz) return;    // a tilted edge - the exact box does not fit
+                    int y0 = -1;
+                    bool ok = true;
+                    for (int gx = 0; gx < bx && ok; ++gx)                  // the footprint: inside the lot, free, flat
+                        for (int gz = 0; gz < bz && ok; ++gz)
+                        {
+                            const qint64 ck = pairKey(x0 + gx, z0 + gz);
+                            if (!ps.cols.contains(ck) || takenCells.contains(ck) || owner.contains(ck)) { ok = false; break; }
+                            const int yy = int(surfaceTop(ck)) + 1;
+                            if (y0 < 0) y0 = yy;
+                            else if (yy != y0) { ok = false; break; }             // the lot floor is not flat here
+                        }
+                    if (!ok || y0 + car.sy > 254) return;
+                    for (const CarSet::Cell& cell : rot.cells)             // every cell of the donor grid must be free
+                    {
+                        if (store.get(x0 + cell.x, y0 + cell.y, z0 + cell.z) != IdAir) { ok = false; break; }
+                    }
+                    if (!ok) return;
+                    for (int gx = 0; gx < bx; ++gx)
+                        for (int gz = 0; gz < bz; ++gz) takenCells.insert(pairKey(x0 + gx, z0 + gz));
+                    for (const CarSet::Cell& cell : rot.cells)
+                        lotCars.append({ x0 + cell.x, y0 + cell.y, z0 + cell.z, cell.id });
+                    // CORE: extract_cars.py baked a TNT block into the middle of every car - a careless player
+                    // breaking into it punches into the dynamite (the trap file anchors its checks on these cells, writeZip).
+                    carCores << x0 + rot.cx << y0 + rot.cy << z0 + rot.cz;
+                    ++carTntCores;
+                    ++nParkCars;
+                };
                 for (const QVector<QPointF>& ring : ps.rings)
                     for (int e = 0; e < ring.size(); ++e)
                     {
@@ -3111,6 +3295,8 @@ void ExportRun::buildStreetFurniture()
                             if (!ok) continue;
                             for (qint64 ck : cells) owner.insert(ck, lineNo);
                             ++lineNo;
+                            trySlot(p0, dx, dz, nx, nz, t, +1.0);              // the spots on both sides of the line
+                            trySlot(p0, dx, dz, nx, nz, t, -1.0);
                         }
                     }
                 for (auto it = owner.constBegin(); it != owner.constEnd(); ++it)
@@ -3120,6 +3306,7 @@ void ExportRun::buildStreetFurniture()
                     if (y > 254 || store.get(x, y, z) != IdAir) continue;
                     store.set(x, y, z, lgCarpet);
                 }
+                for (const CarCell& cc : lotCars) store.set(cc.x, cc.y, cc.z, cc.id);   // the cars after the marking
                 // STONE FENCE of a parking lot with marking: a ring of columns right behind the spot edge (by 8 neighbors). The fence does not touch the roadway: columns within 1 block of
                 // a road (including an adjacent one) stay an opening — the entrance is there. It does not climb onto buildings, water, rails, other parking lots; if there is no entrance (the parking lot does not adjoin a road),
                 // we leave a three-cell opening at a random place of the ring.
@@ -9186,6 +9373,21 @@ bool ExportRun::buildGround()
     return true;
 }
 
+// The .bin structure templates (caves, lairs, the pale garden, patches) live in the "assets" folder next to the
+// program (a user request: the pile of template files straight next to the exe looked untidy). The old flat
+// placement (files next to the exe / in the cwd) is searched too - older packs and dev folders keep working.
+static QString findTemplateAsset(const QStringList& dirs, const QString& name)
+{
+    for (const QString& dir : dirs)
+    {
+        const QString sub = dir + QStringLiteral("/assets/") + name;
+        if (QFile::exists(sub)) return sub;
+        const QString flat = dir + QLatin1Char('/') + name;
+        if (QFile::exists(flat)) return flat;
+    }
+    return QString();
+}
+
 bool ExportRun::prepareObjects()
 {
     legacy = (format == Format::Legacy121x);
@@ -9199,11 +9401,13 @@ bool ExportRun::prepareObjects()
     if (world.caves && world.normalSurroundings)
     {
         QString cavesPath = world.cavesFile;
-        if (cavesPath.isEmpty())
-        {
-            cavesPath = QCoreApplication::applicationDirPath() + QStringLiteral("/cave_templates.bin");
-            if (!QFile::exists(cavesPath))
-                cavesPath = QStringLiteral("cave_templates.bin");   // dev builds/tooling: we look in the cwd
+        if (cavesPath.isEmpty() || !QFile::exists(cavesPath))
+        {   // the standard places (an explicit bare name from the tooling may also miss the cwd): the "assets"
+            // folder next to the exe or the cwd, then the old flat files next to the exe or in the cwd
+            const QString found = findTemplateAsset({ QCoreApplication::applicationDirPath(), QDir::currentPath() },
+                                                    QStringLiteral("cave_templates.bin"));
+            if (!found.isEmpty()) cavesPath = found;
+            else if (cavesPath.isEmpty()) cavesPath = QStringLiteral("cave_templates.bin");   // the load error quotes it
         }
         QString cavesErr;
         cavesUsed = cavesPath;
@@ -9216,11 +9420,10 @@ bool ExportRun::prepareObjects()
     // The secret passages of churches to the stronghold and the Ancient City (lair_structures.bin; no file — the feature is simply off).
     if (!caveSet.empty())
     {
-        // we look next to the caves file (it is certainly found), next to the exe and in the current folder
-        QString lairPath;
+        // we look next to the caves file (it is certainly found), next to the exe and in the current folder —
+        // each of them in the "assets" subfolder first, then flat (the old layout)
         const QStringList lairDirs = { QFileInfo(cavesUsed).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() };
-        for (const QString& dir : lairDirs)
-            if (QFile::exists(dir + QStringLiteral("/lair_structures.bin"))) { lairPath = dir + QStringLiteral("/lair_structures.bin"); break; }
+        const QString lairPath = findTemplateAsset(lairDirs, QStringLiteral("lair_structures.bin"));
         if (lairPath.isEmpty())
             res.lairInfo = QObject::tr("lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)").arg(lairDirs.join(QStringLiteral(", ")));
         else if (!lairSet.load(lairPath, caveSet))
@@ -9235,22 +9438,28 @@ bool ExportRun::prepareObjects()
     if (!caveSet.empty())
     {
         const QStringList paleDirs = { QFileInfo(cavesUsed).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() };
-        for (const QString& dir : paleDirs)
-            if (QFile::exists(dir + QStringLiteral("/pale_garden.bin")))
-            {
-                if (!paleDonor.load(dir + QStringLiteral("/pale_garden.bin"), caveSet)) paleDonor = PaleDonor();
-                break;
-            }
+        const QString palePath = findTemplateAsset(paleDirs, QStringLiteral("pale_garden.bin"));
+        if (!palePath.isEmpty() && !paleDonor.load(palePath, caveSet)) paleDonor = PaleDonor();
         for (const QString& dir : paleDirs)
         {
-            const QStringList pf = QDir(dir).entryList(QStringList() << QStringLiteral("patch_*.bin"), QDir::Files, QDir::Name);
+            QString base = dir;                                   // the patches: "<dir>/assets" first, then the old flat "<dir>"
+            QStringList pf = QDir(base + QStringLiteral("/assets")).entryList(QStringList() << QStringLiteral("patch_*.bin"), QDir::Files, QDir::Name);
+            if (pf.isEmpty()) pf = QDir(base).entryList(QStringList() << QStringLiteral("patch_*.bin"), QDir::Files, QDir::Name);
+            else base += QStringLiteral("/assets");
             if (pf.isEmpty()) continue;
             for (const QString& fn : pf)
             {
                 PaleDonor pd;
-                if (pd.load(dir + QLatin1Char('/') + fn, caveSet)) { pd.name = fn; patchesLoaded.append(pd); }
+                if (pd.load(base + QLatin1Char('/') + fn, caveSet)) { pd.name = fn; patchesLoaded.append(pd); }
             }
             break;
+        }
+        // Parking-lot cars: exact copies of the donor city-map cars (car_templates.bin; no file — the lots simply stay without cars)
+        const QString carPath = findTemplateAsset(paleDirs, QStringLiteral("car_templates.bin"));
+        if (carPath.isEmpty() || !carSet.load(carPath, caveSet))
+        {
+            carSet = CarSet();
+            tmcStepLog("cars: car_templates.bin not found or damaged - the parking lots will stay without cars");
         }
     }
 
@@ -9362,7 +9571,7 @@ bool ExportRun::buildObjects()
                 vo.privMats = j->privMats;
                 j->added = voxelizeObject(*j->o, tf, j->id, j->store, vo, cancel, j->sink,
                                           j->extraBlocks, j->building,
-                                          j->structId, j->woodSingle, j->privMode, j->deepRole);
+                                          j->structId, j->woodSingle, j->privMode, j->deepRole, j->roofId, j->trimId);
                 if (j->added > 0 && j->o->kind == McObject::Building && (j->o->code == 44312000 || j->o->code == 44313000 || j->o->code == 44315000))
                     decorateWalls(j->store, j->o->code, j->id);
             });
@@ -10037,6 +10246,32 @@ bool ExportRun::buildObjects()
         // is made in voxelizeObject from the real geometry (see privMode there). The MAT column is not taken into account for them.
         if (o.kind == McObject::Building && o.closed && (o.code == 44400002 || o.code == 44400100))
             privMode = 1;
+        // Flat roof finishing (a user request): the roof cap becomes a DARK membrane concrete (the facades are
+        // mostly light - "the roof must be dark"); on dark walls a light one, keeping the contrast; above the
+        // wall ring the parapet of the wall material (the membrane is in buildWalls, the parapet in buildParapet).
+        // Skipped: the private sector (gable roofs), churches 44319000 and dome/skillion shapes (not flat
+        // roofs), LIFT objects ("not the roof" is their request) and small building:part pieces.
+        quint16 roofId = 0;
+        if (o.kind == McObject::Building && o.closed && !privMode && !o.lift && !o.part
+            && !o.onionRoof && !o.skillionRoof && o.code != 44319000)
+        {
+            const int pi = int(id) - int(IdPaletteStart);
+            const bool darkWall = pi >= 0 && pi < kPaletteCount
+                && 2 * kBlockPalette[pi].r + 4 * kBlockPalette[pi].g + kBlockPalette[pi].b < 7 * 130;
+            roofId = quint16(IdPaletteStart + paletteIndexOf(darkWall ? "minecraft:light_gray_concrete"
+                                                                     : "minecraft:gray_concrete"));
+        }
+        // The facade trim (a user request): the sill course under the windows
+        // and the corner pilasters of the footprint go in the contrast stone (the membrane's one). Only the
+        // multi-storey RESIDENTIAL and OFFICE towers: schools 44312000 and kindergartens 44313000 have their
+        // owner-approved look, malls 44318000 and glass-material buildings have panoramic glazing, sheds
+        // 44000000 have no windows at all. The wall material from the OSM tags stays everywhere else.
+        quint16 trimId = 0;
+        if (roofId && id != IdGlass && o.code != 44318000 && o.code != 44312000 && o.code != 44313000
+            && o.code != 44000000
+            && (o.code == 44400000 || o.code == 44340000
+                || (o.code >= 44310000 && o.code <= 44317000 && o.code % 1000 == 0)))
+            trimId = roofId;
         if (o.kind == McObject::Plate)
         {   // csrpol with a height — brick, always
             id = quint16(IdPaletteStart + paletteIndexOf("minecraft:bricks"));
@@ -10519,7 +10754,8 @@ bool ExportRun::buildObjects()
         {
             VoxJob* j = new VoxJob;
             j->o = &o; j->id = id; j->sink = sink; j->extraBlocks = extraBlocks;
-            j->structId = structId; j->woodSingle = matWood; j->privMode = privMode;
+            j->structId = structId; j->woodSingle = matWood; j->privMode = privMode; j->roofId = roofId;
+            j->trimId = trimId;
             j->deepRole = deepRoleOf[objDone - 1];
             j->building = (o.kind == McObject::Building);       // "floors"/windows — only bldpol
             int est = 0;                                        // the floor estimate: the counter base of the next building

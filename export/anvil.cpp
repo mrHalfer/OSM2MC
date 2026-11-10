@@ -884,6 +884,7 @@ QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
                                                 : n.variant == 5 ? QStringLiteral("minecraft:vindicator")
                                                 : n.variant == 6 ? QStringLiteral("minecraft:evoker")
                                                 : n.variant == 8 ? QStringLiteral("minecraft:slime")
+                                                : n.variant == 9 ? QStringLiteral("minecraft:creeper")
                                                                  : QStringLiteral("minecraft:enderman"))
                                               : QStringLiteral("minecraft:iron_golem"));
             pos3(n.x + 0.5, double(n.y) + n.yoff, n.z + 0.5);

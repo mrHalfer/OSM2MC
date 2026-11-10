@@ -42,4 +42,4 @@ int voxelizeObject(const McWorldExporter::McObject& obj, const VxTransform& tf, 
                    VoxelStore& store, const VoxelOut& out, const std::atomic_bool* cancel,
                    int sink = 0, int extraBlocks = 0, bool floors = false,
                    quint16 structId = 0, bool woodSingle = false, int privMode = 0,
-                   int deepRole = 0);
+                   int deepRole = 0, quint16 roofId = 0, quint16 trimId = 0);

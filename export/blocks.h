@@ -30,7 +30,7 @@ extern const int kDoorRgb[11][3];
 extern const char* const kRailShapes[10];
 
 // Entry counts. New blocks join kBlockPalette AT THE END — update kPaletteCount there too.
-constexpr int kPaletteCount = 107;
+constexpr int kPaletteCount = 109;
 constexpr int kCarpetsCount = 16;
 constexpr int kWoolsCount = 16;
 constexpr int kFlowersCount = 10;

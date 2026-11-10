@@ -1170,8 +1170,26 @@ def check(path, legacy, env='flat', full=True):
     topY = max(mgY) if mgY else 0
     roof1 = bool(mgY) and mgByY.get(topY - 1, 0) < mgByY.get(topY, 0)          # under the ceiling only the wall remains, not a second slab
     wallsUp = bool(mgY) and all(mgByY.get(y, 0) >= 8 for y in range(min(mgY), topY + 1))   # the wall is solid up to the ceiling
-    good = bool(mgY) and bool(lbY) and min(mgY) > max(lbY) and roof1 and wallsUp
-    print(f'  [{"OK " if good else "MISS"}] elevator shaft on the roof: purple blocks {len(mgY)} (bottom y={min(mgY) if mgY else None}), host blocks {len(lbY)} (top y={max(lbY) if lbY else None}); want the shaft bottom > the host top; ceiling 1 block {roof1}, walls up to the ceiling {wallsUp}, layers {sorted(mgByY.items())}')
+    # The host's parapet is of the WALL material and stands at the roof level next to the shaft's
+    # first tier, so the shaft bottom may EQUAL the host top but must not sink below it.
+    good = bool(mgY) and bool(lbY) and min(mgY) >= max(lbY) and roof1 and wallsUp
+    print(f'  [{"OK " if good else "MISS"}] elevator shaft on the roof: purple blocks {len(mgY)} (bottom y={min(mgY) if mgY else None}), host blocks {len(lbY)} (top y={max(lbY) if lbY else None}); want the shaft bottom >= the host top (the parapet shares the level); ceiling 1 block {roof1}, walls up to the ceiling {wallsUp}, layers {sorted(mgByY.items())}')
+    ok &= good
+    # TNT punch trap (the same pack as /locate): a punched TNT core (hardness 0) falls out as an item —
+    # the tick function relights it ONLY near a generated car core cell (the check function is generated);
+    # with TNT cores in the world the pack files must be in the archive.
+    tntN = counts.get('minecraft:tnt', 0)
+    zn = set(zf.namelist())
+    pTick = 'datapacks/tmc_lairs/data/minecraft/tags/function/tick.json' in zn
+    pTrap = 'datapacks/tmc_lairs/data/tmc/function/car_tnt_trap.mcfunction' in zn
+    pChkN = 0
+    if 'datapacks/tmc_lairs/data/tmc/function/car_tnt_check.mcfunction' in zn:
+        pChkN = zf.read('datapacks/tmc_lairs/data/tmc/function/car_tnt_check.mcfunction') \
+                  .decode('utf-8', 'replace').count('execute positioned')
+    pBoom = 'datapacks/tmc_lairs/data/tmc/function/car_tnt_boom.mcfunction' in zn
+    good = tntN == 0 or (pTick and pTrap and pBoom and pChkN >= tntN)
+    print(f'  [{"OK " if good else "MISS"}] car TNT punch trap: tnt blocks {tntN}, tick.json {pTick}, '
+          f'trap fn {pTrap}, core cells {pChkN}, boom fn {pBoom}')
     ok &= good
     # A rdcpol parking lot: dark gray concrete in the top layer + light gray marking carpets on it; the lines do not cross
     # (a marking carpet has no more than 2 neighbors on 4 sides — at a crossing/T-junction there would be 3-4).
@@ -1203,8 +1221,10 @@ def check(path, legacy, env='flat', full=True):
         h = 0
         while (x, y + h, z) in blk: h += 1
         boards.append((x, y, z, h))
-    good = len(boards) >= 4 and all(b[3] == 3 for b in boards)               # a board: a height of exactly 3, a width (columns) >= 4
-    print(f'  [{"OK " if good else "MISS"}] school board (black_concrete): blocks {len(blk)}, columns {len(boards)} (want >= 4), heights {sorted({b[3] for b in boards})} (want [3])')
+    boards3 = [b for b in boards if b[3] == 3]                          # the cars paint black too (wheel arches, bodies) — only the h=3 columns are board ones
+    good = len(boards3) >= 4                                            # a board: a height of exactly 3, a width (columns) >= 4
+    print(f'  [{"OK " if good else "MISS"}] school board (black_concrete): blocks {len(blk)}, board columns h=3 {len(boards3)} (want >= 4), '
+          f'columns {sorted({b[3] for b in boards})} (want 3; 1-2 are the cars: wheel arches and black bodies)')
     ok &= good
     banBe = [b for b in allBe if b.get('id') == 'minecraft:banner']
     raiders = {k: sum(1 for e in allEnt if e.get('id') == 'minecraft:' + k) for k in ('pillager', 'vindicator', 'evoker')}
