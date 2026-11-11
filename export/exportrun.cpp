@@ -181,6 +181,7 @@ private:
     QVector<QPoint> privCenters;      // the centers of private houses (block X/Z) — the basis for "villages"
     QVector<QRect> privBoxes;         // their extents in blocks (x0, z0, w, h) — for demolishing a house under a square
     QVector<QList<qint64>> pads;      // csrpol patches without height — we surround them with a wooden fence with gates
+    QVector<QList<qint64>> flatPads;  // pads/point squares waiting for their flat level: taken in buildGround, when the terrain is ready
     QVector<char> padIsLake;          // 1 — this is a lake (csrpol 51480000: water + a fence), 0 — an ordinary plate
     QSet<ColKey> noTreePadCols;       // the columns of apiaries and farms (csrpol 52400000/52100000): we do not plant trees there
     QVector<int> padCode;             // the CODE of the plate object (53700000/53710000 — sports/children's: we place equipment)
@@ -356,9 +357,6 @@ private:
     int addEmpty(int v, int x, int z);
     int terrainTopBlock(int cx, int cz);
     int groundTopCol(int x, int z);
-    //! The flat level of a pad (parking lot, site, square, point object): the median of the terrain over its columns
-    //! (INT_MIN — no terrain matrix, the pads stay on the plane as before)
-    int padTerrainLevel(const QList<qint64>& cols);
     int surfaceTop(qint64 ck);
 
     // Shared helpers of the stages (the former run() lambdas).
@@ -1683,21 +1681,6 @@ int ExportRun::surfaceTop(qint64 ck)
     if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)
         top = std::max(top, oit.value() - 1);
     return std::min(top, 255);
-}
-
-int ExportRun::padTerrainLevel(const QList<qint64>& cols)
-{
-    if (!bool(heightAt) || cols.isEmpty()) return std::numeric_limits<int>::min();
-    QVector<int> hs;
-    hs.reserve(cols.size());
-    for (qint64 ck : cols)
-    {
-        const int t = terrainTopBlock(keyFirst(ck), keySecond(ck));
-        if (t != std::numeric_limits<int>::min()) hs << t;
-    }
-    if (hs.isEmpty()) return std::numeric_limits<int>::min();
-    std::nth_element(hs.begin(), hs.begin() + hs.size() / 2, hs.end());
-    return hs[hs.size() / 2];
 }
 
 GroundChunk ExportRun::makeGround(qint64 ckKey)
@@ -8163,6 +8146,46 @@ bool ExportRun::buildGround()
     }
     // Caves: a chunk is deterministically assigned a template index (different chunks — different caves,
     // a repeat is allowed). Without the file (caveSet is empty) caveTpl stays -1 — the underground is solid rock.
+    {   // FLAT PADS: the level of a playground, a parking lot, a courtyard or a point square is the HIGHEST ground around
+        // it — its own cells and a 2-block ring (a user request). The level is taken HERE, when the terrain, the Pale
+        // Garden's relief and the world lift (yShift) are ready: in buildObjects the terrain sampler is not initialized
+        // yet, so a pad computed there flew up to 255 (a user bug report). A pad inside the Pale Garden sits on the
+        // garden's own relief; a pad next to a road or a building takes that final ground level too.
+        if (hasTerrain && !flatPads.isEmpty())
+        {
+            QVector<int> padLevel(flatPads.size(), std::numeric_limits<int>::min());
+            for (int pi = 0; pi < flatPads.size(); ++pi)
+            {
+                const QList<qint64>& pc = flatPads[pi];
+                const QSet<qint64> own(pc.constBegin(), pc.constEnd());
+                int best = std::numeric_limits<int>::min();
+                for (const qint64 ck : pc)
+                    best = std::max(best, groundTopCol(keyFirst(ck), keySecond(ck)));
+                // the ring OUTSIDE the pad only: the neighbours of the border cells (a pad cell's own ring lies inside it)
+                QSet<qint64> ring;
+                for (const qint64 ck : pc)
+                {
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    for (int dz = -2; dz <= 2; ++dz)
+                        for (int dx = -2; dx <= 2; ++dx)
+                        {
+                            const qint64 nk = pairKey(x + dx, z + dz);
+                            if (!own.contains(nk)) ring.insert(nk);
+                        }
+                }
+                for (const qint64 nk : ring)
+                    best = std::max(best, groundTopCol(keyFirst(nk), keySecond(nk)));
+                padLevel[pi] = best;
+            }
+            qint64 nFlat = 0;
+            for (int pi = 0; pi < flatPads.size(); ++pi)
+            {
+                if (padLevel[pi] == std::numeric_limits<int>::min()) continue;
+                for (const qint64 ck : flatPads[pi]) { flatGround.insert(ck, padLevel[pi]); ++nFlat; }
+            }
+            tmcStepLog(QString("pads: %1 flat columns on the highest ground around them").arg(nFlat).toUtf8().constData());
+        }
+    }
     {   // Ground fill: makeGround only reads the common maps, the chunks are independent — we compute in blocks
         // by threads (our own pool), then put into ground in order. Progress/cancel — from the main thread.
         const QVector<qint64> fl(fillChunks.constBegin(), fillChunks.constEnd());
@@ -10120,10 +10143,8 @@ bool ExportRun::buildObjects()
         {   // rdcpol: over the polygon patch the turf is replaced with dark gray concrete (the surface layer of the ground), the place marking — after the ground
             QList<qint64> cols = std::move(pre[objDone - 1]);
             if (cols.isEmpty()) { ++res.skippedCount; continue; }
-            // FLAT: the lot stands on the median relief of its area (a staircase parking lot was a user complaint)
-            const int padLevel = padTerrainLevel(cols);
-            if (padLevel != std::numeric_limits<int>::min())
-                for (qint64 ck : cols) flatGround.insert(ck, padLevel);
+            // FLAT: the lot's level is taken in buildGround, when the terrain and the world lift are ready (see flatPads)
+            flatPads.append(cols);
             if (o.code == 62134000)
             {   // a railway platform (railway=platform): just a stone-brick slab over the patch — no lot marking,
                 // the park site is not registered (a request: "just a slab of stone bricks"). The columns are kept:
@@ -10161,9 +10182,7 @@ bool ExportRun::buildObjects()
             if (cols.isEmpty()) { ++res.skippedCount; continue; }
             const bool square = (o.code == 45300000);
             if (!square && o.code != 62231000) { ++res.skippedCount; continue; }
-            const int padLevel = padTerrainLevel(cols);
-            if (padLevel != std::numeric_limits<int>::min())
-                for (qint64 ck : cols) flatGround.insert(ck, padLevel);      // a flat asphalt square/cover
+            flatPads.append(cols);                                       // a flat asphalt square/cover, the level — in buildGround
             const quint16 cover = quint16(IdPaletteStart + paletteIndexOf(square ? "minecraft:stone_bricks" : "minecraft:gray_concrete"));
             for (qint64 ck : cols)
             {
@@ -10199,11 +10218,9 @@ bool ExportRun::buildObjects()
                 z0 = std::min(z0, keySecond(ck)); z1 = std::max(z1, keySecond(ck));
             }
             spots.append(SpotSite{ int(std::lround((x0 + x1) / 2.0)), int(std::lround((z0 + z1) / 2.0)), o.model });
-            {   // the square under a point object is flat too (a statue on a slope stood on steps)
-                const int padLevel = padTerrainLevel(cols);
-                if (padLevel != std::numeric_limits<int>::min())
-                    for (qint64 ck : cols) flatGround.insert(ck, padLevel);
-            }
+            // the square under a point object is flat too (a statue on a slope stood on steps); its level is taken
+            // in buildGround, when the terrain is ready
+            flatPads.append(cols);
             for (int x = x0 - 3; x <= x1 + 3; ++x)
                 for (int z = z0 - 3; z <= z1 + 3; ++z)
                     noTreePadCols.insert(pairKey(x, z));   // +3: the crowns (even the wide swamp oak ones) do not overhang a statue
@@ -10256,12 +10273,7 @@ bool ExportRun::buildObjects()
             if (o.code == 53530000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
             else if (o.code == 51220000 || o.code == 53110000 || o.code == 51130000 || o.code == 51460000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
             const bool lake = (o.code == 51480000);                  // a lake: water instead of wool, the fence — as for plates
-            if (!lake)
-            {   // a flat plate (a playground, a courtyard, a sports ground): the median relief of its area
-                const int padLevel = padTerrainLevel(cols);
-                if (padLevel != std::numeric_limits<int>::min())
-                    for (qint64 ck : cols) flatGround.insert(ck, padLevel);
-            }
+            if (!lake) flatPads.append(cols);   // a flat plate (a playground, a courtyard, a sports ground): the level is taken in buildGround
             if (lake)
             {
                 const int dLake = std::max(1, std::min(5, int(cols.size() / 18.0 + 0.5)));   // as for hdrpol (lakes)
@@ -11607,20 +11619,30 @@ bool ExportRun::buildObjects()
             }
         }
     }
-    {   // ROADS GRADE THE RELIEF (a user request): a road surface is one level across its width and steps smoothly along
-        // its axis; the ground under it is cut/filled to that level and a shoulder ramps back to the terrain. Without it
-        // the terrain's contour lines cut across a road — even along it (a user complaint about the Sochi world).
-        if (bool(heightAt) && !roadCols.isEmpty())
+    {   // ROADS AND RAILWAYS GRADE THE RELIEF (a user request): a road/rail surface is one level across its width and
+        // steps smoothly along its axis; the ground under it is cut/filled to that level. On both sides there is a FLAT
+        // margin (kMargin blocks) at the same level, so the return to the real terrain is not right after the surface;
+        // beyond the margin the ground keeps the terrain. The roads INSIDE the Pale Garden are not graded at all — they
+        // follow the garden's own terrain (a user request).
+        if (bool(heightAt) && (!roadCols.isEmpty() || !railColsAll.isEmpty()))
         {
-            QHash<ColKey, int> grade;
-            grade.reserve(roadCols.size());
-            for (qint64 ck : roadCols)
+            auto inPale = [&](const ColKey& ck) -> bool
             {
+                return paleIdx >= 0 && paleIdx < forests.size()
+                    && spansContain(forests[paleIdx].spans, keyFirst(ck), keySecond(ck));
+            };
+            QSet<ColKey> track = roadCols;
+            track.unite(railColsAll);
+            QHash<ColKey, int> grade;
+            grade.reserve(track.size());
+            for (const ColKey& ck : track)
+            {
+                if (inPale(ck)) continue;                            // the Pale Garden's roads follow its terrain
                 const auto mit = colMin.constFind(ck);
                 if (mit != colMin.constEnd()) grade.insert(ck, mit.value());
             }
             for (int pass = 0; pass < 2; ++pass)
-            {   // a median over the road cells only: the cross-section becomes one level, the axis profile smooth
+            {   // a median over the track cells only: the cross-section becomes one level, the axis profile smooth
                 const QHash<ColKey, int> src = grade;
                 for (auto it = src.constBegin(); it != src.constEnd(); ++it)
                 {
@@ -11639,10 +11661,27 @@ bool ExportRun::buildObjects()
                 }
             }
             for (auto it = grade.constBegin(); it != grade.constEnd(); ++it)
-                flatGround.insert(it.key(), it.value() - 1);         // the road's own level; the marking lands at +1
-            // The shoulder is NOT flattened any more (a user report: the cells beside a road got high levels — the
-            // terrainTopBlock() there was taken before the world shift). The ground beside a road keeps the terrain.
-            tmcStepLog(QString("roads: %1 cells graded into the relief (shoulder: the terrain as is)").arg(grade.size()).toUtf8().constData());
+                flatGround.insert(it.key(), it.value() - 1);         // the road's/rail's own level; the marking lands at +1
+            constexpr int kMargin = 2;                               // the flat margin on both sides, blocks
+            QSet<ColKey> margin;
+            for (auto it = grade.constBegin(); it != grade.constEnd(); ++it)
+            {
+                const int x = keyFirst(it.key()), z = keySecond(it.key());
+                const int L = it.value() - 1;
+                for (int dz = -kMargin; dz <= kMargin; ++dz)
+                    for (int dx = -kMargin; dx <= kMargin; ++dx)
+                    {
+                        const int d = std::max(std::abs(dx), std::abs(dz));
+                        if (d < 1 || d > kMargin) continue;
+                        const qint64 ck = pairKey(x + dx, z + dz);
+                        if (track.contains(ck) || margin.contains(ck)) continue;
+                        if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck)) continue;   // occupied
+                        if (inPale(ck)) continue;                    // the Pale Garden's ground follows its terrain
+                        margin.insert(ck);
+                        flatGround.insert(ck, L);                    // the same level as the road/rail: the offset margin
+                    }
+            }
+            tmcStepLog(QString("roads/rails: %1 cells graded into the relief (margin %2 blocks)").arg(grade.size()).arg(kMargin).toUtf8().constData());
         }
     }
     tmcStepLog("vox: roads finished");

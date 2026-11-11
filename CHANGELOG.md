@@ -5,6 +5,19 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+### Changed
+
+- Roads and railways keep a FLAT margin of two blocks on both sides at the track's own level (a user request):
+  the return to the real terrain is offset from the surface instead of starting right at its edge; the railways
+  are graded exactly like the roads, so a track lies on top of the relief instead of cutting into it or vanishing
+  under it.
+- Roads inside the Pale Garden are not graded (a user request): they follow the garden's own terrain, so nothing
+  cuts the garden with flat strips.
+- Playgrounds, parking lots, courtyards, squares and point objects take the HIGHEST point of the ground around them
+  (the pad's cells and a two-block ring): the ground under a site is filled up to that level, so no part of it sinks
+  into the slope. The level is computed when the terrain is ready — a pad used to be measured before the terrain
+  sampler was initialized and flew up to the build height limit (255).
+
 ## [1.6.26.11111] — 2026-11-11
 
 ### Added
