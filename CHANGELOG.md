@@ -11,12 +11,13 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   the return to the real terrain is offset from the surface instead of starting right at its edge; the railways
   are graded exactly like the roads, so a track lies on top of the relief instead of cutting into it or vanishing
   under it.
-- Roads inside the Pale Garden are not graded (a user request): they follow the garden's own terrain, so nothing
-  cuts the garden with flat strips.
-- Playgrounds, parking lots, courtyards, squares and point objects take the HIGHEST point of the ground around them
-  (the pad's cells and a two-block ring): the ground under a site is filled up to that level, so no part of it sinks
-  into the slope. The level is computed when the terrain is ready — a pad used to be measured before the terrain
-  sampler was initialized and flew up to the build height limit (255).
+- Roads inside the Pale Garden are not graded (a user request): they follow the garden's own relief with its steep
+  steps. The grading now runs after the Pale Garden is chosen (it is picked in buildGround) — before, the garden's
+  roads were graded by mistake and cut a flat strip across the forest.
+- Playgrounds, parking lots, courtyards, squares and point objects stand at the AVERAGE ground level of their area:
+  that level is spread over the pad itself and a flat margin of two blocks around it, then a smooth ramp returns to
+  the terrain (no wall of earth at the pad's edge). The level is computed when the terrain is ready — a pad used to be
+  measured before the terrain sampler was initialized and flew up to the build height limit (255).
 
 ## [1.6.26.11111] — 2026-11-11
 

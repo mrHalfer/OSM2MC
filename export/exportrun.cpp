@@ -8146,36 +8146,90 @@ bool ExportRun::buildGround()
     }
     // Caves: a chunk is deterministically assigned a template index (different chunks — different caves,
     // a repeat is allowed). Without the file (caveSet is empty) caveTpl stays -1 — the underground is solid rock.
-    {   // FLAT PADS: the level of a playground, a parking lot, a courtyard or a point square is the HIGHEST ground around
-        // it — its own cells and a 2-block ring (a user request). The level is taken HERE, when the terrain, the Pale
-        // Garden's relief and the world lift (yShift) are ready: in buildObjects the terrain sampler is not initialized
-        // yet, so a pad computed there flew up to 255 (a user bug report). A pad inside the Pale Garden sits on the
-        // garden's own relief; a pad next to a road or a building takes that final ground level too.
+    {   // ROADS AND RAILWAYS GRADE THE RELIEF (a user request): a road/rail surface is one level across its width and
+        // steps smoothly along its axis; the ground under it is cut/filled to that level. On both sides there is a FLAT
+        // margin (kMargin blocks) at the same level, so the return to the real terrain is not right after the surface;
+        // beyond the margin the ground keeps the terrain. The roads INSIDE the Pale Garden are not graded at all — they
+        // follow the garden's own relief, steep steps and all (a user request). The grading runs HERE, not in
+        // buildObjects(): the Pale Garden is chosen in buildGround(), so in buildObjects() paleIdx was not set yet and
+        // the garden's roads were graded by mistake — a flat strip across the forest.
+        if (hasTerrain && (!roadCols.isEmpty() || !railColsAll.isEmpty()))
+        {
+            auto inPale = [&](const ColKey& ck) -> bool
+            {
+                return paleIdx >= 0 && paleIdx < forests.size()
+                    && spansContain(forests[paleIdx].spans, keyFirst(ck), keySecond(ck));
+            };
+            QSet<ColKey> track = roadCols;
+            track.unite(railColsAll);
+            QHash<ColKey, int> grade;
+            grade.reserve(track.size());
+            for (const ColKey& ck : track)
+            {
+                if (inPale(ck)) continue;                            // the Pale Garden's roads follow its relief
+                const auto mit = colMin.constFind(ck);
+                if (mit != colMin.constEnd()) grade.insert(ck, mit.value());
+            }
+            for (int pass = 0; pass < 2; ++pass)
+            {   // a median over the track cells only: the cross-section becomes one level, the axis profile smooth
+                const QHash<ColKey, int> src = grade;
+                for (auto it = src.constBegin(); it != src.constEnd(); ++it)
+                {
+                    const int x = keyFirst(it.key()), z = keySecond(it.key());
+                    QVector<int> hs;
+                    hs.reserve(25);
+                    for (int dz = -2; dz <= 2; ++dz)
+                        for (int dx = -2; dx <= 2; ++dx)
+                        {
+                            const auto git = src.constFind(pairKey(x + dx, z + dz));
+                            if (git != src.constEnd()) hs << git.value();
+                        }
+                    if (hs.isEmpty()) continue;
+                    std::nth_element(hs.begin(), hs.begin() + hs.size() / 2, hs.end());
+                    grade[it.key()] = hs[hs.size() / 2];
+                }
+            }
+            for (auto it = grade.constBegin(); it != grade.constEnd(); ++it)
+                flatGround.insert(it.key(), it.value() - 1);         // the road's/rail's own level; the marking lands at +1
+            constexpr int kMargin = 2;                               // the flat margin on both sides, blocks
+            QSet<ColKey> margin;
+            for (auto it = grade.constBegin(); it != grade.constEnd(); ++it)
+            {
+                const int x = keyFirst(it.key()), z = keySecond(it.key());
+                const int L = it.value() - 1;
+                for (int dz = -kMargin; dz <= kMargin; ++dz)
+                    for (int dx = -kMargin; dx <= kMargin; ++dx)
+                    {
+                        const int d = std::max(std::abs(dx), std::abs(dz));
+                        if (d < 1 || d > kMargin) continue;
+                        const qint64 ck = pairKey(x + dx, z + dz);
+                        if (track.contains(ck) || margin.contains(ck)) continue;
+                        if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck)) continue;   // occupied
+                        if (inPale(ck)) continue;                    // the Pale Garden's ground follows its relief
+                        margin.insert(ck);
+                        flatGround.insert(ck, L);                    // the same level as the road/rail: the offset margin
+                    }
+            }
+            tmcStepLog(QString("roads/rails: %1 cells graded into the relief (margin %2 blocks)").arg(grade.size()).arg(kMargin).toUtf8().constData());
+        }
+    }
+    {   // FLAT PADS: a playground, a parking lot, a courtyard or a point square stands at the AVERAGE ground level of
+        // its cells (a user request: the maximum lifted the sites onto the hilltops). That level is spread over the pad
+        // itself and a flat margin of two blocks around it, then it fades back into the terrain over a smooth ramp —
+        // so the junction is gradual, not a wall of earth at the pad's edge. The level is taken HERE, when the terrain,
+        // the Pale Garden's relief and the world lift (yShift) are ready: in buildObjects the terrain sampler is not
+        // initialized yet, so a pad computed there flew up to 255 (a user bug report).
         if (hasTerrain && !flatPads.isEmpty())
         {
+            constexpr int kPadMargin = 2;    // the flat margin around a pad, blocks
+            constexpr int kPadBlend = 6;     // the ramp back to the terrain, blocks
             QVector<int> padLevel(flatPads.size(), std::numeric_limits<int>::min());
             for (int pi = 0; pi < flatPads.size(); ++pi)
             {
                 const QList<qint64>& pc = flatPads[pi];
-                const QSet<qint64> own(pc.constBegin(), pc.constEnd());
-                int best = std::numeric_limits<int>::min();
-                for (const qint64 ck : pc)
-                    best = std::max(best, groundTopCol(keyFirst(ck), keySecond(ck)));
-                // the ring OUTSIDE the pad only: the neighbours of the border cells (a pad cell's own ring lies inside it)
-                QSet<qint64> ring;
-                for (const qint64 ck : pc)
-                {
-                    const int x = keyFirst(ck), z = keySecond(ck);
-                    for (int dz = -2; dz <= 2; ++dz)
-                        for (int dx = -2; dx <= 2; ++dx)
-                        {
-                            const qint64 nk = pairKey(x + dx, z + dz);
-                            if (!own.contains(nk)) ring.insert(nk);
-                        }
-                }
-                for (const qint64 nk : ring)
-                    best = std::max(best, groundTopCol(keyFirst(nk), keySecond(nk)));
-                padLevel[pi] = best;
+                qint64 sum = 0;
+                for (const qint64 ck : pc) sum += groundTopCol(keyFirst(ck), keySecond(ck));
+                padLevel[pi] = int((sum + qint64(pc.size()) / 2) / qint64(pc.size()));
             }
             qint64 nFlat = 0;
             for (int pi = 0; pi < flatPads.size(); ++pi)
@@ -8183,7 +8237,57 @@ bool ExportRun::buildGround()
                 if (padLevel[pi] == std::numeric_limits<int>::min()) continue;
                 for (const qint64 ck : flatPads[pi]) { flatGround.insert(ck, padLevel[pi]); ++nFlat; }
             }
-            tmcStepLog(QString("pads: %1 flat columns on the highest ground around them").arg(nFlat).toUtf8().constData());
+            const int dMax = kPadMargin + kPadBlend;
+            for (int pi = 0; pi < flatPads.size(); ++pi)
+            {
+                const int L = padLevel[pi];
+                if (L == std::numeric_limits<int>::min()) continue;
+                const QList<qint64>& pc = flatPads[pi];
+                // the border cells only: the ring of an inner cell lies inside the pad (the pad cells are already flat)
+                QVector<qint64> border;
+                border.reserve(pc.size() / 4 + 16);
+                for (const qint64 ck : pc)
+                {
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    bool inner = true;
+                    for (int dz = -1; dz <= 1 && inner; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                            if (!flatGround.contains(pairKey(x + dx, z + dz))) { inner = false; break; }
+                    if (!inner) border << ck;
+                }
+                QHash<qint64, int> ring;   // the ring/ramp cell -> the distance to the pad (the nearest border cell wins)
+                for (const qint64 ck : border)
+                {
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    for (int dz = -dMax; dz <= dMax; ++dz)
+                        for (int dx = -dMax; dx <= dMax; ++dx)
+                        {
+                            const int d = std::max(std::abs(dx), std::abs(dz));
+                            if (d < 1 || d > dMax) continue;
+                            const qint64 nk = pairKey(x + dx, z + dz);
+                            if (flatGround.contains(nk)) continue;                        // a pad/road/building is there
+                            if (colMin.contains(nk) || colWool.contains(nk) || colWater.contains(nk)) continue;   // occupied
+                            const auto rit = ring.constFind(nk);                          // the nearest border cell wins
+                            if (rit == ring.constEnd()) ring.insert(nk, d);
+                            else if (d < rit.value()) ring[nk] = d;
+                        }
+                }
+                for (auto it = ring.constBegin(); it != ring.constEnd(); ++it)
+                {
+                    const qint64 nk = it.key();
+                    if (it.value() <= kPadMargin)
+                        flatGround.insert(nk, L);                                     // the flat margin around the pad
+                    else
+                    {   // the smooth return to the terrain (smoothstep, no step at the margin's edge)
+                        const int t = groundTopCol(keyFirst(nk), keySecond(nk));
+                        double w = double(it.value() - kPadMargin) / double(kPadBlend);
+                        w = w * w * (3.0 - 2.0 * w);
+                        flatGround.insert(nk, int(std::lround(double(L) + (double(t) - double(L)) * w)));
+                    }
+                    ++nFlat;
+                }
+            }
+            tmcStepLog(QString("pads: %1 flat columns on the average ground of their area").arg(nFlat).toUtf8().constData());
         }
     }
     {   // Ground fill: makeGround only reads the common maps, the chunks are independent — we compute in blocks
@@ -11617,71 +11721,6 @@ bool ExportRun::buildObjects()
                     }
                 }
             }
-        }
-    }
-    {   // ROADS AND RAILWAYS GRADE THE RELIEF (a user request): a road/rail surface is one level across its width and
-        // steps smoothly along its axis; the ground under it is cut/filled to that level. On both sides there is a FLAT
-        // margin (kMargin blocks) at the same level, so the return to the real terrain is not right after the surface;
-        // beyond the margin the ground keeps the terrain. The roads INSIDE the Pale Garden are not graded at all — they
-        // follow the garden's own terrain (a user request).
-        if (bool(heightAt) && (!roadCols.isEmpty() || !railColsAll.isEmpty()))
-        {
-            auto inPale = [&](const ColKey& ck) -> bool
-            {
-                return paleIdx >= 0 && paleIdx < forests.size()
-                    && spansContain(forests[paleIdx].spans, keyFirst(ck), keySecond(ck));
-            };
-            QSet<ColKey> track = roadCols;
-            track.unite(railColsAll);
-            QHash<ColKey, int> grade;
-            grade.reserve(track.size());
-            for (const ColKey& ck : track)
-            {
-                if (inPale(ck)) continue;                            // the Pale Garden's roads follow its terrain
-                const auto mit = colMin.constFind(ck);
-                if (mit != colMin.constEnd()) grade.insert(ck, mit.value());
-            }
-            for (int pass = 0; pass < 2; ++pass)
-            {   // a median over the track cells only: the cross-section becomes one level, the axis profile smooth
-                const QHash<ColKey, int> src = grade;
-                for (auto it = src.constBegin(); it != src.constEnd(); ++it)
-                {
-                    const int x = keyFirst(it.key()), z = keySecond(it.key());
-                    QVector<int> hs;
-                    hs.reserve(25);
-                    for (int dz = -2; dz <= 2; ++dz)
-                        for (int dx = -2; dx <= 2; ++dx)
-                        {
-                            const auto git = src.constFind(pairKey(x + dx, z + dz));
-                            if (git != src.constEnd()) hs << git.value();
-                        }
-                    if (hs.isEmpty()) continue;
-                    std::nth_element(hs.begin(), hs.begin() + hs.size() / 2, hs.end());
-                    grade[it.key()] = hs[hs.size() / 2];
-                }
-            }
-            for (auto it = grade.constBegin(); it != grade.constEnd(); ++it)
-                flatGround.insert(it.key(), it.value() - 1);         // the road's/rail's own level; the marking lands at +1
-            constexpr int kMargin = 2;                               // the flat margin on both sides, blocks
-            QSet<ColKey> margin;
-            for (auto it = grade.constBegin(); it != grade.constEnd(); ++it)
-            {
-                const int x = keyFirst(it.key()), z = keySecond(it.key());
-                const int L = it.value() - 1;
-                for (int dz = -kMargin; dz <= kMargin; ++dz)
-                    for (int dx = -kMargin; dx <= kMargin; ++dx)
-                    {
-                        const int d = std::max(std::abs(dx), std::abs(dz));
-                        if (d < 1 || d > kMargin) continue;
-                        const qint64 ck = pairKey(x + dx, z + dz);
-                        if (track.contains(ck) || margin.contains(ck)) continue;
-                        if (colMin.contains(ck) || colWool.contains(ck) || colWater.contains(ck)) continue;   // occupied
-                        if (inPale(ck)) continue;                    // the Pale Garden's ground follows its terrain
-                        margin.insert(ck);
-                        flatGround.insert(ck, L);                    // the same level as the road/rail: the offset margin
-                    }
-            }
-            tmcStepLog(QString("roads/rails: %1 cells graded into the relief (margin %2 blocks)").arg(grade.size()).arg(kMargin).toUtf8().constData());
         }
     }
     tmcStepLog("vox: roads finished");
