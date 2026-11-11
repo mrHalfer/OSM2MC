@@ -216,8 +216,13 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
     }
     if (bound.isEmpty())
     {
-        if (err) *err = QObject::tr("None of the layers from the 3D settings was found among the project layers");
-        return false;
+        if (project.rasters().isEmpty())
+        {
+            if (err) *err = QObject::tr("None of the layers from the 3D settings was found among the project layers");
+            return false;
+        }
+        // no objects at all (the rules found nothing): the terrain matrix itself is the content — the scene is empty
+        out.warnings << QObject::tr("No objects in the data: the terrain is exported without them.");
     }
 
     // --- collecting objects (order: layers as in the settings, objects as in the layer) ---
@@ -374,7 +379,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                             .arg(modelsMissing).arg(layer->name);
     }
     tmcStepLog("scene: objects collected");
-    if (items.isEmpty())
+    if (items.isEmpty() && project.rasters().isEmpty())
     {
         if (err) *err = QObject::tr("There are no objects to export");
         return false;
@@ -488,8 +493,16 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
     double bx0, by0, bx1, by1;
     if (!project.bounds(bx0, by0, bx1, by1))
     {
-        if (err) *err = QObject::tr("There are no objects with geometry");
-        return false;
+        if (project.rasters().isEmpty())
+        {
+            if (err) *err = QObject::tr("There are no objects with geometry");
+            return false;
+        }
+        // no objects at all: the height matrix extent is the area — the export is the terrain itself
+        const HeightRaster* r = project.rasters().first();
+        bx0 = std::min(r->xB, r->xE); bx1 = std::max(r->xB, r->xE);
+        by0 = std::min(r->yB, r->yE); by1 = std::max(r->yB, r->yE);
+        out.warnings << QObject::tr("No objects in the data: the terrain is exported without them.");
     }
     out.centerX = 0.5 * (bx0 + bx1);
     out.centerY = 0.5 * (by0 + by1);
@@ -642,8 +655,12 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
         if (okFlag[i]) out.objects << std::move(built[i]);
     if (out.objects.isEmpty())
     {
-        if (err) *err = QObject::tr("No object gave any geometry (check the height field in the 3D settings)");
-        return false;
+        if (project.rasters().isEmpty())
+        {
+            if (err) *err = QObject::tr("No object gave any geometry (check the height field in the 3D settings)");
+            return false;
+        }
+        // no objects at all: the terrain matrix itself is the content (the export goes on without objects)
     }
     if (haveTerrain)
         out.sampler = [terrain](double x, double y) -> double { return terrain.heightAt(x, y); };

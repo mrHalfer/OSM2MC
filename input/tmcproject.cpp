@@ -148,13 +148,27 @@ void TmcProject::addRaster(const QString& path)
     mRasters << r.release();
 }
 
-bool TmcProject::addDefaultDtm(const QString& dir)
+bool TmcProject::addDefaultDtm(const QString& dir, const QString& sourceName)
 {
     if (!mRasters.isEmpty() || !mSrs) return !mRasters.isEmpty();
-    const QString p = QDir(dir).filePath(QStringLiteral("DTM.tif"));
-    if (!QFileInfo::exists(p)) return false;
-    addRaster(p);
-    return !mRasters.isEmpty();
+    // The downloaded matrix is named after the data file (an area of its own): "osm_city_20261111_120000.osm.tif";
+    // its base name variant and the plain DTM.tif stay supported.
+    QStringList candidates;
+    if (!sourceName.isEmpty())
+    {
+        candidates << sourceName + QStringLiteral(".tif");
+        const QString base = QFileInfo(sourceName).completeBaseName();
+        if (base != sourceName) candidates << base + QStringLiteral(".tif");
+    }
+    candidates << QStringLiteral("DTM.tif");
+    for (const QString& name : candidates)
+    {
+        const QString p = QDir(dir).filePath(name);
+        if (!QFileInfo::exists(p)) continue;
+        addRaster(p);
+        if (!mRasters.isEmpty()) return true;
+    }
+    return false;
 }
 
 bool TmcProject::lonLatToProject(double lon, double lat, double& x, double& y) const
@@ -1299,7 +1313,12 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
             mWarnings << QObject::tr("Layer %1: %2 objects skipped — the geometry type did not match the first rule of the layer (use \"as\")").arg(it.key()).arg(skippedGeom.value(it.key()));
         if (it.value()->features.isEmpty()) delete it.value(); else mLayers << it.value();
     }
-    if (mLayers.isEmpty()) { if (err) *err = QObject::tr("The OSM rules found no objects"); return false; }
+    if (mLayers.isEmpty())
+    {
+        // No objects matched the rules: the height matrix (if there is one) still gives a world — the terrain itself.
+        // The caller decides: ExportRun exports the terrain only, without objects.
+        log(QObject::tr("The OSM rules found no objects — the terrain only will be exported (a height matrix is required)."));
+    }
     { GreeneryOptions go = rules.greenery(); if (mGreeneryOff) go.enabled = false; synthesizeGreenery(go); }          // OSM gives noticeably less greenery than our data: top it up (see tmcgreen.cpp)
     return true;
 }

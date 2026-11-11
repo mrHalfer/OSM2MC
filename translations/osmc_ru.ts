@@ -947,6 +947,36 @@ It loads automatically when the data is ready.</source>
         <translation>Скачано: %1 МБ (источник: %2).</translation>
     </message>
     <message>
+        <location filename="../app/osmonlinepanel.cpp" line="1"/>
+        <source>Terrain (elevation)</source>
+        <translation>Рельеф (высоты)</translation>
+    </message>
+    <message>
+        <location filename="../app/osmonlinepanel.cpp" line="1"/>
+        <source>Terrain</source>
+        <translation>Рельеф</translation>
+    </message>
+    <message>
+        <location filename="../app/osmonlinepanel.cpp" line="1"/>
+        <source>The folder already has a height matrix with this name that was not downloaded from the elevation tiles. Overwrite it?</source>
+        <translation>В папке уже есть матрица высот с таким именем, не скачанная с тайлов рельефа. Перезаписать её?</translation>
+    </message>
+    <message>
+        <location filename="../app/osmonlinepanel.cpp" line="1"/>
+        <source> Height matrix: %1 (%2×%3), the relief is %4 m.</source>
+        <translation> Матрица высот: %1 (%2×%3), перепад рельефа %4 м.</translation>
+    </message>
+    <message>
+        <location filename="../app/osmonlinepanel.cpp" line="1"/>
+        <source> The height matrix was not built: cancelled.</source>
+        <translation> Матрица высот не построена: отменено.</translation>
+    </message>
+    <message>
+        <location filename="../app/osmonlinepanel.cpp" line="1"/>
+        <source> The height matrix was not built: %1</source>
+        <translation> Матрица высот не построена: %1</translation>
+    </message>
+    <message>
         <location filename="../app/osmonlinepanel.cpp" line="120"/>
         <source>Download cancelled.</source>
         <translation>Загрузка отменена.</translation>
@@ -1427,8 +1457,8 @@ It loads automatically when the data is ready.</source>
     </message>
     <message>
         <location filename="../app/tmcrun.cpp" line="113"/>
-        <source>Height matrix DTM.tif not found — the terrain is flat.</source>
-        <translation>Матрица высот DTM.tif не найдена — рельеф плоский.</translation>
+        <source>Height matrix not found (neither %1.tif nor DTM.tif) — the terrain is flat.</source>
+        <translation>Матрица высот не найдена (ни %1.tif, ни DTM.tif) — рельеф плоский.</translation>
     </message>
     <message>
         <location filename="../app/tmcrun.cpp" line="114"/>
@@ -2215,6 +2245,36 @@ Unpack the archive into the saves folder and open the world in Minecraft %6%7.
         <location filename="../scene/modelbuilder.cpp" line="1467"/>
         <source>Layer &apos;%1&apos;: coloring by a classifier is not supported in OSMC — the default color is used.</source>
         <translation>Слой &apos;%1&apos;: раскраска по классификатору в OSMC не поддерживается — используется цвет по умолчанию.</translation>
+    </message>
+    <message>
+        <location filename="../app/terrainfetch.cpp" line="1"/>
+        <source>Terrain: downloading %1 tiles of elevation…</source>
+        <translation>Рельеф: скачиваю тайлы высот: %1 шт.…</translation>
+    </message>
+    <message>
+        <location filename="../app/terrainfetch.cpp" line="1"/>
+        <source>Terrain: the tiles are ready — building the height matrix…</source>
+        <translation>Рельеф: тайлы готовы — строю матрицу высот…</translation>
+    </message>
+    <message>
+        <location filename="../app/terrainfetch.cpp" line="1"/>
+        <source>The elevation tiles could not be downloaded: %1</source>
+        <translation>Тайлы высот не скачались: %1</translation>
+    </message>
+    <message>
+        <location filename="../app/terrainfetch.cpp" line="1"/>
+        <source>The area needs too many elevation tiles (%1).</source>
+        <translation>Для области нужно слишком много тайлов высот (%1).</translation>
+    </message>
+    <message>
+        <location filename="../app/terrainfetch.cpp" line="1"/>
+        <source>The area is too close to the pole.</source>
+        <translation>Область слишком близко к полюсу.</translation>
+    </message>
+    <message>
+        <location filename="../app/terrainfetch.cpp" line="1"/>
+        <source>a broken tile %1/%2</source>
+        <translation>битый тайл %1/%2</translation>
     </message>
 </context>
 </TS>

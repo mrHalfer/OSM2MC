@@ -734,7 +734,12 @@ void MainWindow::saveProjectFile()
 {
     const QString dir = defaultOutputDir();
     QDir().mkpath(dir);
-    QString f = QFileDialog::getSaveFileName(this, tr("Save the project"), QDir(dir).filePath(QStringLiteral("project.tmc")), tr("OSMC project (*.tmc);;All files (*)"));
+    // the project is named after the data file by default (a user request): "osm_city_20261111_120000.tmc"
+    QString suggested = QStringLiteral("project.tmc");
+    const QString src = ui->sourceEdit->text().trimmed();
+    if (!src.isEmpty() && QFileInfo::exists(src))
+        suggested = QFileInfo(src).completeBaseName() + QStringLiteral(".tmc");
+    QString f = QFileDialog::getSaveFileName(this, tr("Save the project"), QDir(dir).filePath(suggested), tr("OSMC project (*.tmc);;All files (*)"));
     if (f.isEmpty()) return;
     if (QFileInfo(f).suffix().isEmpty()) f += QStringLiteral(".tmc");
     if (!writeProject(f)) QMessageBox::warning(this, tr("OSMC"), tr("Could not write the file: %1").arg(QDir::toNativeSeparators(f)));

@@ -3,8 +3,10 @@
 // (trees), a grass polygon without height and two csrpol polygons: without height (wool instead of turf)
 // and with height (a brick structure). The zip contents are checked by verify_mc_export.py.
 #include "mcworldexporter.h"
+#include "core/dtmgrid.h"
 #include <QCoreApplication>
 #include <cmath>
+#include <limits>
 #include <QDebug>
 
 namespace {
@@ -111,6 +113,48 @@ McWorldExporter::McObject makeGBox(double x, double y, double h, const QColor& c
     return o;
 }
 
+// The height-matrix preparation (core/dtmgrid.cpp): the terrarium decoding, the hole filling, the smoothing
+// and the normalization "only raise above the base". Pure math — the harness runs it before the export.
+static int dtmSelfTest()
+{
+    int bad = 0;
+    auto check = [&](bool ok, const char* what) { if (!ok) { fprintf(stderr, "[dtm] FAILED: %s\n", what); ++bad; } };
+
+    check(std::fabs(tmcTerrariumHeight(128, 0, 0) - 0.0) < 1e-9, "terrarium sea level");
+    check(std::fabs(tmcTerrariumHeight(131, 232, 0) - 1000.0) < 1e-9, "terrarium 1000 m");
+    check(std::fabs(tmcTerrariumHeight(127, 156, 0) + 100.0) < 1e-9, "terrarium -100 m");
+
+    {   // normalization: the base is the minimum, the rise is compressed to maxRaise
+        DtmGrid g; g.w = 4; g.h = 1; g.px = 1; g.z = { 100, 200, 400, 250 };
+        double scale = 1;
+        const double relief = tmcDtmNormalize(g, 150, &scale);
+        check(std::fabs(relief - 300.0) < 1e-6, "the relief");
+        check(std::fabs(scale - 0.5) < 1e-9, "the compression");
+        check(g.z[0] == 0 && std::fabs(g.z[1] - 50) < 1e-4 && std::fabs(g.z[2] - 150) < 1e-4 && std::fabs(g.z[3] - 75) < 1e-4,
+              "the normalized values");
+    }
+    {   // a height below the base rises nothing (only raising is allowed)
+        DtmGrid g; g.w = 3; g.h = 1; g.px = 1; g.z = { 50, 50, 60 };
+        tmcDtmNormalize(g, 150);
+        check(g.z[0] == 0 && g.z[1] == 0 && std::fabs(g.z[2] - 10) < 1e-4, "only the rise");
+    }
+    {   // smoothing: a spike is spread, the far flat ends stay
+        DtmGrid g; g.w = 21; g.h = 1; g.px = 10; g.z.resize(21); g.z.fill(0);
+        g.z[10] = 100;
+        tmcDtmSmooth(g, 40);                     // the radius 4, two passes: the reach is ±8
+        check(g.z[10] < 100 && g.z[10] > 0, "the spike was spread");
+        check(g.z[9] > 0 && g.z[11] > 0, "the neighbours rose");
+        check(g.z[0] == 0 && g.z[20] == 0, "the far flat ends stay");
+    }
+    {   // a missing pixel becomes its neighbours' mean
+        DtmGrid g; g.w = 3; g.h = 3; g.px = 1; g.z.resize(9); g.z.fill(10); g.z[4] = std::numeric_limits<float>::quiet_NaN();
+        tmcDtmFillHoles(g);
+        check(std::fabs(g.z[4] - 10) < 1e-6, "the hole was filled");
+    }
+    if (!bad) fprintf(stderr, "[dtm] self-test OK\n");
+    return bad;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -118,6 +162,7 @@ int main(int argc, char** argv)
     fprintf(stderr, "[dbg] start\n");
     QCoreApplication app(argc, argv);
     fprintf(stderr, "[dbg] app ok\n");
+    if (dtmSelfTest()) return 2;
 
     const double x0 = 500000.0, y0 = 2000000.0;
     QVector<McWorldExporter::McObject> objs;

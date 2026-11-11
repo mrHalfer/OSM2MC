@@ -277,13 +277,21 @@ bool spansContain(const QVector<ColSpan>& v, int x, int z)
 //! of some mesh triangle onto the horizontal plane. This is how vegetation turns from a
 //! polygon into an area for a forest/grass, without voxelizing the mesh itself. The wall (vertical) triangles
 //! degenerate into a segment and are skipped — the patch is given only by the cap/bottom.
+//! clip — the world area in block coordinates (x, z): columns outside are not collected (empty — no clip). An OSM way
+//! may cross the extract far beyond the boundary (a national park, a long river), and rasterizing it whole used to eat
+//! gigabytes and killed the export.
 
 void footprintColumns(const McWorldExporter::McObject& obj, const VxTransform& tf,
-                             QList<qint64>& out, const std::atomic_bool* cancel)
+                             QList<qint64>& out, const std::atomic_bool* cancel, const QRectF& clip)
 {
     const int nv = obj.vertices.size();
     if (nv < 3 || obj.indices.size() < 3)
         return;
+    const bool haveClip = !clip.isEmpty();
+    const int cX0 = haveClip ? int(std::floor(clip.left())) : std::numeric_limits<int>::min();
+    const int cX1 = haveClip ? int(std::ceil(clip.right())) : std::numeric_limits<int>::max();
+    const int cZ0 = haveClip ? int(std::floor(clip.top())) : std::numeric_limits<int>::min();
+    const int cZ1 = haveClip ? int(std::ceil(clip.bottom())) : std::numeric_limits<int>::max();
     QVector<QPointF> proj;
     proj.reserve(nv);
     for (int i = 0; i < nv; ++i)
@@ -308,7 +316,7 @@ void footprintColumns(const McWorldExporter::McObject& obj, const VxTransform& t
         // center is inside are consecutive Z. Before, the whole bbox of the triangle was iterated: for thin
         // "slivers" of a polygon triangulation that is tens of times its area.
         const QPointF tri[3] = { a, b, c };
-        const int xLo = int(std::floor(minx)), xHi = int(std::ceil(maxx));
+        const int xLo = std::max(cX0, int(std::floor(minx))), xHi = std::min(cX1, int(std::ceil(maxx)));
         for (int X = xLo; X <= xHi; ++X)
         {
             const double x = double(X) + 0.5;
@@ -328,7 +336,7 @@ void footprintColumns(const McWorldExporter::McObject& obj, const VxTransform& t
                 zlo = std::min(zlo, z); zhi = std::max(zhi, z);
             }
             if (zlo > zhi) continue;
-            const int zA = int(std::ceil(zlo - 0.5)), zB = int(std::floor(zhi - 0.5));
+            const int zA = std::max(cZ0, int(std::ceil(zlo - 0.5))), zB = std::min(cZ1, int(std::floor(zhi - 0.5)));
             for (int Z = zA; Z <= zB; ++Z)
                 out.append(pairKey(X, Z));
         }

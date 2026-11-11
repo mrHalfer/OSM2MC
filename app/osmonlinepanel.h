@@ -4,12 +4,22 @@
 #include <QWidget>
 #include <memory>
 #include "app/osmdownload.h"
+#include "app/terrainfetch.h"
 
 class OsmTileMap;
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+
+//! The result of one "Download the area": the OSM extract and (when asked) the elevation matrix next to it
+struct OnlineDownloadResult
+{
+    OsmDownloadResult osm;
+    TerrainFetchResult terrain;      //!< ok — the height matrix DTM.tif was written into the target folder
+    bool terrainTried = false;
+};
 
 class OsmOnlinePanel : public QWidget
 {
@@ -47,13 +57,14 @@ private:
     QComboBox* mResults = nullptr;
     QLabel* mStatus = nullptr;
     QPushButton* mDownloadBtn = nullptr;
+    QCheckBox* mTerrainChk = nullptr;
     QPushButton* mClearBtn = nullptr;
     QPushButton* mResetMarksBtn = nullptr;
     QPushButton* mCancelBtn = nullptr;
     QVector<QPushButton*> mToolBtns;            //!< the tool buttons and their source names (re-translated when the language changes)
     QVector<const char*> mToolNames;
     QFutureWatcher<SearchOut>* mSearchWatcher = nullptr;
-    QFutureWatcher<OsmDownloadResult>* mDownWatcher = nullptr;
+    QFutureWatcher<OnlineDownloadResult>* mDownWatcher = nullptr;
     std::shared_ptr<std::atomic_bool> mCancel;
     QVector<OsmPlace> mPlaces;
     QString mPlaceName;                         //!< the place chosen in the search (for the file name)

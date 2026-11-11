@@ -33,8 +33,9 @@ public:
     //! A folder: all *.shp in the folder itself (terrain — addDefaultDtm). false + err — no shapefiles.
     bool loadFolder(const QString& dir, QString* err);
 
-    //! Default height matrix: DTM.tif from the dir folder if there are no rasters yet. true — a raster exists (it was there or was added). Call after load*().
-    bool addDefaultDtm(const QString& dir);
+    //! Default height matrix: <sourceName>.tif (the downloaded matrix is named after the data file), then its base name + .tif,
+    //! then DTM.tif — from the dir folder, if there are no rasters yet. true — a raster exists (it was there or was added). Call after load*().
+    bool addDefaultDtm(const QString& dir, const QString& sourceName = QString());
     //! WGS84 longitude/latitude -> project coordinates. false — the project CRS is unknown or there is no transformation.
     bool lonLatToProject(double lon, double lat, double& x, double& y) const;
 

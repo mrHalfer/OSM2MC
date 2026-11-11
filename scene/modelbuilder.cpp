@@ -8,6 +8,7 @@
 #include <QHash>
 #include <QSet>
 #include <QPair>
+#include <QPolygonF>
 #include <QThread>
 #include <QThreadPool>
 #include <QElapsedTimer>
@@ -406,8 +407,44 @@ bool ModelBuilder::BuildObjectMesh(MapFeature* obj, double rel, double lift, dou
     bool flat = std::abs(rel) <= 1e-9;
     QVector3D capColor = flat ? wallColor : wallColor * 0.85f;
 
+    // The terrain level of a polygon object: the HIGHEST point of the terrain over its footprint (a user request:
+    // a building must not have half of its first floor underground — the ground under it is filled up to this level
+    // by the exporter, ExportRun::flatGround). Pads (parking lots, sites) take their median in the exporter instead.
+    double terrainLevel = 0.0;
+    bool haveTerrainLevel = false;
+    if (terrain)
+    {
+        QVector<double> hs;
+        for (const QVector<QPointF>& ring : footprints)
+        {
+            if (ring.size() < 3) continue;
+            QPolygonF poly(ring);
+            double x0 = 1e300, x1 = -1e300, y0 = 1e300, y1 = -1e300;
+            for (const QPointF& p : ring)
+            {
+                x0 = std::min(x0, p.x()); x1 = std::max(x1, p.x());
+                y0 = std::min(y0, p.y()); y1 = std::max(y1, p.y());
+            }
+            if (x1 <= x0 || y1 <= y0) continue;
+            const double step = std::max(1.0, std::sqrt((x1 - x0) * (y1 - y0) / 256.0));   // ~256 samples per ring
+            for (double y = y0; y <= y1; y += step)
+                for (double x = x0; x <= x1; x += step)
+                {
+                    if (!poly.containsPoint(QPointF(x, y), Qt::OddEvenFill)) continue;
+                    const double h = terrain->heightAt(x, y);
+                    if (h > -9998.0) hs << h;
+                }
+            if (hs.size() > 4000) break;
+        }
+        if (!hs.isEmpty())
+        {
+            terrainLevel = *std::max_element(hs.constBegin(), hs.constEnd());
+            haveTerrainLevel = true;
+        }
+    }
+
     // Computes base/top Z for each vertex of the outline r (outer or inner/a hole — the formula is one and
-    // the same, see baseZArr/topZArr below): the Z of the source geometry + the terrain at the same point (without terrain
+    // the same, see baseZArr/topZArr below): the Z of the source geometry + the terrain level of the object (without terrain
     // the geometry itself stands on the z=0 plane with an offset by the same Z).
     auto computeZArrays = [&](const QVector<QPointF>& r, const QVector<double>& z,
                                QVector<double>& baseOut, QVector<double>& topOut)
@@ -418,10 +455,11 @@ bool ModelBuilder::BuildObjectMesh(MapFeature* obj, double rel, double lift, dou
         for (int i = 0; i < rn; ++i)
         {
             double bz = i < z.size() ? z[i] : 0.0;
-            if (terrain)
-            {
+            if (haveTerrainLevel) bz += terrainLevel;
+            else if (terrain)
+            {   // the footprint is outside the raster — fall back to the per-vertex terrain (a conventional zero when unknown)
                 double terrainZ = terrain->heightAt(r[i].x(), r[i].y());
-                if (terrainZ <= -9998.0) terrainZ = 0.0; // a point outside the raster — put on a conventional zero
+                if (terrainZ <= -9998.0) terrainZ = 0.0;
                 bz += terrainZ;
             }
             bz += lift;   // the lift of the base (see VectorSource::liftField) — BEFORE zExag, like the terrain/rel

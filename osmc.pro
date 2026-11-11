@@ -60,7 +60,7 @@ RC_LANG = 0x0419
 win32: QMAKE_CXXFLAGS += /utf-8
 win32: QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.5.26.11101
+    VERSION = 1.6.26.11111
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
@@ -82,6 +82,7 @@ HEADERS += \
     app/osmdownload.h \
     app/osmonlinepanel.h \
     app/osmtilemap.h \
+    app/terrainfetch.h \
     app/polygoneditor.h \
     input/tmcproject.h \
     input/t3dsettings.h \
@@ -116,6 +117,8 @@ HEADERS += \
     core/mapfeature.h \
     core/maplayer.h \
     core/heightraster.h \
+    core/dtmgrid.h \
+    core/dtmbuild.h \
     core/steplog.h \
     core/geoutil.h
 
@@ -144,6 +147,7 @@ SOURCES += \
     app/osmdownload.cpp \
     app/osmonlinepanel.cpp \
     app/osmtilemap.cpp \
+    app/terrainfetch.cpp \
     input/tmcproject.cpp \
     input/t3dsettings.cpp \
     osm/tmcosmrules.cpp \
@@ -169,7 +173,9 @@ SOURCES += \
     export/voxelize.cpp \
     export/exportrun.cpp \
     export/format/bytes.cpp \
-    core/heightraster.cpp
+    core/heightraster.cpp \
+    core/dtmgrid.cpp \
+    core/dtmbuild.cpp
 
 # The HTTPS client is platform-specific (common interface in app/httpclient.h): WinHTTP on Windows, system libcurl on Linux.
 win32: SOURCES += app/httpclient.cpp

@@ -224,6 +224,10 @@ private:
     QVector<int> deepRoleOf;
     QVector<QList<qint64>> pre;
     QVector<QVector<ColSpan>> preSpans;           // forest (height >= 2.5) — by segments, we do not store the column list
+    QRectF preClip;                               // the world area (block coordinates) the flat patches are rasterized in: a huge OSM way must not eat memory
+    QHash<ColKey, int> flatGround;                // the flattened ground top of buildings/sites/parking lots (the median relief of their footprint)
+    struct RoadPaint { int x, z; quint16 id; };   // markings and curbs: placed AFTER the ground fill, at its top (the roads follow the relief)
+    QVector<RoadPaint> roadPaints;
     int objDone;
     int objTotal;
     qint64 nsByKind[11] = {}, cntByKind[11] = {};                  // debugging (MCX_LOG_STEPS): the time of sequential object preparation by kind
@@ -233,6 +237,7 @@ private:
     bool logSteps;
     QHash<ColKey, QVector<FluidSite>> fluidsByChunk;   // water/lava sources of the junction — fluid_ticks by chunks
     bool hasTerrain;
+    bool terrainOnly = false;   // no objects at all: the height matrix itself is the content (see prepareObjects)
     int yShift;   // the "normal world": by how much the whole export is raised (decided after the survey, below);
     QList<qint64> touchedChunks;
     QList<qint64> fillChunks;
@@ -267,6 +272,8 @@ private:
     bool paleDonorUsed;
     int erX0, erZ0, erW, erH;
     QVector<qint8> emptyDelta;
+    int tsX0 = 0, tsZ0 = 0, tsW = 0, tsH = 0;    // the terrain slope map (8-block cells, see groundTopCol)
+    QVector<quint8> terrainSlope;               // slope in blocks per block x 40, clamped to 255
     int efx0, efx1, efz0, efz1;            // the exported rectangle of chunks together with the forest chunks
     int snX0, snZ0, snW, snH;
     QVector<quint8> sandNear;                                           // 0 — no water nearby
@@ -349,6 +356,9 @@ private:
     int addEmpty(int v, int x, int z);
     int terrainTopBlock(int cx, int cz);
     int groundTopCol(int x, int z);
+    //! The flat level of a pad (parking lot, site, square, point object): the median of the terrain over its columns
+    //! (INT_MIN — no terrain matrix, the pads stay on the plane as before)
+    int padTerrainLevel(const QList<qint64>& cols);
     int surfaceTop(qint64 ck);
 
     // Shared helpers of the stages (the former run() lambdas).
@@ -1615,18 +1625,51 @@ int ExportRun::terrainTopBlock(int cx, int cz)
     return int(std::floor((h - tf.yBase) * tf.zScale + 1.0)) + yShift;
 }
 
+// A gentle value noise over the terrain matrix (a user request: blindly following the DSM contour lines looks bad —
+// the relief must change smoothly, based on the noise terrain that is already there). Amplitude ~2.5 blocks, the
+// wavelength is tens of blocks; the flattened platforms and the graded roads do not get it.
+static double terrainReliefNoise(int x, int z)
+{
+    return 0.55 * std::sin(x / 27.0 + 1.7) * std::cos(z / 33.0 + 0.9)
+         + 0.30 * std::sin((x + 2.0 * z) / 41.0 + 2.3)
+         + 0.15 * std::sin((x - z) / 13.0 + 4.1) * std::cos(z / 17.0 + 1.1);
+}
+
+// A shorter, ridgier noise for the steep places: mountains and canyon walls get ledges, not smooth ramps.
+static double terrainRidgeNoise(int x, int z)
+{
+    return 0.6 * std::sin(x / 9.0 + 3.1) * std::sin(z / 11.0 + 1.4)
+         + 0.4 * std::cos((x + z) / 7.0 + 2.7);
+}
+
 int ExportRun::groundTopCol(int x, int z)
 {
+    const auto fit = flatGround.constFind(pairKey(x, z));
+    if (fit != flatGround.constEnd())
+        return std::max(0, std::min(fit.value(), 255));      // a flat platform (buildings, sites, parking lots) — cut and filled
     if (!paleCol.isEmpty())
     {
         const auto pit = paleCol.constFind(pairKey(x, z));
         if (pit != paleCol.constEnd()) return pit->top;
     }
-    const int t = terrainTopBlock(x, z);
-    if (t == std::numeric_limits<int>::min()) return addEmpty(genGroundTop, x, z);
+    const int t0 = terrainTopBlock(x, z);
+    if (t0 == std::numeric_limits<int>::min()) return addEmpty(genGroundTop, x, z);
+    // The DSM is only the SHAPE (a user request): where it is gentle, the terrain is a wavy plain; where it is steep,
+    // the slope gets a ridged noise — mountains and cliffs keep their place, the contour lines disappear into it.
+    double slope = 0.0;
+    if (tsW > 0)
+    {
+        const int gx = (x - tsX0) / 8, gz = (z - tsZ0) / 8;
+        if (gx >= 0 && gx < tsW && gz >= 0 && gz < tsH)
+            slope = double(terrainSlope[qsizetype(gz) * tsW + gx]) / 40.0;
+    }
+    const double steep = std::min(1.0, slope);
+    const double amp = 1.2 + 2.6 * steep;
+    const double n = terrainReliefNoise(x, z) + (steep > 0.2 ? 0.7 * terrainRidgeNoise(x, z) * steep : 0.0);
+    const int t = std::max(0, std::min(255, t0 + int(std::lround(amp * n))));
     const int cxk = x >> 4, czk = z >> 4;
     const int d = std::max(std::max(rcx0 - cxk, cxk - rcx1), std::max(std::max(rcz0 - czk, czk - rcz1), 0));
-    if (d <= 0 || rectM <= 0) return addEmpty(std::max(0, std::min(t, 255)), x, z);
+    if (d <= 0 || rectM <= 0) return addEmpty(t, x, z);
     double u = std::min(1.0, double(d) / double(rectM));
     u = u * u * (3.0 - 2.0 * u);
     return std::max(0, std::min(255, int(std::lround(double(t) * (1.0 - u) + double(genGroundTop) * u))));
@@ -1635,10 +1678,26 @@ int ExportRun::groundTopCol(int x, int z)
 int ExportRun::surfaceTop(qint64 ck)
 {
     int top = groundTopCol(keyFirst(ck), keySecond(ck));
+    if (flatGround.contains(ck)) return std::min(top, 255);   // a graded/flattened column: its exact level, no colMin correction
     const auto oit = colMin.constFind(ck);
     if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)
         top = std::max(top, oit.value() - 1);
     return std::min(top, 255);
+}
+
+int ExportRun::padTerrainLevel(const QList<qint64>& cols)
+{
+    if (!bool(heightAt) || cols.isEmpty()) return std::numeric_limits<int>::min();
+    QVector<int> hs;
+    hs.reserve(cols.size());
+    for (qint64 ck : cols)
+    {
+        const int t = terrainTopBlock(keyFirst(ck), keySecond(ck));
+        if (t != std::numeric_limits<int>::min()) hs << t;
+    }
+    if (hs.isEmpty()) return std::numeric_limits<int>::min();
+    std::nth_element(hs.begin(), hs.begin() + hs.size() / 2, hs.end());
+    return hs[hs.size() / 2];
 }
 
 GroundChunk ExportRun::makeGround(qint64 ckKey)
@@ -6748,7 +6807,7 @@ bool ExportRun::buildGround()
             for (const ColSpan& c : v.spans) a += c.z1 - c.z0 + 1;
             bestEligible = std::max(bestEligible, a);
         }
-        if (bestEligible < 2000 && world.paleForestFallback)
+        if (bestEligible < 2000 && world.paleForestFallback && !terrainOnly)
         {
             constexpr int S = 15;                                       // the site side, chunks (the forest template is 14×14)
             QSet<ColKey> occ;                                           // occupied chunks (key pairKey(cx, cz))
@@ -7083,6 +7142,7 @@ bool ExportRun::buildGround()
         {
             store.translateY(yShift);                                 // blocks (the sections will be rebuilt)
             for (auto it = colMin.begin(); it != colMin.end(); ++it) it.value() += yShift;
+            for (auto it = flatGround.begin(); it != flatGround.end(); ++it) it.value() += yShift;   // the flat platforms are lifted with the world
             for (auto it = colAnchor.begin(); it != colAnchor.end(); ++it) it.value() += yShift;
             for (ChestSite& cs : chests) cs.y += yShift;              // chests — together with the houses
             for (PaintingSite& pt : paints) pt.y += yShift;           // paintings — the same coordinates
@@ -8071,6 +8131,36 @@ bool ExportRun::buildGround()
         }
         if (nMoved > 0) res.lairInfo += QObject::tr("; road columns moved onto the relief: %1").arg(nMoved);
     }
+    {   // The terrain slope map (8-block cells): the noise amplitude of the relief depends on it (see groundTopCol).
+        // The DSM is interpreted, not copied: gentle ground becomes a wavy plain, steep ground — ridged mountains and cliffs.
+        if (bool(heightAt) && rcx1 >= rcx0)
+        {
+            constexpr int kCell = 8;
+            tsX0 = (rcx0 - rectM) * 16; tsZ0 = (rcz0 - rectM) * 16;
+            tsW = ((rcx1 - rcx0 + 1 + 2 * rectM) * 16) / kCell + 1;
+            tsH = ((rcz1 - rcz0 + 1 + 2 * rectM) * 16) / kCell + 1;
+            terrainSlope.resize(qsizetype(tsW) * tsH);
+            QVector<int> rows;
+            rows.reserve(tsH);
+            for (int gz = 0; gz < tsH; ++gz) rows.append(gz);
+            QtConcurrent::blockingMap(rows, [&](int gz)
+            {
+                const int z = tsZ0 + gz * kCell + kCell / 2;
+                for (int gx = 0; gx < tsW; ++gx)
+                {
+                    const int x = tsX0 + gx * kCell + kCell / 2;
+                    const int hL = terrainTopBlock(x - kCell, z), hR = terrainTopBlock(x + kCell, z);
+                    const int hU = terrainTopBlock(x, z - kCell), hD = terrainTopBlock(x, z + kCell);
+                    double s = 0;
+                    int n = 0;
+                    if (hL != std::numeric_limits<int>::min() && hR != std::numeric_limits<int>::min()) { s += std::abs(hR - hL) / (2.0 * kCell); ++n; }
+                    if (hU != std::numeric_limits<int>::min() && hD != std::numeric_limits<int>::min()) { s += std::abs(hD - hU) / (2.0 * kCell); ++n; }
+                    const double v = n ? s / n : 0.0;
+                    terrainSlope[qsizetype(gz) * tsW + gx] = quint8(std::min(255.0, std::round(v * 40.0)));
+                }
+            });
+        }
+    }
     // Caves: a chunk is deterministically assigned a template index (different chunks — different caves,
     // a repeat is allowed). Without the file (caveSet is empty) caveTpl stays -1 — the underground is solid rock.
     {   // Ground fill: makeGround only reads the common maps, the chunks are independent — we compute in blocks
@@ -8109,6 +8199,23 @@ bool ExportRun::buildGround()
         }
         for (int i2 = 0; i2 < nF; ++i2)
             ground.insert(fl[i2], built[i2]);
+    }
+    {   // MARKINGS AND CURBS ON THE FINAL RELIEF: the road ribbons were laid by the mesh level, while the ground under them
+        // may be a block higher (the terrain matrix) — a marking left at the mesh level sank into the road. Every road paint
+        // goes into the air cell above the built ground (a carpet there renders flush with the surface).
+        qint64 nPaint = 0;
+        for (const RoadPaint& rp : roadPaints)
+        {
+            const auto git = ground.constFind(pairKey(rp.x >> 4, rp.z >> 4));
+            if (git == ground.constEnd()) continue;
+            const int col = (rp.z & 15) * 16 + (rp.x & 15);
+            const int y = git->top[col] + 1;
+            const quint16 cur = store.get(rp.x, y, rp.z);
+            if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount)) continue;
+            store.set(rp.x, y, rp.z, rp.id);
+            ++nPaint;
+        }
+        if (nPaint > 0) tmcStepLog(QString("roads: %1 marking/curb cells placed on the final ground").arg(nPaint).toUtf8().constData());
     }
 
     lap("g4 ground fill");
@@ -9489,6 +9596,7 @@ bool ExportRun::prepareObjects()
     mnz = mny;
     mxz = -mnz;
     totalVerts = 0;
+    terrainOnly = false;
     for (const McObject& o : objectsIn)
     {
         totalVerts += o.vertices.size();
@@ -9499,6 +9607,18 @@ bool ExportRun::prepareObjects()
             mny = std::min(mny, double(v.y())); mxy = std::max(mxy, double(v.y()));
             mnz = std::min(mnz, double(v.z())); mxz = std::max(mxz, double(v.z()));
         }
+    }
+    if (totalVerts == 0 && objectsIn.isEmpty() && bool(heightAt) && world.terrainArea.size() >= 3)
+    {   // TERRAIN ONLY (a user request): the rules found no objects in the area, but a height matrix is there —
+        // the terrain itself becomes the world. The area is the boundary (or the matrix extent).
+        terrainOnly = true;
+        for (const QPointF& p : world.terrainArea)
+        {
+            mnx = std::min(mnx, double(p.x())); mxx = std::max(mxx, double(p.x()));
+            mny = std::min(mny, double(p.y())); mxy = std::max(mxy, double(p.y()));
+        }
+        mnz = 0.0; mxz = 0.0;                     // the matrix heights are the blocks themselves (the normalized DTM starts at 0)
+        totalVerts = 1;
     }
     if (totalVerts == 0)
     {
@@ -9514,6 +9634,41 @@ bool ExportRun::prepareObjects()
     tf.sz = (world.unitsToMetersY > 1e-9) ? world.unitsToMetersY : 1.0;
     span = mxz - mnz;
     if (span > 240.0) tf.zScale = 240.0 / span;   // height compression to fit into 0..255
+    // The flat patches (vegetation, water, sites) are rasterized only inside the world area: an OSM way may cross the
+    // extract far beyond the boundary (a national park, a long river) — rasterizing it whole ate gigabytes and killed
+    // the export (a fail-fast on a Grand Canyon extract).
+    {
+        double ax0 = 1e300, ax1 = -1e300, az0 = 1e300, az1 = -1e300;
+        if (world.clipPolygon.size() >= 3)
+            for (const QPointF& p : world.clipPolygon)
+            {
+                const double bx = toBlockX(tf, p.x()), bz = toBlockZ(tf, p.y());
+                ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx);
+                az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+            }
+        else
+        {
+            ax0 = toBlockX(tf, mnx); ax1 = toBlockX(tf, mxx);
+            az0 = toBlockZ(tf, mny); az1 = toBlockZ(tf, mxy);
+        }
+        if (ax1 > ax0 && az1 > az0)
+            preClip = QRectF(std::floor(ax0) - 8.0, std::floor(az0) - 8.0,
+                             std::ceil(ax1) - std::floor(ax0) + 16.0, std::ceil(az1) - std::floor(az0) + 16.0);
+    }
+    if (terrainOnly)
+    {   // the chunks of the area get our ground: touchedChunks/fillChunks are taken from the store chunks (buildGround)
+        int bx0 = std::numeric_limits<int>::max(), bx1 = std::numeric_limits<int>::min();
+        int bz0 = bx0, bz1 = bx1;
+        for (const QPointF& p : world.terrainArea)
+        {
+            const int bx = int(std::floor(toBlockX(tf, p.x()))), bz = int(std::floor(toBlockZ(tf, p.y())));
+            bx0 = std::min(bx0, bx); bx1 = std::max(bx1, bx);
+            bz0 = std::min(bz0, bz); bz1 = std::max(bz1, bz);
+        }
+        for (int cx = bx0 >> 4; cx <= bx1 >> 4; ++cx)
+            for (int cz = bz0 >> 4; cz <= bz1 >> 4; ++cz)
+                store.chunks[pairKey(cx, cz)];
+    }
 
     return true;
 }
@@ -9598,6 +9753,23 @@ bool ExportRun::buildObjects()
         {   // merging in object order: a later object overlaps an earlier one (as before)
             if (j->added == 0) { ++res.skippedCount; continue; }
             ++res.objectCount;
+            // FLAT PLATFORM: a building or a raised plate stands on the median relief of its footprint (the scene put it
+            // there); the ground under its floor columns is cut/filled to that level, so a house on a hillside is not a
+            // staircase. The columns of overhangs (a cornice, stairs over a void — a higher colMin) keep the terrain.
+            if (!j->o->lift && (j->o->kind == McObject::Building || j->o->kind == McObject::Plate))
+            {
+                int base = std::numeric_limits<int>::max();
+                for (auto cit = j->colMin.constBegin(); cit != j->colMin.constEnd(); ++cit)
+                    base = std::min(base, cit.value());
+                if (base != std::numeric_limits<int>::max())
+                    for (auto cit = j->colMin.constBegin(); cit != j->colMin.constEnd(); ++cit)
+                        if (cit.value() == base)
+                        {
+                            const int top = base - 1;
+                            auto fit = flatGround.find(cit.key());
+                            if (fit == flatGround.end() || fit.value() > top) flatGround.insert(cit.key(), top);
+                        }
+            }
             for (auto cit = j->store.chunks.begin(); cit != j->store.chunks.end(); ++cit)
             {
                 auto git = store.chunks.find(cit.key());
@@ -9743,7 +9915,7 @@ bool ExportRun::buildObjects()
                 {
                     const int k = next.fetch_add(1);
                     if (k >= todo.size() || (cancel && cancel->load())) break;
-                    footprintColumns(objects[todo[k]], tf, pre[todo[k]], cancel);
+                    footprintColumns(objects[todo[k]], tf, pre[todo[k]], cancel, preClip);
                     if (objects[todo[k]].kind == McObject::Vegetation && objects[todo[k]].extrudeH >= 2.5)
                     {
                         preSpans[todo[k]] = spansFromCols(pre[todo[k]]);
@@ -9948,6 +10120,10 @@ bool ExportRun::buildObjects()
         {   // rdcpol: over the polygon patch the turf is replaced with dark gray concrete (the surface layer of the ground), the place marking — after the ground
             QList<qint64> cols = std::move(pre[objDone - 1]);
             if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            // FLAT: the lot stands on the median relief of its area (a staircase parking lot was a user complaint)
+            const int padLevel = padTerrainLevel(cols);
+            if (padLevel != std::numeric_limits<int>::min())
+                for (qint64 ck : cols) flatGround.insert(ck, padLevel);
             if (o.code == 62134000)
             {   // a railway platform (railway=platform): just a stone-brick slab over the patch — no lot marking,
                 // the park site is not registered (a request: "just a slab of stone bricks"). The columns are kept:
@@ -9985,6 +10161,9 @@ bool ExportRun::buildObjects()
             if (cols.isEmpty()) { ++res.skippedCount; continue; }
             const bool square = (o.code == 45300000);
             if (!square && o.code != 62231000) { ++res.skippedCount; continue; }
+            const int padLevel = padTerrainLevel(cols);
+            if (padLevel != std::numeric_limits<int>::min())
+                for (qint64 ck : cols) flatGround.insert(ck, padLevel);      // a flat asphalt square/cover
             const quint16 cover = quint16(IdPaletteStart + paletteIndexOf(square ? "minecraft:stone_bricks" : "minecraft:gray_concrete"));
             for (qint64 ck : cols)
             {
@@ -10020,6 +10199,11 @@ bool ExportRun::buildObjects()
                 z0 = std::min(z0, keySecond(ck)); z1 = std::max(z1, keySecond(ck));
             }
             spots.append(SpotSite{ int(std::lround((x0 + x1) / 2.0)), int(std::lround((z0 + z1) / 2.0)), o.model });
+            {   // the square under a point object is flat too (a statue on a slope stood on steps)
+                const int padLevel = padTerrainLevel(cols);
+                if (padLevel != std::numeric_limits<int>::min())
+                    for (qint64 ck : cols) flatGround.insert(ck, padLevel);
+            }
             for (int x = x0 - 3; x <= x1 + 3; ++x)
                 for (int z = z0 - 3; z <= z1 + 3; ++z)
                     noTreePadCols.insert(pairKey(x, z));   // +3: the crowns (even the wide swamp oak ones) do not overhang a statue
@@ -10072,6 +10256,12 @@ bool ExportRun::buildObjects()
             if (o.code == 53530000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
             else if (o.code == 51220000 || o.code == 53110000 || o.code == 51130000 || o.code == 51460000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
             const bool lake = (o.code == 51480000);                  // a lake: water instead of wool, the fence — as for plates
+            if (!lake)
+            {   // a flat plate (a playground, a courtyard, a sports ground): the median relief of its area
+                const int padLevel = padTerrainLevel(cols);
+                if (padLevel != std::numeric_limits<int>::min())
+                    for (qint64 ck : cols) flatGround.insert(ck, padLevel);
+            }
             if (lake)
             {
                 const int dLake = std::max(1, std::min(5, int(cols.size() / 18.0 + 0.5)));   // as for hdrpol (lakes)
@@ -11226,9 +11416,9 @@ bool ExportRun::buildObjects()
                         colWool.insert(t2.key(), j.woolId);
                 }
                 else
-                    store.set(bx, t2.value(), bz, j.cid);                 // no wool — a carpet, as before
+                    roadPaints.append(RoadPaint{ bx, bz, j.cid });         // no wool — a carpet, placed on the final ground (the roads follow the relief)
                 if (j.woolId && j.fullCarpet)
-                    store.set(bx, t2.value(), bz, j.cid);                 // bike path: a carpet of the same color on top of the wool
+                    roadPaints.append(RoadPaint{ bx, bz, j.cid });        // bike path: a carpet on top of the wool, on the final ground
                 roadCols.insert(t2.key());                              // street lamps will stand along the strip edge
                 if (j.car) autoRoadCols.insert(t2.key());               // bus stops turn to motor roads, not to paths
                 auto mit = colMin.find(t2.key());                       // the ground exactly under the roadway
@@ -11255,10 +11445,7 @@ bool ExportRun::buildObjects()
                     {
                         const auto rit = j.road.constFind(pairKey(bx, bz));
                         if (rit == j.road.constEnd()) return;
-                        const int y = rit.value();
-                        const quint16 cur = store.get(bx, y, bz);
-                        if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount)) return;
-                        store.set(bx, y, bz, j.markId);
+                        roadPaints.append(RoadPaint{ bx, bz, j.markId });    // on the final ground (see the ground fill)
                     };
                     for (int k = 0; k + 1 < pl.size(); ++k)
                     {
@@ -11291,13 +11478,8 @@ bool ExportRun::buildObjects()
                 auto mid = across.begin();
                 std::advance(mid, int(across.size()) / 2);
                 const int a = mid->first;                     // only the center line (request: the edges are not needed)
-                const int y = across.at(a);
                 const int bx = j.axisX ? sl.first : a, bz = j.axisX ? a : sl.first;
-                const quint16 cur = store.get(bx, y, bz);
-                if (cur != IdAir &&
-                    !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount))
-                    continue;                                 // other people's block (a wall) is not touched
-                store.set(bx, y, bz, j.markId);
+                roadPaints.append(RoadPaint{ bx, bz, j.markId });   // on the final ground (the roads follow the relief)
             }
         }
     tmcStepLog("vox: roads: roadways ready");
@@ -11344,9 +11526,7 @@ bool ExportRun::buildObjects()
                                 if ((int(std::floor((s0 + s) / pitch)) & 1) != 0) continue;             // an empty strip
                                 const auto rit = roadAll.constFind(pairKey(bx, bz));
                                 if (rit == roadAll.constEnd()) continue;                                  // not a roadway — not drawn
-                                const quint16 cur = store.get(bx, rit.value(), bz);
-                                if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount)) continue;
-                                store.set(bx, rit.value(), bz, whiteC);
+                                roadPaints.append(RoadPaint{ bx, bz, whiteC });                           // a strip on the final ground
                                 ++nCells;
                             }
                         s0 += len;
@@ -11421,11 +11601,48 @@ bool ExportRun::buildObjects()
                         for (const QPointF& e : j.ends)                           // at the road ends — no curb
                             if (std::hypot(x + 0.5 - e.x(), z + 0.5 - e.y()) < j.endR) { foreign = true; break; }
                         if (foreign) continue;
-                        const int y = j.road.value(ck);
-                        if (store.get(x, y, z) == IdAir) store.set(x, y, z, lgC);
+                        roadPaints.append(RoadPaint{ x, z, lgC });                // the curb — on the final ground, flush with the road
                     }
                 }
             }
+        }
+    }
+    {   // ROADS GRADE THE RELIEF (a user request): a road surface is one level across its width and steps smoothly along
+        // its axis; the ground under it is cut/filled to that level and a shoulder ramps back to the terrain. Without it
+        // the terrain's contour lines cut across a road — even along it (a user complaint about the Sochi world).
+        if (bool(heightAt) && !roadCols.isEmpty())
+        {
+            QHash<ColKey, int> grade;
+            grade.reserve(roadCols.size());
+            for (qint64 ck : roadCols)
+            {
+                const auto mit = colMin.constFind(ck);
+                if (mit != colMin.constEnd()) grade.insert(ck, mit.value());
+            }
+            for (int pass = 0; pass < 2; ++pass)
+            {   // a median over the road cells only: the cross-section becomes one level, the axis profile smooth
+                const QHash<ColKey, int> src = grade;
+                for (auto it = src.constBegin(); it != src.constEnd(); ++it)
+                {
+                    const int x = keyFirst(it.key()), z = keySecond(it.key());
+                    QVector<int> hs;
+                    hs.reserve(25);
+                    for (int dz = -2; dz <= 2; ++dz)
+                        for (int dx = -2; dx <= 2; ++dx)
+                        {
+                            const auto git = src.constFind(pairKey(x + dx, z + dz));
+                            if (git != src.constEnd()) hs << git.value();
+                        }
+                    if (hs.isEmpty()) continue;
+                    std::nth_element(hs.begin(), hs.begin() + hs.size() / 2, hs.end());
+                    grade[it.key()] = hs[hs.size() / 2];
+                }
+            }
+            for (auto it = grade.constBegin(); it != grade.constEnd(); ++it)
+                flatGround.insert(it.key(), it.value() - 1);         // the road's own level; the marking lands at +1
+            // The shoulder is NOT flattened any more (a user report: the cells beside a road got high levels — the
+            // terrainTopBlock() there was taken before the world shift). The ground beside a road keeps the terrain.
+            tmcStepLog(QString("roads: %1 cells graded into the relief (shoulder: the terrain as is)").arg(grade.size()).toUtf8().constData());
         }
     }
     tmcStepLog("vox: roads finished");

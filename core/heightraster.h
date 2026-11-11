@@ -26,10 +26,15 @@ public:
     //! Height at the project point (x, y); -9999 — outside the matrix / no data
     double heightAt(double x, double y);
 
+    //! The attribution written into the matrix by its maker (the open elevation tiles), empty — none
+    QString sourceNote() const;
 
     QString path() const { return mPath; }
 
 private:
+    //! One pixel; false — outside the matrix / no data
+    bool pixelAt(int col, int row, double& v);
+
     QString mPath;
     GDALDataset* mDs = nullptr;
     OGRCoordinateTransformation* mCt = nullptr;   //!< project -> raster CRS (nullptr if the systems coincide)

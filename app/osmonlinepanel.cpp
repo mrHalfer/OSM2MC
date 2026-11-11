@@ -1,15 +1,19 @@
 #include "app/osmonlinepanel.h"
 #include "app/osmtilemap.h"
+#include "app/terrainfetch.h"
 #include "app/uimetrics.h"
 #include "core/geoutil.h"
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPointer>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -72,6 +76,21 @@ OsmOnlinePanel::OsmOnlinePanel(QWidget* parent) : QWidget(parent), mCancel(std::
     mStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     lay->addWidget(mStatus);
 
+    {
+        auto* optRow = new QHBoxLayout;
+        mTerrainChk = new QCheckBox(tr("Terrain (elevation)"));
+        QSettings s;
+        mTerrainChk->setChecked(s.value(QStringLiteral("online/terrain"), true).toBool());
+        connect(mTerrainChk, &QCheckBox::toggled, this, [](bool on)
+        {
+            QSettings st;
+            st.setValue(QStringLiteral("online/terrain"), on);
+        });
+        optRow->addWidget(mTerrainChk);
+        optRow->addStretch(1);
+        lay->addLayout(optRow);
+    }
+
     auto* btnRow = new QHBoxLayout;
     mDownloadBtn = new QPushButton(tr("Download the area"));
     mDownloadBtn->setObjectName(QStringLiteral("goButton"));         // the accent button, like "Export"
@@ -87,7 +106,7 @@ OsmOnlinePanel::OsmOnlinePanel(QWidget* parent) : QWidget(parent), mCancel(std::
     lay->addLayout(btnRow);
 
     mSearchWatcher = new QFutureWatcher<SearchOut>(this);
-    mDownWatcher = new QFutureWatcher<OsmDownloadResult>(this);
+    mDownWatcher = new QFutureWatcher<OnlineDownloadResult>(this);
 
     connect(mQuery, &QLineEdit::returnPressed, this, &OsmOnlinePanel::doSearch);
     connect(mSearchBtn, &QPushButton::clicked, this, &OsmOnlinePanel::doSearch);
@@ -106,19 +125,29 @@ OsmOnlinePanel::OsmOnlinePanel(QWidget* parent) : QWidget(parent), mCancel(std::
     connect(mMap, &OsmTileMap::marksChanged, this, &OsmOnlinePanel::refreshState);
     connect(mDownloadBtn, &QPushButton::clicked, this, [this]() { if (mMap->clipAllowed()) emit downloadRequested(); });
     connect(mCancelBtn, &QPushButton::clicked, this, &OsmOnlinePanel::cancelDownload);
-    connect(mDownWatcher, &QFutureWatcher<OsmDownloadResult>::finished, this, [this]()
+    connect(mDownWatcher, &QFutureWatcher<OnlineDownloadResult>::finished, this, [this]()
     {
-        const OsmDownloadResult r = mDownWatcher->result();
+        const OnlineDownloadResult r = mDownWatcher->result();
         mBusy = false;
         mCancelBtn->hide();
         refreshState();
-        if (r.ok)
+        if (r.osm.ok)
         {
-            mStatus->setText(tr("Downloaded: %1 MB (source: %2).").arg(r.bytes / 1048576.0, 0, 'f', 1).arg(r.source));
+            QString msg = tr("Downloaded: %1 MB (source: %2).").arg(r.osm.bytes / 1048576.0, 0, 'f', 1).arg(r.osm.source);
+            if (r.terrainTried)
+            {
+                if (r.terrain.ok)
+                    msg += tr(" Height matrix: %1 (%2×%3), the relief is %4 m.")
+                               .arg(QFileInfo(r.terrain.file).fileName()).arg(r.terrain.width).arg(r.terrain.height)
+                               .arg(r.terrain.reliefMeters, 0, 'f', 0);
+                else if (r.terrain.cancelled) msg += tr(" The height matrix was not built: cancelled.");
+                else msg += tr(" The height matrix was not built: %1").arg(r.terrain.error);
+            }
+            mStatus->setText(msg);
             emit downloaded(mOutFile, mDownClip);
         }
-        else if (r.cancelled) mStatus->setText(tr("Download cancelled."));
-        else mStatus->setText(tr("Could not download: %1").arg(r.error));
+        else if (r.osm.cancelled) mStatus->setText(tr("Download cancelled."));
+        else mStatus->setText(tr("Could not download: %1").arg(r.osm.error));
     });
 
     QSettings s;                                                // the map view is as it was at the last start
@@ -147,6 +176,7 @@ void OsmOnlinePanel::retranslate()
     mSearchBtn->setText(tr("Search"));
     for (int i = 0; i < mToolBtns.size(); ++i) mToolBtns[i]->setText(tr(mToolNames[i]));
     mDownloadBtn->setText(tr("Download the area"));
+    mTerrainChk->setText(tr("Terrain (elevation)"));
     mClearBtn->setText(tr("Remove the boundary"));
     mResetMarksBtn->setText(tr("Reset the marks"));
     mCancelBtn->setText(tr("Cancel"));
@@ -164,6 +194,7 @@ void OsmOnlinePanel::refreshState()
     QString why;
     const bool ok = mMap->clipAllowed(&why);
     mDownloadBtn->setEnabled(ok && !mBusy);
+    mTerrainChk->setEnabled(!mBusy);
     mClearBtn->setEnabled(!mBusy);
     mResetMarksBtn->setEnabled(!mBusy && mMap->anyMark());
     mSearchBtn->setEnabled(!mBusy && !mSearchWatcher->isRunning());
@@ -224,6 +255,17 @@ void OsmOnlinePanel::startDownload(const QString& outDir)
     const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
     const QString slug = currentPlaceSlug();
     mOutFile = QDir(outDir).filePath(QStringLiteral("osm_%1%2.osm").arg(slug.isEmpty() ? QString() : slug + QLatin1Char('_'), stamp));
+    // the elevation matrix goes next to the extract and is named after it (osm_city_20261111_120000.osm.tif):
+    // every area keeps its own matrix, a plain DTM.tif is still supported by the loader
+    bool withTerrain = mTerrainChk && mTerrainChk->isChecked();
+    const QString dtmPath = mOutFile + QStringLiteral(".tif");
+    if (withTerrain && QFileInfo::exists(dtmPath) && !tmcIsDownloadedDtm(dtmPath))
+    {   // someone's own height matrix — do not overwrite it silently
+        if (QMessageBox::question(this, tr("Terrain"),
+                                  tr("The folder already has a height matrix with this name that was not downloaded from the elevation tiles. Overwrite it?"))
+            != QMessageBox::Yes)
+            withTerrain = false;
+    }
     mBusy = true;
     mCancel->store(false);
     mCancelBtn->show();
@@ -238,7 +280,17 @@ void OsmOnlinePanel::startDownload(const QString& outDir)
     {
         if (self) QMetaObject::invokeMethod(self.data(), [self, msg]() { if (self && self->mBusy) self->mStatus->setText(msg); }, Qt::QueuedConnection);
     };
-    mDownWatcher->setFuture(QtConcurrent::run([clip, file, cancel, report]() { return tmcDownloadOsm(clip, file, cancel.get(), report); }));
+    mDownWatcher->setFuture(QtConcurrent::run([clip, file, withTerrain, cancel, report]()
+    {
+        OnlineDownloadResult r;
+        r.osm = tmcDownloadOsm(clip, file, cancel.get(), report);
+        if (r.osm.ok && withTerrain && !cancel->load())
+        {   // the elevation tiles: the matrix is named after the extract and normalized to "only raise above the current terrain"
+            r.terrainTried = true;
+            r.terrain = tmcFetchTerrain(clip, file + QStringLiteral(".tif"), cancel.get(), report);
+        }
+        return r;
+    }));
 }
 
 void OsmOnlinePanel::cancelDownload()

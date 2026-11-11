@@ -107,10 +107,11 @@ bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QSt
     }
     else if (isTqt ? !project.loadTqt(srcInfo.absoluteFilePath(), &e) : !project.loadFolder(srcInfo.absoluteFilePath(), &e))
         return fail(e);
-    // terrain: DTM.tif from the working folder, then from the shapefile/project folder (if the project did not bring a height matrix itself)
-    if (!project.addDefaultDtm(QDir::currentPath()))
-        if (!project.addDefaultDtm(sourceDir))
-            log(QObject::tr("Height matrix DTM.tif not found — the terrain is flat."));
+    // terrain: the matrix named after the data file, then DTM.tif — from the working folder, then from the shapefile/project folder
+    const QString srcName = QFileInfo(opt.source).fileName();
+    if (!project.addDefaultDtm(QDir::currentPath(), srcName))
+        if (!project.addDefaultDtm(sourceDir, srcName))
+            log(QObject::tr("Height matrix not found (neither %1.tif nor DTM.tif) — the terrain is flat.").arg(QFileInfo(opt.source).completeBaseName()));
     log(QObject::tr("3D settings: %1").arg(t3dUsed));
     QVector<QPointF> clip = opt.clipPolygon;
     if (clip.isEmpty())
@@ -124,7 +125,8 @@ bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QSt
         const int n = project.clipTo(clip);
         log(QObject::tr("Polygon boundary (%1 vertices): objects discarded outside it: %2").arg(clip.size()).arg(n));
         double a, b, c, d;
-        if (!project.bounds(a, b, c, d)) return fail(QObject::tr("There are no objects inside the boundary."));
+        if (!project.bounds(a, b, c, d) && project.rasters().isEmpty())
+            return fail(QObject::tr("There are no objects inside the boundary and no height matrix — nothing to export."));
     }
     return true;
 }
@@ -158,7 +160,14 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     McSceneOptions sopt;
     double bx0, by0, bx1, by1;
     double ux = 1.0, uy = 1.0;
-    if (project.bounds(bx0, by0, bx1, by1) && opt.realMeters)
+    bool haveBounds = project.bounds(bx0, by0, bx1, by1);
+    if (!haveBounds && !project.rasters().isEmpty())
+    {   // no objects: the height matrix extent is the area (the terrain-only world)
+        const HeightRaster* r = project.rasters().first();
+        bx0 = r->xB; bx1 = r->xE; by0 = r->yB; by1 = r->yE;
+        haveBounds = true;
+    }
+    if (haveBounds && opt.realMeters)
     {
         if (metersPerMapUnit(project.wkt(), 0.5 * (bx0 + bx1), 0.5 * (by0 + by1), ux, uy)
             && (std::abs(ux - 1.0) > 0.002 || std::abs(uy - 1.0) > 0.002))
@@ -188,6 +197,11 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     if (TmcProject::isOsmFile(opt.source))
         w.attribution = QStringLiteral("Map data (c) OpenStreetMap contributors, Open Database License (ODbL) 1.0: https://www.openstreetmap.org/copyright\n"
                                        "This world was made from OpenStreetMap data with OSMC. If you publish it, keep this attribution and follow the ODbL.\n");
+    for (const HeightRaster* r : project.rasters())
+    {   // a downloaded elevation matrix carries its own attribution (the open terrain tiles)
+        const QString note = r->sourceNote();
+        if (!note.isEmpty()) { w.attribution += note + QLatin1Char('\n'); break; }
+    }
     w.strongholdChunk = opt.strongholdChunk;
     w.cityChunk = opt.cityChunk;
     w.paleForestChunk = opt.paleForestChunk;
@@ -198,6 +212,13 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
             double x, y;
             if (project.lonLatToProject(ll.x(), ll.y(), x, y)) w.clipPolygon << QPointF(x, y);
         }
+    // The area of a terrain-only export (no objects matched the rules): the boundary, otherwise the height matrix extent
+    if (w.clipPolygon.size() >= 3) w.terrainArea = w.clipPolygon;
+    else if (!project.rasters().isEmpty())
+    {
+        const HeightRaster* r = project.rasters().first();
+        w.terrainArea << QPointF(r->xB, r->yB) << QPointF(r->xE, r->yB) << QPointF(r->xE, r->yE) << QPointF(r->xB, r->yE);
+    }
     if (opt.climate >= 0) { w.climateZone = opt.climate; log(QObject::tr("Climate zone: %1 (chosen manually)").arg(Climate::name(opt.climate))); }
     else
     {   // automatic: the center of the EXPORT boundary when one is drawn (the user chose exactly that piece of the

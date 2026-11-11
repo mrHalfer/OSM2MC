@@ -5,6 +5,48 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.6.26.11111] — 2026-11-11
+
+### Added
+
+- Real terrain from open elevation data (a user request): the online mode gets a **Terrain (elevation)** checkbox
+  (on by default). Together with the OSM extract it downloads the open height tiles for the boundary and builds a
+  height matrix next to the extract, named after the data file (`osm_city_20261111_120000.osm.tif`; a plain
+  `DTM.tif` is still found): the matrix is normalized so its minimum is exactly the relief the exporter draws today,
+  and everything above it rises - mountains and canyons appear (up to 150 blocks), while the small relief is smoothed
+  away and left to the existing terrain noise. The tiles' required attribution goes into the matrix metadata and into
+  the world's `ATTRIBUTION.txt`. The download is limited by a timeout: an unreachable tile server leaves the world
+  without terrain (the window warns about it), the area itself is still downloaded.
+- A terrain-only export (a user request): when no OSM object matches the rules of the loaded area but a height matrix
+  is there, the terrain itself becomes the world - mountains and canyons are exported without buildings.
+- The project file is suggested under the name of the opened data file (`osm_city_..._120000.tmc`) instead of
+  `project.tmc` (a user request).
+
+### Changed
+
+- The terrain is interpreted, not copied (a user request: "blindly following the contour lines looks bad"): the matrix
+  gives only the shape - a slope map (8-block cells) decides how rugged the ground is, gentle ground becomes a wavy
+  plain, steep ground gets ridged noise, so mountains and cliffs keep their place and the DSM's regular contour
+  terraces disappear into the noise. The matrix itself is read with bilinear interpolation.
+- Buildings stand on the HIGHEST point of their footprint (a user request: the median left half of a first floor
+  underground): the scene puts the object there and the exporter fills the ground under it up to that one level.
+- Playgrounds, parking lots, courtyards, squares and point objects stand flat on the MEDIAN relief of their area
+  (a user request): the slope no longer bends a parking lot into a staircase.
+- Roads grade the relief (a user request: the contour lines cut across a road even along it): the road surface is
+  smoothed across its width and along its axis, the ground under it is cut/filled to that level, while the ground
+  beside the road keeps the terrain (a flattened shoulder used to lift the cells next to a road).
+- Road markings, crosswalks and the curbs along the roadway are placed on the final ground: a marking left at the
+  ribbon's level used to sink into a road that the terrain had raised.
+
+### Fixed
+
+- The export no longer crashes on an extract where an OSM way crosses far beyond the downloaded area (a national
+  park, a long river): the flat patches (vegetation, water, sites) are rasterized only inside the export area; a
+  huge polygon used to eat gigabytes of memory.
+- The flattened platforms and the graded roads are lifted together with the world (the `yShift` of the "normal
+  surroundings" mode): in high mountain areas the ground under the houses and sites was left at the unshifted level
+  and stood as huge earth columns above them.
+
 ## [1.5.26.11101] — 2026-11-10
 
 ### Added

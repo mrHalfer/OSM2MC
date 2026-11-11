@@ -83,6 +83,9 @@ struct McWorldOptions
     //! The export boundary — a polygon in map coordinates (the data projection): only the chunks it touches are written into the world
     //! (the game generates the rest itself). Fewer than 3 vertices — no restriction. Buildings on the boundary stay whole in their chunks.
     QVector<QPointF> clipPolygon;
+    //! The area of a TERRAIN-ONLY export (the rules found no objects, only a height matrix is left): a polygon in map coordinates;
+    //! the terrain of this area is written without any objects. Empty — not used.
+    QVector<QPointF> terrainArea;
     //! The climate zone of the export area (export/climate.h, Climate::Zone): tree species, surface and chunk biome. 0 — temperate (as before).
     int climateZone = 0;
     //! The attribution of the source data (for OpenStreetMap — the ODbL line): if not empty, it is written into the root of the zip as ATTRIBUTION.txt

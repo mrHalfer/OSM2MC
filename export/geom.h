@@ -7,6 +7,7 @@
 #include <QByteArray>
 #include <QHash>
 #include <QPointF>
+#include <QRectF>
 #include <QVector>
 #include <QVector3D>
 #include <algorithm>
@@ -46,7 +47,7 @@ QVector<ColSpan> spansFromCols(const QList<qint64>& sorted);
 QVector<ColSpan> mergeSpans(QVector<ColSpan> v);
 bool spansContain(const QVector<ColSpan>& v, int x, int z);
 void footprintColumns(const McWorldExporter::McObject& obj, const VxTransform& tf,
-                             QList<qint64>& out, const std::atomic_bool* cancel);
+                             QList<qint64>& out, const std::atomic_bool* cancel, const QRectF& clip = QRectF());
 void rasterizeTriangle(const QVector3D& t0, const QVector3D& t1, const QVector3D& t2,
                        int minx, int miny, int minz, int sx, int sy, int sz,
                        QByteArray& grid, QVector<int>& surfaceCells);
