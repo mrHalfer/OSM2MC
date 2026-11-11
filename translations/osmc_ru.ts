@@ -948,8 +948,8 @@ It loads automatically when the data is ready.</source>
     </message>
     <message>
         <location filename="../app/osmonlinepanel.cpp" line="1"/>
-        <source>Terrain (elevation)</source>
-        <translation>Рельеф (высоты)</translation>
+        <source>Terrain (elevation data from AWS Terrain Tiles)</source>
+        <translation>Рельеф (высоты из AWS Terrain Tiles)</translation>
     </message>
     <message>
         <location filename="../app/osmonlinepanel.cpp" line="1"/>

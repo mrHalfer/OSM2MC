@@ -8344,6 +8344,49 @@ bool ExportRun::buildGround()
         }
         if (nPaint > 0) tmcStepLog(QString("roads: %1 marking/curb cells placed on the final ground").arg(nPaint).toUtf8().constData());
     }
+    {   // ROAD STEPS: where the road's height changes between neighbouring cells, the step is smoothed with slabs of
+        // the road's own material and color (a user request): gray concrete slab for the motor roadway, light gray
+        // concrete slab for the pedestrian roads, white wool slab for the markings, light gray wool slab for the curbs.
+        // A bottom slab on the lower cell halves the step; a step of several blocks gets a half-slab ledge per level.
+        qint64 nSlab = 0;
+        for (const qint64 ck : roadCols)
+        {
+            const int x = keyFirst(ck), z = keySecond(ck);
+            const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+            if (git == ground.constEnd()) continue;
+            const int col = (z & 15) * 16 + (x & 15);
+            if (git->wd[col] > 0) continue;                          // over water — the bridge pass deals with it
+            const int h = git->top[col];
+            int hi = h;
+            for (int d = 0; d < 4; ++d)
+            {
+                const int nx = x + (d == 0 ? 1 : d == 1 ? -1 : 0);
+                const int nz = z + (d == 2 ? 1 : d == 3 ? -1 : 0);
+                const qint64 nk = pairKey(nx, nz);
+                if (!roadCols.contains(nk)) continue;
+                const auto g2 = ground.constFind(pairKey(nx >> 4, nz >> 4));
+                if (g2 == ground.constEnd()) continue;
+                hi = std::max(hi, int(g2->top[(nz & 15) * 16 + (nx & 15)]));
+            }
+            if (hi <= h) continue;
+            quint16 slab = roadSlabForCarpet(store.get(x, h + 1, z));  // a marking/curb: the wool slab of its color
+            if (!slab)
+            {
+                const auto wit = colWool.constFind(ck);                // the roadway: the slab of its material
+                if (wit != colWool.constEnd()) slab = roadSlabForSurface(wit.value());
+            }
+            if (!slab) continue;                                       // podzol/dirt roads — no matching slab
+            for (int y = h + 1; y <= hi; ++y)
+            {
+                const quint16 cur = store.get(x, y, z);
+                if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount))
+                    continue;                                          // a lamp/plant/other block — leave it
+                store.set(x, y, z, slab);
+                ++nSlab;
+            }
+        }
+        if (nSlab > 0) tmcStepLog(QString("roads: %1 step slabs placed").arg(nSlab).toUtf8().constData());
+    }
 
     lap("g4 ground fill");
     {   // BRIDGES: a road or a railway that runs over water keeps its level (the plane of the ground around) and gets an artificial bridge: a deck flush with the road level

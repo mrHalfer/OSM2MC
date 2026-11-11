@@ -187,6 +187,23 @@ const NamedColor kWools[] = {
     { "minecraft:black_wool",        20,  20,  20 },
 };
 
+//! Road step slabs (26.3+): a half-block of the road's own material smooths the height steps. Concrete slabs first,
+//! then wool ones (the marking/curb carpets). NOT in kBlockPalette: nearestBlockId would otherwise turn walls into slabs.
+const char* const kRoadSlabs[] = {
+    "minecraft:white_concrete_slab", "minecraft:light_gray_concrete_slab", "minecraft:gray_concrete_slab",
+    "minecraft:black_concrete_slab", "minecraft:brown_concrete_slab", "minecraft:red_concrete_slab",
+    "minecraft:orange_concrete_slab", "minecraft:yellow_concrete_slab", "minecraft:lime_concrete_slab",
+    "minecraft:green_concrete_slab", "minecraft:cyan_concrete_slab", "minecraft:light_blue_concrete_slab",
+    "minecraft:blue_concrete_slab", "minecraft:purple_concrete_slab", "minecraft:magenta_concrete_slab",
+    "minecraft:pink_concrete_slab",
+    "minecraft:white_wool_slab", "minecraft:orange_wool_slab", "minecraft:magenta_wool_slab",
+    "minecraft:light_blue_wool_slab", "minecraft:yellow_wool_slab", "minecraft:lime_wool_slab",
+    "minecraft:pink_wool_slab", "minecraft:gray_wool_slab", "minecraft:light_gray_wool_slab",
+    "minecraft:cyan_wool_slab", "minecraft:purple_wool_slab", "minecraft:blue_wool_slab",
+    "minecraft:brown_wool_slab", "minecraft:green_wool_slab", "minecraft:red_wool_slab",
+    "minecraft:black_wool_slab",
+};
+
 //! Meadow flowers (a user request): scattered over grass polygons "without height" instead of
 //! part of the short grass; the values of the pot's flower property (a windowsill) are the same names.
 //! 1.21+ (flattening 24w21a) and 26.x carry them as separate ids; the names were verified by probing the servers.
@@ -382,6 +399,8 @@ QString blockName(quint16 id)
         return QLatin1String(kFlowers[int(id) - int(IdFlowerBase)].name);
     if (id >= IdCarpetBase && id < IdCarpetBase + kCarpetsCount)
         return QLatin1String(kCarpets[int(id) - int(IdCarpetBase)].name);
+    if (id >= IdRoadSlabBase && id < IdRoadSlabMax)
+        return QLatin1String(kRoadSlabs[int(id) - int(IdRoadSlabBase)]);
     if (id >= IdWoolBase && id < IdWoolBase + kWoolsCount)
         return QLatin1String(kWools[int(id) - int(IdWoolBase)].name);
     const int i = int(id) - int(IdPaletteStart);
@@ -712,6 +731,32 @@ int paletteIndexOf(const char* name)
         if (qstrcmp(kBlockPalette[i].name, name) == 0)
             return i;
     return -1;
+}
+
+//! The slab of the same color as a roadway block (concrete or wool) — a half-block road step (0 — no matching slab,
+//! e.g. podzol/dirt roads: the game has no podzol slab).
+quint16 roadSlabForSurface(quint16 id)
+{
+    const QString n = blockName(id);
+    if (!n.endsWith(QLatin1String("_concrete")) && !n.endsWith(QLatin1String("_wool")))
+        return 0;
+    const QString s = n + QLatin1String("_slab");
+    for (int i = 0; i < kRoadSlabsCount; ++i)
+        if (s == QLatin1String(kRoadSlabs[i]))
+            return quint16(IdRoadSlabBase + i);
+    return 0;
+}
+
+//! The wool slab of a marking/curb carpet (0 — not a carpet).
+quint16 roadSlabForCarpet(quint16 id)
+{
+    if (id < IdCarpetBase || id >= IdCarpetBase + kCarpetsCount) return 0;
+    QString n = QLatin1String(kCarpets[int(id) - int(IdCarpetBase)].name);
+    n.replace(QLatin1String("_carpet"), QLatin1String("_wool_slab"));
+    for (int i = 0; i < kRoadSlabsCount; ++i)
+        if (n == QLatin1String(kRoadSlabs[i]))
+            return quint16(IdRoadSlabBase + i);
+    return 0;
 }
 
 //! The vegpol codes on which a Pale Garden may grow (a user request): tall/stunted forest, forest undergrowth, bushes, industrial crops and meadow vegetation.

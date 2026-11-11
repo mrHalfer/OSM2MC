@@ -31,6 +31,7 @@ extern const char* const kRailShapes[10];
 
 // Entry counts. New blocks join kBlockPalette AT THE END — update kPaletteCount there too.
 constexpr int kPaletteCount = 109;
+constexpr int kRoadSlabsCount = 32;   // 16 concrete slabs + 16 wool slabs (the road step slabs)
 constexpr int kCarpetsCount = 16;
 constexpr int kWoolsCount = 16;
 constexpr int kFlowersCount = 10;
@@ -213,6 +214,11 @@ enum : quint16
     IdFurnaceMax = int(IdFurnaceBase) + 4,
     IdBerryRipe,                          // 'minecraft:sweet_berry_bush' age=3 — a berry bush of the taiga undergrowth
                                           //   (the palette entry writes age=0, the game shows an empty green bush there)
+    IdRoadSlabBase,                       // IdRoadSlabBase + i = kRoadSlabs[i] (0..15 — concrete slabs, 16..31 —
+                                          // wool slabs): the half-block steps of the roads (type=bottom — the default).
+                                          // A separate range, NOT kBlockPalette: nearestBlockId must not turn walls
+                                          // into slabs (it matches only "_concrete" palette names)
+    IdRoadSlabMax = int(IdRoadSlabBase) + kRoadSlabsCount,
     IdCaveBase,                           // IdCaveBase + i = the i-th state of the cave world palette (the name +
                                           //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
 };
@@ -231,6 +237,8 @@ void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out);
 quint16 nearestBlockId(const QColor& c);
 quint16 nearestCarpetId(const QColor& c);
 int paletteIndexOf(const char* name);
+quint16 roadSlabForSurface(quint16 id);   // a concrete/wool roadway block -> the slab of the same color (0 — none)
+quint16 roadSlabForCarpet(quint16 id);    // a marking/curb carpet -> the wool slab of the same color (0 — none)
 bool isPaleForestCode(int code);
 bool isForestExtraVeg(quint16 bid);
 bool isVegBlockId(quint16 bid);

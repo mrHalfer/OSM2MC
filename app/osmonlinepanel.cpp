@@ -78,7 +78,7 @@ OsmOnlinePanel::OsmOnlinePanel(QWidget* parent) : QWidget(parent), mCancel(std::
 
     {
         auto* optRow = new QHBoxLayout;
-        mTerrainChk = new QCheckBox(tr("Terrain (elevation)"));
+        mTerrainChk = new QCheckBox(tr("Terrain (elevation data from AWS Terrain Tiles)"));
         QSettings s;
         mTerrainChk->setChecked(s.value(QStringLiteral("online/terrain"), true).toBool());
         connect(mTerrainChk, &QCheckBox::toggled, this, [](bool on)
@@ -176,7 +176,7 @@ void OsmOnlinePanel::retranslate()
     mSearchBtn->setText(tr("Search"));
     for (int i = 0; i < mToolBtns.size(); ++i) mToolBtns[i]->setText(tr(mToolNames[i]));
     mDownloadBtn->setText(tr("Download the area"));
-    mTerrainChk->setText(tr("Terrain (elevation)"));
+    mTerrainChk->setText(tr("Terrain (elevation data from AWS Terrain Tiles)"));
     mClearBtn->setText(tr("Remove the boundary"));
     mResetMarksBtn->setText(tr("Reset the marks"));
     mCancelBtn->setText(tr("Cancel"));

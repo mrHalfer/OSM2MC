@@ -71,13 +71,16 @@ QString cacheDir(int z)
     return QDir(base).filePath(QStringLiteral("terrain/z%1").arg(z));
 }
 
-//! The overall limit of the elevation download: a hung or unreachable tile server must not hold the export hostage —
-//! after it the terrain is simply left out (the caller warns).
-constexpr int kDownloadDeadlineMs = 90000;
+//! The limit of the FIRST response of the elevation server: a hung or unreachable tile server (usually blocked
+//! without a VPN) must not hold the export hostage — after it the terrain is simply left out (the caller warns).
+//! As soon as any tile has been received the download is under way and the overall limit no longer applies.
+constexpr int kFirstResponseMs = 15000;
 constexpr int kTileRequestMs = 15000;
 
-//! true + the tile PNG bytes (from the disk cache or the network); the deadline is checked before every attempt
-bool loadTileBytes(const TileKey& k, int z, const std::atomic_bool* cancel, QElapsedTimer& clock, QByteArray& out, QString* err)
+//! true + the tile PNG bytes (from the disk cache or the network); the first-response deadline is checked before
+//! every attempt until the server has answered at least once
+bool loadTileBytes(const TileKey& k, int z, const std::atomic_bool* cancel, QElapsedTimer& clock,
+                   std::atomic_bool& started, QByteArray& out, QString* err)
 {
     const QString dir = cacheDir(z);
     QDir().mkpath(dir);
@@ -92,16 +95,21 @@ bool loadTileBytes(const TileKey& k, int z, const std::atomic_bool* cancel, QEla
     for (int attempt = 0; attempt < kRetries; ++attempt)
     {
         if (cancel && cancel->load()) { *err = QObject::tr("cancelled"); return false; }
-        const qint64 left = kDownloadDeadlineMs - clock.elapsed();
-        if (left <= 0)
+        qint64 left = kTileRequestMs;
+        if (!started.load())
         {
-            *err = QObject::tr("the elevation tile server did not answer within %1 s").arg(kDownloadDeadlineMs / 1000);
-            return false;
+            left = kFirstResponseMs - clock.elapsed();
+            if (left <= 0)
+            {
+                *err = QObject::tr("the elevation tile server did not answer within %1 s").arg(kFirstResponseMs / 1000);
+                return false;
+            }
         }
         if (attempt) QThread::msleep(500u * (1u << (attempt - 1)));
         const HttpResult r = httpRequest(url, QByteArray(), QByteArray(), int(std::min<qint64>(kTileRequestMs, left)), cancel);
         if (r.ok() && !r.body.isEmpty())
         {
+            started.store(true);            // the server answers — no overall deadline any more
             QFile f(path);
             if (f.open(QIODevice::WriteOnly)) f.write(r.body);
             out = r.body;
@@ -196,16 +204,17 @@ TerrainFetchResult tmcFetchTerrain(const QVector<QPointF>& lonLat, const QString
     QHash<TileKey, TileHeights> tiles;
     QMutex tilesMutex;
     QStringList errors;
+    std::atomic_bool started{false};   // the server has answered at least once — the download is under way
     {
         QThreadPool pool;
         pool.setMaxThreadCount(kMaxThreads);
         QFutureSynchronizer<void> sync;
         for (const TileKey& k : keys)
-            sync.addFuture(QtConcurrent::run(&pool, [&tiles, &tilesMutex, &errors, &clock, k, z, cancel]()
+            sync.addFuture(QtConcurrent::run(&pool, [&tiles, &tilesMutex, &errors, &clock, &started, k, z, cancel]()
             {
                 QByteArray bytes;
                 QString err;
-                if (!loadTileBytes(k, z, cancel, clock, bytes, &err))
+                if (!loadTileBytes(k, z, cancel, clock, started, bytes, &err))
                 {
                     QMutexLocker lk(&tilesMutex);
                     errors << err;

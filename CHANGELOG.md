@@ -5,32 +5,20 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
-### Changed
-
-- Roads and railways keep a FLAT margin of two blocks on both sides at the track's own level (a user request):
-  the return to the real terrain is offset from the surface instead of starting right at its edge; the railways
-  are graded exactly like the roads, so a track lies on top of the relief instead of cutting into it or vanishing
-  under it.
-- Roads inside the Pale Garden are not graded (a user request): they follow the garden's own relief with its steep
-  steps. The grading now runs after the Pale Garden is chosen (it is picked in buildGround) — before, the garden's
-  roads were graded by mistake and cut a flat strip across the forest.
-- Playgrounds, parking lots, courtyards, squares and point objects stand at the AVERAGE ground level of their area:
-  that level is spread over the pad itself and a flat margin of two blocks around it, then a smooth ramp returns to
-  the terrain (no wall of earth at the pad's edge). The level is computed when the terrain is ready — a pad used to be
-  measured before the terrain sampler was initialized and flew up to the build height limit (255).
-
 ## [1.6.26.11111] — 2026-11-11
 
 ### Added
 
-- Real terrain from open elevation data (a user request): the online mode gets a **Terrain (elevation)** checkbox
-  (on by default). Together with the OSM extract it downloads the open height tiles for the boundary and builds a
-  height matrix next to the extract, named after the data file (`osm_city_20261111_120000.osm.tif`; a plain
-  `DTM.tif` is still found): the matrix is normalized so its minimum is exactly the relief the exporter draws today,
-  and everything above it rises - mountains and canyons appear (up to 150 blocks), while the small relief is smoothed
-  away and left to the existing terrain noise. The tiles' required attribution goes into the matrix metadata and into
-  the world's `ATTRIBUTION.txt`. The download is limited by a timeout: an unreachable tile server leaves the world
-  without terrain (the window warns about it), the area itself is still downloaded.
+- Real terrain from open elevation data (a user request): the online mode gets a **Terrain (elevation data from AWS
+  Terrain Tiles)** checkbox (on by default). Together with the OSM extract it downloads the open height tiles for the
+  boundary and builds a height matrix next to the extract, named after the data file
+  (`osm_city_20261111_120000.osm.tif`; a plain `DTM.tif` is still found): the matrix is normalized so its minimum is
+  exactly the relief the exporter draws today, and everything above it rises - mountains and canyons appear (up to
+  150 blocks), while the small relief is smoothed away and left to the existing terrain noise. The tiles' required
+  attribution goes into the matrix metadata and into the world's `ATTRIBUTION.txt`. The download waits 15 seconds for
+  the FIRST response of the tile server; once a tile has arrived it continues normally, and an unreachable server
+  (typically blocked without a VPN) leaves the world without terrain (the window warns about it), while the area
+  itself is still downloaded.
 - A terrain-only export (a user request): when no OSM object matches the rules of the loaded area but a height matrix
   is there, the terrain itself becomes the world - mountains and canyons are exported without buildings.
 - The project file is suggested under the name of the opened data file (`osm_city_..._120000.tmc`) instead of
@@ -44,11 +32,22 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   terraces disappear into the noise. The matrix itself is read with bilinear interpolation.
 - Buildings stand on the HIGHEST point of their footprint (a user request: the median left half of a first floor
   underground): the scene puts the object there and the exporter fills the ground under it up to that one level.
-- Playgrounds, parking lots, courtyards, squares and point objects stand flat on the MEDIAN relief of their area
-  (a user request): the slope no longer bends a parking lot into a staircase.
-- Roads grade the relief (a user request: the contour lines cut across a road even along it): the road surface is
-  smoothed across its width and along its axis, the ground under it is cut/filled to that level, while the ground
-  beside the road keeps the terrain (a flattened shoulder used to lift the cells next to a road).
+- Playgrounds, parking lots, courtyards, squares and point objects stand at the AVERAGE ground level of their area:
+  that level is spread over the pad itself and a flat margin of two blocks around it, then a smooth ramp returns to
+  the terrain (no wall of earth at the pad's edge). The level is computed when the terrain is ready — a pad used to be
+  measured before the terrain sampler was initialized and flew up to the build height limit (255).
+- Roads and railways grade the relief (a user request: the contour lines cut across a road even along it): the track
+  surface is smoothed across its width and along its axis, the ground under it is cut/filled to that level, and on
+  both sides there is a FLAT margin of two blocks at the track's own level before the ground returns to the terrain.
+  Railways are graded exactly like the roads, so a track lies on top of the relief instead of cutting into it or
+  vanishing under it.
+- The height steps of the roads are smoothed with slabs of the road's own material and color (a user request): a
+  gray concrete slab on the motor roadway, a light gray concrete slab on the pedestrian roads, a white wool slab on
+  the markings and a light gray wool slab on the curbs. A bottom slab on the lower cell halves a one-block step; a
+  step of several blocks gets a half-slab ledge per level (dirt/podzol roads have no matching slab in the game).
+- Roads inside the Pale Garden are not graded (a user request): they follow the garden's own relief with its steep
+  steps. The grading runs after the Pale Garden is chosen (it is picked in buildGround) — before, the garden's roads
+  were graded by mistake and cut a flat strip across the forest.
 - Road markings, crosswalks and the curbs along the roadway are placed on the final ground: a marking left at the
   ribbon's level used to sink into a road that the terrain had raised.
 
