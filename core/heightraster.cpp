@@ -77,6 +77,27 @@ bool HeightRaster::open(const QString& path, const OGRSpatialReference* projSrs,
         if (band->RasterIO(GF_Read, 0, 0, xSize, ySize, mCache.data(), xSize, ySize, GDT_Float32, 0, 0) != CE_None)
             mCache.clear();
     }
+    // The matrix resampled into the PROJECT CRS ONCE (a user request: the ground/vegetation stage was slow): with the
+    // CRSs different (the tiles are EPSG:3857, the OSM data EPSG:3395) heightAt() used to run a PROJ transform under a
+    // mutex for EVERY column — the ground fill of a big area was effectively single-threaded because of it.
+    if (mCt && !mCache.isEmpty())
+    {
+        mProjW = xSize;
+        mProjH = ySize;
+        mProjDx = (xE - xB) / double(mProjW);
+        mProjDy = (yE - yB) / double(mProjH);
+        mProj.resize(qint64(mProjW) * mProjH);
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        for (int j = 0; j < mProjH; ++j)
+            for (int i = 0; i < mProjW; ++i)
+            {
+                double rx = xB + (i + 0.5) * mProjDx;
+                double ry = yB + (j + 0.5) * mProjDy;
+                if (!mCt->Transform(1, &rx, &ry)) { mProj[qint64(j) * mProjW + i] = nan; continue; }
+                double v = 0.0;
+                mProj[qint64(j) * mProjW + i] = sampleCache(rx, ry, v) ? float(v) : nan;
+            }
+    }
     return true;
 }
 
@@ -98,10 +119,73 @@ bool HeightRaster::pixelAt(int col, int row, double& v)
     return true;
 }
 
+//! Bilinear over the cached raster at raster coordinates (the pixel-centre convention of heightAt); false — no data.
+bool HeightRaster::sampleCache(double rx, double ry, double& out) const
+{
+    const double fx = (rx - mGt[0]) / mGt[1] - 0.5;
+    const double fy = (ry - mGt[3]) / mGt[5] - 0.5;
+    const int c0 = int(std::floor(fx)), r0 = int(std::floor(fy));
+    const double tx = fx - c0, ty = fy - r0;
+    auto pix = [&](int c, int r, double& v) -> bool
+    {
+        if (c < 0 || c >= xSize || r < 0 || r >= ySize) return false;
+        const float f = mCache[qint64(r) * xSize + c];
+        if (std::isnan(f)) return false;
+        if (mHasNoData && std::fabs(double(f) - mNoData) < 1e-6 * std::max(1.0, std::fabs(mNoData))) return false;
+        if (f <= -9998.0f) return false;
+        v = double(f);
+        return true;
+    };
+    double v00, v10, v01, v11;
+    const bool o00 = pix(c0, r0, v00), o10 = pix(c0 + 1, r0, v10);
+    const bool o01 = pix(c0, r0 + 1, v01), o11 = pix(c0 + 1, r0 + 1, v11);
+    if (o00 && o10 && o01 && o11)
+    {
+        out = (1.0 - ty) * ((1.0 - tx) * v00 + tx * v10) + ty * ((1.0 - tx) * v01 + tx * v11);
+        return true;
+    }
+    double best = -9999.0, bestD = std::numeric_limits<double>::max();
+    auto take = [&](bool ok, double v, double d) { if (ok && d < bestD) { bestD = d; best = v; } };
+    take(o00, v00, tx * tx + ty * ty);
+    take(o10, v10, (1.0 - tx) * (1.0 - tx) + ty * ty);
+    take(o01, v01, tx * tx + (1.0 - ty) * (1.0 - ty));
+    take(o11, v11, (1.0 - tx) * (1.0 - tx) + (1.0 - ty) * (1.0 - ty));
+    if (bestD == std::numeric_limits<double>::max()) return false;
+    out = best;
+    return true;
+}
+
 double HeightRaster::heightAt(double x, double y)
 {
     if (!mDs) return -9999.0;
     if (x < xB || x > xE || y < yB || y > yE) return -9999.0;
+    if (!mProj.isEmpty())
+    {   // the matrix already resampled into the project CRS: a bilinear over it, no PROJ transform per column
+        const double fx = (x - xB) / mProjDx - 0.5;
+        const double fy = (y - yB) / mProjDy - 0.5;
+        const int c0 = int(std::floor(fx)), r0 = int(std::floor(fy));
+        const double tx = fx - c0, ty = fy - r0;
+        auto pix = [&](int c, int r, double& v) -> bool
+        {
+            if (c < 0 || c >= mProjW || r < 0 || r >= mProjH) return false;
+            const float f = mProj[qint64(r) * mProjW + c];
+            if (std::isnan(f) || f <= -9998.0f) return false;
+            v = double(f);
+            return true;
+        };
+        double v00, v10, v01, v11;
+        const bool o00 = pix(c0, r0, v00), o10 = pix(c0 + 1, r0, v10);
+        const bool o01 = pix(c0, r0 + 1, v01), o11 = pix(c0 + 1, r0 + 1, v11);
+        if (o00 && o10 && o01 && o11)
+            return (1.0 - ty) * ((1.0 - tx) * v00 + tx * v10) + ty * ((1.0 - tx) * v01 + tx * v11);
+        double best = -9999.0, bestD = std::numeric_limits<double>::max();
+        auto take = [&](bool ok, double v, double d) { if (ok && d < bestD) { bestD = d; best = v; } };
+        take(o00, v00, tx * tx + ty * ty);
+        take(o10, v10, (1.0 - tx) * (1.0 - tx) + ty * ty);
+        take(o01, v01, tx * tx + (1.0 - ty) * (1.0 - ty));
+        take(o11, v11, (1.0 - tx) * (1.0 - tx) + (1.0 - ty) * (1.0 - ty));
+        return best;
+    }
     double rx = x, ry = y;
     if (mCt)
     {

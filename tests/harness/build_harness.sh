@@ -15,7 +15,7 @@ CXXFLAGS=(-O2 -std=c++17 -fPIC -DNDEBUG
 LIBS=($(pkg-config --libs Qt5Gui Qt5Concurrent))
 LIBS=("-Wl,--no-as-needed" "${LIBS[@]}")
 
-UNITS=(format/bytes blocks anvil buildingmerge carset ground caveset facade geom sites lairset paledonor rails mcworldexporter voxelize exportrun)
+UNITS=(format/bytes blocks anvil buildingmerge carset ground caveset facade geom sites lairset paledonor playgroundset rails mcworldexporter voxelize exportrun)
 OBJS=()
 for u in "${UNITS[@]}"; do
   o="${u##*/}.o"
@@ -24,6 +24,8 @@ for u in "${UNITS[@]}"; do
 done
 g++ -c "${CXXFLAGS[@]}" -o dtmgrid.o "$ROOT/core/dtmgrid.cpp" || { echo BUILD-FAILED; exit 1; }
 OBJS+=("dtmgrid.o")
+g++ -c "${CXXFLAGS[@]}" -o stlmodel.o "$ROOT/core/stlmodel.cpp" || { echo BUILD-FAILED; exit 1; }
+OBJS+=("stlmodel.o")
 
 g++ "${CXXFLAGS[@]}" -o mc_export_test "$SELF/mc_export_test.cpp" "${OBJS[@]}" "${LIBS[@]}" || { echo BUILD-FAILED; exit 1; }
 g++ "${CXXFLAGS[@]}" -o mc_scene_run "$SELF/mc_scene_run.cpp" "${OBJS[@]}" "${LIBS[@]}" || { echo BUILD-FAILED; exit 1; }

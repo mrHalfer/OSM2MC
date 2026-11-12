@@ -11,6 +11,8 @@
 #include "export/lairset.h"
 #include "export/paledonor.h"
 #include "export/carset.h"
+#include "export/playgroundset.h"
+#include "core/stlmodel.h"
 #include "export/sites.h"
 #include "export/geom.h"
 #include "export/rails.h"
@@ -159,6 +161,7 @@ private:
     QVector<PaleDonor> patchesLoaded;                              // outposts and camps (patch_*.bin next to cave_templates.bin)
     PaleDonor paleDonor;
     CarSet carSet;                                                     // parking-lot cars copied from the donor city-map schematics (car_templates.bin)
+    PlaygroundSet pgSet;                                               // playground structures copied from the .schem files (playground_templates.bin)
     double mnx, mxx;
     double mny, mxy, mnz, mxz;
     int totalVerts;
@@ -182,6 +185,10 @@ private:
     QVector<QRect> privBoxes;         // their extents in blocks (x0, z0, w, h) — for demolishing a house under a square
     QVector<QList<qint64>> pads;      // csrpol patches without height — we surround them with a wooden fence with gates
     QVector<QList<qint64>> flatPads;  // pads/point squares waiting for their flat level: taken in buildGround, when the terrain is ready
+    struct BldPlat { QList<qint64> cols; QList<qint64> allCols; int base; };   // the floor columns, all columns, the (unshifted) base
+    QVector<BldPlat> bldPlats;        // the building platforms: a 2-block flat margin + a ramp, taken in buildGround
+    QVector<quint8> builtDist;        // the distance (4-block cells) to the nearest building/road/pad, capped at 32
+    int bdW = 0, bdH = 0, bdX0 = 0, bdZ0 = 0;
     QVector<char> padIsLake;          // 1 — this is a lake (csrpol 51480000: water + a fence), 0 — an ordinary plate
     QSet<ColKey> noTreePadCols;       // the columns of apiaries and farms (csrpol 52400000/52100000): we do not plant trees there
     QVector<int> padCode;             // the CODE of the plate object (53700000/53710000 — sports/children's: we place equipment)
@@ -1662,8 +1669,21 @@ int ExportRun::groundTopCol(int x, int z)
             slope = double(terrainSlope[qsizetype(gz) * tsW + gx]) / 40.0;
     }
     const double steep = std::min(1.0, slope);
-    const double amp = 1.2 + 2.6 * steep;
-    const double n = terrainReliefNoise(x, z) + (steep > 0.2 ? 0.7 * terrainRidgeNoise(x, z) * steep : 0.0);
+    // BUILT-UP / PLAIN CALM: near the houses and on gentle ground the noise is damped — no abrupt two-block steps in
+    // the residential quarters and the relief is stretched (a user request); far from everything the ridges are
+    // stronger, so the wild ground stays hilly and mountainous where the matrix asks for it.
+    double near = 0.0;
+    if (bdW > 0)
+    {
+        const int gx = (x - bdX0) / 4, gz = (z - bdZ0) / 4;
+        if (gx >= 0 && gx < bdW && gz >= 0 && gz < bdH)
+            near = std::max(0.0, 1.0 - double(builtDist[qsizetype(gz) * bdW + gx]) / 32.0);
+    }
+    const double plain = std::max(0.0, 1.0 - steep / 0.35);          // gentle ground: the relief is stretched
+    const double calm = std::max(near, plain);
+    const double amp = (1.2 - 1.0 * calm) + 2.6 * steep * (1.0 - 0.35 * calm);
+    const double ridgeK = 0.7 * (0.6 + 0.9 * (1.0 - near));           // wilder far from the buildings
+    const double n = terrainReliefNoise(x, z) + (steep > 0.2 ? ridgeK * terrainRidgeNoise(x, z) * steep : 0.0);
     const int t = std::max(0, std::min(255, t0 + int(std::lround(amp * n))));
     const int cxk = x >> 4, czk = z >> 4;
     const int d = std::max(std::max(rcx0 - cxk, cxk - rcx1), std::max(std::max(rcz0 - czk, czk - rcz1), 0));
@@ -2593,6 +2613,64 @@ void ExportRun::buildStreetFurniture()
                     if (courtBuilt) ++nEq;
                     else if (padCols.size() < 700 && hp % 100u < 30u) kidsPad = true;       // a small sports/children's playground (the code 53700000 unites both kinds)
                 }
+                // PLAYGROUND STRUCTURES from the .schem templates (playground_templates.bin, a user request): a BIG
+                // children's playground gets one of them (the small ones keep the exporter's sandboxes and carousels),
+                // and a sports ground with a marked court gets one into the free area OUTSIDE the court marking.
+                // The grid's y=0 layer is the layer above the pad's surface (see extract_playgrounds.py).
+                auto placePlayTemplate = [&](const PlaygroundSet::Item& it, int rot, int u, int v) -> bool
+                {
+                    const int w = (rot & 1) ? it.sz : it.sx;
+                    const int d = (rot & 1) ? it.sx : it.sz;
+                    if (u < 1 || v < 1 || u + w > L - 1 || v + d > Wd - 1) return false;
+                    for (int uu = u; uu < u + w; ++uu)
+                        for (int vv = v; vv < v + d; ++vv)
+                        {
+                            if (!inside(uu, vv, 1)) return false;
+                            const QPoint q = toXZ(uu, vv);
+                            if (courtCols.contains(pairKey(q.x(), q.y()))) return false;   // never on a court marking
+                        }
+                    const QVector<PlaygroundSet::Cell>& cells = it.rots[rot].cells;
+                    for (const PlaygroundSet::Cell& c : cells)
+                    {
+                        const QPoint q = toXZ(u + c.x, v + c.z);
+                        const int y = surfaceTop(pairKey(q.x(), q.y())) + 1 + c.y;
+                        if (y >= 254 || store.get(q.x(), y, q.y()) != IdAir) return false;
+                    }
+                    for (const PlaygroundSet::Cell& c : cells)
+                    {
+                        const QPoint q = toXZ(u + c.x, v + c.z);
+                        store.set(q.x(), surfaceTop(pairKey(q.x(), q.y())) + 1 + c.y, q.y(), c.id);
+                    }
+                    return true;
+                };
+                auto placeBigPlay = [&]() -> bool
+                {
+                    if (pgSet.empty()) return false;
+                    const quint32 h0 = colHash(pairKey(bx0, bz0) ^ ring.first() ^ 0xB16Bull);
+                    const int n = pgSet.items.size();
+                    for (int attempt = 0; attempt < n; ++attempt)
+                    {
+                        const int ti = int((h0 + quint32(attempt)) % quint32(n));
+                        const int rot = int(((h0 >> 8) + quint32(attempt) * 3u) % 4u);
+                        const PlaygroundSet::Item& it = pgSet.items[ti];
+                        const int w = (rot & 1) ? it.sz : it.sx;
+                        const int d = (rot & 1) ? it.sx : it.sz;
+                        if (w > L - 2 || d > Wd - 2) continue;
+                        const int umax = L - 1 - w, vmax = Wd - 1 - d;
+                        if (umax < 1 || vmax < 1) continue;
+                        const quint32 hu = (h0 >> 16) ^ quint32(attempt) * 7u;
+                        const int us = 1 + int(hu % quint32(umax));
+                        const int vs = 1 + int((hu >> 9) % quint32(vmax));
+                        for (int k = 0; k < umax * vmax; ++k)
+                        {
+                            const int u = 1 + (us - 1 + k) % umax;
+                            const int v = 1 + (vs - 1 + k / umax) % vmax;
+                            if (placePlayTemplate(it, rot, u, v)) return true;
+                        }
+                    }
+                    return false;
+                };
+                if (courtBuilt || (kidsPad && padCols.size() >= 700)) placeBigPlay();
                 if (kidsPad)
                 {   // CHILDREN'S PLAYGROUND
                     // swings: a frame of two posts 4 high with a crossbar and two seats
@@ -2863,8 +2941,9 @@ void ExportRun::buildStreetFurniture()
                             // window and without the balance logs — the court is the main thing there, not a scatter of
                             // small pieces; children's pads without a court keep the full set
                             if (courtBuilt && colHash(pairKey(u0, v0) ^ 0x71C1ull) % 3u != 0u) continue;
-                            if (!haveFort && colHash(pairKey(u0 * 7 + 1, v0 * 13) ^ ring.first() ^ 0xA11Cull) % 3u == 0u)
-                            {   // the featured structure before the small pieces: ~1/3 of the free windows
+                            if (pgSet.empty() && !haveFort && colHash(pairKey(u0 * 7 + 1, v0 * 13) ^ ring.first() ^ 0xA11Cull) % 3u == 0u)
+                            {   // the procedural featured structure before the small pieces: ~1/3 of the free windows
+                                // (only when the .schem templates are absent; the imported structures are placed above)
                                 const quint32 hs = colHash(pairKey(u0, v0) ^ 0x517Aull);
                                 const int sk = int(hs % 3u);
                                 if (u0 + 1 + kW2[sk] < L - 1 && v0 + 1 + kD2[sk] < Wd - 1)
@@ -3291,13 +3370,26 @@ void ExportRun::buildStreetFurniture()
                         return;
                     }
                 };
+                struct ParkEdge { const QVector<QPointF>* ring; int e; double len; };
+                QVector<ParkEdge> parkEdges;
                 for (const QVector<QPointF>& ring : ps.rings)
                     for (int e = 0; e < ring.size(); ++e)
                     {
                         const QPointF p0 = ring[e], p1 = ring[(e + 1) % ring.size()];
                         const double len = std::hypot(p1.x() - p0.x(), p1.y() - p0.y());
-                        if (len < 8.0) continue;
-                        const double dx = (p1.x() - p0.x()) / len, dz = (p1.y() - p0.y()) / len;
+                        if (len >= 8.0) parkEdges.append(ParkEdge{ &ring, e, len });
+                    }
+                // the LONG edges first (a user request: on a narrow lot the lines must run ACROSS it, not along it —
+                // many more spots for cars); the short edges' along-lines then touch the cross-lines and are dropped
+                std::sort(parkEdges.begin(), parkEdges.end(),
+                          [](const ParkEdge& a, const ParkEdge& b) { return a.len > b.len; });
+                for (const ParkEdge& pe : parkEdges)
+                {
+                    const QVector<QPointF>& ring = *pe.ring;
+                    const int e = pe.e;
+                    const QPointF p0 = ring[e], p1 = ring[(e + 1) % ring.size()];
+                    const double len = pe.len;
+                    const double dx = (p1.x() - p0.x()) / len, dz = (p1.y() - p0.y()) / len;
                         auto inside = [&](double x, double z) { return ps.cols.contains(pairKey(int(std::floor(x)), int(std::floor(z)))); };
                         double nx = -dz, nz = dx;                           // the normal into the polygon
                         const double mx = (p0.x() + p1.x()) * 0.5, mz = (p0.y() + p1.y()) * 0.5;
@@ -3323,7 +3415,11 @@ void ExportRun::buildStreetFurniture()
                                 if (!ps.cols.contains(ck)) { exitSl = sl; exX = fx; exZ = fz; break; }
                                 if (sl <= 12.0 && (cells.isEmpty() || cells.last() != ck)) cells.append(ck);
                             }
-                            if (exitSl >= 0.0 && exitSl <= 12.0) continue;              // the line length is greater than the parking lot — no lines
+                            if (exitSl >= 0.0 && exitSl <= 12.0)
+                            {   // the line does not fit (the lot is shallower than 12): on a NARROW lot the long edge
+                                // still gets a shorter cross-line across it — many more spots for cars (a user request)
+                                if (!(len >= 16.0 && exitSl >= 6.0)) continue;
+                            }
                             if (cells.size() < 5) continue;
                             if (exitSl >= 0.0)
                             {   // depth < 36: only one of the two opposite sides
@@ -3420,6 +3516,91 @@ void ExportRun::buildStreetFurniture()
             tmcStepLog(QString("cars: %1 cars on %2 spots (skipped: lot full %3, tilted edge %4, overlap %5, floor %6, blocked %7, wide %8)")
                        .arg(nParkCars).arg(nSlot).arg(nSlotFull).arg(nSlotTilt).arg(nSlotBusy).arg(nSlotFloor).arg(nSlotAir).arg(nSlotWide)
                        .toUtf8().constData());
+    }
+    {   // LANDMARK 3D MODELS (the STL files, a user request): voxelize the models that fall inside the export area and
+        // stand them on the ground. The JSON "placement": "roof" (default) — when the model's place falls on a
+        // building, it stands on the building's roof, never inside the house; "instead" — the building that the centre
+        // fell on (and the ones stacked over it) is razed, and the model stands on the lot. The models are z-up; the
+        // height in the JSON sets the block height, the yaw turns the model around the up axis (degrees, clockwise as
+        // seen from above), the material may name ANY block (an unknown name joins the runtime palette tail).
+        int nLand = 0, nRazed = 0;
+        QHash<qint64, int> razedFrom;     // a razed column -> the y where its building's blocks started
+        for (const McWorldOptions::LandmarkSite& site : world.landmarks)
+        {
+            const int bx = int(std::lround(toBlockX(tf, site.mapX)));
+            const int bz = int(std::lround(toBlockZ(tf, site.mapY)));
+            // inside the export boundary (the drawn polygon), otherwise inside the data rect
+            const bool inside = clipPath.isEmpty() ? inExportRect(bx, bz)
+                                                   : clipPath.contains(QPointF(bx + 0.5, bz + 0.5));
+            if (!inside) continue;
+            QVector<StlTri> tris;
+            QString err;
+            if (!stlLoad(site.file, tris, &err))
+            {
+                res.lairInfo += QObject::tr("; landmark %1 skipped: %2").arg(site.label, err);
+                continue;
+            }
+            QVector<StlCell> cells;
+            if (!stlVoxelize(tris, site.heightM, site.yaw, cells, &err))
+            {
+                res.lairInfo += QObject::tr("; landmark %1 skipped: %2").arg(site.label, err);
+                continue;
+            }
+            const quint16 block = landmarkBlockId(site.material);
+            const qint64 ck = pairKey(bx, bz);
+            const bool instead = site.placement.compare(QString::fromLatin1("instead"), Qt::CaseInsensitive) == 0;
+            if (instead)
+            {   // RAZE THE BUILDING (a user request): every building whose columns cover the centre (a stacked pair —
+                // both) is cleared down to its lot; the plates and street signs re-check the wall supports later,
+                // the interior entities are filtered after the loop.
+                for (const BldPlat& bp : bldPlats)
+                {
+                    if (!bp.allCols.contains(ck)) continue;
+                    for (const qint64 k : bp.allCols)
+                    {
+                        const int x = keyFirst(k), z = keySecond(k);
+                        const int y0 = std::max(surfaceTop(k) + 1, colMin.value(k, bp.base));   // never dig into the ground
+                        int yTop = y0 - 1;
+                        for (int y = 254; y >= y0; --y)
+                            if (store.get(x, y, z) != IdAir) { yTop = y; break; }
+                        for (int y = y0; y <= yTop; ++y)
+                            store.set(x, y, z, IdAir);
+                        if (yTop >= y0) razedFrom.insert(k, y0);
+                    }
+                    ++nRazed;
+                }
+            }
+            int base = surfaceTop(ck) + 1;
+            if (!instead && colMin.contains(ck))
+            {   // "roof": a building (or another object) at this column: its highest solid block is the roof
+                int roof = -1;
+                for (int y = 254; y > base; --y)
+                {
+                    const quint16 b = store.get(bx, y, bz);
+                    if (b != IdAir && !isVegBlockId(b)) { roof = y; break; }
+                }
+                if (roof > base + 1) base = roof + 1;
+            }
+            for (const StlCell& c : cells)
+                store.set(bx + c.x, base + c.y, bz + c.z, block);
+            ++nLand;
+        }
+        if (!razedFrom.isEmpty())
+        {   // the loot, paintings, spawners and mobs of a razed building must not hang over the lot
+            auto razed = [&](int x, int z, int y)
+            {
+                const auto it = razedFrom.constFind(pairKey(x, z));
+                return it != razedFrom.constEnd() && y >= it.value();
+            };
+            const auto cut = [&](auto& v)
+            { v.erase(std::remove_if(v.begin(), v.end(),
+                                     [&](const auto& s) { return razed(s.x, s.z, s.y); }), v.end()); };
+            cut(chests); cut(paints); cut(mannequins); cut(npcs); cut(frames); cut(spawners); cut(bannerSites);
+        }
+        if (nLand > 0)
+            res.lairInfo += nRazed > 0 ? QObject::tr("; landmark models: %1 (buildings razed: %2)").arg(nLand).arg(nRazed)
+                                       : QObject::tr("; landmark models: %1").arg(nLand);
+        if (nLand > 0) tmcStepLog(QString("landmarks: %1 models placed, %2 buildings razed").arg(nLand).arg(nRazed).toUtf8().constData());
     }
 
 }
@@ -7141,6 +7322,46 @@ bool ExportRun::buildGround()
             genGroundTop += yShift;                                   // terrainTopBlock will add it itself (by reference)
         }
     }
+    {   // BUILT-UP DISTANCE: how far a column is from the nearest building/road/pad/rail — a 4-block grid, capped at
+        // 32 cells (128 blocks). groundTopCol() damps the noise near the houses and on plains (no abrupt two-block
+        // steps in the residential quarters) and strengthens the ridges far from everything (a user request).
+        const int ex0 = rcx0 * 16, ez0 = rcz0 * 16;
+        const qint64 eW = qint64(rcx1 - rcx0 + 1) * 16, eH = qint64(rcz1 - rcz0 + 1) * 16;
+        constexpr int kGrid = 4;
+        constexpr int kCap = 32;
+        bdW = int((eW + kGrid - 1) / kGrid);
+        bdH = int((eH + kGrid - 1) / kGrid);
+        bdX0 = ex0; bdZ0 = ez0;
+        builtDist.clear();
+        if (eW > 0 && eH > 0 && qint64(bdW) * bdH <= 100000000ll)
+        {
+            builtDist.fill(quint8(kCap), int(qint64(bdW) * bdH));
+            auto mark = [&](qint64 k)
+            {
+                const int gx = (keyFirst(k) - ex0) / kGrid, gz = (keySecond(k) - ez0) / kGrid;
+                if (gx >= 0 && gx < bdW && gz >= 0 && gz < bdH) builtDist[qsizetype(gz) * bdW + gx] = 0;
+            };
+            for (auto it = colMin.constBegin(); it != colMin.constEnd(); ++it) mark(it.key());
+            for (auto it = colWool.constBegin(); it != colWool.constEnd(); ++it) mark(it.key());
+            for (auto it = colWater.constBegin(); it != colWater.constEnd(); ++it) mark(it.key());
+            for (const qint64 k : roadCols) mark(k);
+            for (const qint64 k : railColsAll) mark(k);
+            for (int z = 1; z < bdH; ++z)                             // forward pass (Manhattan)
+                for (int x = 1; x < bdW; ++x)
+                {
+                    quint8& dv = builtDist[qsizetype(z) * bdW + x];
+                    if (!dv) continue;
+                    dv = quint8(std::min<int>(dv, std::min(builtDist[qsizetype(z) * bdW + x - 1], builtDist[qsizetype(z - 1) * bdW + x]) + 1));
+                }
+            for (int z = bdH - 2; z >= 0; --z)                        // backward pass
+                for (int x = bdW - 2; x >= 0; --x)
+                {
+                    quint8& dv = builtDist[qsizetype(z) * bdW + x];
+                    if (!dv) continue;
+                    dv = quint8(std::min<int>(dv, std::min(builtDist[qsizetype(z) * bdW + x + 1], builtDist[qsizetype(z + 1) * bdW + x]) + 1));
+                }
+        }
+    }
     lap("g0 before the Pale Garden");
     // PALE GARDEN: the biggest forest (by the number of columns) becomes a full "Pale Garden" biome — the biome on
     // 4×4 cells along the forest outline, trees of pale oak (a 2×2 trunk, some with a "creaking heart"), moss, "eyeblossom" flowers.
@@ -8213,6 +8434,120 @@ bool ExportRun::buildGround()
             tmcStepLog(QString("roads/rails: %1 cells graded into the relief (margin %2 blocks)").arg(grade.size()).arg(kMargin).toUtf8().constData());
         }
     }
+    {   // BUILDING PLATFORMS: around every house a FLAT margin of two blocks at the house's own level, and only then a
+        // smooth ramp back to the terrain (a user request: the house must stand on its plane, the ground around it does
+        // not jump). ROADS AND RAILWAYS ARE NEVER TOUCHED (a user request: the roads are the most important thing on
+        // the map) — neither the track nor its flat margin; the ramp length follows the real height difference, so the
+        // ground next to a house steps by one block at a time. The house's floor columns are already flat
+        // (buildObjects); the margin and the ramp are taken HERE, when the terrain and the world lift are ready.
+        if (!bldPlats.isEmpty())
+        {
+            constexpr int kMargin = 2;    // the flat margin around the house, blocks
+            qint64 nCells = 0;
+            for (const BldPlat& bp : bldPlats)
+            {
+                int L = std::numeric_limits<int>::max();          // the house's floor level (shifted with the world)
+                for (const qint64 ck : bp.cols)
+                {
+                    const auto fit = flatGround.constFind(ck);
+                    if (fit != flatGround.constEnd()) L = std::min(L, fit.value());
+                }
+                if (L == std::numeric_limits<int>::max()) L = bp.base - 1 + yShift;
+                // the box of the house and its own columns
+                int bx0 = std::numeric_limits<int>::max(), bx1 = std::numeric_limits<int>::min();
+                int bz0 = bx0, bz1 = bx1;
+                QSet<qint64> own;
+                own.reserve(bp.cols.size());
+                for (const qint64 ck : bp.cols)
+                {
+                    own.insert(ck);
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    bx0 = std::min(bx0, x); bx1 = std::max(bx1, x);
+                    bz0 = std::min(bz0, z); bz1 = std::max(bz1, z);
+                }
+                // the largest height difference to the free terrain next to the house: the ramp length
+                int maxDiff = 0;
+                for (const qint64 ck : bp.cols)
+                {
+                    const int x = keyFirst(ck), z = keySecond(ck);
+                    bool border = false;
+                    for (int dz = -1; dz <= 1 && !border; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                            if (!own.contains(pairKey(x + dx, z + dz))) { border = true; break; }
+                    if (!border) continue;
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            const qint64 nk = pairKey(x + dx, z + dz);
+                            if (own.contains(nk) || flatGround.contains(nk)) continue;
+                            if (colMin.contains(nk) || colWool.contains(nk) || colWater.contains(nk)) continue;
+                            if (roadCols.contains(nk) || railColsAll.contains(nk)) continue;
+                            maxDiff = std::max(maxDiff, std::abs(L - groundTopCol(x + dx, z + dz)));
+                        }
+                }
+                const int kBlend = std::max(6, std::min(16, maxDiff));   // one block per step where possible
+                const int dMax = kMargin + kBlend;
+                // the distance to the house (8-neighbour chamfer = Chebyshev), on a grid around the house
+                const int ox0 = bx0 - dMax, oz0 = bz0 - dMax;
+                const int W = bx1 - bx0 + 1 + 2 * dMax, H = bz1 - bz0 + 1 + 2 * dMax;
+                if (W <= 0 || H <= 0 || qint64(W) * H > 4000000ll) continue;
+                QVector<quint8> dist(qsizetype(W) * H, 255);
+                for (const qint64 ck : bp.cols)
+                    dist[qsizetype(keySecond(ck) - oz0) * W + (keyFirst(ck) - ox0)] = 0;
+                for (int z = 0; z < H; ++z)                       // forward pass: NW, N, NE, W
+                    for (int x = 0; x < W; ++x)
+                    {
+                        quint8& dv = dist[qsizetype(z) * W + x];
+                        if (!dv) continue;
+                        int best = 255;
+                        static const int kdx[4] = { -1, 0, 1, -1 }, kdz[4] = { -1, -1, -1, 0 };
+                        for (int k = 0; k < 4; ++k)
+                        {
+                            const int nx = x + kdx[k], nz = z + kdz[k];
+                            if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
+                            best = std::min(best, int(dist[qsizetype(nz) * W + nx]));
+                        }
+                        dv = quint8(std::min<int>(dv, best + 1));
+                    }
+                for (int z = H - 1; z >= 0; --z)                  // backward pass: E, SW, S, SE
+                    for (int x = W - 1; x >= 0; --x)
+                    {
+                        quint8& dv = dist[qsizetype(z) * W + x];
+                        if (!dv) continue;
+                        int best = 255;
+                        static const int kdx[4] = { 1, -1, 0, 1 }, kdz[4] = { 0, 1, 1, 1 };
+                        for (int k = 0; k < 4; ++k)
+                        {
+                            const int nx = x + kdx[k], nz = z + kdz[k];
+                            if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
+                            best = std::min(best, int(dist[qsizetype(nz) * W + nx]));
+                        }
+                        dv = quint8(std::min<int>(dv, best + 1));
+                    }
+                for (int z = 0; z < H; ++z)
+                    for (int x = 0; x < W; ++x)
+                    {
+                        const int d = dist[qsizetype(z) * W + x];
+                        if (d < 1 || d > dMax) continue;
+                        const qint64 nk = pairKey(ox0 + x, oz0 + z);
+                        if (flatGround.contains(nk)) continue;                     // a house/road/pad is there
+                        if (colMin.contains(nk) || colWool.contains(nk) || colWater.contains(nk)) continue;   // occupied
+                        if (roadCols.contains(nk) || railColsAll.contains(nk)) continue;   // roads are never touched
+                        if (d <= kMargin)
+                            flatGround.insert(nk, L);                     // the flat margin at the house's level
+                        else
+                        {   // the smooth return to the terrain
+                            const int t = groundTopCol(ox0 + x, oz0 + z);
+                            double w = double(d - kMargin) / double(kBlend);
+                            w = w * w * (3.0 - 2.0 * w);
+                            flatGround.insert(nk, int(std::lround(double(L) + (double(t) - double(L)) * w)));
+                        }
+                        ++nCells;
+                    }
+            }
+            tmcStepLog(QString("buildings: %1 platform/margin cells").arg(nCells).toUtf8().constData());
+        }
+    }
     {   // FLAT PADS: a playground, a parking lot, a courtyard or a point square stands at the AVERAGE ground level of
         // its cells (a user request: the maximum lifted the sites onto the hilltops). That level is spread over the pad
         // itself and a flat margin of two blocks around it, then it fades back into the terrain over a smooth ramp —
@@ -8348,7 +8683,11 @@ bool ExportRun::buildGround()
         // the road's own material and color (a user request): gray concrete slab for the motor roadway, light gray
         // concrete slab for the pedestrian roads, white wool slab for the markings, light gray wool slab for the curbs.
         // A bottom slab on the lower cell halves the step; a step of several blocks gets a half-slab ledge per level.
+        // The half-slab ledge is then EXTENDED two cells downhill along the road (a user request: 2-3 cells of half
+        // blocks instead of one), together with the marking and the curb — a one-block rise is spread over three cells.
         qint64 nSlab = 0;
+        QHash<qint64, int> stepDir;   // a lower cell with a higher neighbour -> the direction (0..3) to the higher one
+        QSet<qint64> slabbed;         // the cells that already got their step slabs
         for (const qint64 ck : roadCols)
         {
             const int x = keyFirst(ck), z = keySecond(ck);
@@ -8357,7 +8696,7 @@ bool ExportRun::buildGround()
             const int col = (z & 15) * 16 + (x & 15);
             if (git->wd[col] > 0) continue;                          // over water — the bridge pass deals with it
             const int h = git->top[col];
-            int hi = h;
+            int hi = h, dir = -1;
             for (int d = 0; d < 4; ++d)
             {
                 const int nx = x + (d == 0 ? 1 : d == 1 ? -1 : 0);
@@ -8366,7 +8705,8 @@ bool ExportRun::buildGround()
                 if (!roadCols.contains(nk)) continue;
                 const auto g2 = ground.constFind(pairKey(nx >> 4, nz >> 4));
                 if (g2 == ground.constEnd()) continue;
-                hi = std::max(hi, int(g2->top[(nz & 15) * 16 + (nx & 15)]));
+                const int nh = int(g2->top[(nz & 15) * 16 + (nx & 15)]);
+                if (nh > hi) { hi = nh; dir = d; }
             }
             if (hi <= h) continue;
             quint16 slab = roadSlabForCarpet(store.get(x, h + 1, z));  // a marking/curb: the wool slab of its color
@@ -8382,6 +8722,41 @@ bool ExportRun::buildGround()
                 if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount))
                     continue;                                          // a lamp/plant/other block — leave it
                 store.set(x, y, z, slab);
+                ++nSlab;
+            }
+            slabbed.insert(ck);
+            stepDir.insert(ck, dir);
+        }
+        for (auto it = stepDir.constBegin(); it != stepDir.constEnd(); ++it)
+        {
+            const qint64 ck = it.key();
+            const int x = keyFirst(ck), z = keySecond(ck);
+            const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+            if (git == ground.constEnd()) continue;
+            const int h = git->top[(z & 15) * 16 + (x & 15)];
+            const int d = it.value();
+            if (d < 0) continue;
+            const int dx = (d == 0 ? 1 : d == 1 ? -1 : 0);
+            const int dz = (d == 2 ? 1 : d == 3 ? -1 : 0);
+            for (int k = 1; k <= 2; ++k)
+            {   // downhill along the road: the same level only (the shelf of the flat approach)
+                const int nx = x - dx * k, nz = z - dz * k;
+                const qint64 nk = pairKey(nx, nz);
+                if (!roadCols.contains(nk) || slabbed.contains(nk)) break;
+                const auto g2 = ground.constFind(pairKey(nx >> 4, nz >> 4));
+                if (g2 == ground.constEnd()) break;
+                if (int(g2->top[(nz & 15) * 16 + (nx & 15)]) != h) break;
+                quint16 slab = roadSlabForCarpet(store.get(nx, h + 1, nz));
+                if (!slab)
+                {
+                    const auto wit = colWool.constFind(nk);
+                    if (wit != colWool.constEnd()) slab = roadSlabForSurface(wit.value());
+                }
+                if (!slab) break;
+                const quint16 cur = store.get(nx, h + 1, nz);
+                if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount)) break;   // occupied
+                store.set(nx, h + 1, nz, slab);
+                slabbed.insert(nk);
                 ++nSlab;
             }
         }
@@ -9755,6 +10130,17 @@ bool ExportRun::prepareObjects()
             carSet = CarSet();
             tmcStepLog("cars: car_templates.bin not found or damaged - the parking lots will stay without cars");
         }
+        // Playground structures: exact copies of the owner's .schem structures (playground_templates.bin; no file —
+        // the procedural playground structures are used instead)
+        const QString pgPath = findTemplateAsset(paleDirs, QStringLiteral("playground_templates.bin"));
+        if (pgPath.isEmpty() || !pgSet.load(pgPath, caveSet))
+        {
+            pgSet = PlaygroundSet();
+            tmcStepLog("playgrounds: playground_templates.bin not found or damaged - the procedural structures are used");
+        }
+        // The playground/car states live in the cave-state registry: without caves it is not activated by CaveSet::load,
+        // but blockName() needs it to write the blocks — activate it for this export.
+        if (!g_caveStates) g_caveStates = &caveSet.states;
     }
 
     tmcStepLog("export: start");
@@ -9932,13 +10318,22 @@ bool ExportRun::buildObjects()
                 for (auto cit = j->colMin.constBegin(); cit != j->colMin.constEnd(); ++cit)
                     base = std::min(base, cit.value());
                 if (base != std::numeric_limits<int>::max())
+                {
+                    BldPlat bp;
+                    bp.base = base;
                     for (auto cit = j->colMin.constBegin(); cit != j->colMin.constEnd(); ++cit)
+                    {
+                        bp.allCols << cit.key();
                         if (cit.value() == base)
                         {
                             const int top = base - 1;
                             auto fit = flatGround.find(cit.key());
                             if (fit == flatGround.end() || fit.value() > top) flatGround.insert(cit.key(), top);
+                            bp.cols << cit.key();
                         }
+                    }
+                    if (!bp.cols.isEmpty()) bldPlats.append(bp);   // a 2-block flat margin + a ramp, taken in buildGround
+                }
             }
             for (auto cit = j->store.chunks.begin(); cit != j->store.chunks.end(); ++cit)
             {

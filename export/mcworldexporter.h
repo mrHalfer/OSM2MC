@@ -86,6 +86,21 @@ struct McWorldOptions
     //! The area of a TERRAIN-ONLY export (the rules found no objects, only a height matrix is left): a polygon in map coordinates;
     //! the terrain of this area is written without any objects. Empty — not used.
     QVector<QPointF> terrainArea;
+    //! A landmark 3D model (an STL) placed at its real coordinates (a user request): the exporter voxelizes it and
+    //! stands it on the ground; when its place falls on a building, it stands on the building's roof, not inside it.
+    struct LandmarkSite
+    {
+        QString file;         //!< the .stl file (absolute, or relative to the JSON folder)
+        QString label;        //!< for the log
+        double mapX = 0.0;    //!< the position in the project (map) coordinates
+        double mapY = 0.0;
+        double heightM = 0.0; //!< the model's height in blocks (the real height of the landmark)
+        QString material;     //!< the block name (minecraft:...) the model is built of
+        double yaw = 0.0;     //!< the rotation around the up axis, degrees clockwise (0 — as in the STL)
+        QString placement;    //!< "roof" (default) — on the building's roof, "instead" — the building is removed
+        QString attribution;  //!< the credit line of the model (the CC license), written into ATTRIBUTION.txt
+    };
+    QVector<LandmarkSite> landmarks;
     //! The climate zone of the export area (export/climate.h, Climate::Zone): tree species, surface and chunk biome. 0 — temperate (as before).
     int climateZone = 0;
     //! The attribution of the source data (for OpenStreetMap — the ODbL line): if not empty, it is written into the root of the zip as ATTRIBUTION.txt

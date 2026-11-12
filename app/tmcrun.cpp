@@ -10,6 +10,10 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QCoreApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QRandomGenerator>
 #include <QElapsedTimer>
 #include <QDateTime>
@@ -37,6 +41,55 @@ static QString findDefaultT3d()
         if (QFileInfo::exists(p)) return p;
     }
     return QString();
+}
+
+//! The landmark STL models (a user request): landmarks.json next to the exe (or in assets/stl), with the real
+//! coordinates of every landmark; the coordinates are projected into the project CRS here, the exporter voxelizes
+//! and places the models. MCX_LANDMARKS=<path> overrides the JSON (for testing on any area).
+static QVector<McWorldOptions::LandmarkSite> tmcLoadLandmarks(TmcProject& project)
+{
+    QVector<McWorldOptions::LandmarkSite> out;
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QStringList cands;
+    const QString env = qEnvironmentVariable("MCX_LANDMARKS");
+    if (!env.isEmpty()) cands << env;
+    cands << QDir(appDir).filePath(QStringLiteral("landmarks.json"))
+          << QDir(appDir).filePath(QStringLiteral("assets/stl/landmarks.json"))
+          << QDir(appDir).filePath(QStringLiteral("stl/landmarks.json"))
+          << QDir(QDir::currentPath()).filePath(QStringLiteral("resources/stl/landmarks.json"));
+    QString path;
+    for (const QString& c : cands)
+        if (QFileInfo::exists(c)) { path = c; break; }
+    if (path.isEmpty()) return out;
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return out;
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) return out;
+    const QJsonArray models = doc.object().value(QStringLiteral("models")).toArray();
+    const QDir base = QFileInfo(path).absoluteDir();
+    for (const QJsonValue& v : models)
+    {
+        const QJsonObject o = v.toObject();
+        const QJsonValue lonV = o.value(QStringLiteral("lon"));
+        const QJsonValue latV = o.value(QStringLiteral("lat"));
+        if (!lonV.isDouble() || !latV.isDouble()) continue;
+        double x = 0.0, y = 0.0;
+        if (!project.lonLatToProject(lonV.toDouble(), latV.toDouble(), x, y)) continue;
+        McWorldOptions::LandmarkSite s;
+        s.file = base.filePath(o.value(QStringLiteral("file")).toString());
+        s.label = o.value(QStringLiteral("label")).toString();
+        s.mapX = x;
+        s.mapY = y;
+        s.heightM = o.value(QStringLiteral("height_m")).toDouble(0.0);
+        s.material = o.value(QStringLiteral("material")).toString();
+        s.yaw = o.value(QStringLiteral("yaw")).toDouble(0.0);
+        s.placement = o.value(QStringLiteral("placement")).toString();
+        s.attribution = o.value(QStringLiteral("attribution")).toString();
+        if (s.file.isEmpty() || s.heightM <= 0.0) continue;
+        out.append(s);
+    }
+    return out;
 }
 
 bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QString&)>& logFn, TmcProject& project, T3dSettings& settings, QString* err)
@@ -212,6 +265,15 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
             double x, y;
             if (project.lonLatToProject(ll.x(), ll.y(), x, y)) w.clipPolygon << QPointF(x, y);
         }
+    // Landmark 3D models (the STL files): the JSON with the real coordinates and heights; only the ones inside the
+    // export area are voxelized and placed by the exporter.
+    w.landmarks = tmcLoadLandmarks(project);
+    if (!w.landmarks.isEmpty())
+    {
+        log(QObject::tr("Landmark 3D models: %1").arg(w.landmarks.size()));
+        for (const McWorldOptions::LandmarkSite& s : w.landmarks)
+            if (!s.attribution.isEmpty()) w.attribution += s.attribution + QLatin1Char('\n');
+    }
     // The area of a terrain-only export (no objects matched the rules): the boundary, otherwise the height matrix extent
     if (w.clipPolygon.size() >= 3) w.terrainArea = w.clipPolygon;
     else if (!project.rasters().isEmpty())

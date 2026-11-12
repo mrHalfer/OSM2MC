@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "help": {
+    "file": "the .stl model (absolute path, or relative to this file); binary or ASCII STL, z-up",
+    "lon, lat": "the real longitude/latitude of the model's centre",
+    "height_m": "the model height in blocks (the real height of the landmark)",
+    "material": "the block the model is built of (minecraft:...) — any block name, also one that is not in the built-in palette",
+    "yaw": "rotation around the up axis, degrees, clockwise as seen from above (0 — as the model lies in the file)",
+    "placement": "\"roof\" (default) — when the centre falls on a building, the model stands on its roof; \"instead\" — that building is razed and the model stands on the lot",
+    "attribution": "the credit line of the model, written into the world's ATTRIBUTION.txt"
+  },
+  "models": [
+    {
+      "file": "Statue_of_libertyV1.stl",
+      "label": "Statue of Liberty",
+      "lon": -74.044502,
+      "lat": 40.689247,
+      "height_m": 93,
+      "material": "minecraft:oxidized_copper",
+      "yaw": 0,
+      "placement": "roof",
+      "attribution": "Statue of Liberty model: MrRicketts, CC BY-SA, https://www.thingiverse.com/thing:32488"
+    },
+    {
+      "file": "ChristReedemer.stl",
+      "label": "Christ the Redeemer",
+      "lon": -43.210487,
+      "lat": -22.951916,
+      "height_m": 38,
+      "material": "minecraft:calcite",
+      "yaw": 0,
+      "placement": "instead",
+      "attribution": "Christ the Redeemer model: JuanG3D, CC BY-SA, https://www.thingiverse.com/thing:744525"
+    }
+  ]
+}

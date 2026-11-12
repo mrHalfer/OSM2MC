@@ -46,5 +46,14 @@ Qt is used under the **GNU LGPL v3** (https://www.qt.io/licensing, https://www.g
 - **Vehicle models** of the parking-lot cars (template `car_templates.bin`): the block-built car and motorcycle
   shapes are made by **Nordic_Studios** (https://www.curseforge.com/members/nordic_studios). OSMC re-saves them in
   its own template format and stamps them into parking lots as they stand; the author of the models gets the credit.
+- **Playground structures** of the children's playgrounds and sports grounds (template `playground_templates.bin`):
+  the block-built playground structures are made by **domonman**
+  (https://www.planetminecraft.com/project/medieval-style-playground/). OSMC re-saves them in its own template
+  format and stamps them into the playgrounds as they stand; the author of the structures gets the credit.
+- **Landmark 3D models** (the STL files in `assets/stl`, voxelized into the world): the Statue of Liberty model
+  (`Statue_of_libertyV1.stl`) is made by **MrRicketts** (https://www.thingiverse.com/thing:32488) and the Christ the
+  Redeemer model (`ChristReedemer.stl`) is made by **JuanG3D** (https://www.thingiverse.com/thing:744525), both under
+  the Creative Commons Attribution-ShareAlike license. OSMC voxelizes them into blocks and stands them at their real
+  coordinates; the authors get the credit.
 
 Minecraft is a trademark of Mojang AB; OSMC is not affiliated with Mojang or Microsoft. The structure templates (`*.bin`) were cut out of a game world.

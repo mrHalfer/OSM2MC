@@ -25,6 +25,14 @@ import argparse, glob, gzip, io, os, struct, sys, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CW = {'north': 'east', 'east': 'south', 'south': 'west', 'west': 'north'}   # one step clockwise
+# the rail shape turns clockwise too: the ascending direction and the curve pairs
+CW_SHAPE = {
+    'north_south': 'east_west', 'east_west': 'north_south',
+    'ascending_north': 'ascending_east', 'ascending_east': 'ascending_south',
+    'ascending_south': 'ascending_west', 'ascending_west': 'ascending_north',
+    'north_east': 'south_east', 'south_east': 'south_west',
+    'south_west': 'north_west', 'north_west': 'north_east',
+}
 
 
 # ---------------------------------------------------------------- the donor .schem reader (two container variants)
@@ -120,6 +128,8 @@ def rotate_state(state):
             out[k] = CW[v]
         elif k == 'axis':
             out[k] = {'x': 'z', 'z': 'x', 'y': 'y'}[v]
+        elif k == 'shape':
+            out[k] = CW_SHAPE.get(v, v)                         # rails: the ascending direction turns too
         elif k == 'rotation':
             out[k] = str((int(v) + 4) % 16)
         else:

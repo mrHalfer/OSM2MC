@@ -30,7 +30,7 @@ extern const int kDoorRgb[11][3];
 extern const char* const kRailShapes[10];
 
 // Entry counts. New blocks join kBlockPalette AT THE END — update kPaletteCount there too.
-constexpr int kPaletteCount = 109;
+constexpr int kPaletteCount = 110;
 constexpr int kRoadSlabsCount = 32;   // 16 concrete slabs + 16 wool slabs (the road step slabs)
 constexpr int kCarpetsCount = 16;
 constexpr int kWoolsCount = 16;
@@ -223,6 +223,12 @@ enum : quint16
                                           //  properties from cave_templates.bin, see CaveSet) — MUST COME LAST
 };
 
+//! Landmark materials (the "material" of landmarks.json): a name absent from the static palette joins a RUNTIME
+//! tail at the top of the id space, so the JSON can name ANY block without a recompile. The tail is appended in the
+//! landmark stage (single-threaded) and read by the chunk assembly threads; the cave registry is a few hundred
+//! states at most, so IdLandmarkBase never collides with it (blockName checks the ranges separately).
+enum : quint16 { IdLandmarkBase = 60000 };
+
 //! A block state from the cave world palette (donor structures: rails, fences, stairs... with properties).
 struct CaveState
 {
@@ -237,6 +243,9 @@ void blockProperties(quint16 id, QVector<QPair<QString, QString>>& out);
 quint16 nearestBlockId(const QColor& c);
 quint16 nearestCarpetId(const QColor& c);
 int paletteIndexOf(const char* name);
+//! The block id of a landmark material (landmarks.json): the static palette first, then the runtime tail
+//! (see IdLandmarkBase); an empty name or a full tail — IdStone.
+quint16 landmarkBlockId(const QString& material);
 quint16 roadSlabForSurface(quint16 id);   // a concrete/wool roadway block -> the slab of the same color (0 — none)
 quint16 roadSlabForCarpet(quint16 id);    // a marking/curb carpet -> the wool slab of the same color (0 — none)
 bool isPaleForestCode(int code);

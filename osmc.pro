@@ -60,7 +60,7 @@ RC_LANG = 0x0419
 win32: QMAKE_CXXFLAGS += /utf-8
 win32: QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.6.26.11111
+    VERSION = 1.6.26.11121
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
@@ -101,6 +101,7 @@ HEADERS += \
     export/facade.h \
     export/voxelstore.h \
     export/carset.h \
+    export/playgroundset.h \
     export/caveset.h \
     export/geom.h \
     export/ground.h \
@@ -117,6 +118,7 @@ HEADERS += \
     core/mapfeature.h \
     core/maplayer.h \
     core/heightraster.h \
+    core/stlmodel.h \
     core/dtmgrid.h \
     core/dtmbuild.h \
     core/steplog.h \
@@ -162,6 +164,7 @@ SOURCES += \
     export/blocks.cpp \
     export/buildingmerge.cpp \
     export/carset.cpp \
+    export/playgroundset.cpp \
     export/caveset.cpp \
     export/facade.cpp \
     export/geom.cpp \
@@ -174,6 +177,7 @@ SOURCES += \
     export/exportrun.cpp \
     export/format/bytes.cpp \
     core/heightraster.cpp \
+    core/stlmodel.cpp \
     core/dtmgrid.cpp \
     core/dtmbuild.cpp
 

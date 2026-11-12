@@ -69,6 +69,12 @@ for f in default.t3d osm_rules.json heights.csv point_models.csv tmc_buildings.d
 done
 mkdir -p "$APP/usr/assets"
 cp -u "$ROOT"/resources/templates/*.bin "$APP/usr/assets/"
+# the landmark STL models and landmarks.json (the same assets/stl as the Windows zip; the wikidata list is not shipped)
+if [ -d "$ROOT/resources/stl" ]; then
+  mkdir -p "$APP/usr/assets/stl"
+  cp -u "$ROOT"/resources/stl/*.stl "$ROOT"/resources/stl/ATTRIBUTION.txt "$APP/usr/assets/stl/"
+  [ -f "$ROOT/resources/stl/landmarks.json" ] && cp -u "$ROOT/resources/stl/landmarks.json" "$APP/usr/assets/stl/"
+fi
 for f in README.md README.ru.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md; do
   [ -f "$ROOT/$f" ] && cp -u "$ROOT/$f" "$APP/usr/"
 done

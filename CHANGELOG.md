@@ -5,6 +5,46 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.6.26.11121] — 2026-11-12
+
+### Added
+
+- Block-built playground structures imported from .schem files (a user request): a BIG children's playground gets one
+  of them (the small ones keep the exporter's sandboxes and carousels), and a sports ground with a marked court gets
+  one into the free area outside the court marking. The structures keep their exact block grid in four rotations and
+  are stored in `playground_templates.bin` next to the other templates (no file — the procedural structures are used).
+- Landmark 3D models from STL files (a user request): the exporter reads `landmarks.json` (the file, the real
+  longitude/latitude, the height in blocks, the material, the yaw and the placement of every landmark), voxelizes the
+  binary or ASCII STL at that height and stands the model at its place. The `placement` knob: "roof" (default) stands
+  the model on the roof of the building its centre fell on, "instead" razes that building and stands the model on the
+  lot. The material may name any block: a name outside the built-in palette joins it at runtime. The models are z-up;
+  the shell is sampled and the interior filled, so a closed mesh comes out solid. The Statue of Liberty and Christ the
+  Redeemer are included (see `THIRD_PARTY_NOTICES.md`).
+
+### Changed
+
+- Every building stands on a flat margin of two blocks at its own level, and only then the ground ramps back to the
+  terrain (a user request): the house no longer meets the relief with a step right at its wall. The ramp length
+  follows the real height difference (one block per step where possible), and roads/railways are never touched by the
+  platforms — the roads stay the most important thing on the map.
+- The terrain noise is calmer near the buildings and on gentle ground (no abrupt two-block steps in the residential
+  quarters, the plain relief is stretched) and stronger far from everything, where the wild ground stays hilly and
+  mountainous according to the height matrix (a user request).
+- Parking lots: the marking lines are drawn from the LONG edges first, so on a narrow lot the lines run ACROSS it
+  instead of along it — many more spots for cars; a narrow lot may take a shorter line (from 6 blocks) when the full
+  12-block one does not fit.
+- The half-slab ledge on a road step is extended two cells downhill along the road (with the marking and the curb),
+  so a one-block rise is spread over three cells instead of one (a user request).
+- The ground stage is several times faster (a user request: the speed of the ground and vegetation stages): the
+  height matrix is resampled into the project CRS once, instead of a PROJ transform for every column. The transform
+  ran under a mutex, so the parallel ground fill was effectively single-threaded; on the Электросталь export the
+  ground stage went from 62 s to 9 s and the whole export from 78 s to 26 s (Cuba: 271 s to 77 s and 401 s to 204 s).
+
+### Fixed
+
+- The powered rails of the imported playground structures turned the wrong way after a rotation: the rail `shape`
+  property (`ascending_north/east/south/west` and the curves) is now rotated together with the structure.
+
 ## [1.6.26.11111] — 2026-11-11
 
 ### Added

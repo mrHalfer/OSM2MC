@@ -24,6 +24,7 @@ Instead of the online map you can use a file: type the path to an OpenStreetMap 
 - **Roads** with marking and crosswalks, bridges over water, railways (electrified ones get powered rails on a stone bed, trams on stone bricks), street lamps, signs with street names and house numbers. Roads and railways are graded into the relief: one level across the width, a flat margin of two blocks on both sides, and the height steps are smoothed with slabs of the road's own material and color. Roads inside the Pale Garden keep the garden's own relief.
 - **Nature**: water, forests, parks, yards, fields and terrain relief - just like real life, only better. The elevation data makes mountains and canyons real; buildings stand on a flat platform at the highest point of their footprint, while playgrounds, parking lots, courtyards and squares get a flat pad at the average height of their area with a smooth ramp back to the terrain. The climate zone is worked out from the coordinates automatically (or set by hand): 12 zones from tundra and taiga to deserts, savannas and tropical jungles - they pick the tree species, the ground surface and the biomes.
 - **Underground and hidden places**: caves, metro tunnels with rails and lanterns, grand underground station halls with pillars and staircase shafts to the surface, church and laboratory dungeons, a stronghold and an Ancient City with secret passages, a Pale Garden with a mansion, bandit outposts and camps, shipwrecks in big lakes, ruined portals, floating islands above the parks, and villages grown from clusters of private houses.
+- **Landmark 3D models**: list your landmarks (STL files) in `stl/landmarks.json` with their real coordinates and height, and OSMC turns them into blocks and stands them right on the building at that place - or instead of it.
 - Villagers, mannequins, furniture and chests with ordinary game loot.
 - The result is an ordinary save (a `.zip`): drop it into `.minecraft/saves`, no need to unpack it. Versions **26.x** and **1.21.x** are supported; outside the exported area you get either a regular seed-based world or a superflat one.
 
@@ -88,6 +89,7 @@ These files lie next to `osmc.exe` and can be edited with any text editor:
 - **`default.t3d`** - the 3D settings: materials, heights, the look of object types.
 - **`heights.csv`** - typical building heights by type, used when the map has none.
 - **`tmc_buildings.dat`** - building points (type, height, floors) used only when OpenStreetMap does not give them; the values in it are deliberately rough.
+- **`stl/landmarks.json`** - landmark 3D models: the file, the real coordinates, the height in blocks, the material, the rotation and the placement (on a building's roof or instead of it); the fields are described inside the file (the `help` section).
 
 ## License and data
 

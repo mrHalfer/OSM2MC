@@ -42,5 +42,10 @@ private:
     bool mHasNoData = false;
     double mNoData = -9999.0;
     QVector<float> mCache;                        //!< the whole matrix in memory (if not too large)
+    QVector<float> mProj;                         //!< the matrix resampled into the PROJECT CRS (when the CRSs differ):
+                                                  //!< the per-column PROJ transform was the ground fill's bottleneck
+    double mProjDx = 0, mProjDy = 0;
+    int mProjW = 0, mProjH = 0;
+    bool sampleCache(double rx, double ry, double& out) const;   //!< bilinear over the cached raster (raster CRS)
     QMutex mMutex;                                //!< protects the coordinate transformation / per-pixel raster reads
 };

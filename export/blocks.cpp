@@ -140,6 +140,8 @@ const NamedColor kBlockPalette[] = {
     { "minecraft:tnt",                   165,  50,  45 },
     // Roof gear (a user request): the antenna mast on flat roofs
     { "minecraft:lightning_rod",          85,  68,  56 },
+    // Landmark models (STL): the patina of the Statue of Liberty
+    { "minecraft:oxidized_copper",        82, 162, 132 },
 };
 
 
@@ -238,6 +240,11 @@ const char* const kArmorMats[] = { "leather", "chainmail", "iron", "golden", "di
 
 //! The state table of the active CaveSet (set in CaveSet::load, read from the chunk assembly threads).
 const QVector<CaveState>* g_caveStates = nullptr;
+
+//! The runtime tail of the palette for landmark materials (see IdLandmarkBase): full "minecraft:..." names in the
+//! order of joining. Appended in the landmark stage, read while the chunks assemble; the entries stay valid for a
+//! next export in the same session (the ids are stable, and the unused ones are simply never written).
+static QVector<QString> g_landmarkPal;
 
 //! The entrance doors: the type (wood — by the building color, 11 — an iron "locked" one), the compass sides as in dvec: 0=N,1=E,2=S,3=W.
 const char* const kDoorNames[12] = {
@@ -403,6 +410,8 @@ QString blockName(quint16 id)
         return QLatin1String(kRoadSlabs[int(id) - int(IdRoadSlabBase)]);
     if (id >= IdWoolBase && id < IdWoolBase + kWoolsCount)
         return QLatin1String(kWools[int(id) - int(IdWoolBase)].name);
+    if (id >= IdLandmarkBase && int(id) - int(IdLandmarkBase) < g_landmarkPal.size())
+        return g_landmarkPal[int(id) - int(IdLandmarkBase)];   // a landmark material from the runtime tail
     const int i = int(id) - int(IdPaletteStart);
     if (i >= 0 && i < kPaletteCount)
         return QLatin1String(kBlockPalette[i].name);
@@ -731,6 +740,22 @@ int paletteIndexOf(const char* name)
         if (qstrcmp(kBlockPalette[i].name, name) == 0)
             return i;
     return -1;
+}
+
+quint16 landmarkBlockId(const QString& material)
+{
+    QString n = material.trimmed();
+    if (n.isEmpty()) return IdStone;
+    if (!n.startsWith(QLatin1String("minecraft:")))
+        n = QLatin1String("minecraft:") + n;                 // the JSON may drop the namespace
+    const QByteArray ba = n.toLatin1();
+    const int pi = paletteIndexOf(ba.constData());
+    if (pi >= 0) return quint16(IdPaletteStart + pi);
+    for (int i = 0; i < g_landmarkPal.size(); ++i)
+        if (g_landmarkPal[i] == n) return quint16(IdLandmarkBase + i);
+    if (g_landmarkPal.size() >= 24) return IdStone;          // the tail cap (nowhere near the id space's end)
+    g_landmarkPal.append(n);
+    return quint16(IdLandmarkBase + g_landmarkPal.size() - 1);
 }
 
 //! The slab of the same color as a roadway block (concrete or wool) — a half-block road step (0 — no matching slab,

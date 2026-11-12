@@ -39,6 +39,7 @@ copy /y "%OSMC_BUILD%\release\osmc.exe" "%DST%\" >nul
 for %%f in (default.t3d osm_rules.json heights.csv point_models.csv tmc_buildings.dat) do if exist "%ROOT%resources\%%f" copy /y "%ROOT%resources\%%f" "%DST%\" >nul
 if not exist "%DST%\assets" mkdir "%DST%\assets"
 copy /y "%ROOT%resources\templates\*.bin" "%DST%\assets\" >nul
+if exist "%ROOT%resources\stl" (mkdir "%DST%\assets\stl" & copy /y "%ROOT%resources\stl\*.stl" "%DST%\assets\stl\" >nul & copy /y "%ROOT%resources\stl\landmarks.json" "%DST%\assets\stl\" >nul & copy /y "%ROOT%resources\stl\ATTRIBUTION.txt" "%DST%\assets\stl\" >nul)
 xcopy /E /Y /Q /I "%ROOT%third_party\gdal\bin" "%DST%" >nul
 for %%f in (README.md README.ru.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md) do if exist "%ROOT%%%f" copy /y "%ROOT%%%f" "%DST%\" >nul
 if exist "%ROOT%images" (mkdir "%DST%\images" & copy /y "%ROOT%images\*.png" "%DST%\images\" >nul & xcopy /e /i /y /q "%ROOT%images\shots" "%DST%\images\shots" >nul)
