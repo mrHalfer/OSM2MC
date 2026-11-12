@@ -3564,7 +3564,7 @@ void ExportRun::buildStreetFurniture()
                         for (int y = 254; y >= y0; --y)
                             if (store.get(x, y, z) != IdAir) { yTop = y; break; }
                         for (int y = y0; y <= yTop; ++y)
-                            store.set(x, y, z, IdAir);
+                            store.erase(x, y, z);             // set() ignores air, only erase() cuts
                         if (yTop >= y0) razedFrom.insert(k, y0);
                     }
                     ++nRazed;

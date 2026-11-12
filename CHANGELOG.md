@@ -5,6 +5,22 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.6.26.11122] — 2026-11-12
+
+### Added
+
+- "3D figures" button in the window (a user request): it opens the model list of landmarks.json with a voxel preview
+  of every model rendered at its standard size, and a button to load any STL file — one that parses may be placed too.
+  A click on the map stands the figure there; its mark opens the settings of THIS copy: the block it is built of
+  (typed by hand or picked from the list), the azimuth and the size, and the placement "on the roof" / "in place of
+  the building". The per-instance settings never touch landmarks.json or the model defaults; the placed figures are
+  saved into the .tmc project file and stand again when it is opened.
+
+### Fixed
+
+- Landmark placement "instead" left the building standing: the clearing wrote air with set(), which the voxel
+  storage silently ignores — the model stood inside the building it was supposed to replace (1.6.26.11121).
+
 ## [1.6.26.11121] — 2026-11-12
 
 ### Added

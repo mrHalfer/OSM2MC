@@ -44,11 +44,9 @@ static QString findDefaultT3d()
 }
 
 //! The landmark STL models (a user request): landmarks.json next to the exe (or in assets/stl), with the real
-//! coordinates of every landmark; the coordinates are projected into the project CRS here, the exporter voxelizes
-//! and places the models. MCX_LANDMARKS=<path> overrides the JSON (for testing on any area).
-static QVector<McWorldOptions::LandmarkSite> tmcLoadLandmarks(TmcProject& project)
+//! coordinates of every landmark. MCX_LANDMARKS=<path> overrides the JSON (for testing on any area).
+QVector<LandmarkPreset> tmcLoadLandmarkPresets(QString* jsonPath)
 {
-    QVector<McWorldOptions::LandmarkSite> out;
     const QString appDir = QCoreApplication::applicationDirPath();
     QStringList cands;
     const QString env = qEnvironmentVariable("MCX_LANDMARKS");
@@ -60,6 +58,8 @@ static QVector<McWorldOptions::LandmarkSite> tmcLoadLandmarks(TmcProject& projec
     QString path;
     for (const QString& c : cands)
         if (QFileInfo::exists(c)) { path = c; break; }
+    if (jsonPath) *jsonPath = path;
+    QVector<LandmarkPreset> out;
     if (path.isEmpty()) return out;
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) return out;
@@ -71,22 +71,42 @@ static QVector<McWorldOptions::LandmarkSite> tmcLoadLandmarks(TmcProject& projec
     for (const QJsonValue& v : models)
     {
         const QJsonObject o = v.toObject();
-        const QJsonValue lonV = o.value(QStringLiteral("lon"));
-        const QJsonValue latV = o.value(QStringLiteral("lat"));
-        if (!lonV.isDouble() || !latV.isDouble()) continue;
+        LandmarkPreset p;
+        p.file = base.filePath(o.value(QStringLiteral("file")).toString());
+        p.label = o.value(QStringLiteral("label")).toString();
+        p.lon = o.value(QStringLiteral("lon")).toDouble(0.0);
+        p.lat = o.value(QStringLiteral("lat")).toDouble(0.0);
+        p.hasPlace = o.value(QStringLiteral("lon")).isDouble() && o.value(QStringLiteral("lat")).isDouble();
+        p.heightM = o.value(QStringLiteral("height_m")).toDouble(0.0);
+        p.material = o.value(QStringLiteral("material")).toString();
+        p.yaw = o.value(QStringLiteral("yaw")).toDouble(0.0);
+        p.placement = o.value(QStringLiteral("placement")).toString();
+        p.attribution = o.value(QStringLiteral("attribution")).toString();
+        if (p.file.isEmpty() || p.heightM <= 0.0) continue;
+        out.append(p);
+    }
+    return out;
+}
+
+//! The models of the JSON that carry real coordinates: projected into the project CRS, the exporter voxelizes
+//! and places them (the window-placed figures join them in tmcRunExport).
+static QVector<McWorldOptions::LandmarkSite> tmcLoadLandmarks(TmcProject& project)
+{
+    QVector<McWorldOptions::LandmarkSite> out;
+    for (const LandmarkPreset& p : tmcLoadLandmarkPresets())
+    {
         double x = 0.0, y = 0.0;
-        if (!project.lonLatToProject(lonV.toDouble(), latV.toDouble(), x, y)) continue;
+        if (!p.hasPlace || !project.lonLatToProject(p.lon, p.lat, x, y)) continue;
         McWorldOptions::LandmarkSite s;
-        s.file = base.filePath(o.value(QStringLiteral("file")).toString());
-        s.label = o.value(QStringLiteral("label")).toString();
+        s.file = p.file;
+        s.label = p.label;
         s.mapX = x;
         s.mapY = y;
-        s.heightM = o.value(QStringLiteral("height_m")).toDouble(0.0);
-        s.material = o.value(QStringLiteral("material")).toString();
-        s.yaw = o.value(QStringLiteral("yaw")).toDouble(0.0);
-        s.placement = o.value(QStringLiteral("placement")).toString();
-        s.attribution = o.value(QStringLiteral("attribution")).toString();
-        if (s.file.isEmpty() || s.heightM <= 0.0) continue;
+        s.heightM = p.heightM;
+        s.material = p.material;
+        s.yaw = p.yaw;
+        s.placement = p.placement;
+        s.attribution = p.attribution;
         out.append(s);
     }
     return out;
@@ -266,8 +286,10 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
             if (project.lonLatToProject(ll.x(), ll.y(), x, y)) w.clipPolygon << QPointF(x, y);
         }
     // Landmark 3D models (the STL files): the JSON with the real coordinates and heights; only the ones inside the
-    // export area are voxelized and placed by the exporter.
+    // export area are voxelized and placed by the exporter. The figures placed in the window join them as they are:
+    // the per-instance settings never touch landmarks.json or the model defaults.
     w.landmarks = tmcLoadLandmarks(project);
+    w.landmarks += opt.guiLandmarks;
     if (!w.landmarks.isEmpty())
     {
         log(QObject::tr("Landmark 3D models: %1").arg(w.landmarks.size()));

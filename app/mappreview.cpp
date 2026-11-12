@@ -205,8 +205,8 @@ MapPreview::MapPreview(QWidget* parent) : QWidget(parent)
     setCursor(Qt::CrossCursor);
 }
 
-void MapPreview::setPreview(const TmcPreview& p) { mPrev = p; mHave = p.ok && !p.image.isNull(); mHasSpawn = false; mClip.clear(); mClipClosed = false; mMarkSet[0] = mMarkSet[1] = mMarkSet[2] = false; resetView(); emit clipChanged(); emit marksChanged(); }
-void MapPreview::clearPreview() { mPrev = TmcPreview(); mHave = false; mHasSpawn = false; mClip.clear(); mClipClosed = false; mMarkSet[0] = mMarkSet[1] = mMarkSet[2] = false; resetView(); emit clipChanged(); emit marksChanged(); }
+void MapPreview::setPreview(const TmcPreview& p) { mPrev = p; mHave = p.ok && !p.image.isNull(); mHasSpawn = false; mClip.clear(); mClipClosed = false; mMarkSet[0] = mMarkSet[1] = mMarkSet[2] = false; mLandmarks.clear(); resetView(); emit clipChanged(); emit marksChanged(); }
+void MapPreview::clearPreview() { mPrev = TmcPreview(); mHave = false; mHasSpawn = false; mClip.clear(); mClipClosed = false; mMarkSet[0] = mMarkSet[1] = mMarkSet[2] = false; mLandmarks.clear(); resetView(); emit clipChanged(); emit marksChanged(); }
 void MapPreview::resetView() { mZoom = 1.0; mPan = QPointF(); update(); }
 
 void MapPreview::setTool(Tool t)
@@ -229,6 +229,19 @@ void MapPreview::clearClip()
     mClip.clear(); mClipClosed = false; mDragVertex = -1;
     update();
     emit clipChanged();
+}
+
+int MapPreview::landmarkAt(const QPoint& pos) const
+{
+    int best = -1;
+    double bd = 10.0;                                       // marker grab radius, pixels
+    for (int i = 0; i < mLandmarks.size(); ++i)
+    {
+        const QPointF w = toWidget(mLandmarks[i].x(), mLandmarks[i].y());
+        const double d = std::hypot(w.x() - pos.x(), w.y() - pos.y());
+        if (d <= bd) { bd = d; best = i; }
+    }
+    return best;
 }
 
 int MapPreview::vertexAt(const QPoint& pos) const
@@ -325,7 +338,13 @@ void MapPreview::mousePressEvent(QMouseEvent* e)
 {
     if (!mHave) return;
     if (e->button() == Qt::MiddleButton) { resetView(); return; }
-    if (mTool >= Tool::Stronghold && e->button() == Qt::RightButton)
+    if (mTool == Tool::Landmark && e->button() == Qt::RightButton)
+    {   // the right button removes the figure under the cursor (the window owns the list, we only report it)
+        const int i = landmarkAt(e->pos());
+        if (i >= 0) emit landmarkRemoved(i);
+        return;
+    }
+    if (mTool >= Tool::Stronghold && mTool <= Tool::Pale && e->button() == Qt::RightButton)
     {   // the right button removes the mark of the selected entrance
         const int mi = int(mTool) - int(Tool::Stronghold);
         if (mMarkSet[mi]) { mMarkSet[mi] = false; update(); emit marksChanged(); }
@@ -394,6 +413,13 @@ void MapPreview::mouseReleaseEvent(QMouseEvent* e)
         return;
     }
     if (mMoved || !imageRect().contains(e->pos())) return;
+    if (mTool == Tool::Landmark)
+    {   // a click on a marker opens its settings, a click on free ground places the chosen figure here
+        const int i = landmarkAt(e->pos());
+        if (i >= 0) emit landmarkClicked(i);
+        else emit landmarkPlaced(toProject(e->pos()));
+        return;
+    }
     if (mTool >= Tool::Stronghold)
     {
         const int mi = int(mTool) - int(Tool::Stronghold);
@@ -516,6 +542,14 @@ void MapPreview::paintEvent(QPaintEvent*)
             p.setPen(Qt::white);
             p.drawText(tr, Qt::AlignCenter, t);
         }
+    }
+    // 3D figures placed in the window: orange dots with a white rim (the window owns the list, here they are only drawn)
+    for (const QPointF& lm : mLandmarks)
+    {
+        const QPointF c = toWidget(lm.x(), lm.y());
+        p.setPen(QPen(Qt::white, 2.5));
+        p.setBrush(QColor(0xd3, 0x54, 0x00));
+        p.drawEllipse(c, 5.5, 5.5);
     }
     // spawn marker: the chosen one is a pin in the theme color with a white rim; the default (boundary center, else data center) is a pale ring
     const bool chosen = mHasSpawn;

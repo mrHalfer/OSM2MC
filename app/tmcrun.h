@@ -35,6 +35,9 @@ struct TmcRunOptions
     QVector<QPointF> clipLonLat;        //!< the same, but WGS84 longitude/latitude (command line); converted to project coordinates after loading
     bool hasSpawnLonLat = false;        //!< the spawn point is given as WGS84 longitude/latitude (command line); converted to project coordinates after loading
     double spawnLon = 0, spawnLat = 0;
+    //! 3D figures placed in the window (the "3D figures" button): the landmarks are already in the project coordinates,
+    //! they join the models of landmarks.json without changing them (the per-instance settings never reach the JSON).
+    QVector<McWorldOptions::LandmarkSite> guiLandmarks;
 };
 
 struct TmcRunResult
@@ -75,6 +78,25 @@ TmcPreview tmcBuildPreview(const TmcRunOptions& opt, const std::function<void(co
 bool tmcLonLatToProject(const QString& wkt, double lon, double lat, double& x, double& y);
 //! Project coordinates -> WGS84 longitude/latitude (by wkt from TmcPreview). false — failed.
 bool tmcProjectToLonLat(const QString& wkt, double x, double y, double& lon, double& lat);
+
+//! A 3D figure of landmarks.json WITHOUT projection (a user request): the window shows these presets in the
+//! "3D figures" list and the exporter projects the ones that carry real coordinates. The window copies a preset
+//! into every placed instance — editing an instance never writes anything back here.
+struct LandmarkPreset
+{
+    QString file;             //!< the .stl path (absolute, resolved against the JSON folder)
+    QString label;            //!< the name in the list
+    double lon = 0, lat = 0;  //!< the real place of the landmark (0/0 when the figure was loaded from a file)
+    bool hasPlace = false;    //!< the JSON gave lon/lat (a figure loaded in the window carries its own point instead)
+    double heightM = 0;       //!< the standard height in blocks
+    QString material;         //!< the block name (empty — the game's stone)
+    double yaw = 0;           //!< the standard rotation, degrees clockwise
+    QString placement;        //!< "roof" (default) / "instead"
+    QString attribution;      //!< the credit line of the model
+};
+//! The models of landmarks.json (MCX_LANDMARKS overrides; then next to the exe, assets/stl, resources/stl).
+//! jsonPath — not null: the path of the JSON that was read (empty when none was found).
+QVector<LandmarkPreset> tmcLoadLandmarkPresets(QString* jsonPath = nullptr);
 
 //! Default settings file name
 extern const char* const kTmcDefaultT3dName;

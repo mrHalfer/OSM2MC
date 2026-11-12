@@ -482,6 +482,16 @@
            </widget>
           </item>
           <item>
+           <widget class="QPushButton" name="toolFigures">
+            <property name="toolTip">
+             <string>Choose a 3D model, click on the map where it stands, then set its material, rotation and size; a click on the mark opens its settings</string>
+            </property>
+            <property name="text">
+             <string>3D figures</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <spacer name="spacerTools">
             <property name="orientation">
              <enum>Qt::Horizontal</enum>

@@ -60,7 +60,7 @@ RC_LANG = 0x0419
 win32: QMAKE_CXXFLAGS += /utf-8
 win32: QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.6.26.11121
+    VERSION = 1.6.26.11122
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
@@ -74,6 +74,7 @@ HEADERS += \
     app/mainwindow.h \
     app/exportmeta.h \
     app/exportsettingsdialog.h \
+    app/landmarkdialog.h \
     app/tmcrun.h \
     app/mappreview.h \
     app/theme.h \
@@ -142,6 +143,7 @@ SOURCES += \
     app/mainwindow.cpp \
     app/exportmeta.cpp \
     app/exportsettingsdialog.cpp \
+    app/landmarkdialog.cpp \
     app/tmcrun.cpp \
     app/mappreview.cpp \
     app/theme.cpp \

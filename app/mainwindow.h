@@ -11,6 +11,8 @@ class QPushButton;
 class QComboBox;
 class QLabel;
 class QEvent;
+class QButtonGroup;
+class QAbstractButton;
 
 //! The exporter window: source (.tqt, OSM or a folder), 3D settings (.t3d), world parameters, progress and the log; on the right a basic map preview
 //! with the spawn point chosen by a click. The layout is in mainwindow.ui (edit it in Qt Designer), only the logic is here.
@@ -47,6 +49,7 @@ private slots:
     void onSpawnPicked(double x, double y);
     void resetSpawn();
     void copyTp();
+    void openFigures();                                     //!< "3D figures": choose a model, then click on the map where it stands
 
 private:
     TmcRunOptions collect() const;
@@ -57,6 +60,12 @@ private:
     void saveSettings() const;
     void updateSpawnInfo();
     void updateClipInfo();
+    //! 3D figures placed in the window (a user request): the window owns the list in longitude/latitude (so it survives
+    //! preview rebuilds), the map only draws and reports clicks. The per-instance settings never reach landmarks.json.
+    void pushLandmarksToMap();
+    void placeLandmarkAt(const QPointF& projectPt);
+    void editLandmark(int index);
+    void removeLandmark(int index);
 
     void setOnlineMode(bool online);
     void onDownloaded(const QString& file, const QVector<QPointF>& clipLonLat);
@@ -99,6 +108,11 @@ private:
     bool mOnlineMode = false;
     bool mPendingSet[4] = { false, false, false, false };       //!< marks of the online map (spawn, stronghold, city, forest), longitude/latitude
     QPointF mPendingPt[4];
+    QButtonGroup* mToolGroup = nullptr;                         //!< the map tool buttons (the picking mode unhooks the active one while it lasts)
+    QAbstractButton* mRestoreBtn = nullptr;                     //!< the tool button to re-check when the picking mode ends
+    bool mPickActive = false;                                   //!< waiting for the click that places mPickPreset
+    LandmarkPreset mPickPreset;                                 //!< the model chosen in the "3D figures" window
+    QVector<LandmarkPreset> mLandmarks;                         //!< the placed figures with their per-instance settings (longitude/latitude)
     QVector<QPointF> mPendingClip;     //!< boundary (longitude/latitude) of the downloaded area: moved onto the map once the preview is loaded
     TmcRunOptions mInit;              //!< command-line parameters (entrance chunks etc. that have no counterpart in the window)
     bool mDebug = false;

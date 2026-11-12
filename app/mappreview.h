@@ -33,7 +33,7 @@ public:
     //! a click on an edge of a closed polygon inserts a vertex, the right button on a vertex deletes it. Coordinates are the data project coordinates.
     //! A click farther than 500 m from a finished polygon clears it and starts a new one from that click.
     //! What a click on the map does: sets the spawn, edits the boundary or marks an entrance place (stronghold, Ancient City, Pale Garden)
-    enum class Tool { Spawn, Clip, Stronghold, City, Pale };
+    enum class Tool { Spawn, Clip, Stronghold, City, Pale, Landmark };
     void setTool(Tool t);
     Tool tool() const { return mTool; }
     bool editMode() const { return mTool == Tool::Clip; }
@@ -43,6 +43,10 @@ public:
     bool anyMark() const { return mMarkSet[0] || mMarkSet[1] || mMarkSet[2]; }
     void setMark(Tool t, const QPointF& pt) { const int i = int(t) - int(Tool::Stronghold); if (i < 0 || i > 2) return; mMark[i] = pt; mMarkSet[i] = true; update(); emit marksChanged(); }
     void clearMarks();
+    //! 3D figures placed in the window (a user request): the window owns the list, the map draws its points
+    //! and reports clicks on them (place / edit / remove). Cleared with the preview, the window fills it again.
+    void setLandmarks(const QVector<QPointF>& pts) { mLandmarks = pts; update(); }
+    const QVector<QPointF>& landmarks() const { return mLandmarks; }
     bool hasClip() const { return mClipClosed; }
     QVector<QPointF> clipPolygon() const { return mClipClosed ? mClip : QVector<QPointF>(); }
     void clearClip();
@@ -56,6 +60,10 @@ signals:
     void clipChanged();
     //! An entrance mark was placed or removed
     void marksChanged();
+    //! A 3D figure: clicked on free ground with the Landmark tool (place), on a marker (edit), the right button on a marker (remove)
+    void landmarkPlaced(const QPointF& pt);
+    void landmarkClicked(int index);
+    void landmarkRemoved(int index);
 
 protected:
     void paintEvent(QPaintEvent*) override;
@@ -79,6 +87,8 @@ private:
     Tool mTool = Tool::Clip;
     bool mMarkSet[3] = { false, false, false };
     QPointF mMark[3];
+    QVector<QPointF> mLandmarks;      //!< 3D figure points in project coordinates (the window owns the list)
+    int landmarkAt(const QPoint& pos) const;                    //!< marker under the cursor or -1
     QVector<QPointF> mClip;       //!< boundary vertices, project coordinates
     bool mClipClosed = false;
     int mDragVertex = -1;

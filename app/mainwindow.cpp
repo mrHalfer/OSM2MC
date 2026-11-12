@@ -2,6 +2,7 @@
 #include "ui_mainwindow.h"
 #include "app/exportsettingsdialog.h"
 #include "app/exportmeta.h"                             // the "export" section of the .tmc project file
+#include "app/landmarkdialog.h"
 #include "app/mappreview.h"
 #include "app/i18n.h"
 #include "app/osmonlinepanel.h"
@@ -95,17 +96,17 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
         l->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);         // the layout defines the width, a long text does not stretch it
     }
     {   // map tools: one is active; a click on the map does what is selected
-        auto* group = new QButtonGroup(this);
+        mToolGroup = new QButtonGroup(this);
         const std::pair<QAbstractButton*, MapPreview::Tool> tools[] = {
             { ui->toolSpawn, MapPreview::Tool::Spawn }, { ui->toolClip, MapPreview::Tool::Clip }, { ui->toolStronghold, MapPreview::Tool::Stronghold },
             { ui->toolCity, MapPreview::Tool::City }, { ui->toolPale, MapPreview::Tool::Pale } };
         for (const auto& t : tools)
         {
-            group->addButton(t.first);
+            mToolGroup->addButton(t.first);
             const MapPreview::Tool tool = t.second;
-            connect(t.first, &QAbstractButton::toggled, this, [this, tool](bool on) { if (on) { ui->preview->setTool(tool); updateClipInfo(); } });
+            connect(t.first, &QAbstractButton::toggled, this, [this, tool](bool on) { if (on) { if (mPickActive) mPickActive = false; ui->preview->setTool(tool); updateClipInfo(); } });
         }
-        group->setExclusive(true);
+        mToolGroup->setExclusive(true);
     }
     {   // On the right there is the online OSM map by default (search, boundary, data download); as soon as a local file is chosen on the left its preview is shown,
         // and clearing the file field (the cross) brings the online map back.
@@ -153,6 +154,10 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
     connect(ui->resetMarksButton, &QPushButton::clicked, this, [this]() { ui->preview->clearMarks(); });
     connect(ui->preview, &MapPreview::clipChanged, this, [this]() { updateClipInfo(); updateClimateAutoZone(); });
     connect(ui->preview, &MapPreview::marksChanged, this, &MainWindow::updateClipInfo);
+    connect(ui->toolFigures, &QPushButton::clicked, this, &MainWindow::openFigures);
+    connect(ui->preview, &MapPreview::landmarkPlaced, this, &MainWindow::placeLandmarkAt);
+    connect(ui->preview, &MapPreview::landmarkClicked, this, &MainWindow::editLandmark);
+    connect(ui->preview, &MapPreview::landmarkRemoved, this, &MainWindow::removeLandmark);
     connect(ui->sourceEdit, &QLineEdit::textChanged, this, &MainWindow::onSourceChanged);
     // the path was typed by hand — load the preview when the input is finished
     connect(ui->sourceEdit, &QLineEdit::editingFinished, this, [this]()
@@ -370,6 +375,26 @@ TmcRunOptions MainWindow::collect() const
     if (ui->preview->hasMark(Tool::Pale)) { o.hasPalePt = true; o.palePt = ui->preview->mark(Tool::Pale); }
     o.clipPolygon = ui->preview->clipPolygon();
     if (ui->preview->hasSpawn()) { o.hasSpawn = true; o.spawnX = ui->preview->spawnX(); o.spawnY = ui->preview->spawnY(); }
+    if (ui->preview->hasPreview())
+    {   // the placed 3D figures: longitude/latitude -> the data projection, the per-instance parameters as the user set them
+        const QString wkt = ui->preview->preview().wkt;
+        for (const LandmarkPreset& p : mLandmarks)
+        {
+            double x = 0, y = 0;
+            if (!tmcLonLatToProject(wkt, p.lon, p.lat, x, y)) continue;
+            McWorldOptions::LandmarkSite s;
+            s.file = p.file;
+            s.label = p.label;
+            s.mapX = x;
+            s.mapY = y;
+            s.heightM = p.heightM;
+            s.material = p.material;
+            s.yaw = p.yaw;
+            s.placement = p.placement;
+            s.attribution = p.attribution;
+            o.guiLandmarks << s;
+        }
+    }
     return o;
 }
 
@@ -577,6 +602,7 @@ void MainWindow::onPreviewReady()
             else ui->preview->setMark(kinds[i], QPointF(x, y));
         }
     }
+    pushLandmarksToMap();                                     // the placed figures stand again on the fresh preview
     mPreviewObjects = p.objects;
     updateSpawnInfo();
     updateClipInfo();
@@ -633,6 +659,25 @@ bool MainWindow::writeProject(const QString& path)
     QJsonObject mj;
     for (int i = 0; i < 4; ++i) if (markSet[i]) mj.insert(QLatin1String(kNames[i]), QJsonArray{ marks[i].x(), marks[i].y() });
     root.insert(QStringLiteral("marks"), mj);
+    {   // the 3D figures placed in the window (a user request): every copy carries its own parameters,
+        // landmarks.json and the model defaults are never written to
+        QJsonArray la;
+        for (const LandmarkPreset& p : mLandmarks)
+        {
+            QJsonObject lo;
+            lo.insert(QStringLiteral("file"), p.file);
+            if (!p.label.isEmpty()) lo.insert(QStringLiteral("label"), p.label);
+            lo.insert(QStringLiteral("lon"), p.lon);
+            lo.insert(QStringLiteral("lat"), p.lat);
+            lo.insert(QStringLiteral("height_m"), p.heightM);
+            if (!p.material.isEmpty()) lo.insert(QStringLiteral("material"), p.material);
+            lo.insert(QStringLiteral("yaw"), p.yaw);
+            if (!p.placement.isEmpty()) lo.insert(QStringLiteral("placement"), p.placement);
+            if (!p.attribution.isEmpty()) lo.insert(QStringLiteral("attribution"), p.attribution);
+            la.append(lo);
+        }
+        root.insert(QStringLiteral("landmarks"), la);
+    }
     const QString src = ui->sourceEdit->text().trimmed();
     if (!src.isEmpty()) root.insert(QStringLiteral("source"), src);
     QJsonObject opt;
@@ -708,6 +753,30 @@ bool MainWindow::readProject(const QString& path, QString* error)
     bool markSet[4] = { false, false, false, false };
     QPointF marks[4];
     for (int i = 0; i < 4; ++i) markSet[i] = pt(mj.value(QLatin1String(kNames[i])), &marks[i]);
+    {   // the 3D figures placed earlier: their own copies with their own parameters; a model file that is gone drops that figure
+        mLandmarks.clear();
+        for (const QJsonValue& v : root.value(QStringLiteral("landmarks")).toArray())
+        {
+            const QJsonObject lo = v.toObject();
+            LandmarkPreset p;
+            p.file = QFileInfo(lo.value(QStringLiteral("file")).toString()).absoluteFilePath();
+            if (!QFileInfo::exists(p.file))
+            {
+                if (error && error->isEmpty()) *error = tr("The model file of a 3D figure was not found: %1").arg(QDir::toNativeSeparators(p.file));
+                continue;
+            }
+            p.label = lo.value(QStringLiteral("label")).toString();
+            p.lon = lo.value(QStringLiteral("lon")).toDouble(0.0);
+            p.lat = lo.value(QStringLiteral("lat")).toDouble(0.0);
+            p.hasPlace = true;
+            p.heightM = lo.value(QStringLiteral("height_m")).toDouble(24.0);
+            p.material = lo.value(QStringLiteral("material")).toString();
+            p.yaw = lo.value(QStringLiteral("yaw")).toDouble(0.0);
+            p.placement = lo.value(QStringLiteral("placement")).toString();
+            p.attribution = lo.value(QStringLiteral("attribution")).toString();
+            mLandmarks.append(p);
+        }
+    }
     const QJsonObject view = root.value(QStringLiteral("view")).toObject();
     const QString src = root.value(QStringLiteral("source")).toString();
     if (!src.isEmpty() && QFileInfo::exists(src))
@@ -863,7 +932,7 @@ void MainWindow::setOnlineMode(bool online)
 {
     mOnlineMode = online;
     for (QWidget* w : std::initializer_list<QWidget*>{ ui->previewStatusLabel,
-                                                       ui->toolSpawn, ui->toolClip, ui->toolStronghold, ui->toolCity, ui->toolPale, ui->preview,
+                                                       ui->toolSpawn, ui->toolClip, ui->toolStronghold, ui->toolCity, ui->toolPale, ui->toolFigures, ui->preview,
                                                        ui->spawnInfoLabel, ui->resetSpawnButton, ui->copyTpButton, ui->clipClearButton, ui->resetMarksButton })
         w->setVisible(!online);
     for (QWidget* w : mLocalRows) w->setVisible(!online);
@@ -895,6 +964,7 @@ void MainWindow::updateClipInfo()
     const bool have = ui->preview->hasPreview();
     for (QAbstractButton* b : std::initializer_list<QAbstractButton*>{ ui->toolSpawn, ui->toolClip, ui->toolStronghold, ui->toolCity, ui->toolPale })
         b->setEnabled(have);
+    ui->toolFigures->setEnabled(have);
     ui->clipClearButton->setEnabled(have && ui->preview->hasClip());
     ui->resetMarksButton->setEnabled(have && ui->preview->anyMark());
     if (!have) return;
@@ -907,8 +977,11 @@ void MainWindow::updateClipInfo()
     case Tool::Stronghold: hint = tr("Stronghold: click — the entrance will be in the church nearest to this place. The right button removes the mark."); break;
     case Tool::City: hint = tr("Ancient City: click — the entrance will be in the church nearest to this place. The right button removes the mark."); break;
     case Tool::Pale: hint = tr("Pale Garden: click — the forest nearest to this place becomes the Pale Garden. The right button removes the mark."); break;
+    case Tool::Landmark: hint = mPickActive ? tr("3D figure: click on the map — the figure will stand here; the chosen tool button returns without placing.")
+                                            : tr("3D figure: a click on its mark opens the settings, the right button removes the figure."); break;
     }
     if (ui->preview->hasClip()) hint += tr(" The export covers only the inside of the boundary; the world origin is the center of the clipped data.");
+    if (!mLandmarks.isEmpty()) hint = tr("Figures on the map: %1. ").arg(mLandmarks.size()) + hint;
     if (mPreviewObjects >= 0) hint = tr("Objects on the map: %1. ").arg(mPreviewObjects) + hint;
     ui->previewStatusLabel->setText(hint);
     ui->previewStatusLabel->setWordWrap(true);
@@ -918,6 +991,77 @@ void MainWindow::resetSpawn()
 {
     ui->preview->clearSpawn();
     updateSpawnInfo();
+}
+
+// ------------------------------------------------------------------ 3D figures placed in the window (a user request)
+
+void MainWindow::openFigures()
+{
+    LandmarkPickerDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) return;
+    // the chosen model waits for the click that gives it a place: the map switches to the picking tool while
+    // the active tool button steps aside, and takes its place back when the figure stands (or the pick is dropped)
+    mPickPreset = dlg.preset();
+    mPickActive = true;
+    mRestoreBtn = mToolGroup ? mToolGroup->checkedButton() : nullptr;
+    if (mRestoreBtn) mRestoreBtn->setChecked(false);
+    ui->preview->setTool(MapPreview::Tool::Landmark);
+    updateClipInfo();
+}
+
+void MainWindow::pushLandmarksToMap()
+{
+    QVector<QPointF> pts;
+    QVector<LandmarkPreset> kept;
+    if (ui->preview->hasPreview())
+    {
+        const QString wkt = ui->preview->preview().wkt;
+        for (const LandmarkPreset& p : mLandmarks)
+        {
+            double x = 0, y = 0;
+            if (!tmcLonLatToProject(wkt, p.lon, p.lat, x, y)) continue;     // the figure is outside this projection — useless here
+            pts << QPointF(x, y);
+            kept << p;
+        }
+    }
+    if (kept.size() != mLandmarks.size()) mLandmarks = kept;                // the marker indexes must match the list the clicks report back
+    ui->preview->setLandmarks(pts);
+}
+
+void MainWindow::placeLandmarkAt(const QPointF& projectPt)
+{
+    if (!mPickActive || !ui->preview->hasPreview()) return;
+    double lon = 0, lat = 0;
+    if (!tmcProjectToLonLat(ui->preview->preview().wkt, projectPt.x(), projectPt.y(), lon, lat)) return;
+    LandmarkPreset p = mPickPreset;
+    p.lon = lon;
+    p.lat = lat;
+    p.hasPlace = true;
+    mLandmarks.append(p);
+    pushLandmarksToMap();
+    mPickActive = false;
+    if (mRestoreBtn) mRestoreBtn->setChecked(true);           // the previous tool is back on the buttons and on the map
+    else ui->preview->setTool(MapPreview::Tool::Clip);
+    mRestoreBtn = nullptr;
+    updateClipInfo();
+    editLandmark(mLandmarks.size() - 1);                      // the placed figure can be set up right away
+}
+
+void MainWindow::editLandmark(int index)
+{
+    if (index < 0 || index >= mLandmarks.size()) return;
+    LandmarkEditDialog dlg(mLandmarks[index], this);
+    dlg.exec();
+    if (dlg.removeRequested()) { removeLandmark(index); return; }
+    if (dlg.result() == QDialog::Accepted) mLandmarks[index] = dlg.preset();
+}
+
+void MainWindow::removeLandmark(int index)
+{
+    if (index < 0 || index >= mLandmarks.size()) return;
+    mLandmarks.remove(index);
+    pushLandmarksToMap();
+    updateClipInfo();
 }
 
 //! The label under the map: where the spawn point is (latitude/longitude and world blocks for /tp)
