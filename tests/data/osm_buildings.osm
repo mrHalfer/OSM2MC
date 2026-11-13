@@ -149,47 +149,53 @@
 <node id="147" lat="51.6605390" lon="39.3172982"><tag k="highway" v="crossing"/></node>
 <node id="148" lat="51.6616170" lon="39.3158501"></node>
 <node id="149" lat="51.6616170" lon="39.3187463"></node>
-<node id="150" lat="51.6617966" lon="39.3158501"></node>
-<node id="151" lat="51.6617966" lon="39.3201944"></node>
-<node id="152" lat="51.6619763" lon="39.3158501"></node>
-<node id="153" lat="51.6619763" lon="39.3201944"></node>
-<node id="154" lat="51.6597000" lon="39.2110000"></node>
-<node id="155" lat="51.6599800" lon="39.2110000"></node>
-<node id="156" lat="51.6599800" lon="39.2110000"></node>
-<node id="157" lat="51.6599800" lon="39.2114500"></node>
-<node id="158" lat="51.6600000" lon="39.3230907"></node>
-<node id="159" lat="51.6600000" lon="39.3239596"></node>
-<node id="160" lat="51.6603593" lon="39.3239596"></node>
-<node id="161" lat="51.6603593" lon="39.3230907"></node>
-<node id="162" lat="51.6608983" lon="39.3230907"></node>
-<node id="163" lat="51.6608983" lon="39.3239596"></node>
-<node id="164" lat="51.6612576" lon="39.3239596"></node>
-<node id="165" lat="51.6612576" lon="39.3230907"></node>
-<node id="166" lat="51.6600000" lon="39.3259869"></node>
-<node id="167" lat="51.6600000" lon="39.3265662"></node>
-<node id="168" lat="51.6602695" lon="39.3265662"></node>
-<node id="169" lat="51.6602695" lon="39.3259869"></node>
-<node id="170" lat="51.6601797" lon="39.3274351"><tag k="leisure" v="playground"/></node>
-<node id="171" lat="51.6600000" lon="39.3288832"></node>
-<node id="172" lat="51.6600000" lon="39.3297521"></node>
-<node id="173" lat="51.6602695" lon="39.3297521"></node>
-<node id="174" lat="51.6602695" lon="39.3288832"></node>
-<node id="175" lat="51.6600000" lon="39.3317794"></node>
-<node id="176" lat="51.6600000" lon="39.3325035"></node>
-<node id="177" lat="51.6604492" lon="39.3325035"></node>
-<node id="178" lat="51.6604492" lon="39.3317794"></node>
-<node id="179" lat="51.6600000" lon="39.3346757"></node>
-<node id="180" lat="51.6600000" lon="39.3352549"></node>
-<node id="181" lat="51.6603593" lon="39.3352549"></node>
-<node id="182" lat="51.6603593" lon="39.3346757"></node>
-<node id="183" lat="51.6600000" lon="39.3361238"></node>
-<node id="184" lat="51.6600000" lon="39.3367031"></node>
-<node id="185" lat="51.6603593" lon="39.3367031"></node>
-<node id="186" lat="51.6603593" lon="39.3361238"></node>
-<node id="187" lat="51.6600000" lon="39.3375719"></node>
-<node id="188" lat="51.6600000" lon="39.3381512"></node>
-<node id="189" lat="51.6603593" lon="39.3381512"></node>
-<node id="190" lat="51.6603593" lon="39.3375719"></node>
+<node id="150" lat="51.6621559" lon="39.3158501"></node>
+<node id="151" lat="51.6621559" lon="39.3187463"></node>
+<node id="152" lat="51.6623356" lon="39.3158501"></node>
+<node id="153" lat="51.6623356" lon="39.3187463"></node>
+<node id="154" lat="51.6625153" lon="39.3158501"></node>
+<node id="155" lat="51.6625153" lon="39.3187463"></node>
+<node id="156" lat="51.6617966" lon="39.3158501"></node>
+<node id="157" lat="51.6617966" lon="39.3201944"></node>
+<node id="158" lat="51.6619763" lon="39.3158501"></node>
+<node id="159" lat="51.6619763" lon="39.3201944"></node>
+<node id="160" lat="51.6597000" lon="39.2110000"></node>
+<node id="161" lat="51.6599800" lon="39.2110000"></node>
+<node id="162" lat="51.6599800" lon="39.2110000"></node>
+<node id="163" lat="51.6599800" lon="39.2114500"></node>
+<node id="164" lat="51.6600000" lon="39.3230907"></node>
+<node id="165" lat="51.6600000" lon="39.3239596"></node>
+<node id="166" lat="51.6603593" lon="39.3239596"></node>
+<node id="167" lat="51.6603593" lon="39.3230907"></node>
+<node id="168" lat="51.6608983" lon="39.3230907"></node>
+<node id="169" lat="51.6608983" lon="39.3239596"></node>
+<node id="170" lat="51.6612576" lon="39.3239596"></node>
+<node id="171" lat="51.6612576" lon="39.3230907"></node>
+<node id="172" lat="51.6600000" lon="39.3259869"></node>
+<node id="173" lat="51.6600000" lon="39.3265662"></node>
+<node id="174" lat="51.6602695" lon="39.3265662"></node>
+<node id="175" lat="51.6602695" lon="39.3259869"></node>
+<node id="176" lat="51.6601797" lon="39.3274351"><tag k="leisure" v="playground"/></node>
+<node id="177" lat="51.6600000" lon="39.3288832"></node>
+<node id="178" lat="51.6600000" lon="39.3297521"></node>
+<node id="179" lat="51.6602695" lon="39.3297521"></node>
+<node id="180" lat="51.6602695" lon="39.3288832"></node>
+<node id="181" lat="51.6600000" lon="39.3317794"></node>
+<node id="182" lat="51.6600000" lon="39.3325035"></node>
+<node id="183" lat="51.6604492" lon="39.3325035"></node>
+<node id="184" lat="51.6604492" lon="39.3317794"></node>
+<node id="185" lat="51.6600000" lon="39.3346757"></node>
+<node id="186" lat="51.6600000" lon="39.3352549"></node>
+<node id="187" lat="51.6603593" lon="39.3352549"></node>
+<node id="188" lat="51.6603593" lon="39.3346757"></node>
+<node id="189" lat="51.6600000" lon="39.3361238"></node>
+<node id="190" lat="51.6600000" lon="39.3367031"></node>
+<node id="191" lat="51.6603593" lon="39.3367031"></node>
+<node id="192" lat="51.6603593" lon="39.3361238"></node>
+<node id="193" lat="51.6600000" lon="39.3375719"></node>
+<node id="194" lat="51.6600000" lon="39.3381512"></node>
+<node id="195" lat="51.6603593" lon="39.3381512"></node>
+<node id="196" lat="51.6603593" lon="39.3375719"></node>
 <way id="101"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/><tag k="building" v="yes"/></way>
 <way id="102"><nd ref="6"/><nd ref="7"/><nd ref="8"/><nd ref="9"/><nd ref="6"/><tag k="building" v="yes"/><tag k="building:levels" v="9"/><tag k="addr:street" v="Ул"/><tag k="addr:housenumber" v="1"/></way>
 <way id="103"><nd ref="10"/><nd ref="11"/><nd ref="12"/><nd ref="13"/><nd ref="10"/><tag k="landuse" v="residential"/></way>
@@ -231,16 +237,19 @@
 <way id="139"><nd ref="141"/><nd ref="142"/><tag k="highway" v="track"/></way>
 <way id="140"><nd ref="143"/><nd ref="144"/><tag k="highway" v="footway"/><tag k="footway" v="crossing"/></way>
 <way id="141"><nd ref="148"/><nd ref="149"/><tag k="highway" v="residential"/><tag k="tunnel" v="yes"/></way>
-<way id="142"><nd ref="150"/><nd ref="151"/><tag k="railway" v="rail"/></way>
-<way id="143"><nd ref="152"/><nd ref="153"/><tag k="railway" v="abandoned"/></way>
-<way id="144"><nd ref="154"/><nd ref="155"/><tag k="barrier" v="fence"/></way>
-<way id="145"><nd ref="156"/><nd ref="157"/><tag k="barrier" v="fence"/></way>
-<way id="146"><nd ref="158"/><nd ref="159"/><nd ref="160"/><nd ref="161"/><nd ref="158"/><tag k="amenity" v="parking"/></way>
-<way id="147"><nd ref="162"/><nd ref="163"/><nd ref="164"/><nd ref="165"/><nd ref="162"/><tag k="amenity" v="parking"/><tag k="parking" v="underground"/></way>
-<way id="148"><nd ref="166"/><nd ref="167"/><nd ref="168"/><nd ref="169"/><nd ref="166"/><tag k="leisure" v="playground"/></way>
-<way id="149"><nd ref="171"/><nd ref="172"/><nd ref="173"/><nd ref="174"/><nd ref="171"/><tag k="leisure" v="pitch"/><tag k="sport" v="soccer"/></way>
-<way id="150"><nd ref="175"/><nd ref="176"/><nd ref="177"/><nd ref="178"/><nd ref="175"/><tag k="highway" v="pedestrian"/><tag k="area" v="yes"/></way>
-<way id="151"><nd ref="179"/><nd ref="180"/><nd ref="181"/><nd ref="182"/><nd ref="179"/><tag k="natural" v="wood"/></way>
-<way id="152"><nd ref="183"/><nd ref="184"/><nd ref="185"/><nd ref="186"/><nd ref="183"/><tag k="landuse" v="grass"/></way>
-<way id="153"><nd ref="187"/><nd ref="188"/><nd ref="189"/><nd ref="190"/><nd ref="187"/><tag k="leisure" v="park"/></way>
+<way id="142"><nd ref="150"/><nd ref="151"/><tag k="highway" v="primary"/><tag k="bridge" v="yes"/><tag k="level" v="2"/></way>
+<way id="143"><nd ref="152"/><nd ref="153"/><tag k="highway" v="service"/><tag k="tunnel" v="building_passage"/></way>
+<way id="144"><nd ref="154"/><nd ref="155"/><tag k="highway" v="unclassified"/><tag k="tunnel" v="culvert"/></way>
+<way id="145"><nd ref="156"/><nd ref="157"/><tag k="railway" v="rail"/></way>
+<way id="146"><nd ref="158"/><nd ref="159"/><tag k="railway" v="abandoned"/></way>
+<way id="147"><nd ref="160"/><nd ref="161"/><tag k="barrier" v="fence"/></way>
+<way id="148"><nd ref="162"/><nd ref="163"/><tag k="barrier" v="fence"/></way>
+<way id="149"><nd ref="164"/><nd ref="165"/><nd ref="166"/><nd ref="167"/><nd ref="164"/><tag k="amenity" v="parking"/></way>
+<way id="150"><nd ref="168"/><nd ref="169"/><nd ref="170"/><nd ref="171"/><nd ref="168"/><tag k="amenity" v="parking"/><tag k="parking" v="underground"/></way>
+<way id="151"><nd ref="172"/><nd ref="173"/><nd ref="174"/><nd ref="175"/><nd ref="172"/><tag k="leisure" v="playground"/></way>
+<way id="152"><nd ref="177"/><nd ref="178"/><nd ref="179"/><nd ref="180"/><nd ref="177"/><tag k="leisure" v="pitch"/><tag k="sport" v="soccer"/></way>
+<way id="153"><nd ref="181"/><nd ref="182"/><nd ref="183"/><nd ref="184"/><nd ref="181"/><tag k="highway" v="pedestrian"/><tag k="area" v="yes"/></way>
+<way id="154"><nd ref="185"/><nd ref="186"/><nd ref="187"/><nd ref="188"/><nd ref="185"/><tag k="natural" v="wood"/></way>
+<way id="155"><nd ref="189"/><nd ref="190"/><nd ref="191"/><nd ref="192"/><nd ref="189"/><tag k="landuse" v="grass"/></way>
+<way id="156"><nd ref="193"/><nd ref="194"/><nd ref="195"/><nd ref="196"/><nd ref="193"/><tag k="leisure" v="park"/></way>
 </osm>

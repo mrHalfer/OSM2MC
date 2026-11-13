@@ -34,6 +34,8 @@ struct ExportItem
     double roadScale = 1.0;
     int code = 0;
     bool elec = false;                              // Railway: the ELEC column (OSM "electrified" other than "no")
+    bool bridge = false, tunnel = false;            // Road: the BRG/TUN columns (OSM "bridge"/"tunnel" other than "no")
+    int elev = 0;                                   // Road: the LVL column (OSM "level"), clamped to -4..4
     bool lift = false;
     bool onion = false;
     double roofH = 0.0;
@@ -342,6 +344,22 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                 case 45210000: case 61210000: case 61220000: case 61230000: e.roadScale = 2.5; break;
                 default: break;
                 }
+                // elevated / underground roadway: the BRG/TUN/LVL columns (OSM "bridge"/"tunnel"/"level");
+                // the value "no" (and an empty column) — an ordinary surface road
+                const int brn = layer->fieldIndex(QStringLiteral("BRG"));
+                if (brn >= 0)
+                {
+                    const QString bv = obj->fields.value(brn).trimmed();
+                    e.bridge = !bv.isEmpty() && bv.compare(QLatin1String("no"), Qt::CaseInsensitive) != 0;
+                }
+                const int tnn = layer->fieldIndex(QStringLiteral("TUN"));
+                if (tnn >= 0)
+                {
+                    const QString tv = obj->fields.value(tnn).trimmed();
+                    e.tunnel = !tv.isEmpty() && tv.compare(QLatin1String("no"), Qt::CaseInsensitive) != 0;
+                }
+                const int lv = layer->fieldIndex(QStringLiteral("LVL"));
+                if (lv >= 0) e.elev = obj->fields.value(lv).trimmed().toInt();
             }
             // rail electrification: the ELEC column (the OSM "electrified" tag other than "no")
             if (kind == Kind::Railway)
@@ -567,6 +585,9 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             mo.code = e.code;
             mo.model = e.model;
             mo.railElec = e.elec;
+            mo.roadBridge = e.bridge;
+            mo.roadTunnel = e.tunnel;
+            mo.roadLevel = qBound(-4, e.elev, 4);
             if (e.kind == Kind::Plate && mo.extrudeH < 1.0 && (e.code == 51230000 || e.code == 51133000 || e.code == 51410000))
             {   // csrpol 51230000/51133000/51410000 with zero height — a 15 m tower
                 float zmin = std::numeric_limits<float>::max(), zmax = -zmin;

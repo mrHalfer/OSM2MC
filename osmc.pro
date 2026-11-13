@@ -60,7 +60,7 @@ RC_LANG = 0x0419
 win32: QMAKE_CXXFLAGS += /utf-8
 win32: QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.6.26.11122
+    VERSION = 1.6.26.11131
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{

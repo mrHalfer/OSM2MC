@@ -169,6 +169,12 @@ def check(path, legacy, env='flat', full=True):
     furnPos = []                                  # [(x, y, z, name)]
     torchY = set()      # the levels of wall_torch / hanging lamps — "light on all floors", not only the 1st
     hangY = set()
+    # Signature candidates for the elevated/underground roadways (see the viaduct/tunnel gates below):
+    gcAll = []     # all gray_concrete cells — viaduct decks (over girders) and tunnel floors (deep, see gates below)
+    gcLo = []      # gray_concrete at y<=0 — tunnel floor candidates
+    swAll = []     # all stone_brick_wall cells (signpost posts + parapets)
+    wcAll = []     # all white_carpet cells (deck marking candidates)
+    lampPos = []   # all hanging lanterns
     grassMaxY = -999    # the highest grass: <=8 — a flat test world (the city at y≈1)
     grassTot = 0        # all grass_block in the world (the denominator of the share of low ones)
     grassLow = 0        # …at y<=8: in a flat test world there are practically 100% of them
@@ -205,6 +211,14 @@ def check(path, legacy, env='flat', full=True):
                 elif nm in FLOORFURN:
                     furnPos.append((cx * 16 + (i & 15), sy * 16 + ((i >> 8) & 15),
                                     cz * 16 + ((i >> 4) & 15), nm))
+                elif nm == 'minecraft:gray_concrete':
+                    y = sy * 16 + ((i >> 8) & 15)
+                    gcAll.append((cx * 16 + (i & 15), y, cz * 16 + ((i >> 4) & 15)))
+                    if y <= 0: gcLo.append((cx * 16 + (i & 15), y, cz * 16 + ((i >> 4) & 15)))
+                elif nm == 'minecraft:stone_brick_wall':
+                    swAll.append((cx * 16 + (i & 15), sy * 16 + ((i >> 8) & 15), cz * 16 + ((i >> 4) & 15)))
+                elif nm == 'minecraft:white_carpet':
+                    wcAll.append((cx * 16 + (i & 15), sy * 16 + ((i >> 8) & 15), cz * 16 + ((i >> 4) & 15)))
             # The Y distribution of light: torches and hanging lamps must be on several floors,
             # not concentrated on the first (the palette gives the hanging property index of the lantern)
             wt = {pi for pi, (en, ep) in enumerate(entries) if en == 'minecraft:wall_torch'}
@@ -216,7 +230,9 @@ def check(path, legacy, env='flat', full=True):
                 for i in range(4096):
                     v = (data[i // per] >> ((i % per) * bits)) & mask
                     if v in wt: torchY.add(sy * 16 + ((i >> 8) & 15))
-                    if v in hl: hangY.add(sy * 16 + ((i >> 8) & 15))
+                    if v in hl:
+                        hangY.add(sy * 16 + ((i >> 8) & 15))
+                        lampPos.append((cx * 16 + (i & 15), sy * 16 + ((i >> 8) & 15), cz * 16 + ((i >> 4) & 15)))
     # "Dungeons" are on if there is air deep (y<-48) — before the checkbox there was zero.
     caves = sum(secAir.get(s, 0) for s in (-4, -3)) > 4096
     # A flat test world: turf IN EVERY chunk at the walking level (y=0..1), in a noise world
@@ -226,6 +242,15 @@ def check(path, legacy, env='flat', full=True):
     # Column tightness: the world bottom (-64) without holes ALWAYS; y=0 must be soil in a flat
     # test world (3 rows of analytics under the turf — caves do not touch it) and in a world without caves;
     # in a noise world with caves y=0 is legal underground (a user request).
+    # Columns carrying a road tunnel: a dug section (gray_concrete floor, air or a step half-block above it,
+    # stone_bricks lid 5 higher) or an open-cut portal (trench roadway surface below the y=-4 strip). Their
+    # interior legitimately passes through the y=-4 soil strip, so the tightness escape check must not count
+    # them as craters. Portal cells also widen the cut 2 cells past the roadway (the stepped-back walls have
+    # no floor block themselves) — the escape therefore covers the floor column and its 2-cell neighbourhood.
+    tunCols = {(c[0], c[2]) for c in gcLo
+               if cell(c[0], c[1] + 1, c[2]) in ('minecraft:air', 'minecraft:gray_concrete_slab')
+               and (c[1] <= -4 or cell(c[0], c[1] + 5, c[2]) == 'minecraft:stone_bricks')}
+    tunCols |= {(x + dx, z + dz) for (x, z) in tunCols for dx in (-2, -1, 0, 1, 2) for dz in (-2, -1, 0, 1, 2)}
     for (cx, cz), secs in chunks.items():
         for lz in range(16):
             for lx in range(16):
@@ -237,7 +262,7 @@ def check(path, legacy, env='flat', full=True):
                     # are lowered by 1..2 — above the new surface (y=-1/-2) empty cells y=0..-1
                     # are legal if the soil UNDER them is intact (at y=-4 a strip of earth/stone must exist).
                     xx, zz = cx*16+lx, cz*16+lz
-                    if not (flatWorld and cell(xx, -4, zz) != 'minecraft:air'):
+                    if not (flatWorld and (cell(xx, -4, zz) != 'minecraft:air' or (xx, zz) in tunCols)):
                         bad += 1
     print(f'  chunks={len(chunks)} cols={cols} bad={bad}; palette fmt ok={fmt_ok}')
     if flatWorld:
@@ -936,6 +961,29 @@ def check(path, legacy, env='flat', full=True):
           f'in the intersection gray_concrete {interGray} (want 12), light {interLg} (want 0), '
           f'pedestrian road outside the highway {pedFree} (want 7)')
     ok &= interGray == 12 and interLg == 0 and pedFree == 7
+    # ELEVATED / UNDERGROUND roadways (OSM bridge=yes / tunnel=yes — the two 60-block highways in the harness
+    # scene). Checked by block SIGNATURES, not coordinates: a viaduct deck — gray_concrete above the ground
+    # level on a stone_bricks girder (a surface road has dirt/stone under its concrete, a building has slabs);
+    # parapets — stone_brick_wall standing on the deck; the marking — a white carpet on the deck. A tunnel
+    # floor — deep gray_concrete with air over it and a stone_bricks lid 5 higher; a tunnel lantern hangs
+    # under that lid exactly 4 blocks over its floor.
+    deck = [c for c in gcAll if c[1] >= 1 and cell(c[0], c[1] - 1, c[2]) == 'minecraft:stone_bricks']
+    deckCols = {(c[0], c[2]) for c in deck}
+    parapet = [c for c in swAll if (c[0], c[2]) in deckCols and cell(c[0], c[1] - 1, c[2]) == 'minecraft:gray_concrete']
+    deckMark = [c for c in wcAll if cell(c[0], c[1] - 1, c[2]) == 'minecraft:gray_concrete'
+                and cell(c[0], c[1] - 2, c[2]) == 'minecraft:stone_bricks']
+    tunFloor = [c for c in gcLo if cell(c[0], c[1] + 1, c[2]) == 'minecraft:air'
+                and cell(c[0], c[1] + 5, c[2]) == 'minecraft:stone_bricks']
+    tunLamp = [p for p in lampPos if cell(p[0], p[1] + 1, p[2]) == 'minecraft:stone_bricks'
+               and cell(p[0], p[1] - 4, p[2]) == 'minecraft:gray_concrete']
+    okViad = len(deck) >= 150 and len(parapet) >= 30 and len(deckMark) >= 20
+    print(f'  [{"OK " if okViad else "MISS"}] viaduct (bridge=yes): deck cells {len(deck)} (want >= 150), '
+          f'parapet walls {len(parapet)} (want >= 30), marking on the deck {len(deckMark)} (want >= 20)')
+    ok &= okViad
+    okTun = len(tunFloor) >= 150 and len(tunLamp) >= 4
+    print(f'  [{"OK " if okTun else "MISS"}] road tunnel (tunnel=yes): floor cells {len(tunFloor)} (want >= 150), '
+          f'lamps under the lid {len(tunLamp)} (want >= 4)')
+    ok &= okTun
     # A double track (a request: "instead of one roadway line — two parallel rrslin with an intermediate
     # gap of 2 blocks"): in the railway window there are exactly two rows of rails, the gap between the rows = 2 cells.
     railRows, railN = set(), 0
@@ -1038,8 +1086,9 @@ def check(path, legacy, env='flat', full=True):
                   if cell(x, y, z) in ('minecraft:bookshelf', 'minecraft:barrel', 'minecraft:oak_fence'))
     print(f'  [{"OK " if gapsBig <= 32 else "MISS"}] shopping center without voids: free 5x5 squares {gapsBig} (want <= 32: the remainder — staircase shafts and passages at the partition doors), furniture {furnBig}')
     ok &= gapsBig <= 32
-    # Stands in the shopping center: item frames (item_frame) on plank panels. Swords/tools of different materials with a wear of
-    # 2..36% of durability, occasionally golden apples/carrots; a frame hangs on a plank (a support from the opposite side).
+    # Stands in the shopping center: item frames (item_frame) on light gray concrete panels (game balance).
+    # Swords/tools of different materials with a wear of
+    # 2..36% of durability, occasionally golden apples/carrots; a frame hangs on the panel (a support from the opposite side).
     frs = [e for e in allEnt if e.get('id') == 'minecraft:item_frame']
     altarFr = [e for e in frs if e.get('Facing') == 1]
     frs = [e for e in frs if e.get('Facing') != 1]
@@ -1064,7 +1113,7 @@ def check(path, legacy, env='flat', full=True):
                 frBad += 1
         if len(bp) == 3 and fc in DIRV:
             dx, dz = DIRV[fc]
-            if cell(bp[0] - dx, bp[1], bp[2] - dz) != 'minecraft:oak_planks': frNoSupport += 1
+            if cell(bp[0] - dx, bp[1], bp[2] - dz) != 'minecraft:light_gray_concrete': frNoSupport += 1
         else:
             frBad += 1
     good = len(frs) >= 8 and frBad == 0 and frNoSupport == 0 and frTools >= 6

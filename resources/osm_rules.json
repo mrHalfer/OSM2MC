@@ -12,7 +12,7 @@
   "        _area — the outline area, m2; _perim — the perimeter, m; nb:code / nb:share / nb:n / nb:rel / nb:dist — neighbors (pass 2 only).",
   "fields: the tqt layer fields (CODE, REL, MAT ...). The value: text with substitutions {tag}, {tag1,tag2} (the first non-empty),",
   "        {tag|num}, {tag|int}, {tag|num*3}, {osm_id}; alternatives through || (the first non-empty). REL=\"auto\": height -> building:levels by the",
-  "        floor recalculation formulas (by CODE and the outline shape) -> heights.csv by CODE -> 6 m.",
+  "        floor recalculation formulas (by CODE and the outline shape) -> heights.csv by CODE -> 6 m. Elevation: the rdslin rules also carry BRG/TUN/LVL (the OSM bridge/tunnel/level tags): bridge=yes raises the roadway on a viaduct, tunnel=yes sinks it into a tunnel, level gives the height/depth in 8-block levels (bridge wins, 0 level - one level).",
   "Address: the fields TYSTR (street type), STREET (name) and NUMBR (house number) for bldpol and the street name for rdslin are filled IN BY THEMSELVES from addr:street/addr:place/addr:full/addr:housenumber and name",
   "        (osm/tmcaddress.cpp): \"улица Ленина\" -> TYSTR=улица, STREET=Ленина; \"12к1\" -> 12К.1. If a rule sets these fields explicitly, its value is taken.",
   "The tags from the conditions and templates automatically become columns of the temporary osmconf.ini, the others are read from other_tags.",
@@ -1131,13 +1131,12 @@
    }
   },
   {
-   "note": "Not roads: tunnels and passages under buildings",
+   "note": "Not roads: culverts under streams and passages through buildings (a tunnel=yes roadway is a road: the road rules sink it as an underground road via the TUN column)",
    "from": "lines",
    "layer": "-",
    "when": {
     "highway": "*",
     "tunnel": [
-     "yes",
      "culvert",
      "building_passage"
     ]
@@ -1155,6 +1154,9 @@
     "footway": "crossing"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45262000"
    }
   },
@@ -1167,6 +1169,9 @@
     "cycleway": "crossing"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45262000"
    }
   },
@@ -1198,6 +1203,9 @@
     "highway": "motorway"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "61210000"
    }
   },
@@ -1209,6 +1217,9 @@
     "highway": "trunk"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "61220000"
    }
   },
@@ -1226,6 +1237,9 @@
     ]
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "61231000"
    }
   },
@@ -1237,6 +1251,9 @@
     "highway": "primary"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45210000"
    }
   },
@@ -1248,6 +1265,9 @@
     "highway": "secondary"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45220000"
    }
   },
@@ -1259,6 +1279,9 @@
     "highway": "tertiary"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45230000"
    }
   },
@@ -1275,6 +1298,9 @@
     "name": "*"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45230000"
    }
   },
@@ -1290,6 +1316,9 @@
     ]
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45270000"
    }
   },
@@ -1301,6 +1330,9 @@
     "highway": "service"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45260000"
    }
   },
@@ -1317,6 +1349,9 @@
     ]
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45260000"
    }
   },
@@ -1328,6 +1363,9 @@
     "highway": "cycleway"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45261000"
    }
   },
@@ -1339,6 +1377,9 @@
     "highway": "track"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "61330000"
    }
   },
@@ -1350,6 +1391,9 @@
     "highway": "bridleway"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "61420000"
    }
   },
@@ -1466,6 +1510,9 @@
     "highway": "crossing"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45262000"
    }
   },
@@ -2191,6 +2238,9 @@
     "highway": "road"
    },
    "fields": {
+    "BRG": "{bridge}",
+    "TUN": "{tunnel}",
+    "LVL": "{level}",
     "CODE": "45270000"
    }
   },

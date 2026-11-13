@@ -9,6 +9,12 @@
 #include <limits>
 
 
+//! Mall racks and stands are light gray concrete (game balance: harder to farm than planks or bookshelves)
+static quint16 mallRackId()
+{
+    return quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
+}
+
 // Everything a single-object voxelization needs: the object mesh, the transform,
 // the store to write into and the collected outputs (the old parameter list).
 class ObjectVoxelizer
@@ -3195,7 +3201,7 @@ void ObjectVoxelizer::buildInteriors()
                         if (panor)
                         {   // ——— MALL: a rack along a wall / barrels / a counter ———
                             if (h2 < 66)
-                            {   // a rack 4..8: bookshelf (every third is a barrel of "goods")
+                            {   // a rack 4..8: light gray concrete (every third is a barrel of "goods")
                                 const int want2 = 4 + int((h >> 7) % 5u);
                                 int okN = 0;
                                 for (; okN < want2; ++okN)
@@ -3206,9 +3212,9 @@ void ObjectVoxelizer::buildInteriors()
                                 for (int i = 0; i < okN; ++i)
                                 {
                                     put(lx + s0 * i, lz + s1 * i, 0,
-                                        i % 3 == 2 ? IdBarrel : IdBookshelf, &floorBlocks);
+                                        i % 3 == 2 ? IdBarrel : mallRackId(), &floorBlocks);
                                     if (twoUp && cellFree(lx + s0 * i, lz + s1 * i, 1))
-                                        put(lx + s0 * i, lz + s1 * i, 1, IdBookshelf, &floorBlocks);
+                                        put(lx + s0 * i, lz + s1 * i, 1, mallRackId(), &floorBlocks);
                                 }
                             }
                             else if (h2 < 80)
@@ -3226,7 +3232,7 @@ void ObjectVoxelizer::buildInteriors()
                                 if (cellFree(lx + dvec[cd][0], lz + dvec[cd][1], 0))
                                     put(lx + dvec[cd][0], lz + dvec[cd][1], 0, stairId[cd], &floorBlocks);
                             }
-                            else put(lx, lz, 0, IdBookshelf, &floorBlocks);
+                            else put(lx, lz, 0, mallRackId(), &floorBlocks);
                             continue;
                         }
                         if (h2 < 30)                              // bookshelves (a row of 1..3)
@@ -3328,10 +3334,10 @@ void ObjectVoxelizer::buildInteriors()
                             for (int i = 0; i < okN; ++i)
                             {
                                 put(lx + q0 * i, lz + q1 * i, 0,
-                                    i % 3 == 2 ? IdBarrel : IdBookshelf, &floorBlocks);
+                                    i % 3 == 2 ? IdBarrel : mallRackId(), &floorBlocks);
                                 // the 2nd tier 75% (was 50%) — the hall looks like a "shop"
                                 if ((twoUp || ((h >> 2) & 1u) != 0u) && cellFree(lx + q0 * i, lz + q1 * i, 1))
-                                    put(lx + q0 * i, lz + q1 * i, 1, IdBookshelf, &floorBlocks);
+                                    put(lx + q0 * i, lz + q1 * i, 1, mallRackId(), &floorBlocks);
                             }
                             continue;
                         }
@@ -3522,9 +3528,10 @@ void ObjectVoxelizer::buildInteriors()
                         }
                 }
             }
-            // ——— STANDS WITH FRAMES (malls): a panel of 3 plank blocks 2 high, with item frames on both sides (swords and
+            // ——— STANDS WITH FRAMES (malls): a panel of 3 light gray concrete blocks 2 high (balance: harder to farm
+            // than planks), with item frames on both sides (swords and
             // tools of different materials: wood 66%, stone 24%, gold 7%, iron 2.5%, diamond 0.5%; wear —
-            // durability remains 2..36%; very rarely a golden apple and a golden carrot). ———
+            // durability remains 2..36%; very rarely a golden apple (1%) and a golden carrot (2%)). ———
             auto placeRack = [&](int lx, int lz, bool ax) -> bool
             {
                 if (!frames) return false;
@@ -3541,7 +3548,7 @@ void ObjectVoxelizer::buildInteriors()
                 for (int i = -1; i <= 1; ++i)
                     for (int row = 0; row < 2; ++row)
                     {
-                        put(lx + q0 * i, lz + q1 * i, row, IdOakPlanks, &dummyPlaced);
+                        put(lx + q0 * i, lz + q1 * i, row, mallRackId(), &dummyPlaced);
                         for (int sd = -1; sd <= 1; sd += 2)
                         {
                             const int fx = lx + q0 * i + p0 * sd, fz = lz + q1 * i + p1 * sd;
@@ -3553,11 +3560,11 @@ void ObjectVoxelizer::buildInteriors()
                             fr.face = ax ? (sd > 0 ? 2 : 0) : (sd > 0 ? 1 : 3);
                             const quint32 hf = finHash(bx, bz, byc, 0xF4A3Eu);
                             const int itemRoll = int(hf % 100u);
-                            if (itemRoll < 3) fr.kind = 5;                 // a golden apple (rarer: there is less good stuff on racks)
-                            else if (itemRoll < 6) fr.kind = 6;            // a golden carrot
+                            if (itemRoll < 1) fr.kind = 5;                 // a golden apple (1%, balance: rare loot on racks)
+                            else if (itemRoll < 3) fr.kind = 6;            // a golden carrot (2%)
                             else
                             {
-                                const int tr = itemRoll - 6;                // 0..93: a sword ~40, a pickaxe/axe/shovel/hoe ~13 each
+                                const int tr = itemRoll - 3;                // 0..96: a sword ~40, a pickaxe/axe/shovel/hoe ~14 each
                                 fr.kind = tr < 40 ? 0 : 1 + (tr - 40) / 14;
                                 if (fr.kind > 4) fr.kind = 4;
                                 // a rack: wood 66%, stone 24%, gold 7%, iron 2.5%, diamond 0.5%
@@ -3647,8 +3654,8 @@ void ObjectVoxelizer::buildInteriors()
                                     {
                                         const int x = lx + q0 * i, z = lz + q1 * i;
                                         if (!cellFree(x, z, 0)) continue;
-                                        put(x, z, 0, (i + 2) % 3 == 2 ? IdBarrel : IdBookshelf, &dummy);
-                                        if (cellFree(x, z, 1)) put(x, z, 1, IdBookshelf, &dummy);
+                                        put(x, z, 0, (i + 2) % 3 == 2 ? IdBarrel : mallRackId(), &dummy);
+                                        if (cellFree(x, z, 1)) put(x, z, 1, mallRackId(), &dummy);
                                     }
                                 }
                                 else if (roll < 78 && cellFree(lx, lz, 1))

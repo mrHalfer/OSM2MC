@@ -5,6 +5,31 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.6.26.11131] — 2026-11-13
+
+### Added
+
+- Multi-level road interchanges and road tunnels from OSM tags: a way with `bridge=yes` now rises on a viaduct
+  above the ground and the other roads — a FLAT deck at least five free blocks over the highest ground under it,
+  of the roadway material on a stone-brick girder, with piers along the span, stone brick wall parapets and the
+  marking on the deck; lines that continue each other join in the air, and a `level=2` way starts its climb from
+  the deck of a `level=1` one. A way with `tunnel=yes` sinks into an underground road that keeps a single FLAT
+  floor under the lowest ground along the joined line (the tunnel never repeats the relief): a lit four-block
+  interior under a stone-brick lid with four rock rows over it; tunnel lines that continue each other join
+  underground, and the ends that reach no tunnel ramp out through open-cut portals. The grades are gentle (one
+  block per five cells) and every step of a climb is eased by two half-block slabs in a row, so a ramp can be
+  driven up and down; the `level` tag picks how many 8-block levels to rise or sink (1..4, default one)
+
+### Changed
+
+- Game balance for loot and shop fittings: a barrel anywhere (a house, a shop, a warehouse) now holds no more
+  than four items — the goods are laid in by the exporter itself from the same village themes, since the game's
+  generator gives up to five stacks and heaps of up to 21 items in one. Mall racks and weapon stands are built
+  of light gray concrete instead of planks and bookshelves (harder to farm), and golden apples and golden
+  carrots on the stands became three times rarer
+- Building platforms blend into the relief gently: the margin and the ramp are smoothed until no step wider
+  than one block remains around the house — the platform could perch two blocks above the ground on its edge
+
 ## [1.6.26.11122] — 2026-11-12
 
 ### Added

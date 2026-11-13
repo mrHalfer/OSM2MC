@@ -114,7 +114,12 @@ node(8150, 0, {'highway': 'crossing'})
 expected_layers['rdslin']['45262000'] += 1
 node(8105, 0, {'highway': 'crossing'})
 node(8100, 60, {'highway': 'crossing'})
-line([(8000, 180), (8200, 180)], {'highway': 'residential', 'tunnel': 'yes'})                      # skip
+# elevated / underground roadways (the bridge/tunnel/level tags go to the BRG/TUN/LVL columns of the rdslin rules,
+# see osm_rules.json): tunnel=yes is an underground road, bridge=yes a viaduct; culverts and building passages are not roads
+line([(8000, 180), (8200, 180)], {'highway': 'residential', 'tunnel': 'yes'}, 'rdslin', '45270000')
+line([(8000, 240), (8200, 240)], {'highway': 'primary', 'bridge': 'yes', 'level': '2'}, 'rdslin', '45210000')
+line([(8000, 260), (8200, 260)], {'highway': 'service', 'tunnel': 'building_passage'})              # skip
+line([(8000, 280), (8200, 280)], {'highway': 'unclassified', 'tunnel': 'culvert'})                  # skip
 line([(8000, 200), (8300, 200)], {'railway': 'rail'}, 'rrslin', '61111000')
 line([(8000, 220), (8300, 220)], {'railway': 'abandoned'})                                         # skip
 # two TOUCHING barrier=fence ways (an L, x~760, empty field south of the buildings): csrlin 82200000,

@@ -209,6 +209,13 @@ public:
         //! rails are electrified like in the metro (every 20th on a straight run), and the ground under the track is
         //! replaced by stone (stone bricks for trams); trams (61124000) are electrified even without the tag.
         bool railElec = false;
+        //! For Road — the BRG/TUN/LVL columns of osm_rules.json (the OSM tags "bridge", "tunnel" and "level"):
+        //! the roadway rises above the terrain and the other roads on a viaduct (bridge) or sinks into a tunnel
+        //! (tunnel); roadBridge wins when both tags are set. |roadLevel| (1..4) — how many 8-block levels up/down
+        //! to lift the way; 0 — the owner's default of one level. The VIADUCTS AND TUNNELS pass of exportrun.cpp
+        //! owns the geometry; short lines with no room for the ramps stay surface roads.
+        bool roadBridge = false, roadTunnel = false;
+        int roadLevel = 0;
     };
 
     //! The terrain height at a world point (X,Y) — honest meters, -9999 for "no data" (the same contract

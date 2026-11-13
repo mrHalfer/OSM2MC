@@ -514,6 +514,28 @@ int main(int argc, char** argv)
         objs << lg;
     }
 
+    // Elevated and underground roadways (the OSM bridge=yes / tunnel=yes tags, the BRG/TUN/LVL columns
+    // of osm_rules.json): two 60-block highways (CODE 45210000, marking) lifted/sunk by 6 blocks (level 0 —
+    // one 6-block level, trapezoid ramps at both ends). The viaduct — a gray_concrete deck on a stone_bricks
+    // girder above the ground, stone_brick_wall parapets, piers, the marking on the deck; the tunnel — a
+    // gray_concrete floor 7 blocks under the surface, a 4-block interior with a stone_bricks lid and lanterns,
+    // open-cut portals at the ends. The verifier catches these block signatures. Free band y0+60..+92,
+    // x0+42..+102 — does not touch the other gates; inside the scene bbox — the tf auto-centering and the
+    // coordinates of the other verify checks do not shift.
+    McWorldExporter::McObject brgRoad = makeQuad(x0 + 42, y0 + 60, 60, 2, 100.0, QColor(120, 120, 120));
+    brgRoad.kind = McWorldExporter::McObject::Road;
+    brgRoad.code = 45210000;
+    brgRoad.roadBridge = true;
+    brgRoad.paths << (QVector<QPointF>() << QPointF(x0 + 42, y0 + 61) << QPointF(x0 + 102, y0 + 61));
+    objs << brgRoad;
+
+    McWorldExporter::McObject tunRoad = makeQuad(x0 + 42, y0 + 90, 60, 2, 100.0, QColor(120, 120, 120));
+    tunRoad.kind = McWorldExporter::McObject::Road;
+    tunRoad.code = 45210000;
+    tunRoad.roadTunnel = true;
+    tunRoad.paths << (QVector<QPointF>() << QPointF(x0 + 42, y0 + 91) << QPointF(x0 + 102, y0 + 91));
+    objs << tunRoad;
+
     // A residential high-rise 14x14x200 m with CODE 44400000 (square windows 2×2) — the ONLY one above
     // 15 floors (shaftH=197 -> n4=(198)/5=39 floors of 5 blocks): the "monster spawners" test
     // (every 15th floor of the city: 11 floors were counted before it, its own go as the 12th..50th —

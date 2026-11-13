@@ -28,6 +28,50 @@ static void packSparse(const QVector<quint32>& values, int bits, QVector<qint64>
     }
 }
 
+//! Barrel goods (game balance, owner's request: "no more than 4 items in a barrel anywhere"). The vanilla
+//! kBarrelLoot tables are NOT given to the game for barrels — they roll 3..5 stacks and lay up to 8..21 items
+//! in a stack (kelp). The rows here follow the order of kBarrelLoot (the fisherman, the butcher, a plains
+//! house, the shepherd, the tannery, the mason, a taiga house, the ship's bilge); the barrel gets 1..4 stacks
+//! written straight into its block_entities, the pick and the counts come from a hash of the cell — stable
+//! between re-exports of the same project.
+struct BarrelGood { const char* id; char minC, maxC, weight; };   // id==nullptr — end of the row
+static const BarrelGood kBarrelGoods[kBarrelLootCount][5] = {
+    {   // a fisherman's barrel
+        { "minecraft:cod",         1, 3, 4 }, { "minecraft:salmon", 1, 2, 3 },
+        { "minecraft:kelp",        2, 5, 3 }, { "minecraft:clay",   1, 2, 1 },
+        { nullptr,                 0, 0, 0 } },
+    {   // a butcher's barrel
+        { "minecraft:raw_beef",    1, 3, 3 }, { "minecraft:raw_porkchop", 1, 3, 3 },
+        { "minecraft:raw_mutton",  1, 3, 3 }, { "minecraft:coal",         1, 3, 2 },
+        { nullptr,                 0, 0, 0 } },
+    {   // a provisions barrel of a plains house
+        { "minecraft:bread",       1, 2, 3 }, { "minecraft:wheat",  1, 3, 3 },
+        { "minecraft:potato",      1, 4, 3 }, { "minecraft:carrot", 1, 4, 2 },
+        { nullptr,                 0, 0, 0 } },
+    {   // a shepherd's barrel
+        { "minecraft:white_wool",       1, 3, 3 }, { "minecraft:light_gray_wool", 1, 2, 2 },
+        { "minecraft:string",           1, 4, 3 }, { "minecraft:shears",          1, 1, 1 },
+        { nullptr,                      0, 0, 0 } },
+    {   // a tannery's barrel
+        { "minecraft:leather",     1, 3, 4 }, { "minecraft:feather",    1, 4, 2 },
+        { "minecraft:rabbit_hide", 1, 3, 2 }, { "minecraft:flint",      1, 2, 1 },
+        { nullptr,                 0, 0, 0 } },
+    {   // a mason's barrel (building stone)
+        { "minecraft:andesite",    2, 4, 3 }, { "minecraft:diorite", 2, 4, 3 },
+        { "minecraft:granite",     2, 4, 3 }, { "minecraft:brick",   1, 3, 2 },
+        { nullptr,                 0, 0, 0 } },
+    {   // a provisions barrel of a taiga house
+        { "minecraft:potato",         1, 4, 3 }, { "minecraft:sweet_berries", 1, 4, 3 },
+        { "minecraft:brown_mushroom", 1, 2, 2 }, { "minecraft:apple",         1, 2, 2 },
+        { nullptr,                    0, 0, 0 } },
+    {   // the bilge barrel of a ship
+        { "minecraft:kelp",          2, 6, 4 }, { "minecraft:iron_ingot",   1, 2, 2 },
+        { "minecraft:copper_ingot",  1, 3, 2 }, { "minecraft:glass",        1, 3, 2 },
+        { nullptr,                   0, 0, 0 } },
+};
+static_assert(int(sizeof(kBarrelGoods) / sizeof(kBarrelGoods[0])) == kBarrelLootCount,
+              "update kBarrelGoods with kBarrelLoot (export/sites.cpp)");
+
 //! Chunk NBT in the NATIVE Minecraft 26.x format (DataVersion 5023): sections Y=-4..19 (the world -64..319),
 //! the palettes are STRING LISTS ("minecraft:stone"), a unary palette has no data written; we do not write light and heightmaps
 //! at all — the reader computes them itself (checked with a live 26.3 server: such a chunk loads,
@@ -669,8 +713,35 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
             w.writeInt("x", cs.x);
             w.writeInt("y", cs.y);
             w.writeInt("z", cs.z);
-            w.writeString("LootTable", cs.barrel ? QLatin1String(kBarrelLoot[cs.tbl % kBarrelLootCount])
-                                              : QLatin1String(kChestLoot[cs.tbl % kChestLootCount]));
+            if (cs.barrel)
+            {   // the barrel's goods lie right in the BE (see kBarrelGoods): the game's generator is not
+                // asked, so never more than 4 stacks; the item format is 1.20.5+ (id/count), as in stoves
+                const BarrelGood* const goods = kBarrelGoods[cs.tbl % kBarrelLootCount];
+                int nGoods = 0, wAll = 0;
+                while (goods[nGoods].id) { wAll += goods[nGoods].weight; ++nGoods; }
+                quint32 s = quint32(cs.x) * 374761393u ^ quint32(cs.z) * 668265263u
+                          ^ quint32(cs.y) * 2246822519u ^ quint32(cs.tbl) * 3266489917u ^ 0xBA77E15u;
+                s ^= s >> 15; s *= 2246822519u; s ^= s >> 13;
+                auto next = [&s]() { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return s; };
+                const int nStack = 1 + int(next() % 4u);                  // 1..4 stacks — the balance cap
+                w.beginList("Items", Nbt::Compound, nStack);
+                for (int j = 0; j < nStack; ++j)
+                {
+                    int pick = int(next() % quint32(wAll));
+                    int gi = 0;
+                    while (pick >= goods[gi].weight) { pick -= goods[gi].weight; ++gi; }
+                    const BarrelGood& g = goods[gi];
+                    const int cnt = g.minC + int(next() % quint32(g.maxC - g.minC + 1));
+                    w.beginCompound(nullptr);
+                    w.writeByte("Slot", qint8(j));
+                    w.writeString("id", QLatin1String(g.id));
+                    w.writeByte("count", qint8(cnt));
+                    w.endCompound();
+                }
+                w.endCompound();                              // a list element
+                continue;
+            }
+            w.writeString("LootTable", QLatin1String(kChestLoot[cs.tbl % kChestLootCount]));
             w.endCompound();                                  // a list element
         }
         for (const BannerSite& bn : bannersHere)

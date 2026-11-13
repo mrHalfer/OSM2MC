@@ -42,9 +42,11 @@ const BookText kSciBooks[] = {
                       "∇·E = ρ / ε₀\n\n∇×E = −∂B / ∂t\n\n(уравнения Максвелла)" },
 };
 
-//! The loot of barrels (a request: "what usually lies in barrels in Minecraft"): vanilla village barrels —
+//! The loot themes of barrels (a request: "what usually lies in barrels in Minecraft"): vanilla village barrels —
 //! the fisherman, butcher, a meat/fruit "house", shepherd, tanner, mason, weaponsmith/toolsmith,
-//! plus the bilge barrel of a shipwreck. The game survives tables that are absent in a version (an empty barrel).
+//! plus the bilge barrel of a shipwreck. The table itself is NOT given to the game anymore: the game rolls
+//! up to 5 stacks and 8..21 items per stack, while the balance needs no more than 4 items — the goods live in
+//! kBarrelGoods (anvil.cpp) in the same order and are written into the barrel's BE directly.
 const char* const kBarrelLoot[] = {
     "minecraft:chests/village/village_fisher",
     "minecraft:chests/village/village_butcher",
