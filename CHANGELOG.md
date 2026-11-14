@@ -5,6 +5,42 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.7.26.11141] — 2026-11-14
+
+### Added
+
+- The OSM `layer` tag MULTIPLIES a bridge's lift (a user request): a `layer=2` ramp now rides over a `layer=1`
+  one — the stacked interchanges of Los Angeles; up to four levels, at most 40 blocks of lift all in all
+
+### Changed
+
+- Road interchanges and tunnels (the owner's test round) got their grades gentler and their details fixed:
+  a viaduct climbs one block per eight cells of the line, a tunnel sinks one per ten (one per three for a
+  foot underpass), and each climbing end may only spend its share of the line outside a reserved flat middle,
+  so the deck and the tunnel floor always keep their plane somewhere; the earlier one-block-per-five-cells
+  ramps of 1.6.26.11131 superseded
+- A tunnel descent STARTS BEFORE the tagged section (OSM marks a tunnel only where the road has already left
+  the satellite image): the open cut extends along the straight approach road up to 30 cells outward, down to
+  the natural ground there, so a portal no longer opens in the middle of the surface roadway; the portal walls
+  retreat until the floor meets the ground (a wide open basin you can drive into)
+- When a viaduct climb still does not fit its line, its first up to two blocks MOVE ONTO the straight
+  approach road in front of the bridge end — the roadway rises on a low embankment with the same half-blocks
+  easing the steps; the export log reports the number of such lifted approach cells
+- A surface roadbed running over a tunnel portal stays UNTOUCHABLE (the owner's choice): a covered stone-brick
+  chamber goes under it instead of the open cut, so that tunnel may come out worse — the surface road never breaks
+- Inside a tunnel the floor carries the line's own marking, and lanterns hang only deep in the dug span (from
+  the eighth cell between the portals, the fourth for a foot underpass) — never above the start of a descent
+- A tunnel sinks by its `level` as well, up to four 8-block levels deep (the README said 1..3, the exporter
+  always read 1..4)
+
+### Fixed
+
+- Parapets no longer stand ACROSS a roadway: a wall only rises where the neighbour of a deck cell is open
+  ground, not a ramp step of the same way, the other tube of a dual carriageway or a tunnel (the old rule
+  fenced every ramp of a climb row by row)
+- No pier or girder embankment of an upper deck now lands on the deck or ramp of a lower one — a `level=2`
+  column used to stand right on the `level=1` roadway of the same interchange
+
 ## [1.6.26.11131] — 2026-11-13
 
 ### Added
