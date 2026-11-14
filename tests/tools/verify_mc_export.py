@@ -980,9 +980,11 @@ def check(path, legacy, env='flat', full=True):
     print(f'  [{"OK " if okViad else "MISS"}] viaduct (bridge=yes): deck cells {len(deck)} (want >= 150), '
           f'parapet walls {len(parapet)} (want >= 30), marking on the deck {len(deckMark)} (want >= 20)')
     ok &= okViad
-    okTun = len(tunFloor) >= 150 and len(tunLamp) >= 4
+    okTun = len(tunFloor) >= 150 and len(tunLamp) >= 3
     print(f'  [{"OK " if okTun else "MISS"}] road tunnel (tunnel=yes): floor cells {len(tunFloor)} (want >= 150), '
-          f'lamps under the lid {len(tunLamp)} (want >= 4)')
+          f'lamps under the lid {len(tunLamp)} (want >= 3)')   # the 60-block test line: the descents take ~16 cells
+    # each side (a 1-in-2 as steep as fits), so ~28 cells are flat floor and the lanterns hang from the 8th dug
+    # cell every 6th — the 8th, 14th and 20th (the owner: no lantern where the descent begins)
     ok &= okTun
     # A double track (a request: "instead of one roadway line — two parallel rrslin with an intermediate
     # gap of 2 blocks"): in the railway window there are exactly two rows of rails, the gap between the rows = 2 cells.

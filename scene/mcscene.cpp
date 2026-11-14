@@ -36,6 +36,7 @@ struct ExportItem
     bool elec = false;                              // Railway: the ELEC column (OSM "electrified" other than "no")
     bool bridge = false, tunnel = false;            // Road: the BRG/TUN columns (OSM "bridge"/"tunnel" other than "no")
     int elev = 0;                                   // Road: the LVL column (OSM "level"), clamped to -4..4
+    int lyr = 0;                                    // Road: the LYR column (OSM "layer"), the bridge lift multiplier
     bool lift = false;
     bool onion = false;
     double roofH = 0.0;
@@ -344,7 +345,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                 case 45210000: case 61210000: case 61220000: case 61230000: e.roadScale = 2.5; break;
                 default: break;
                 }
-                // elevated / underground roadway: the BRG/TUN/LVL columns (OSM "bridge"/"tunnel"/"level");
+                // elevated / underground roadway: the BRG/TUN/LVL/LYR columns (OSM "bridge"/"tunnel"/"level"/"layer");
                 // the value "no" (and an empty column) — an ordinary surface road
                 const int brn = layer->fieldIndex(QStringLiteral("BRG"));
                 if (brn >= 0)
@@ -360,6 +361,8 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                 }
                 const int lv = layer->fieldIndex(QStringLiteral("LVL"));
                 if (lv >= 0) e.elev = obj->fields.value(lv).trimmed().toInt();
+                const int ly = layer->fieldIndex(QStringLiteral("LYR"));
+                if (ly >= 0) e.lyr = obj->fields.value(ly).trimmed().toInt();
             }
             // rail electrification: the ELEC column (the OSM "electrified" tag other than "no")
             if (kind == Kind::Railway)
@@ -588,6 +591,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             mo.roadBridge = e.bridge;
             mo.roadTunnel = e.tunnel;
             mo.roadLevel = qBound(-4, e.elev, 4);
+            mo.roadLayer = qBound(-4, e.lyr, 4);   // (user request) multiplies a bridge's lift (stacked interchanges)
             if (e.kind == Kind::Plate && mo.extrudeH < 1.0 && (e.code == 51230000 || e.code == 51133000 || e.code == 51410000))
             {   // csrpol 51230000/51133000/51410000 with zero height — a 15 m tower
                 float zmin = std::numeric_limits<float>::max(), zmax = -zmin;

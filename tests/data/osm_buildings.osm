@@ -237,7 +237,7 @@
 <way id="139"><nd ref="141"/><nd ref="142"/><tag k="highway" v="track"/></way>
 <way id="140"><nd ref="143"/><nd ref="144"/><tag k="highway" v="footway"/><tag k="footway" v="crossing"/></way>
 <way id="141"><nd ref="148"/><nd ref="149"/><tag k="highway" v="residential"/><tag k="tunnel" v="yes"/></way>
-<way id="142"><nd ref="150"/><nd ref="151"/><tag k="highway" v="primary"/><tag k="bridge" v="yes"/><tag k="level" v="2"/></way>
+<way id="142"><nd ref="150"/><nd ref="151"/><tag k="highway" v="primary"/><tag k="bridge" v="yes"/><tag k="level" v="2"/><tag k="layer" v="2"/></way>
 <way id="143"><nd ref="152"/><nd ref="153"/><tag k="highway" v="service"/><tag k="tunnel" v="building_passage"/></way>
 <way id="144"><nd ref="154"/><nd ref="155"/><tag k="highway" v="unclassified"/><tag k="tunnel" v="culvert"/></way>
 <way id="145"><nd ref="156"/><nd ref="157"/><tag k="railway" v="rail"/></way>

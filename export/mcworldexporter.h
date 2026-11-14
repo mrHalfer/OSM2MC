@@ -213,9 +213,10 @@ public:
         //! the roadway rises above the terrain and the other roads on a viaduct (bridge) or sinks into a tunnel
         //! (tunnel); roadBridge wins when both tags are set. |roadLevel| (1..4) — how many 8-block levels up/down
         //! to lift the way; 0 — the owner's default of one level. The VIADUCTS AND TUNNELS pass of exportrun.cpp
-        //! owns the geometry; short lines with no room for the ramps stay surface roads.
+        //! owns the geometry; short lines with no room for the ramps stay surface roads. roadLayer (OSM "layer")
+        //! MULTIPLIES a bridge's lift (a user request: the stacked interchanges of Los Angeles, layer=2 over 1).
         bool roadBridge = false, roadTunnel = false;
-        int roadLevel = 0;
+        int roadLevel = 0, roadLayer = 0;
     };
 
     //! The terrain height at a world point (X,Y) — honest meters, -9999 for "no data" (the same contract

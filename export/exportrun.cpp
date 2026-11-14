@@ -8831,20 +8831,27 @@ bool ExportRun::buildGround()
         //  * a viaduct — a FLAT deck plane, at least 7 blocks over the highest ground under the component
         //    (5 free blocks under the deck plus its 2-block thickness, owner request) and j.h over it when
         //    the level allows; the deck of the roadway material one row under the plane, a stone-brick girder
-        //    under it; the plane is reached by 1-in-5 grades from the ground and every step of the grade is
-        //    eased with TWO half-block slabs in a row (owner requests: the deck must not repeat the relief,
-        //    the ramps must be smooth and long); an embankment where there is no clearance under the girder,
-        //    piers every 8 blocks under the raised span (not over another roadway or the rails), parapets of
-        //    stone_brick_wall on the deck edges and the marking carpet of the main roads along the axis;
+        //    under it; the plane is reached by 1-in-8 grades from the ground and every step of the grade is
+        //    eased with half-block slabs (the step's lower cell and the two cells before it, owner requests:
+        //    the deck must not repeat the relief, the ramps must be smooth and long, the FIRST step must
+        //    have a half-block before it); an embankment where there is no clearance under the girder, piers
+        //    every 8 blocks under the raised span (not over another roadway or the rails), parapets of
+        //    stone_brick_wall ONLY on the cells at the deck edge (the axis walk put walls inside wide decks)
+        //    and the marking carpet of the main roads along the axis;
         //  * a tunnel — a FLAT floor under the lowest ground along the joined line: road row =
         //    minGround - (j.h + 1), i.e. 4 rock blocks over the lid, the lid, 4 blocks of interior and the
         //    roadway (the tunnel never repeats the relief, owner request). Parts that continue each other
-        //    in line share the floor and join UNDERGROUND; the free ends ramp down 1 block per 2 cells
-        //    (a pedestrian underpass per cell), steepening on short lines, and the floor never pierces the
-        //    surface — where there are not 4 rock rows left over the lid the cell stays an open-cut portal
-        //    (the column surface lowered to the floor row, the cut widened 2 cells past the roadway with
-        //    the walls stepping back), its steps eased by the same double half-blocks (owner request).
-        //    Lanterns every 6th cell of the dug span. The approach cell before a portal dips -1;
+        //    in line share the floor and join UNDERGROUND; the free ends ramp down FLATTER than a viaduct —
+        //    1 block per 10 cells (a pedestrian underpass per 3), steepening only as far as the line's length
+        //    demands, and the floor never pierces the surface. Where there are not 4 rock rows left over the
+        //    lid the cell stays an open-cut portal: the column surface lowered to its row, the cut dug far
+        //    along the slope with the walls receding a cell per block until they reach the natural ground (an
+        //    open basin, not a slot, owner request), its steps eased by the same half-blocks. The descent of
+        //    every tunnel starts EARLY — on the straight approach road in front of the free end (OSM tags a
+        //    tunnel only where the road has already gone); a foot underpass stops at the footpath touching
+        //    it (owner request). Lanterns only deep in the dug span: from the 8th dug cell past
+        //    a portal, then every 6th — none where the descent begins; the marking carpet lies on the tunnel
+        //    floor too. The approach cell before a portal dips -1;
         //  * the approach cells (profile 0) and the tunnel cells over water — an ordinary surface road: the
         //    roadway material in the surface layer of the column at its natural height.
         if (!roadsElev.isEmpty())
@@ -8861,9 +8868,10 @@ bool ExportRun::buildGround()
                 fillChunks << gk;             // the approach cells painted into the ground must reach the zip too
                 return &ground[gk];
             };
-            qint64 nDeck = 0, nTun = 0, nPortal = 0, nPier = 0, nLamp = 0, nSurf = 0;
+            qint64 nDeck = 0, nTun = 0, nPortal = 0, nPier = 0, nLamp = 0, nSurf = 0, nPara = 0;
             QVector<QHash<ColKey, int>> deckYs(roadsElev.size()), floorYs(roadsElev.size());
             QVector<QSet<ColKey>> deckSlabs(roadsElev.size()), tunSlabs(roadsElev.size());   // ramp-step cells eased with half-blocks
+            QVector<QVector<QPair<qint64, int>>> tunExt(roadsElev.size());   // the descents extended to the footpath
             static const int kN4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
             auto spread = [&](const RoadJob& j, QHash<ColKey, int>& hm, bool wholeWay)
             {   // every roadway cell inherits the row of its nearest axis cell (a 4-connected flood over the
@@ -8921,7 +8929,7 @@ bool ExportRun::buildGround()
             // in line (the dispatcher's junction rule in cells: ends <= 2 apart, the directions anti-parallel,
             // the partner end ahead and not to the side, the partner >= 12 cells long) share one FLAT floor
             // under the LOWEST ground along the component and join UNDERGROUND; the ends that reach no other
-            // tunnel ramp down 1 block per 2 cells (a pedestrian underpass per cell), steepening
+            // tunnel ramp down 1 block per 10 cells (a pedestrian underpass per 3), steepening
             // automatically on short lines, and the floor never pierces the surface. A part with no length
             // and no junction end is left on the surface (its floorYs stay empty — phase 1 paints it).
             QVector<ElevPart> tparts;
@@ -9001,8 +9009,16 @@ bool ExportRun::buildGround()
                 const int gA = ep.v.first().second, gB = ep.v.last().second;
                 const int F = tFloor.value(pairKey(tfind(i), ep.h), gA - j.h - 1);
                 const bool frA = !tconnA[i], frB = !tconnB[i];
-                const int stA = (frA && j.car && 4 * qMax(1, gA - F - 1) <= n) ? 2 : 1;   // 1 block per 2 cells where the line is long enough
-                const int stB = (frB && j.car && 4 * qMax(1, gB - F - 1) <= n) ? 2 : 1;
+                // (owner request) the tunnel descent must be FLATTER than a viaduct grade: 1 block per 10
+                // cells for a car tunnel, per 3 for a pedestrian underpass — but each free end may spend only
+                // its share of the line OUTSIDE a reserved flat middle: two 1-in-10 descents of a short line
+                // ate it whole, so the floor never reached its row and the whole span stayed an open trench
+                // (the owner's harness test found exactly that)
+                const int nFree = (frA ? 1 : 0) + (frB ? 1 : 0);
+                const int tunFlat = std::max(10, n / 4);                       // at least a quarter of the line is the flat floor
+                const int tunSide = std::max(1, (n - tunFlat) / std::max(1, nFree));
+                const int stA = frA ? std::max(1, std::min(tunSide / qMax(1, gA - F - 1), j.car ? 10 : 3)) : 1;
+                const int stB = frB ? std::max(1, std::min(tunSide / qMax(1, gB - F - 1), j.car ? 10 : 3)) : 1;
                 int prev = std::numeric_limits<int>::min();
                 for (int k = 0; k < n; ++k)
                 {
@@ -9011,12 +9027,49 @@ bool ExportRun::buildGround()
                     if (frA) y = std::max(y, gA - 1 - (k + stA - 1) / stA);               // the free end ramps: ceil(k / st) blocks down
                     if (frB) y = std::max(y, gB - 1 - (n - 1 - k + stB - 1) / stB);
                     y = std::min(y, top0 - 1);                                            // never pierce the surface
-                    if (prev != std::numeric_limits<int>::min())                          // rough ground — keep the row walkable
-                        y = std::max(prev - 2, std::min(prev + 2, y));
+                    if (prev != std::numeric_limits<int>::min())                          // (owner: the underpass steps were too steep) the row
+                        y = std::max(prev - 1, std::min(prev + 1, y));                   // walks at most 1 block per cell, the slabs ease the rest
                     y = std::min(y, top0 - 1);
                     floorYs[ep.ji].insert(ep.v[k].first, y);
                     prev = y;
                 }
+                // (owner request, the LA test) the descent must start EARLIER than the tunnel-tagged cells:
+                // OSM marks a tunnel only where the road has already disappeared from the picture, so the
+                // straight roadway that runs into this end becomes the open channel (30 cells): its cells are
+                // lowered cell per st rows exactly as the portal ramp, and the surface paints they received
+                // as ordinary roads are erased. A pedestrian underpass instead stops AT the surface footpath
+                // that touches its line (the owner's earlier request) — its own way cells keep walking level
+                auto extend = [&](int side)
+                {
+                    const QPointF w = toutw(i, side);
+                    if (std::fabs(w.x()) < 1e-6 && std::fabs(w.y()) < 1e-6) return;
+                    const bool majX = std::fabs(w.x()) >= std::fabs(w.y());
+                    const int sgn = majX ? (w.x() < 0 ? -1 : 1) : (w.y() < 0 ? -1 : 1);
+                    int cx = int(keyFirst(tcell(i, side))), cz = int(keySecond(tcell(i, side)));
+                    const int gE = side ? gB : gA, st = qMax(1, side ? stB : stA);
+                    for (int m = 1; m <= (j.car ? 30 : 16); ++m)
+                    {
+                        cx += majX ? sgn : 0; cz += majX ? 0 : sgn;
+                        const qint64 ck = pairKey(cx, cz);
+                        const int y = gE - 1 - (m - 1) / st;
+                        if (y <= F || y < gE - 2) break;                      // the floor, or the depth where the tunnel's own ramp
+                        if (elevCells.contains(ck) || j.road.contains(ck)) break;  // (its first cell is gE-2) joins without a step back
+                        if (!j.car && roadCols.contains(ck)) break;           // a foot underpass stops at the walkway
+                        GroundChunk* gp = ensureG(pairKey(cx >> 4, cz >> 4));
+                        const int gc = (cz & 15) * 16 + (cx & 15);
+                        const int orig2 = int(gp->top[gc]);
+                        if (gp->wd[gc] > 0 || orig2 <= y) break;              // water, or the ground is already low
+                        if (j.car && !roadCols.contains(ck)) break;           // the approach road turned away
+                        if (j.car && store.get(cx, orig2 + 3, cz) != IdAir) break;   // a building stands on this cell
+                        for (int yy = y + 1; yy <= orig2 + 2; ++yy)           // the wool, carpets and slabs of
+                            store.erase(cx, yy, cz);                          // the ordinary surface road here
+                        floorYs[ep.ji].insert(ck, y);                         // before the spread — the channel is a floor cell now
+                        elevCells.insert(ck);                                 // no grading, trees or furniture over it
+                        tunExt[ep.ji] << qMakePair(ck, y);
+                    }
+                };
+                if (frA) extend(0);
+                if (frB) extend(1);
                 spread(j, floorYs[ep.ji], true);                                  // the whole way is the structure now
             }
             // VIADUCTS (owner requests): the deck plane is FLAT and shared by the parts that join end to end —
@@ -9024,7 +9077,7 @@ bool ExportRun::buildGround()
             // ground on that side; parts of one level ride one plane (at least 7 blocks — the clearance under
             // the deck — over the highest ground under the component, the level height when it is bigger),
             // and a higher level starts its climb from the deck plane of the lower one. An end that reaches
-            // no other line runs down to the ground 1 block per 5 cells, every step eased by two slabs.
+            // no other line runs down to the ground 1 block per 8 cells, the steps eased by half-blocks.
             QVector<ElevPart> parts;
             for (int ji = 0; ji < roadsElev.size(); ++ji)
             {
@@ -9069,7 +9122,7 @@ bool ExportRun::buildGround()
                     if (ra != rb) par[rb] = ra;
                 }
             QVector<qint8> lng(parts.size(), 0), alive(parts.size(), 0);
-            for (int i = 0; i < parts.size(); ++i) lng[i] = parts[i].v.size() >= 12;   // long enough for its own 1-in-4 grades
+            for (int i = 0; i < parts.size(); ++i) lng[i] = parts[i].v.size() >= 12;   // long enough for its own 1-in-8 grades
             for (const QPair<int, int>& lk : links)
             {   // a short line joins the viaduct only as a link between real decks, else it stays a surface road
                 if (lng[lk.first]) alive[lk.second] = 1;
@@ -9087,8 +9140,8 @@ bool ExportRun::buildGround()
                 const qint64 pk = pairKey(findp(i), ep.h / 8);
                 Acc& a2 = acc[pk];
                 a2.maxG = acc.contains(pk) ? std::max(a2.maxG, maxY) : maxY;
-                if (!connA[i]) a2.cap = std::min(a2.cap, ep.v.first().second + 1 + ep.v.size() / 10);  // a free end: 5 cells
-                if (!connB[i]) a2.cap = std::min(a2.cap, ep.v.last().second + 1 + ep.v.size() / 10);   // per block on each side
+                if (!connA[i]) a2.cap = std::min(a2.cap, ep.v.first().second + 1 + ep.v.size() / 16);  // a free end: 8 cells
+                if (!connB[i]) a2.cap = std::min(a2.cap, ep.v.last().second + 1 + ep.v.size() / 16);   // per block on each side
             }
             QHash<qint64, int> planeV;
             for (auto it = acc.constBegin(); it != acc.constEnd(); ++it)
@@ -9132,8 +9185,14 @@ bool ExportRun::buildGround()
                 if (lnA) endA = std::min(poA, plane);               // connected — the decks meet in the air (owner request)
                 if (lnB) endB = std::min(poB, plane);
                 const int climbA = std::max(0, plane - endA), climbB = std::max(0, plane - endB);
-                const int rampA = climbA ? std::max(1, std::min(5 * climbA, std::max(1, n - 1))) : 1;
-                const int rampB = climbB ? std::max(1, std::min(5 * climbB, std::max(1, n - 1))) : 1;
+                // (the harness test found it) two 1-in-8 ramps of a short line ate the whole part, so the
+                // deck never stood on its plane anywhere — each climbing end may spend only its share of
+                // the line outside a reserved flat middle, the preferred grade is kept on long lines
+                const int nClimb = (climbA > 0 ? 1 : 0) + (climbB > 0 ? 1 : 0);
+                const int deckFlat = std::max(10, n / 4);
+                const int deckSide = std::max(1, (n - deckFlat) / std::max(1, nClimb));
+                const int rampA = climbA ? std::max(1, std::min(8 * climbA, deckSide)) : 1;
+                const int rampB = climbB ? std::max(1, std::min(8 * climbB, deckSide)) : 1;
                 for (int k = 0; k < n; ++k)
                 {
                     int s = plane;
@@ -9145,33 +9204,45 @@ bool ExportRun::buildGround()
                 }
                 spread(roadsElev[ep.ji], hm, true);
             }
-            // every step of a ramp — viaduct deck or tunnel floor — is eased by TWO half-blocks in a row:
-            // the lower cell of the step and the flat cell before it, as the relief smoothing does on the
-            // ordinary roads (owner request: "2 blocks + 2 half-blocks", so the grade runs 1 block per 5 cells)
+            // every step of a ramp — viaduct deck or tunnel floor — is eased by TWO half-blocks before it:
+            // the lower cell of the step and the two cells downhill of it. The owner found the half-blocks
+            // missing before the FIRST step of a viaduct: a step of 2+ blocks (the deck line jumping over
+            // rough ground) was matched only at == +1 and got none, and a 1-per-N grade has no same-level
+            // cell before a step, so the pair now reaches two cells downhill at any row
             auto stepSlabs = [&](const QHash<ColKey, int>& hm, QSet<ColKey>& out)
             {
                 QHash<qint64, int> sdir;                              // the lower cell of a step -> the direction of the higher one
                 for (auto it = hm.constBegin(); it != hm.constEnd(); ++it)
                     for (int d = 0; d < 4; ++d)
                         if (hm.value(pairKey(keyFirst(it.key()) + kN4[d][0], keySecond(it.key()) + kN4[d][1]),
-                                     std::numeric_limits<int>::min()) == int(it.value()) + 1)
+                                     std::numeric_limits<int>::min()) >= int(it.value()) + 1)
                         {
                             out.insert(it.key());
                             sdir.insert(it.key(), d);
                             break;
                         }
                 for (auto it = sdir.constBegin(); it != sdir.constEnd(); ++it)
-                {   // one cell downhill along the ramp, the same level — the second half-block of the pair
+                {   // the two cells downhill along the ramp carry the second half-block of the pair
                     const int d = it.value();
-                    const qint64 nk = pairKey(keyFirst(it.key()) - kN4[d][0], keySecond(it.key()) - kN4[d][1]);
-                    if (hm.value(nk, std::numeric_limits<int>::min()) == hm.value(it.key()))
-                        out.insert(nk);
+                    for (int k = 1; k <= 2; ++k)
+                    {
+                        const qint64 nk = pairKey(keyFirst(it.key()) - qint64(k) * kN4[d][0],
+                                                  keySecond(it.key()) - qint64(k) * kN4[d][1]);
+                        if (hm.contains(nk)) out.insert(nk);
+                    }
                 }
             };
             for (int ji = 0; ji < roadsElev.size(); ++ji)
                 if (roadsElev[ji].bridge) stepSlabs(deckYs[ji], deckSlabs[ji]);
             for (int ji = 0; ji < roadsElev.size(); ++ji)
                 if (!roadsElev[ji].bridge) stepSlabs(floorYs[ji], tunSlabs[ji]);
+            auto otherDeck = [&](const QHash<ColKey, int>& mine, qint64 ck)
+            {   // (owner request, the LA test) a level 2 pier stood on the level 1 roadway — no column of one
+                // elevated way and no embankment under its girder may touch another way's deck or ramp
+                for (int jj = 0; jj < roadsElev.size(); ++jj)
+                    if (&deckYs[jj] != &mine && deckYs[jj].contains(ck)) return true;
+                return false;
+            };
             for (int ji = 0; ji < roadsElev.size(); ++ji)
             {
                 const RoadJob& j = roadsElev[ji];
@@ -9208,8 +9279,25 @@ bool ExportRun::buildGround()
                             if (sl && store.get(x, Yd, z) == IdAir) store.set(x, Yd, z, sl);
                         }
                         ++nDeck;
-                        if (Yd - orig <= 5)                                            // no clearance under the girder here — an embankment to the ground
-                            for (int y = Yd - 3; y > g.top[gc]; --y)
+                        if (Yd - 1 > orig)
+                        {   // (owner request) the mouth of the ramp — the deck block stands over the natural
+                            // ground here, so a half-block of the roadway lies on that ground in front of it:
+                            // the climb never begins with a whole block of asphalt
+                            const quint16 slE = roadSlabForSurface(deckId);
+                            if (slE)
+                                for (int d = 0; d < 4; ++d)
+                                {
+                                    const qint64 nk = pairKey(x + kN4[d][0], z + kN4[d][1]);
+                                    if (j.road.contains(nk)) continue;            // inside the ribbon — its own row rules there
+                                    GroundChunk* gp3 = ensureG(pairKey(keyFirst(nk) >> 4, keySecond(nk) >> 4));
+                                    const int gc3 = (keySecond(nk) & 15) * 16 + (keyFirst(nk) & 15);
+                                    if (int(gp3->top[gc3]) + 1 == Yd - 1          // that ground is exactly one under the deck block
+                                        && store.get(keyFirst(nk), Yd - 1, keySecond(nk)) == IdAir)
+                                        store.set(keyFirst(nk), Yd - 1, keySecond(nk), slE);
+                                }
+                        }
+                        if (Yd - orig <= 5 && !otherDeck(hm, it.key()))                // no clearance under the girder here — an embankment to
+                            for (int y = Yd - 3; y > g.top[gc]; --y)                   // the ground (never over another way's deck)
                                 store.set(x, y, z, stoneBr);
                         continue;
                     }
@@ -9236,9 +9324,9 @@ bool ExportRun::buildGround()
                             continue;
                         }
                         if (orig - F < 9)
-                        {   // the ramp — the open-cut portal: the column surface lowered to the floor row, the
-                            // cut widened 2 cells past the roadway with the walls stepping back a cell per block
-                            // so the entrance is not a slot you bump your head in (owner request); the floor
+                        {   // the ramp — the open-cut portal: the column surface lowered to its row, the cut
+                            // dug far along the slope with the walls receding a cell per block until they reach
+                            // the natural ground, so the entrance is an open basin (owner request); the floor
                             // cells without 4 rock rows over the lid stay open too (the owner's depth rule)
                             g.top[gc] = qint16(std::min(orig, F));
                             if (j.woolId) g.surf[gc] = j.woolId;
@@ -9248,15 +9336,17 @@ bool ExportRun::buildGround()
                                 if (slT && store.get(x, F + 1, z) == IdAir) store.set(x, F + 1, z, slT);
                             }
                             for (int sgn = -1; sgn <= 1; sgn += 2)
-                                for (int k = 1; k <= 2; ++k)
-                                {
+                                for (int k = 1; k <= 12; ++k)
+                                {   // (owner request) the earth is dug far along the slope, its walls receding
+                                    // a cell per block until they reach the ground — the whole descent becomes
+                                    // a flat basin, not a 2-cell slot you bump your head in
                                     const qint64 nk = j.axisX ? pairKey(x, z + sgn * k) : pairKey(x + sgn * k, z);
-                                    if (elevCells.contains(nk) || roadCols.contains(nk)) continue;   // not into another roadway
+                                    if (elevCells.contains(nk) || roadCols.contains(nk)) break;   // another roadway — the wall ends here
                                     GroundChunk* gp2 = ensureG(pairKey(keyFirst(nk) >> 4, keySecond(nk) >> 4));
                                     const int gc2 = (keySecond(nk) & 15) * 16 + (keyFirst(nk) & 15);
-                                    if (int(gp2->top[gc2]) > F + 2 + k
-                                        && store.get(keyFirst(nk), int(gp2->top[gc2]), keySecond(nk)) == IdAir)
-                                        gp2->top[gc2] = qint16(F + 2 + k);
+                                    if (int(gp2->top[gc2]) <= F + 2 + k) break;                   // the wall is flush — the basin is complete
+                                    if (store.get(keyFirst(nk), int(gp2->top[gc2]), keySecond(nk)) != IdAir) break;   // something is built there
+                                    gp2->top[gc2] = qint16(F + 2 + k);
                                 }
                             ++nPortal;
                         }
@@ -9278,11 +9368,88 @@ bool ExportRun::buildGround()
                     }
                 }
             }
-            for (int ji = 0; ji < roadsElev.size(); ++ji)          // the along-axis part: parapets, marking, piers, lamps
+            for (int ji = 0; ji < roadsElev.size(); ++ji)          // the extended descents (owner request): the approach-road cells of a car
+            {   // tunnel and the footpath channel of a pedestrian underpass — an open trench painted like a portal
+                const RoadJob& j = roadsElev[ji];
+                const quint16 deckId = j.woolId ? j.woolId : stoneBr;
+                for (const QPair<qint64, int>& t : tunExt[ji])
+                {
+                    const int x = int(keyFirst(t.first)), z = int(keySecond(t.first));
+                    GroundChunk* gp = ensureG(pairKey(x >> 4, z >> 4));
+                    const int gc = (z & 15) * 16 + (x & 15);
+                    GroundChunk& g = *gp;
+                    if (g.wd[gc] > 0 || int(g.top[gc]) <= t.second) continue;
+                    g.top[gc] = qint16(t.second);
+                    if (j.woolId) g.surf[gc] = j.woolId;
+                    if (tunSlabs[ji].contains(t.first))
+                    {   // the same half-blocks ease the steps of the channel
+                        const quint16 slT = roadSlabForSurface(deckId);
+                        if (slT && store.get(x, t.second + 1, z) == IdAir) store.set(x, t.second + 1, z, slT);
+                    }
+                }
+            }
+            for (int ji = 0; ji < roadsElev.size(); ++ji)          // the parapets of the decks (owner request): ONLY the cells at the deck
+            {   // edge — a deck cell with a neighbour that is not this way's coplanar deck. The old axis
+                // walk measured the width from the centre line and put the walls inside wide or curving decks
+                const RoadJob& j = roadsElev[ji];
+                if (!j.bridge) continue;
+                const QHash<ColKey, int>& deckY = deckYs[ji];
+                for (auto it = deckY.constBegin(); it != deckY.constEnd(); ++it)
+                {
+                    const int x = int(keyFirst(it.key())), z = int(keySecond(it.key()));
+                    const int Yd = it.value();
+                    bool mouth = false;                               // the ramp mouth — no wall across the open roadway
+                    for (const QPointF& e : j.ends)
+                        if (std::hypot(x + 0.5 - e.x(), z + 0.5 - e.y()) <= j.endR + 1.0) { mouth = true; break; }
+                    if (mouth) continue;
+                    bool edge = false;
+                    for (int d = 0; d < 4 && !edge; ++d)
+                    {
+                        const qint64 nk = pairKey(x + kN4[d][0], z + kN4[d][1]);
+                        edge = !(j.road.contains(nk) && j.off.value(nk, 0) != 0 && deckY.value(nk, 0) == Yd);
+                    }
+                    if (!edge) continue;
+                    GroundChunk* gp = ensureG(pairKey(x >> 4, z >> 4));
+                    if (Yd - int(gp->top[(z & 15) * 16 + (x & 15)]) < 6) continue;   // the same clearance rule as the piers
+                    if (store.get(x, Yd, z) == IdAir)
+                    {
+                        store.set(x, Yd, z, IdStoneBrickWall);
+                        ++nPara;
+                    }
+                }
+            }
+            for (int ji = 0; ji < roadsElev.size(); ++ji)          // the along-axis part: marking, piers, lamps
             {
                 const RoadJob& j = roadsElev[ji];
                 const QHash<ColKey, int>& deckY = deckYs[ji];
-                int pierCnt = 0, lampCnt = 0;
+                int pierCnt = 0;
+                QSet<qint64> lampOk;                                // the axis cells that may carry a lantern
+                if (!j.bridge)
+                    for (const QVector<QPointF>& pl : j.lines)
+                    {   // (owner request) a lantern hangs only deep in the dug span — from the 8th dug cell
+                        // (the 4th for a foot underpass) of the run between the portals, then every 6th, so
+                        // the descent into a tunnel stays dark. A dug cell: its floor row == the surface + 1
+                        const QVector<QPair<qint64, int>> v = axisCells(j, pl, true);
+                        QVector<char> dug(v.size(), 0);
+                        for (int k = 0; k < v.size(); ++k)
+                        {
+                            GroundChunk* gp3 = ensureG(pairKey(keyFirst(v[k].first) >> 4, keySecond(v[k].first) >> 4));
+                            const int gc3 = (keySecond(v[k].first) & 15) * 16 + (keyFirst(v[k].first) & 15);
+                            const int Fc = floorYs[ji].value(v[k].first, 0);
+                            dug[k] = (Fc && Fc == int(gp3->top[gc3]) + 1);
+                        }
+                        QVector<int> back(v.size(), 0);
+                        int run = 0;
+                        for (int k = 0; k < v.size(); ++k) { run = dug[k] ? run + 1 : 0; back[k] = run; }
+                        const int minDug = j.car ? 8 : 4;
+                        run = 0;
+                        for (int k = v.size() - 1; k >= 0; --k)
+                        {
+                            run = dug[k] ? run + 1 : 0;
+                            if (dug[k] && back[k] >= minDug && run >= minDug && ((back[k] - minDug) % 6) == 0)
+                                lampOk.insert(v[k].first);
+                        }
+                    }
                 for (const QVector<QPointF>& pl : j.lines)
                 {
                     int px = std::numeric_limits<int>::min(), pz = 0;
@@ -9300,28 +9467,15 @@ bool ExportRun::buildGround()
                         {
                             const int Yd = deckY.value(ck, 0);                          // the row the deck was built at
                             if (!Yd) return;
-                            if (Yd - int(g.top[gc]) >= 6)
-                            {   // the parapet row on both edges of the raised deck (the deck of a wider road —
-                                // the outermost covered cell in each transverse direction from the axis)
-                                for (int sgn = -1; sgn <= 1; sgn += 2)
-                                {
-                                    int ex = bx, ez = bz, ey = 0;
-                                    for (int k = 1; k <= 8; ++k)
-                                    {
-                                        const qint64 nk = j.axisX ? pairKey(bx, bz + sgn * k) : pairKey(bx + sgn * k, bz);
-                                        if (!j.road.contains(nk) || j.off.value(nk, 0) == 0) break;
-                                        ex = keyFirst(nk); ez = keySecond(nk); ey = deckY.value(nk);
-                                    }
-                                    if (ey && store.get(ex, ey, ez) == IdAir)
-                                        store.set(ex, ey, ez, IdStoneBrickWall);
-                                }
-                            }
+                            // (owner request) the parapets moved to their own pass over the deck cells above:
+                            // the walls stand only at the deck edge, not where the axis walk measured the width
                             if (j.markId && deckY.contains(ck) && store.get(bx, Yd - 1, bz) != IdAir
                                 && store.get(bx, Yd, bz) == IdAir)
                                 store.set(bx, Yd, bz, j.markId);                      // the marking carpet over a built deck, flush with it
                             ++pierCnt;
                             if (Yd - int(g.top[gc]) >= 6 && (pierCnt % 8) == 1
-                                && !roadCols.contains(ck) && !railOwnCols.contains(ck))   // nor over the rails — the pier would stand in the cut
+                                && !roadCols.contains(ck) && !railOwnCols.contains(ck)    // nor over the rails — the pier would stand in the cut
+                                && !otherDeck(deckY, ck))                                 // nor on another way's deck (the owner request)
                             {   // a pier under the deck every 8 blocks along the axis, down to the bottom
                                 // (not over another roadway — it would stand in the middle of it)
                                 const int bot = g.wd[gc] > 0 ? int(g.top[gc]) - int(g.wd[gc]) : int(g.top[gc]);
@@ -9333,14 +9487,21 @@ bool ExportRun::buildGround()
                                 ++nPier;
                             }
                         }
-                        else if (floorYs[ji].value(ck, 0) == int(g.top[gc]) + 1)
-                        {   // a lantern under the ceiling of the dug tunnel every 6th axis cell (a dug column has top = floor-1)
-                            const int lampY = int(g.top[gc]) + 5;
-                            ++lampCnt;
-                            if ((lampCnt % 6) == 0 && store.get(bx, lampY + 1, bz) == stoneBr && store.get(bx, lampY, bz) == IdAir)
-                            {
-                                store.set(bx, lampY, bz, IdLanternHung);
-                                ++nLamp;
+                        else
+                        {   // (owner requests) the marking of a car tunnel lies ON its floor (it died inside
+                            // the tunnels before), a lantern hangs under the lid only deep in the dug span
+                            const int Fc = floorYs[ji].value(ck, 0);
+                            if (j.markId && Fc && store.get(bx, Fc + 1, bz) == IdAir
+                                && (store.get(bx, Fc, bz) != IdAir || int(g.top[gc]) == Fc))
+                                store.set(bx, Fc + 1, bz, j.markId);              // the floor block is there, the step slabs got the air first
+                            if (lampOk.contains(ck))
+                            {   // a dug column has top = floor - 1 (see the lamp runs above)
+                                const int lampY = int(g.top[gc]) + 5;
+                                if (store.get(bx, lampY + 1, bz) == stoneBr && store.get(bx, lampY, bz) == IdAir)
+                                {
+                                    store.set(bx, lampY, bz, IdLanternHung);
+                                    ++nLamp;
+                                }
                             }
                         }
                     };
@@ -9363,11 +9524,11 @@ bool ExportRun::buildGround()
             }
             if (nDeck + nTun > 0)
             {
-                res.lairInfo += QObject::tr("; elevated roads: %1 deck cells, %2 tunnel cells, %3 portal cells, %4 piers, %5 tunnel lamps")
-                                   .arg(nDeck).arg(nTun).arg(nPortal).arg(nPier).arg(nLamp);
+                res.lairInfo += QObject::tr("; elevated roads: %1 deck cells, %2 tunnel cells, %3 portal cells, %4 piers, %5 tunnel lamps, %6 parapets")
+                                   .arg(nDeck).arg(nTun).arg(nPortal).arg(nPier).arg(nLamp).arg(nPara);
                 char buf[160];
-                snprintf(buf, sizeof buf, "viaducts/tunnels: deck %d, tunnel %d, portals %d, piers %d, lamps %d, surface %d",
-                         int(nDeck), int(nTun), int(nPortal), int(nPier), int(nLamp), int(nSurf));
+                snprintf(buf, sizeof buf, "viaducts/tunnels: deck %d, tunnel %d, portals %d, piers %d, lamps %d, surface %d, parapets %d",
+                         int(nDeck), int(nTun), int(nPortal), int(nPier), int(nLamp), int(nSurf), int(nPara));
                 tmcStepLog(buf);
             }
         }
@@ -11733,9 +11894,9 @@ bool ExportRun::buildObjects()
                     cid = quint16(IdCarpetBase + markIdx);      // (woolForCarpetId -> light_gray_wool)
                 else if (!ped && grayIdx >= 0) cid = quint16(IdCarpetBase + grayIdx);
                 // ELEVATED / UNDERGROUND WAY (the OSM bridge/tunnel tags, level gives the number of levels,
-                // 8 blocks each; the BRG/TUN/LVL columns, see osm_rules.json). Both kinds are marked along ALL
+                // 8 blocks each; the BRG/TUN/LVL/LYR columns, see osm_rules.json). Both kinds are marked along ALL
                 // their length (off = +/-elevH everywhere) and their geometry belongs to the VIADUCTS AND
-                // TUNNELS pass of buildGround: the viaduct gets a FLAT deck plane and 1-in-5 ramps with air
+                // TUNNELS pass of buildGround: the viaduct gets a FLAT deck plane and 1-in-8 ramps with air
                 // junctions where bridge lines continue each other; the tunnel gets a FLAT floor under the
                 // lowest ground along the line (never repeating the relief, owner request) with ramps down to
                 // it and UNDERGROUND junctions where tunnel lines continue each other (owner requests). A
@@ -11746,8 +11907,12 @@ bool ExportRun::buildObjects()
                 bool elev = false;
                 QHash<ColKey, int> elevOff;                       // way cells -> +prof (viaduct) / -prof (tunnel), absent — the approach
                 const bool elevBr = o.roadBridge, elevTn = !o.roadBridge && o.roadTunnel;
-                const int elevH = 8 * qBound(1, std::abs(o.roadLevel), 4);   // one level is 8 blocks (owner request): a viaduct deck
-                // over the ground by j.h; for a tunnel the depth (4 of interior + the lid at F+5 + 2 rock rows over it)
+                // (owner requests) one level is 8 blocks: a viaduct deck rises by j.h over the ground, a tunnel
+                // sinks by it (4 of interior + the lid at F+5 + 4 rock rows over it); the OSM "layer" tag MULTIPLIES
+                // the bridge lift — the stacked interchanges of Los Angeles ride layer=2 over layer=1 (user request),
+                // a tunnel keeps its depth; at most five levels all in all
+                const int elevH = std::min(40, 8 * qBound(1, std::abs(o.roadLevel), 4)
+                                           * (elevBr ? qBound(1, std::abs(o.roadLayer), 4) : 1));
                 if (elevBr || elevTn)
                 {
                     QVector<QVector<QPointF>> apl;                // the axis polylines in block coordinates
