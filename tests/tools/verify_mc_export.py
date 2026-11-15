@@ -190,7 +190,7 @@ def check(path, legacy, env='flat', full=True):
     secAir = {}
     deepChunk = set()               # chunks that have air at y<0 (sections -4..-1) — cave coverage
     for (cx, cz), secs in chunks.items():
-        for sy in range(-4, 20):                  # the whole world column — in the noise mode the city is raised beyond y=32
+        for sy in range(-4, 41):                  # the whole world column (the tall world, see export/worldy.h) — in the noise mode the city is raised beyond y=32
             ent = secs.get(sy)
             if ent is None: continue
             entries, data = ent

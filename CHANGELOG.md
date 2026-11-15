@@ -5,6 +5,56 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.7.26.11161] — 2026-11-16
+
+### Added
+
+- TALL WORLDS: every exported world now carries a small `tmc_tall` dimension_type datapack that widens the
+  overworld build range to Y=655 (the floor stays at the vanilla −64), and exported chunks write an
+  impenetrable bedrock floor at Y=−64 — so a 700-metre mountain range stays a mountain, and cave
+  complexes can never be dug out into the void
+- Tunnels THROUGH MOUNTAINS: a car tunnel whose line stands under 9 or more rows of ground right behind its
+  portals and crosses no other roadway now stays FLAT at the ground level of its ends — the tube bores straight
+  through the hill and the portals are cut as door notches in the slope, instead of digging the road down under
+  the street and climbing it back up
+
+### Changed
+
+- STEEP SLOPES STAY CLIFFS (a user request): on steep slopes the final ground height is snapped to a level
+  lattice with a step that grows with the slope (1 block on gentle ground, up to 4 blocks on a cliff face),
+  so a rock reads as horizontal treads with 2..4-block vertical faces instead of a long one-block staircase —
+  the height profile is preserved, gentle plains and city ground are untouched
+- The height matrix keeps up to 480 blocks of real relief (was 150), and the exporter compresses ground
+  heights only above 460 blocks (was 240): a user-request Rio de Janeiro clip that used to export as small
+  hills now exports the actual rock mountain; the whole export is raised or sunk so its LOWEST terrain point
+  along the area edge stands at the ~68 generator level — flat and gently rolling cities are placed exactly
+  as before, a mountain clip keeps its full height above the surrounding world instead of being sunk to fit
+- Terrain relief keeps its detail: the downloaded height matrix is now blurred by ONE tile pixel (was an
+  80-metre box applied twice) — the old blur planed mountain crests and small hills into gentle ramps, the
+  Rio massif lost about 40 metres of its summit ridge to it
+- The automatic Pale Garden choice now considers ONLY vegpol code 71111110 (dense tall forests): undergrowth,
+  bushes and meadow sites on mountain slopes made ruined-looking terrain (a user request); a Pale Garden
+  placed by the user's own chunk mark still accepts any of the previously allowed vegetation codes
+- Parking lots are marked as a GRID of spots over the whole polygon (a user request): spot bands 12 blocks deep
+  follow one another across the lot separated by unmarked aisles of the same width, so the middle of a large
+  lot is no longer an empty field; the spot lines of parallel lot edges now share one phase and cancel where they
+  meet instead of interleaving into double-density lines, cars fill the new spots as before
+- A marked parking lot almost never stands empty now (a user request): when every spot of a lot refused its car,
+  the lot retries all its spots once ignoring the 45..90% fill percentage — 90% of marked lots get at least one car
+- A building tagged entirely as a shopping mall is no longer furnished mall ALL THE WAY UP (a user request):
+  the racks, counters and trader crowds live on its first three floors, the storeys above furnish as an office
+  building — merged or mistagged 20-storey malls no longer flood the world with loot and traders
+- The export window is simpler (a user request): the "World file (zip)" field is gone (the zip goes next to the
+  source data, only `-o` or a project file can name another path), and the service fields (.t3d, OSM rules,
+  Enhancer, "real meters") are gone too — those stay command-line options; "Caves underground" and the new
+  "Surface terrain" checkbox (on by default, switches the height matrix off entirely, leaving the terrain the
+  game generates itself) now share one row, and the datapack checkbox reads
+  "World datapack (for correct generation)" with a tooltip about the required experimental features
+- In `-debug` the "Project / folder" row no longer REPLACES the OSM file row: the OSM file is always chosen in
+  its own row, and the project/folder row appears below it as an extra service row
+- The export-destination label now names the chosen instance: "Export: Modrinth - {instance}" /
+  "Export: CurseForge - {instance}"
+
 ## [1.7.26.11141] — 2026-11-14
 
 ### Added

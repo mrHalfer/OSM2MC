@@ -1912,7 +1912,7 @@ void ObjectVoxelizer::buildGableRoof()
         if (fx1 - fx0 >= 4 && fz1 - fz0 >= 4)                   // the wall patch and the a/b axes are computed above,
         {                                                       // before the surface pass (the roof needs them)
         const int W = a1 - a0 + 1;                              // the width across the slopes
-        const int half = qMin(W / 2, 7);                        // slope columns per side (the ceiling — against y>319)
+        const int half = qMin(W / 2, 7);                        // slope columns per side (the ceiling — against the build height)
         // A half-block slope (a user request: "stair roofs are TOO tall — build
         // from half blocks: first the lower, then the upper"): the column jj from the cornice carries
         // an oak_slab at the level lyHigh+1+jj/2 (the type alternates bottom/top by parity) — the surface
@@ -2199,6 +2199,11 @@ void ObjectVoxelizer::buildInteriors()
         for (int k = 0; k < nFin; ++k)
         {
             const int lyF = (lowF && k == 0 ? lyLow + 1 : lyLow + 2) + k * storyP;
+            // (owner request) a mall may never furnish the WHOLE building: a merged complex or a mistagged
+            // outline once made a 20-storey shopping centre — rows of racks and chests and a crowd of traders
+            // on every storey. The mall plan now lives on the first THREE floors, the storeys above furnish
+            // as an office building (the panoramic glazing, the entrances and the open mall rooms stay as is)
+            if (panor && k >= 3) { panor = false; office = true; }
             // The MANSARD of a brick private house (a user request): such OSM houses are often "~1.5 storeys" —
             // the gable stands only 1-2 rows above the eaves, and the strict margin cut the 2nd floor off
             // completely (0 furnished mansards). For the upper private floors the margin is relaxed to 1 row:

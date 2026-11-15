@@ -49,10 +49,9 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
         wrap(ui->rowPreviewTop, 0);
     }
     if (!debug)
-    {   // the service fields are hidden: always the default files (next to the program), real meters on; the source is an OSM file
-        applyEditionTexts();
-        for (QWidget* w : std::initializer_list<QWidget*>{ ui->btnFolder, ui->labelT3d, ui->t3dEdit, ui->btnT3d, ui->labelOsmRules, ui->osmRulesEdit, ui->btnOsmRules,
-                                                           ui->labelEnhancer, ui->enhancerEdit, ui->btnEnhancer, ui->realMetersCheck })
+    {   // the "Project / folder" row belongs to the -debug window only: an ordinary user always works with an OSM file
+        ui->subtitleLabel->setText(tr("Export an OpenStreetMap area to a Minecraft world"));
+        for (QWidget* w : std::initializer_list<QWidget*>{ ui->labelProject, ui->projectEdit, ui->btnProject, ui->btnFolder })
             w->hide();
     }
     {   // the interface language selector in the header: the choice is saved and takes effect after a restart
@@ -132,12 +131,9 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
     ui->splitter->setSizes({ 700, 620 });
     ui->progressBar->setRange(0, 100);
 
+    connect(ui->btnOsm, &QPushButton::clicked, this, &MainWindow::browseOsm);
     connect(ui->btnProject, &QPushButton::clicked, this, &MainWindow::browseProject);
     connect(ui->btnFolder, &QPushButton::clicked, this, &MainWindow::browseFolder);
-    connect(ui->btnT3d, &QPushButton::clicked, this, &MainWindow::browseT3d);
-    connect(ui->btnOsmRules, &QPushButton::clicked, this, &MainWindow::browseOsmRules);
-    connect(ui->btnEnhancer, &QPushButton::clicked, this, &MainWindow::browseEnhancer);
-    connect(ui->btnOut, &QPushButton::clicked, this, &MainWindow::browseOut);
     connect(ui->genSeedButton, &QPushButton::clicked, this, &MainWindow::generateSeed);
     connect(ui->goButton, &QPushButton::clicked, this, &MainWindow::startExport);
     connect(ui->exportDirButton, &QPushButton::clicked, this, &MainWindow::openExportSettings);
@@ -194,6 +190,11 @@ void MainWindow::onSourceChanged()
     updateSpawnInfo();
     const QString t = ui->sourceEdit->text().trimmed();
     setOnlineMode(t.isEmpty());
+    if (mDebug)
+    {   // the service row only mirrors a non-OSM source: the .tqt project or the shapefile folder (an .osm/.pbf stays in the row above)
+        const bool projectSource = t.endsWith(QStringLiteral(".tqt"), Qt::CaseInsensitive) || QFileInfo(t).isDir();
+        ui->projectEdit->setText(projectSource ? t : QString());
+    }
     if (!t.isEmpty() && mAutoLoad && QFileInfo::exists(t)) QTimer::singleShot(0, this, [this]() { if (!mPrevWatcher->isRunning()) loadPreview(); });
 }
 
@@ -202,25 +203,18 @@ MainWindow::~MainWindow() = default;
 void MainWindow::loadSettings(const TmcRunOptions& init)
 {
     QSettings s;
-    auto str = [&](const char* key, const QString& cli) { return !cli.isEmpty() ? cli : s.value(QLatin1String(key)).toString(); };
-    // a saved path to a file that no longer exists (the program was moved) is dropped — the default next to the exe is used
-    auto file = [&](const char* key, const QString& cli) { const QString v = str(key, cli); return (cli.isEmpty() && !QFileInfo::exists(v)) ? QString() : v; };
     mAutoLoad = false;                                     // at startup a file from the command line loads the preview separately, below
     ui->sourceEdit->setText(init.source);                  // the previously used file is not restored: the window always opens with the online map
     mAutoLoad = true;
-    // without -debug the saved paths are not used — only what is explicitly set on the command line
-    ui->t3dEdit->setText(mDebug ? file("t3d", init.t3dPath) : init.t3dPath);
-    ui->osmRulesEdit->setText(mDebug ? file("osmRules", init.osmRulesPath) : init.osmRulesPath);
-    ui->enhancerEdit->setText(mDebug ? file("enhancer", init.enhancerPath) : init.enhancerPath);
-    updateDefaultHints();
-    ui->outEdit->setText(init.outPath);
+    // the service paths (.t3d, OSM rules, enhancer) and the output zip have had no window fields since 1.7 — they are set on the command line only
+    mOutPath = init.outPath;
     const bool legacy = init.format == McWorldExporter::Format::Legacy121x
                         || (init.format == McWorldExporter::Format::Native26x && s.value(QStringLiteral("format"), 0).toInt() == 1 && init.source.isEmpty());
     (legacy ? ui->fmt121Radio : ui->fmt26Radio)->setChecked(true);
     const bool noise = init.noiseWorld;
     (noise ? ui->noiseRadio : ui->flatRadio)->setChecked(true);
     ui->cavesCheck->setChecked(init.caves);
-    ui->realMetersCheck->setChecked(mDebug ? init.realMeters : true);
+    ui->surfaceCheck->setChecked(init.useDtm && s.value(QStringLiteral("surfaceTerrain"), true).toBool());
     mExportDest = s.value(QStringLiteral("exportDest"), 0).toInt();
     mSavesLauncher = s.value(QStringLiteral("savesLauncher")).toString();
     mSavesModrinth = s.value(QStringLiteral("savesModrinth")).toString();
@@ -237,13 +231,8 @@ void MainWindow::saveSettings() const
 {
     QSettings s;
     s.setValue(QStringLiteral("source"), ui->sourceEdit->text());
-    if (mDebug)
-    {
-        s.setValue(QStringLiteral("t3d"), ui->t3dEdit->text());
-        s.setValue(QStringLiteral("osmRules"), ui->osmRulesEdit->text());
-        s.setValue(QStringLiteral("enhancer"), ui->enhancerEdit->text());
-    }
     s.setValue(QStringLiteral("locateDatapack"), ui->datapackCheck->isChecked());
+    s.setValue(QStringLiteral("surfaceTerrain"), ui->surfaceCheck->isChecked());
     s.setValue(QStringLiteral("format"), ui->fmt121Radio->isChecked() ? 1 : 0);
 }
 
@@ -291,21 +280,13 @@ void MainWindow::updateExportDestUi()
 {
     const QString dest = resolvedSavesDir();
     const bool zipMode = dest.isEmpty();
-    ui->labelOut->setEnabled(zipMode);
-    ui->outEdit->setEnabled(zipMode);
-    ui->btnOut->setEnabled(zipMode);
-    const QString tip = zipMode ? QString()
-        : tr("The export destination chosen in \"Export settings\" overrides this field: %1").arg(QDir::toNativeSeparators(dest));
-    ui->labelOut->setToolTip(tip);
-    ui->outEdit->setToolTip(tip);
-    ui->btnOut->setToolTip(tip);
     QString where;                                          // the short "where does it go now" label next to the settings button
     if (zipMode) where = tr("Export: local zip");
     else if (mExportDest == 1) where = tr("Export: launcher");
-    else if (mExportDest == 2) where = tr("Export: Modrinth");
-    else where = tr("Export: CurseForge");
+    else if (mExportDest == 2) where = tr("Export: Modrinth - %1").arg(ExportSettingsDialog::instanceDisplayName(mSavesModrinth));
+    else where = tr("Export: CurseForge - %1").arg(ExportSettingsDialog::instanceDisplayName(mSavesCurse));
     ui->labelExportDest->setText(where);
-    QString destTip = zipMode ? tr("A zip file next to the source data (or the chosen output file)")
+    QString destTip = zipMode ? tr("A zip file next to the source data")
                               : QDir::toNativeSeparators(dest);
     destTip += QStringLiteral(" ") + tr("Click to open the folder.");
     ui->labelExportDest->setToolTip(destTip);
@@ -316,7 +297,7 @@ QString MainWindow::exportFolderToOpen() const
     const QString dest = resolvedSavesDir();
     if (!dest.isEmpty())
         return dest;                                      // the saves folder chosen in "Export settings"
-    const QString out = ui->outEdit->text().trimmed();
+    const QString out = mOutPath;                           // the zip path set on the command line (-o) or in the project file
     if (!out.isEmpty())
         return QFileInfo(out).absolutePath();             // the folder of the chosen output zip
     const QString src = ui->sourceEdit->text().trimmed(); // no destination — the zip goes next to the source data
@@ -351,19 +332,20 @@ TmcRunOptions MainWindow::collect() const
 {
     TmcRunOptions o;
     o.source = ui->sourceEdit->text().trimmed();
-    o.t3dPath = ui->t3dEdit->text().trimmed();
-    o.osmRulesPath = ui->osmRulesEdit->text().trimmed();
-    o.enhancerPath = ui->enhancerEdit->text().trimmed();
-    o.outPath = ui->outEdit->text().trimmed();
+    o.t3dPath = mInit.t3dPath;                              // the service paths: no window fields since 1.7, command line only
+    o.osmRulesPath = mInit.osmRulesPath;
+    o.enhancerPath = mInit.enhancerPath;
+    o.outPath = mOutPath;                                   // -o / the project file
     o.savesDir = resolvedSavesDir();          // the "Export settings" destination; empty — the zip as before
     o.format = ui->fmt121Radio->isChecked() ? McWorldExporter::Format::Legacy121x : McWorldExporter::Format::Native26x;
     o.noiseWorld = ui->noiseRadio->isChecked();
     o.caves = ui->cavesCheck->isChecked() && o.noiseWorld;
+    o.useDtm = ui->surfaceCheck->isChecked();
     bool ok = false;
     const QString st = ui->seedEdit->text().trimmed();
     o.seed = st.isEmpty() ? 0 : st.toULongLong(&ok);
     if (!st.isEmpty() && !ok) o.seed = 0;           // not a number — a random seed
-    o.realMeters = mDebug ? ui->realMetersCheck->isChecked() : true;
+    o.realMeters = mInit.realMeters;                        // the checkbox is gone with the service fields: "real meters" is a command-line option
     o.climate = mClimate->currentData().toInt();
     o.locateDatapack = ui->datapackCheck->isChecked();
     o.strongholdChunk = mInit.strongholdChunk;                                  // chunks from the command line; otherwise — the marks on the map
@@ -398,7 +380,7 @@ TmcRunOptions MainWindow::collect() const
     return o;
 }
 
-void MainWindow::browseProject()
+void MainWindow::browseOsm()
 {
     // without a chosen source the dialog opens in Documents\OSMC (the folder is created on the first click)
     QString start = ui->sourceEdit->text();
@@ -407,11 +389,15 @@ void MainWindow::browseProject()
         start = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(QStringLiteral("OSMC"));
         QDir().mkpath(start);
     }
-    const QString f = mDebug
-        ? QFileDialog::getOpenFileName(this, tr("tqt project file or OSM extract"), start,
-                                       tr("tqt project, OSM extract (*.tqt *.osm *.pbf);;tqt project (*.tqt);;OSM extract (*.osm *.pbf);;All files (*)"))
-        : QFileDialog::getOpenFileName(this, tr("OpenStreetMap extract"), start,
-                                       tr("OSM extract (*.osm *.pbf);;All files (*)"));
+    const QString f = QFileDialog::getOpenFileName(this, tr("OpenStreetMap extract"), start,
+                                                   tr("OSM extract (*.osm *.pbf);;All files (*)"));
+    if (!f.isEmpty()) ui->sourceEdit->setText(QDir::toNativeSeparators(f));
+}
+
+void MainWindow::browseProject()
+{   // the -debug row: a .tqt project becomes the source (the "OSM file" row shows it too, it is the single source of truth)
+    const QString f = QFileDialog::getOpenFileName(this, tr("tqt project file"), ui->sourceEdit->text(),
+                                                   tr("tqt project (*.tqt);;All files (*)"));
     if (!f.isEmpty()) ui->sourceEdit->setText(QDir::toNativeSeparators(f));
 }
 
@@ -419,30 +405,6 @@ void MainWindow::browseFolder()
 {
     const QString d = QFileDialog::getExistingDirectory(this, tr("Folder with shapefiles"), ui->sourceEdit->text());
     if (!d.isEmpty()) ui->sourceEdit->setText(QDir::toNativeSeparators(d));
-}
-
-void MainWindow::browseT3d()
-{
-    const QString f = QFileDialog::getOpenFileName(this, tr("3D model settings"), ui->t3dEdit->text(), tr("3D model settings (*.t3d);;All files (*)"));
-    if (!f.isEmpty()) ui->t3dEdit->setText(QDir::toNativeSeparators(f));
-}
-
-void MainWindow::browseOsmRules()
-{
-    const QString f = QFileDialog::getOpenFileName(this, tr("OSM rules"), ui->osmRulesEdit->text(), tr("OSM rules (*.json);;All files (*)"));
-    if (!f.isEmpty()) ui->osmRulesEdit->setText(QDir::toNativeSeparators(f));
-}
-
-void MainWindow::browseEnhancer()
-{
-    const QString f = QFileDialog::getOpenFileName(this, tr("Enhancer file"), ui->enhancerEdit->text(), tr("Enhancer (*.dat);;All files (*)"));
-    if (!f.isEmpty()) ui->enhancerEdit->setText(QDir::toNativeSeparators(f));
-}
-
-void MainWindow::browseOut()
-{
-    const QString f = QFileDialog::getSaveFileName(this, tr("Save the Minecraft world (zip archive)"), ui->outEdit->text(), tr("ZIP archive (*.zip)"));
-    if (!f.isEmpty()) ui->outEdit->setText(QDir::toNativeSeparators(f.endsWith(QLatin1String(".zip"), Qt::CaseInsensitive) ? f : f + QStringLiteral(".zip")));
 }
 
 void MainWindow::generateSeed()
@@ -685,9 +647,10 @@ bool MainWindow::writeProject(const QString& path)
     opt.insert(QStringLiteral("noiseWorld"), ui->noiseRadio->isChecked());
     opt.insert(QStringLiteral("seed"), ui->seedEdit->text().trimmed());
     opt.insert(QStringLiteral("caves"), ui->cavesCheck->isChecked());
+    opt.insert(QStringLiteral("terrain"), ui->surfaceCheck->isChecked());
     opt.insert(QStringLiteral("datapack"), ui->datapackCheck->isChecked());
     opt.insert(QStringLiteral("climate"), mClimate->currentData().toInt());
-    opt.insert(QStringLiteral("out"), ui->outEdit->text().trimmed());
+    opt.insert(QStringLiteral("out"), mOutPath);
     root.insert(QStringLiteral("options"), opt);
     {   // the same export info as the world archive gets in its root (app/exportmeta.h); the machine paths live in the usual keys above
         const TmcRunOptions o = collect();
@@ -741,10 +704,11 @@ bool MainWindow::readProject(const QString& path, QString* error)
         (opt.value(QStringLiteral("noiseWorld")).toBool(true) ? ui->noiseRadio : ui->flatRadio)->setChecked(true);
         ui->seedEdit->setText(opt.value(QStringLiteral("seed")).toString());
         ui->cavesCheck->setChecked(opt.value(QStringLiteral("caves")).toBool(true));
+        ui->surfaceCheck->setChecked(opt.value(QStringLiteral("terrain")).toBool(true));
         ui->datapackCheck->setChecked(opt.value(QStringLiteral("datapack")).toBool(true));
         const int ci = mClimate->findData(opt.value(QStringLiteral("climate")).toInt(-1));
         mClimate->setCurrentIndex(ci >= 0 ? ci : 0);
-        ui->outEdit->setText(opt.value(QStringLiteral("out")).toString());
+        mOutPath = opt.value(QStringLiteral("out")).toString();
     }
     QVector<QPointF> clip;
     for (const QJsonValue& v : root.value(QStringLiteral("clip")).toArray()) { QPointF p; if (pt(v, &p)) clip << p; }
@@ -831,30 +795,6 @@ void MainWindow::changeEvent(QEvent* e)
     if (e->type() == QEvent::LanguageChange && ui && mLang) retranslate();
 }
 
-//! The texts of the simple (non-debug) window: the source is always an OSM file
-void MainWindow::applyEditionTexts()
-{
-    ui->labelSource->setText(tr("OSM file:"));
-    ui->subtitleLabel->setText(tr("Export an OpenStreetMap area to a Minecraft world"));
-    ui->btnProject->setText(tr("Browse…"));
-    ui->sourceEdit->setPlaceholderText(tr("an OpenStreetMap extract (.osm / .pbf)"));
-    ui->outEdit->setPlaceholderText(tr("empty — <file name>.zip in the folder of the OSM file"));
-}
-
-//! An empty field = the file next to the program; show which one exactly
-void MainWindow::updateDefaultHints()
-{
-    const QDir appDir(QCoreApplication::applicationDirPath());
-    auto hint = [&](QLineEdit* e, const char* name)
-    {
-        const QString p = appDir.filePath(QLatin1String(name));
-        if (QFileInfo::exists(p)) e->setPlaceholderText(tr("default: %1").arg(QDir::toNativeSeparators(p)));
-    };
-    hint(ui->t3dEdit, "default.t3d");
-    hint(ui->osmRulesEdit, "osm_rules.json");
-    hint(ui->enhancerEdit, "tmc_buildings.dat");
-}
-
 void MainWindow::updateClimateAutoZone()
 {
     const TmcPreview p = ui->preview->preview();
@@ -903,7 +843,7 @@ void MainWindow::updateStageLabel()
 void MainWindow::retranslate()
 {
     ui->retranslateUi(this);
-    if (!mDebug) applyEditionTexts();
+    if (!mDebug) ui->subtitleLabel->setText(tr("Export an OpenStreetMap area to a Minecraft world"));
     mLangLabel->setText(tr("Language:"));
     mOpenProjBtn->setText(tr("Open project…"));
     mSaveProjBtn->setText(tr("Save project…"));
@@ -913,7 +853,6 @@ void MainWindow::retranslate()
     mClimateLabel->setText(tr("Climate:"));
     mClimate->setToolTip(tr("Tree species, surface and biome inside the export area; the world around the area is not changed by this."));
     updateClimateItems();
-    updateDefaultHints();
     updateSpawnInfo();
     updateClipInfo();
     updateStageLabel();
@@ -922,8 +861,7 @@ void MainWindow::retranslate()
 //! Where to put the downloaded data: the folder of the chosen world file, otherwise "Documents\OSMC"
 QString MainWindow::defaultOutputDir() const
 {
-    const QString out = ui->outEdit->text().trimmed();
-    if (!out.isEmpty()) return QFileInfo(out).absolutePath();
+    if (!mOutPath.isEmpty()) return QFileInfo(mOutPath).absolutePath();
     return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/OSMC");
 }
 

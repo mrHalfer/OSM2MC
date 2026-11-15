@@ -31,8 +31,9 @@ cl /c %CXXFLAGS% /Forails.obj "%ROOT%\export\rails.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fomcworldexporter.obj "%ROOT%\export\mcworldexporter.cpp" || goto :fail
 cl /c %CXXFLAGS% /Fovoxelize.obj "%ROOT%\export\voxelize.cpp" || goto :fail
 cl /c %CXXFLAGS% /Foexportrun.obj "%ROOT%\export\exportrun.cpp" || goto :fail
-cl %CXXFLAGS% /Fomc_export_test.obj /Fe:mc_export_test.exe "%~dp0mc_export_test.cpp" mcworldexporter.obj voxelize.obj exportrun.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj carset.obj dtmgrid.obj facade.obj ground.obj paledonor.obj playgroundset.obj stlmodel.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
-cl %CXXFLAGS% /Fomc_scene_run.obj /Fe:mc_scene_run.exe "%~dp0mc_scene_run.cpp" mcworldexporter.obj voxelize.obj exportrun.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj carset.obj dtmgrid.obj facade.obj ground.obj paledonor.obj playgroundset.obj stlmodel.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
+cl /c %CXXFLAGS% /Fohighworld.obj "%ROOT%\export\highworld.cpp" || goto :fail
+cl %CXXFLAGS% /Fomc_export_test.obj /Fe:mc_export_test.exe "%~dp0mc_export_test.cpp" mcworldexporter.obj voxelize.obj exportrun.obj highworld.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj carset.obj dtmgrid.obj facade.obj ground.obj paledonor.obj playgroundset.obj stlmodel.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
+cl %CXXFLAGS% /Fomc_scene_run.obj /Fe:mc_scene_run.exe "%~dp0mc_scene_run.cpp" mcworldexporter.obj voxelize.obj exportrun.obj highworld.obj geom.obj sites.obj rails.obj anvil.obj buildingmerge.obj carset.obj dtmgrid.obj facade.obj ground.obj paledonor.obj playgroundset.obj stlmodel.obj lairset.obj caveset.obj blocks.obj bytes.obj %LIBS% || goto :fail
 popd
 rem Export templates (caves, lairs, pale forest, wrecks ...) lie in the "assets" folder next to the exe (the old flat copy is still searched)
 if not exist "%OUT%\assets" mkdir "%OUT%\assets"

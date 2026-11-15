@@ -786,6 +786,7 @@ quint16 roadSlabForCarpet(quint16 id)
 
 //! The vegpol codes on which a Pale Garden may grow (a user request): tall/stunted forest, forest undergrowth, bushes, industrial crops and meadow vegetation.
 //! Parks (71126000), lawns and flowerbeds (71329000), gardens and everything courtyard (vgbpol) — not allowed.
+//! The AUTOMATIC choice (no chunk picked by the user) narrows this down to 71111110 only — broad-code forests turned out to wreck mountain terrain.
 bool isPaleForestCode(int code)
 {
     switch (code)

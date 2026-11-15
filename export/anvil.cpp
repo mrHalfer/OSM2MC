@@ -72,7 +72,21 @@ static const BarrelGood kBarrelGoods[kBarrelLootCount][5] = {
 static_assert(int(sizeof(kBarrelGoods) / sizeof(kBarrelGoods[0])) == kBarrelLootCount,
               "update kBarrelGoods with kBarrelLoot (export/sites.cpp)");
 
-//! Chunk NBT in the NATIVE Minecraft 26.x format (DataVersion 5023): sections Y=-4..19 (the world -64..319),
+namespace
+{
+const quint16 kIdBedrock = quint16(IdPaletteStart + paletteIndexOf("minecraft:bedrock"));
+
+//! The second bedrock row is patchy (about half the columns) — like the vanilla floor at the bottom of the world.
+inline bool bedrockBump(int wx, int wz)
+{
+    quint32 h = quint32(wx) * 374761393u ^ quint32(wz) * 668265263u ^ 0xB3D7u;
+    h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+    return h % 100u < 50u;
+}
+}
+
+//! Chunk NBT in the NATIVE Minecraft 26.x format (DataVersion 5023): sections Y=kSecMin..kSecMax (the tall world
+//! kWorldMinY..kWorldMaxY, see export/worldy.h and the tmc_tall datapack),
 //! the palettes are STRING LISTS ("minecraft:stone"), a unary palette has no data written; we do not write light and heightmaps
 //! at all — the reader computes them itself (checked with a live 26.3 server: such a chunk loads,
 //! the blocks are preserved, the game re-saves them with light/heightmaps). The format was checked against reference
@@ -104,7 +118,7 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
     w.beginCompound("");                    // the root compound — without a name (the root must be a named compound)
     w.writeString("Status", QStringLiteral("minecraft:full"));
     w.writeInt("xPos", chunkX);
-    w.writeInt("yPos", -4);                 // the lower boundary of the world -64/16
+    w.writeInt("yPos", kSecMin);            // the lower boundary of the world kWorldMinY/16
     w.writeInt("zPos", chunkZ);
     w.writeLong("LastUpdate", 0);
     w.beginCompound("structures");
@@ -280,15 +294,15 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
     {   // The export boundary: the blending_data tag turns on vanilla terrain smoothing (the same as when upgrading a world from 1.17 to 1.18) —
         // the neighboring chunks that the game will still generate adjust the height and density to our surface
         w.beginCompound("blending_data");
-        w.writeInt("min_section", -4);
-        w.writeInt("max_section", 20);
+        w.writeInt("min_section", kSecMin);
+        w.writeInt("max_section", kSecMax + 1);
         w.endCompound();
     }
     w.writeLong("InhabitedTime", 0);
 
     // The sections: the object blocks are taken from the store, the GROUND is completed analytically from the column metadata
     // (it is not in the store). Entirely stone sections (below stoneFloor, without objects) are written
-    // with a unary palette without materializing 4096 cells — on the apron this is ~8 of the 24 sections of a chunk.
+    // with a unary palette without materializing 4096 cells — on the apron this is ~7 of the 45 sections of a chunk.
     const bool hasGround = !ground.isEmpty();
     int groundMaxTop = 0;                   // the highest ground top in the chunk (above it — air only)
     if (hasGround)
@@ -401,8 +415,8 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
         }
     const char* const* kBiomeNames = g_biomeName;                          // depend on the climate zone
     const bool zoneBiome = std::strcmp(g_biomeName[0], "minecraft:plains") != 0;
-    w.beginList("sections", Nbt::Compound, 24);     // all sections Y=-4..19, as vanilla writes
-    for (int si = -4; si <= 19; ++si)
+    w.beginList("sections", Nbt::Compound, kSecMax - kSecMin + 1);   // all sections Y=kSecMin..kSecMax, as vanilla writes
+    for (int si = kSecMin; si <= kSecMax; ++si)
     {
         const auto sit = sections.constFind(si);
         const bool hasObj = (sit != sections.constEnd());
@@ -417,10 +431,12 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
         {
             if (hasObj) secP = &sit.value();
         }
-        else if (!hasObj && secBotY + 15 <= ground.stoneFloor && (!caveSec || tplUni))
+        else if (!hasObj && secBotY + 15 <= ground.stoneFloor && secBotY > kWorldMinY && (!caveSec || tplUni))
             // Entirely under the ground: a uniform section of the cast — its block (usually deepslate), otherwise stone.
             // Careful: the unary tplUni must be tied to stoneFloor — otherwise a uniform section
             // of the template in a flat world would overwrite the surface (si=0 = y0..15 = the turf layer).
+            // The very bottom slice is always materialized: it carries the bedrock floor (below it the game
+            // has nothing — from a cave the player must not be able to fall/fly out into the void).
             unaryId = tplUni ? tplUni : IdStone;
         else if (hasObj || secBotY <= groundMaxTop || caveSec)
         {   // the section touches objects and/or the ground surface — we assemble the cells
@@ -441,6 +457,8 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
                     for (const QPair<qint16, quint16>& ue : *underCol[col])
                         if (ue.first == y) { blk = ue.second; break; }
                 if (hasObj && sit.value()[i]) blk = sit.value()[i];     // an object takes priority over the ground
+                if (y == kWorldMinY || (y == kWorldMinY + 1 && bedrockBump(chunkX * 16 + (col & 15), chunkZ * 16 + (col >> 4))))
+                    blk = kIdBedrock;                                   // impenetrable floor: from the caves below you can only hit bedrock
                 merged[i] = blk;
             }
             secP = &merged;
@@ -1263,8 +1281,8 @@ QByteArray buildLevelDat(const QString& levelName, int spawnX, int spawnY, int s
 //! below — stone down to the bottom; structures are turned off.
 static void writeDimensions(NbtWriter& w, int groundTopY, const McWorldExporter::WorldOptions& world)
 {
-    groundTopY = std::max(0, std::min(groundTopY, 300));
-    const int stoneH = groundTopY + 65 - 4;           // total layers from y=-64 to the top: top+65
+    groundTopY = std::max(0, std::min(groundTopY, kGroundTopMax));
+    const int stoneH = groundTopY - kWorldMinY - 3;   // layers stack from min_y: bedrock(1) + stone + dirt(2) + grass(1)
 
     w.beginCompound("dimensions");
 

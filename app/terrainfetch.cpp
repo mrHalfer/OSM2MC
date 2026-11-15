@@ -266,8 +266,8 @@ TerrainFetchResult tmcFetchTerrain(const QVector<QPointF>& lonLat, const QString
     DtmBuildParams p;
     p.lon0 = lon0; p.lat0 = lat0; p.lon1 = lon1; p.lat1 = lat1;
     p.pixel = 2.0 * kPi * kEarthR / worldPx;             // the tile pixel in the Web Mercator plane
-    p.smoothMeters = 80.0;
-    p.maxRaise = 150.0;
+    p.smoothMeters = 1.2 * p.pixel;                   // one pixel only: kills single-tile-pixel spikes without erasing real relief (the old 80 m box twice blurred a mountain smooth, a user report)
+    p.maxRaise = 480.0;                             // the tall world (export/worldy.h): mountains up to ~480 blocks go 1:1
     p.sourceNote = QString::fromLatin1(kTerrainNote);
     const QString file = outFile;
     QDir().mkpath(QFileInfo(file).absolutePath());       // the matrix lies next to the data file

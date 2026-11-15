@@ -17,6 +17,8 @@
 #include "export/geom.h"
 #include "export/rails.h"
 #include "export/anvil.h"
+#include "export/highworld.h"
+#include "export/worldy.h"
 #include "export/buildingmerge.h"
 #include "export/facade.h"
 #include "export/voxelize.h"
@@ -650,10 +652,10 @@ bool ExportRun::assembleChunks()
                     if (git->wd[col] > 0) continue;                       // not into water
                     const int top = git->top[col];
                     bool free = true;
-                    for (int y = top + 1; y <= std::min(top + 12, 319) && free; ++y)
+                    for (int y = top + 1; y <= std::min(top + 12, kWorldMaxY) && free; ++y)
                         if (store.get(x, y, z)) free = false;
                     if (!free) continue;
-                    outX = x; outZ = z; outY = std::min(top + 2, 310);
+                    outX = x; outZ = z; outY = std::min(top + 2, kWorldMaxY);
                     return true;
                 }
         return false;
@@ -662,7 +664,7 @@ bool ExportRun::assembleChunks()
     {
         spawnX = int(std::llround(objCx / double(objCount)));
         spawnZ = int(std::llround(objCz / double(objCount)));
-        spawnY = int(std::min<qint64>(objMaxY + 3, 310));   // a fallback: above the very top of the scene
+        spawnY = int(std::min<qint64>(objMaxY + 3, kWorldMaxY));   // a fallback: above the very top of the scene
         surfaceSpawn(spawnX, spawnZ, spawnX, spawnY, spawnZ);
     }
     if (world.hasSpawnPoint)
@@ -714,6 +716,10 @@ bool ExportRun::writeZip()
         addEntry(QStringLiteral("ATTRIBUTION.txt"), world.attribution.toUtf8());       // Minecraft ignores unknown files in the save folder
     if (!world.exportInfo.isEmpty())
         addEntry(QStringLiteral("export_info.json"), world.exportInfo.toUtf8());       // the info about this export (app/exportmeta.h)
+    // The world is taller than vanilla (see export/worldy.h): the game only honours that with the dimension_type
+    // override, so EVERY exported world carries the small "tmc_tall" datapack. Flat cities are untouched by it;
+    // mountainous DSMs (a 700 m ridge) stay a mountain instead of being squashed into a 150-block bump.
+    addTallWorldDatapack(addEntry);
     if (world.locateDatapack && (!lairSet.placed.isEmpty() || !portalStarts.isEmpty() || !tplInst.isEmpty()
                                  || carTntCores > 0))             // cars with TNT cores alone also need the pack (the punch trap)
     {
@@ -925,11 +931,11 @@ void ExportRun::buildPointObjects()
                 const qint64 ck = pairKey(sp.x, sp.z);
                 if (colWater.contains(ck) || roadCols.contains(ck)) { ++nSkipped; continue; }   // a pit/roadway under the object
                 const int gy = surfaceTop(ck) + 1;
-                if (gy + 40 > 255) continue;
+                if (gy + 40 > kWorldMaxY) continue;
                 // the highest solid non-vegetation block of the column: for a tower — the roof to grow from,
                 // for the others — the fact that something is already built here
                 int topSolid = -1;
-                for (int y = 255; y >= gy; --y)
+                for (int y = kWorldMaxY; y >= gy; --y)
                 {
                     const quint16 b = store.get(sp.x, y, sp.z);
                     if (b && !isVegBlockId(b)) { topSolid = y; break; }
@@ -1059,7 +1065,7 @@ void ExportRun::buildPointObjects()
                     const int baseY = colMin.contains(ck) ? std::max(gy, topSolid + 1) : gy;
                     const int above = baseY - gy;
                     const int body = above >= 32 ? 6 : std::max(6, 32 - above - 4);
-                    if (baseY + body + 3 > 255) { ++nSkipped; break; }
+                    if (baseY + body + 3 > kWorldMaxY) { ++nSkipped; break; }
                     store.set(sp.x, baseY, sp.z, IdIronBlock);
                     for (int dy = 1; dy <= body; ++dy) store.set(sp.x, baseY + dy, sp.z, IdCobbleWall);
                     for (int dy = 1; dy <= 3; ++dy) store.set(sp.x, baseY + body + dy, sp.z, qQuartz);
@@ -1631,7 +1637,7 @@ int ExportRun::addEmpty(int v, int x, int z)
     const int dx = x - erX0, dz = z - erZ0;               // the 4-block cell grid (kEGrid of the empty lands block)
     if (dx < 0 || dz < 0 || dx / 4 >= erW || dz / 4 >= erH) return v;
     const int gx = dx / 4, gz = dz / 4;
-    return std::max(0, std::min(255, v + int(emptyDelta[qsizetype(gz) * erW + gx])));
+    return std::max(0, std::min(kGroundTopMax, v + int(emptyDelta[qsizetype(gz) * erW + gx])));
 }
 
 int ExportRun::terrainTopBlock(int cx, int cz)
@@ -1665,7 +1671,7 @@ int ExportRun::groundTopCol(int x, int z)
 {
     const auto fit = flatGround.constFind(pairKey(x, z));
     if (fit != flatGround.constEnd())
-        return std::max(0, std::min(fit.value(), 255));      // a flat platform (buildings, sites, parking lots) — cut and filled
+        return std::max(0, std::min(fit.value(), kGroundTopMax));      // a flat platform (buildings, sites, parking lots) — cut and filled
     if (!paleCol.isEmpty())
     {
         const auto pit = paleCol.constFind(pairKey(x, z));
@@ -1682,6 +1688,18 @@ int ExportRun::groundTopCol(int x, int z)
         if (gx >= 0 && gx < tsW && gz >= 0 && gz < tsH)
             slope = double(terrainSlope[qsizetype(gz) * tsW + gx]) / 40.0;
     }
+    // CLIFF SHARPENING (a user request): a 10-30 m height matrix and the vertical compression (460/span)
+    // smear a real cliff into a long ramp of one-block steps — "tall hills" instead of cliffs. On a steep
+    // slope the FINAL ground height (after the relief noise) is snapped to a global level lattice with a
+    // step Q growing with the slope (1 on gentle ground → 4 at slope 0.45+): neighbouring columns of the
+    // same treads collapse to one level, so the ramp becomes horizontal treads with 2..4-block vertical
+    // faces — the "rock, not a tall hill" the user asked for. The rise itself is preserved (the world
+    // height budget is untouched); a continuous Q keeps the lattice shift invisible. Only `near` (the
+    // built-up damping) softens it — a graded yard by a house stays smooth, the massif between them steps;
+    // the noise textures the treads instead of washing the faces out because the snap runs after it.
+    double cliffQ = 1.0;
+    if (slope > 0.10)
+        cliffQ = 1.0 + 3.0 * std::min(1.0, (slope - 0.10) / 0.35);                     // step 1..4 blocks
     const double steep = std::min(1.0, slope);
     // BUILT-UP / PLAIN CALM: near the houses and on gentle ground the noise is damped — no abrupt two-block steps in
     // the residential quarters and the relief is stretched (a user request); far from everything the ridges are
@@ -1698,23 +1716,28 @@ int ExportRun::groundTopCol(int x, int z)
     const double amp = (1.2 - 1.0 * calm) + 2.6 * steep * (1.0 - 0.35 * calm);
     const double ridgeK = 0.7 * (0.6 + 0.9 * (1.0 - near));           // wilder far from the buildings
     const double n = terrainReliefNoise(x, z) + (steep > 0.2 ? ridgeK * terrainRidgeNoise(x, z) * steep : 0.0);
-    const int t = std::max(0, std::min(255, t0 + int(std::lround(amp * n))));
+    int t = std::max(0, std::min(kGroundTopMax, t0 + int(std::lround(amp * n))));
+    if (cliffQ > 1.02)
+    {
+        const double q = 1.0 + (cliffQ - 1.0) * (1.0 - near);         // built-up columns snap with a softer step
+        t = std::max(0, std::min(kGroundTopMax, int(std::lround(std::floor(double(t) / q + 0.5) * q))));
+    }
     const int cxk = x >> 4, czk = z >> 4;
     const int d = std::max(std::max(rcx0 - cxk, cxk - rcx1), std::max(std::max(rcz0 - czk, czk - rcz1), 0));
     if (d <= 0 || rectM <= 0) return addEmpty(t, x, z);
     double u = std::min(1.0, double(d) / double(rectM));
     u = u * u * (3.0 - 2.0 * u);
-    return std::max(0, std::min(255, int(std::lround(double(t) * (1.0 - u) + double(genGroundTop) * u))));
+    return std::max(0, std::min(kGroundTopMax, int(std::lround(double(t) * (1.0 - u) + double(genGroundTop) * u))));
 }
 
 int ExportRun::surfaceTop(qint64 ck)
 {
     int top = groundTopCol(keyFirst(ck), keySecond(ck));
-    if (flatGround.contains(ck)) return std::min(top, 255);   // a graded/flattened column: its exact level, no colMin correction
+    if (flatGround.contains(ck)) return std::min(top, kGroundTopMax);   // a graded/flattened column: its exact level, no colMin correction
     const auto oit = colMin.constFind(ck);
     if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)
         top = std::max(top, oit.value() - 1);
-    return std::min(top, 255);
+    return std::min(top, kGroundTopMax);
 }
 
 GroundChunk ExportRun::makeGround(qint64 ckKey)
@@ -1737,7 +1760,7 @@ GroundChunk ExportRun::makeGround(qint64 ckKey)
                 if (oit != colMin.constEnd() && oit.value() - 1 <= top + 3)       // a body hanging higher than 3 blocks over the ground does not raise it
                     top = std::max(top, oit.value() - 1);
             }
-            if (top > 255) top = 255;
+            if (top > kGroundTopMax) top = kGroundTopMax;
             quint16 surface = g_zoneSurface;              // the top block of the column (turf or csrpol wool; sand in the desert, snow in the tundra)
             const auto wit = hasWool ? colWool.constFind(ck) : colWool.constEnd();
             if (wit != colWool.constEnd())
@@ -1750,7 +1773,7 @@ GroundChunk ExportRun::makeGround(qint64 ckKey)
             int wd = 0;                                   // the depth of the water pit (0 — land)
             const auto witW = hasWat ? colWater.constFind(ck) : colWater.constEnd();
             if (witW != colWater.constEnd())
-                wd = witW.value();                        // top>=0 always (median clamp), the pit does not go below -64
+                wd = witW.value();                        // top>=0 always (median clamp), the pit does not go below kWorldMinY
             else if (surface == IdGrass && !colWater.isEmpty() && g_sandId)
             {   // sandy shores (partially): a dry column near water (up to 2 blocks) — sand with a chance that falls with the distance
                 int nearD = 99;
@@ -1864,7 +1887,7 @@ void ExportRun::buildStreetFurniture()
                     const int x = keyFirst(ck), z = keySecond(ck);
                     if (colMin.contains(ck) || colWater.contains(ck)) continue;
                     const int y0 = surfaceTop(ck) + 1;
-                    if (y0 + 6 > 250) continue;
+                    if (y0 + 6 > kWorldMaxY) continue;
                     const bool boundary = isBoundary(x, z);
                     if (boundary)
                     {
@@ -3275,10 +3298,16 @@ void ExportRun::buildStreetFurniture()
         }
     }
 
-    // PARKING LOT MARKING (rdcpol): light gray carpets. From every long enough edge of the outline inward into the polygon, perpendicular
-    // to the edge, lines 12 blocks long run with a step of 7 blocks along the edge (if it does not fit into the parking lot — not drawn; if the parking lot is wider than three
-    // line lengths (36) — the lines only from one of the opposite sides). A line does not touch (including diagonally) lines already laid from other edges — there are no intersections;
-    // if a line touches another object (a building, a road, rails, water, any block at the carpet height) — it is not drawn at all.
+    // PARKING LOT MARKING (rdcpol): white carpets, a GRID of spots over the WHOLE lot (a user request: the old
+    // "a row from each edge, up to three line lengths deep" left the middle of a big lot an empty field). Perpendicular
+    // to every long enough edge, spot bands 12 cells deep lie one after another across the whole depth of the polygon,
+    // separated by UNMARKED aisles 7 cells wide (as wide as a spot, the owner's pattern); inside a band the spots are
+    // 7-cell columns divided by 1-cell carpet lines, and the columns of ALL PARALLEL edges share ONE phase (a user
+    // request: seeded from their own corners, opposite parallel edges interleaved two combs around 3 cells apart and
+    // the lines fell twice as often). A band line that does not fit entirely is not drawn — the grid just stops where
+    // the lot ends (only band 0 on a lot narrower than a spot keeps the shorter cross-line). A line never touches
+    // (including diagonally) a line already laid from another edge or band — there are no intersections; if a line
+    // touches another object (a building, a road, rails, water, any block at the carpet height) — it is not drawn at all.
     {
         quint16 lgCarpet = 0;
         int nParkWall = 0, nParkCars = 0;
@@ -3293,7 +3322,9 @@ void ExportRun::buildStreetFurniture()
                 // CARS (a user request): the 7-block gap between two marking lines is a parking
                 // spot where an EXACT copy of a donor city-map car (car_templates.bin from extract_cars.py)
                 // stands: the model and the nose direction come from the spot hash, the lot density from the lot
-                // hash (45..90% of the spots taken); a spot that refuses its car tries two more models. The
+                // hash (45..90% of the spots taken); a spot that refuses its car tries two more models. A lot that
+                // ended up with NO car retries all its spots ignoring the fill percentage — with a 90% roll per lot,
+                // so an empty marked lot becomes the exception (a user request). The
                 // templates are 3..7 cells wide - the 7-cell spot keeps a margin; a long car is pulled towards
                 // the aisle so that its tail matches the end of the marking line. The rotated grids of the template are stamped in the
                 // WORLD axes as is and NEVER transposed (a transpose mirrors the car and tears its buttons and
@@ -3302,20 +3333,22 @@ void ExportRun::buildStreetFurniture()
                 // no car there. The car cells are reserved when accepted; the blocks are written after the
                 // marking is drawn. No car templates (no file, caves off) - the lots simply stay without cars.
                 struct CarCell { int x, y, z; quint16 id; };
+                struct LotSpot { QPointF q0; double ex, ez, nx2, nz2, tt, side, base; };
                 QVector<CarCell> lotCars;
+                QVector<LotSpot> spots;                                    // every spot the lot offered, for the coverage retry
                 QSet<qint64> takenCells;                                   // the cells reserved by the accepted cars
                 const qint64 r0 = ps.rings.isEmpty() ? 0 : pairKey(int(std::floor(ps.rings.first().first().x())),
                                                                    int(std::floor(ps.rings.first().first().y())));
                 const quint32 lotFill = 45u + colHash(r0 ^ 0xF111ull) % 46u;      // 45..90% of the spots are taken
-                auto trySlot = [&](const QPointF& q0, double ex, double ez, double nx2, double nz2, double tt, double side)
+                auto trySlot = [&](const QPointF& q0, double ex, double ez, double nx2, double nz2, double tt, double side, double base, bool force) -> bool
                 {
-                    if (carSet.empty()) return;                            // no templates - the lot stays empty
-                    ++nSlot;
+                    if (carSet.empty()) return false;                      // no templates - the lot stays empty
+                    if (!force) ++nSlot;
                     const double ec = tt + side * 3.5;                     // the spot's middle between the lines
-                    const qint64 mid = pairKey(int(std::floor(q0.x() + ex * ec + nx2 * 6.0)),
-                                               int(std::floor(q0.y() + ez * ec + nz2 * 6.0)));
+                    const qint64 mid = pairKey(int(std::floor(q0.x() + ex * ec + nx2 * (base + 6.0))),
+                                               int(std::floor(q0.y() + ez * ec + nz2 * (base + 6.0))));
                     const quint32 h = colHash(mid ^ r0 ^ 0xCA7Cull);
-                    if (h % 100u >= lotFill) { ++nSlotFull; return; }
+                    if (!force && h % 100u >= lotFill) { ++nSlotFull; return false; }
                     auto cellPt = [&](double across, double along)         // the cell of the spot grid (x, z)
                     {
                         return QPoint(int(std::floor(q0.x() + ex * across + nx2 * along)),
@@ -3335,12 +3368,12 @@ void ExportRun::buildStreetFurniture()
                         const int bx = (r % 2) ? car.sz : car.sx;          // the stamped box in the world axes
                         const int bz = (r % 2) ? car.sx : car.sz;
                         const int aLen = qMax(bx, bz), wLen = qMin(bx, bz);    // along the normal / along the marking line
-                        if (wLen > 7) { if (k == 2) ++nSlotWide; continue; }   // the spot between the lines is 7 cells wide
+                        if (wLen > 7) { if (k == 2 && !force) ++nSlotWide; continue; }   // the spot between the lines is 7 cells wide
                         const double a0 = std::min(3.5, 12.5 - aLen);      // a long car is pulled towards the aisle
                         const double e0 = ec - (wLen - 1) * 0.5;           // so that its tail matches the line end
                         int x0 = std::numeric_limits<int>::max(), z0 = x0;
                         int x1 = std::numeric_limits<int>::min(), z1 = x1;
-                        const double cA[2] = { e0, e0 + wLen - 1 }, cL[2] = { a0, a0 + aLen - 1 };
+                        const double cA[2] = { e0, e0 + wLen - 1 }, cL[2] = { base + a0, base + a0 + aLen - 1 };
                         for (int i = 0; i < 2; ++i)                        // the spot rectangle in the world axes
                             for (int j = 0; j < 2; ++j)
                             {
@@ -3348,7 +3381,7 @@ void ExportRun::buildStreetFurniture()
                                 x0 = qMin(x0, p.x()); x1 = qMax(x1, p.x());
                                 z0 = qMin(z0, p.y()); z1 = qMax(z1, p.y());
                             }
-                        if (x1 - x0 + 1 != bx || z1 - z0 + 1 != bz) { if (k == 2) ++nSlotTilt; continue; }  // a tilted edge
+                        if (x1 - x0 + 1 != bx || z1 - z0 + 1 != bz) { if (k == 2 && !force) ++nSlotTilt; continue; }  // a tilted edge
                         int y0 = -1;
                         bool ok = true;
                         char why = 0;                                      // 1 busy, 2 floor, 3 blocked (for the log)
@@ -3369,7 +3402,7 @@ void ExportRun::buildStreetFurniture()
                             }
                         if (!ok)
                         {
-                            if (k == 2) { if (why == 1) ++nSlotBusy; else if (why == 2) ++nSlotFloor; else ++nSlotAir; }
+                            if (k == 2 && !force) { if (why == 1) ++nSlotBusy; else if (why == 2) ++nSlotFloor; else ++nSlotAir; }
                             continue;
                         }
                         for (int gx = 0; gx < bx; ++gx)
@@ -3381,8 +3414,9 @@ void ExportRun::buildStreetFurniture()
                         carCores << x0 + rot.cx << y0 + rot.cy << z0 + rot.cz;
                         ++carTntCores;
                         ++nParkCars;
-                        return;
+                        return true;
                     }
+                    return false;
                 };
                 struct ParkEdge { const QVector<QPointF>* ring; int e; double len; };
                 QVector<ParkEdge> parkEdges;
@@ -3397,6 +3431,8 @@ void ExportRun::buildStreetFurniture()
                 // many more spots for cars); the short edges' along-lines then touch the cross-lines and are dropped
                 std::sort(parkEdges.begin(), parkEdges.end(),
                           [](const ParkEdge& a, const ParkEdge& b) { return a.len > b.len; });
+                struct ParkAxis { QPointF o; double ux, uz; };            // one global column phase per direction
+                QVector<ParkAxis> axes;
                 for (const ParkEdge& pe : parkEdges)
                 {
                     const QVector<QPointF>& ring = *pe.ring;
@@ -3412,34 +3448,49 @@ void ExportRun::buildStreetFurniture()
                             nx = -nx; nz = -nz;
                             if (!inside(mx + nx * 2.0, mz + nz * 2.0)) continue;
                         }
-                        for (double t = 3.5; t <= len - 3.5; t += 7.0)
+                        // the columns of PARALLEL edges share one phase: the direction's longest edge opens the axis,
+                        // every other parallel edge (within ~5 degrees) keeps its 3.5 + 7k phase (a user request:
+                        // seeded from its own corner, opposite parallel edges phase-shifted their combs by len mod 7
+                        // and where the shift was around 3 the combs interleaved into double-density lines; now the
+                        // two combs land ON each other and the touching cancel, never interleave).
+                        ParkAxis g;
+                        g.o = p0; g.ux = dx; g.uz = dz;
+                        bool found = false;
+                        for (const ParkAxis& a : axes)
+                            if (std::fabs(dx * a.ux + dz * a.uz) > 0.996)
+                            {
+                                g = a; found = true;
+                                if (dx * g.ux + dz * g.uz < 0.0) { g.ux = -g.ux; g.uz = -g.uz; }   // keep the edge's own sense
+                                break;
+                            }
+                        if (!found) axes.append(g);
+                        const double ta = (p0.x() - g.o.x()) * g.ux + (p0.y() - g.o.y()) * g.uz;
+                        const double tb = (p1.x() - g.o.x()) * g.ux + (p1.y() - g.o.y()) * g.uz;
+                        const double tFirst = 3.5 + 7.0 * std::ceil(qMin(ta, tb) / 7.0);   // the first column of the global phase
+                        for (double band = 0.0; band <= 380.0; band += 19.0)    // spot bands of 12 through aisles of 7
                         {
+                        for (double t = tFirst; t <= qMax(ta, tb) - 3.5; t += 7.0)
+                        {
+                            const double px = g.o.x() + g.ux * t, pz = g.o.y() + g.uz * t;   // the column on the axis
+                            const double tl = (px - p0.x()) * dx + (pz - p0.y()) * dz;       // its place on this edge
                             QVector<qint64> cells;
                             bool ok = true;
-                            // The parking depth across (up to 36 = 3 line lengths): the first exit from the spot along the normal.
-                            // A 12-block line MUST fit entirely, otherwise it is not drawn; if the depth is less than 36, the lines are drawn
-                            // only from one side (where the start cell is "earlier" than the exit point), from the opposite one — not.
+                            // The band across the lot is [band + 0.5, band + 12.5]. A band line MUST fit entirely,
+                            // otherwise it is not drawn — the grid just stops where the lot ends; only band 0 on a lot
+                            // narrower than a spot still gets a shorter cross-line (many more spots for cars, a user request)
                             double exitSl = -1.0;
-                            int exX = 0, exZ = 0;
-                            for (double sl = 0.5; sl <= 36.0; sl += 0.5)
+                            for (double sl = band + 0.5; sl <= band + 12.0; sl += 0.5)
                             {
-                                const double x = p0.x() + dx * t + nx * sl, z = p0.y() + dz * t + nz * sl;
-                                const int fx = int(std::floor(x)), fz = int(std::floor(z));
-                                const qint64 ck = pairKey(fx, fz);
-                                if (!ps.cols.contains(ck)) { exitSl = sl; exX = fx; exZ = fz; break; }
-                                if (sl <= 12.0 && (cells.isEmpty() || cells.last() != ck)) cells.append(ck);
+                                const double x = p0.x() + dx * tl + nx * sl, z = p0.y() + dz * tl + nz * sl;
+                                const qint64 ck = pairKey(int(std::floor(x)), int(std::floor(z)));
+                                if (!ps.cols.contains(ck)) { exitSl = sl; break; }
+                                if (cells.isEmpty() || cells.last() != ck) cells.append(ck);
                             }
-                            if (exitSl >= 0.0 && exitSl <= 12.0)
-                            {   // the line does not fit (the lot is shallower than 12): on a NARROW lot the long edge
-                                // still gets a shorter cross-line across it — many more spots for cars (a user request)
-                                if (!(len >= 16.0 && exitSl >= 6.0)) continue;
+                            if (exitSl >= 0.0)
+                            {   // the band does not fit whole; the narrow-lot exception belongs to band 0 only
+                                if (!(band == 0.0 && exitSl >= 6.0 && exitSl <= 12.0 && len >= 16.0)) continue;
                             }
                             if (cells.size() < 5) continue;
-                            if (exitSl >= 0.0)
-                            {   // depth < 36: only one of the two opposite sides
-                                const int sx0 = keyFirst(cells.first()), sz0 = keySecond(cells.first());
-                                if (!(sx0 < exX || (sx0 == exX && sz0 < exZ))) continue;
-                            }
                             for (qint64 ck : cells)
                             {   // touches another object — the line is not drawn
                                 const int cxk = keyFirst(ck), czk = keySecond(ck);
@@ -3460,10 +3511,19 @@ void ExportRun::buildStreetFurniture()
                             if (!ok) continue;
                             for (qint64 ck : cells) owner.insert(ck, lineNo);
                             ++lineNo;
-                            trySlot(p0, dx, dz, nx, nz, t, +1.0);              // the spots on both sides of the line
-                            trySlot(p0, dx, dz, nx, nz, t, -1.0);
+                            spots.append(LotSpot{ p0, dx, dz, nx, nz, tl, +1.0, band });
+                            spots.append(LotSpot{ p0, dx, dz, nx, nz, tl, -1.0, band });
+                            trySlot(p0, dx, dz, nx, nz, tl, +1.0, band, false);        // the spots on both sides of the line
+                            trySlot(p0, dx, dz, nx, nz, tl, -1.0, band, false);
+                        }
                         }
                     }
+                // COVERAGE GUARANTEE (a user request): a lot whose marking exists but whose cars all refused
+                // gets one more pass over its spots ignoring the fill percentage — 90% of such lots take a car,
+                // the retry stops at the first car that physically fits
+                if (lotCars.isEmpty() && (colHash(r0 ^ 0xC0FF1EEull) % 100u) < 90u)
+                    for (const LotSpot& sp : spots)
+                        if (trySlot(sp.q0, sp.ex, sp.ez, sp.nx2, sp.nz2, sp.tt, sp.side, sp.base, true)) break;
                 for (auto it = owner.constBegin(); it != owner.constEnd(); ++it)
                 {
                     const int x = keyFirst(it.key()), z = keySecond(it.key());
@@ -3721,7 +3781,7 @@ void ExportRun::buildVillages()
             for (int z = z0; z <= z1; ++z)
                 for (int x = x0; x <= x1; ++x)
                 {
-                    for (int y = std::max(-64, ymin - 2); y <= std::min(319, ymin + 70); ++y)
+                    for (int y = std::max(kWorldMinY, ymin - 2); y <= std::min(kWorldMaxY, ymin + 70); ++y)
                         if (store.get(x, y, z) != IdAir) store.erase(x, y, z);
                     colMin.remove(pairKey(x, z));
                     colAnchor.remove(pairKey(x, z));
@@ -5222,7 +5282,7 @@ bool ExportRun::buildVegetation()
                                                                // stopped being an obstacle for y0)
             const int bx = keyFirst(ck), bz = keySecond(ck);
             const int y0 = surfaceTop(ck) + 1;
-            if (y0 + site.treeH + 2 > 255) continue;
+            if (y0 + site.treeH + 2 > kWorldMaxY) continue;
             if (store.get(bx, y0, bz) != IdAir) continue;
             if (pale && paleDonorUsed)
             {   // trees were carried together with the donor terrain; in the fringe at the forest border and in the ring around the mansion (there the terrain is mixed with the ground) we plant procedural ones
@@ -5235,7 +5295,7 @@ bool ExportRun::buildVegetation()
             {   // pale oak: taller than usual (6..9), 2×2 — free neighboring columns are needed
                 const quint32 hp = colHash(ck ^ 0x9A1Eull);
                 const int hh = 6 + int(hp % 4u);
-                if (y0 + hh + 4 > 255) continue;
+                if (y0 + hh + 4 > kWorldMaxY) continue;
                 if (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))) continue;
                 // the 2x2 trunk must not stand half in a drawn pond (the anchor was checked above)
                 if (colWater.contains(pairKey(bx + 1, bz)) || colWater.contains(pairKey(bx, bz + 1)) || colWater.contains(pairKey(bx + 1, bz + 1))) continue;
@@ -5249,7 +5309,7 @@ bool ExportRun::buildVegetation()
                 const quint32 hc = colHash(ck ^ 0x0CE51ull);
                 if (hc % 100u >= 85u) continue;                                // ~85% of the grid cells are planted
                 const int h = 7 + int(hc % 4u);                                // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
-                if (y0 + h + 4 > 255) continue;
+                if (y0 + h + 4 > kWorldMaxY) continue;
                 plantDarkOak(bx, bz, y0, h, hc);
                 continue;
             }
@@ -5260,7 +5320,7 @@ bool ExportRun::buildVegetation()
                 const quint32 hs = colHash(ck ^ 0x2F8C3ull);
                 if (hs % 100u >= 50u) continue;                                // ~50% of the grid cells are planted
                 const int h = 5 + int(hs % 4u);                                // trunks 5..8
-                if (y0 + h + 4 > 255) continue;
+                if (y0 + h + 4 > kWorldMaxY) continue;
                 plantSwampOak(bx, bz, y0, h, hs);
                 continue;
             }
@@ -5272,7 +5332,7 @@ bool ExportRun::buildVegetation()
                 {   // a palm park (monsoon and semi-arid): the zone's share is palms, the rest are oaks (no birches and no spruces)
                     if (colHash(ck ^ 0x3C77ull) % 100u < quint32(zt.palmShare) && plantPalm(bx, bz, y0, colHash(ck ^ 0x5F13ull))) continue;
                     const int h = 5 + int((hr >> 16) % 3u);
-                    if (y0 + h + 4 > 255) continue;
+                    if (y0 + h + 4 > kWorldMaxY) continue;
                     plantBroad(bx, bz, y0, h, IdOakLog, IdOakLeaves);
                     continue;
                 }
@@ -5280,19 +5340,19 @@ bool ExportRun::buildVegetation()
                 if (cls < 40)
                 {   // oak — as in ordinary forests
                     const int h = 5 + int((hr >> 16) % 3u);
-                    if (y0 + h + 4 > 255) continue;
+                    if (y0 + h + 4 > kWorldMaxY) continue;
                     plantBroad(bx, bz, y0, h, IdOakLog, IdOakLeaves);
                 }
                 else if (cls < 75)
                 {   // birch: thinner and taller than the oak
                     const int h = 6 + int((hr >> 16) % 4u);
-                    if (y0 + h + 4 > 255) continue;
+                    if (y0 + h + 4 > kWorldMaxY) continue;
                     plantBroad(bx, bz, y0, h, quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")), IdBirchLeaves);
                 }
                 else
                 {   // a medium-sized spruce
                     const int hs = 9 + int((hr >> 16) % 5u);
-                    if (y0 + hs + 3 > 255) continue;
+                    if (y0 + hs + 3 > kWorldMaxY) continue;
                     plantSpruce(bx, bz, y0, hs, 3);
                 }
                 continue;
@@ -5304,7 +5364,7 @@ bool ExportRun::buildVegetation()
                 const int roll = int(hz % 100u);
                 const int R = roll < 30 ? 1 : (roll < 75 ? 2 : 3);
                 const int h = R == 1 ? 3 + int((hz >> 8) % 2u) : (R == 2 ? 5 + int((hz >> 8) % 2u) : 7 + int((hz >> 8) % 3u));
-                if (y0 + h + 4 > 255) continue;
+                if (y0 + h + 4 > kWorldMaxY) continue;
                 const bool birch = ((hz >> 16) % 100u) < 35u;
                 plantSized(bx, bz, y0, h, R, birch ? quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log")) : quint16(IdOakLog), birch ? quint16(IdBirchLeaves) : quint16(IdOakLeaves));
                 continue;
@@ -5325,7 +5385,7 @@ bool ExportRun::buildVegetation()
                 else if (cls < 75) { hs = 14 + int((hr >> 16) % 6u);  R = 4; }       // taller 14..19
                 else if (cls < 93) { hs = 20 + int((hr >> 16) % 8u);  R = 5; }       // big 20..27, a 2×2 trunk
                 else               { hs = 30 + int((hr >> 16) % 11u); R = 7; }       // a giant 30..40, a 2×2 trunk
-                if (y0 + hs + 3 > 255) continue;
+                if (y0 + hs + 3 > kWorldMaxY) continue;
                 if (R >= 5 && (colMin.contains(pairKey(bx + 1, bz)) || colMin.contains(pairKey(bx, bz + 1)) || colMin.contains(pairKey(bx + 1, bz + 1))
                                || !spansContain(site.spans, bx + 1, bz) || !spansContain(site.spans, bx, bz + 1) || !spansContain(site.spans, bx + 1, bz + 1))) continue;
                 plantSpruce(bx, bz, y0, hs, R);
@@ -5342,7 +5402,7 @@ bool ExportRun::buildVegetation()
                     && spansContain(site.spans, bx + 1, bz) && spansContain(site.spans, bx, bz + 1) && spansContain(site.spans, bx + 1, bz + 1)
                     && plantJungleBig(bx, bz, y0, hj))
                     continue;
-                if (y0 + site.treeH + 6 > 255) continue;
+                if (y0 + site.treeH + 6 > kWorldMaxY) continue;
                 plantBroad(bx, bz, y0, site.treeH + int(hj % 4u), IdOakLog, IdOakLeaves);   // the zone remap turns it into a jungle one with vines
                 continue;
             }
@@ -5446,10 +5506,10 @@ bool ExportRun::buildVegetation()
     for (const IslandSite& is : islandSites)
     {
         if (is.kind != 2) continue;
-        int y0 = std::min(surfaceTop(pairKey(is.cx, is.cz)), 255) + 70 + int(is.hash % 16u);   // high above the park: 70–85 blocks above the ground
+        int y0 = std::min(surfaceTop(pairKey(is.cx, is.cz)), kGroundTopMax) + 70 + int(is.hash % 16u);   // high above the park: 70–85 blocks above the ground
         if ((y0 & 15) == 15) ++y0;                                         // the lake and lily pads (a block above the water) are not cut by a section border
         const int D = std::max(5, std::min(11, std::min(is.rx, is.rz) / 3));   // the "bowl" depth: thin, does not reach the buildings
-        if (y0 + 14 > 300) continue;
+        if (y0 + 14 > kWorldMaxY) continue;
         const quint16 calcite = quint16(IdPaletteStart + paletteIndexOf("minecraft:calcite"));
         const quint16 white = quint16(IdPaletteStart + paletteIndexOf("minecraft:diorite"));
         const quint16 sandB = quint16(IdPaletteStart + paletteIndexOf("minecraft:sand"));
@@ -5671,7 +5731,7 @@ bool ExportRun::buildVegetation()
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(tx, y0, tz) != IdAir) continue;                      // something already stands here
             const int h = 5 + int(hs % 4u);
-            if (y0 + h + 4 > 255) continue;
+            if (y0 + h + 4 > kWorldMaxY) continue;
             plantSwampOak(tx, tz, y0, h, hs);
             ++nSwampTrees;
         }
@@ -5717,7 +5777,7 @@ bool ExportRun::buildVegetation()
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(tx, y0, tz) != IdAir) continue;                        // something already stands here
             const int h = 7 + int(hs % 4u);                                   // trunks 7..10 (a request: 2 blocks taller, the crown over the paths)
-            if (y0 + h + 4 > 255) continue;
+            if (y0 + h + 4 > kWorldMaxY) continue;
             plantDarkOak(tx, tz, y0, h, hs);
             ++nCemTrees;
         }
@@ -5880,7 +5940,7 @@ void ExportRun::buildUserTrees()
                     if (!fillChunkSet.contains(pairKey((bx + sx) >> 4, (bz + sz) >> 4)))
                         return false;
             const int y0 = surfaceTop(ck) + 1;
-            if (y0 + h + 3 > 255) return false;
+            if (y0 + h + 3 > kWorldMaxY) return false;
             for (int dy = 0; dy < h; ++dy)
                 if (store.get(bx, y0 + dy, bz) != IdAir) return false;    // not a single foreign stump in the trunk
             if ((g_zone == Climate::Desert || g_zone == Climate::SemiArid) && colHash(ck ^ 0x7C31ull) % 100u < (g_zone == Climate::Desert ? 45u : 30u))   // cacti dot the desert and semi-arid open lands (the trees there stay rare)
@@ -6089,7 +6149,7 @@ void ExportRun::buildUserTrees()
                     if (!crownOk) continue;
                     const int y0 = surfaceTop(ck) + 1;
                     const int h = 5 + int(colHash(ck ^ 0x1B1Eull) % 5u);                       // trunk 5..9
-                    if (y0 + h + 4 > 255) continue;
+                    if (y0 + h + 4 > kWorldMaxY) continue;
                     bool free = true;
                     for (int dy = 0; dy < h && free; ++dy) if (store.get(bx, y0 + dy, bz) != IdAir) free = false;
                     if (!free) continue;
@@ -6685,7 +6745,7 @@ bool ExportRun::plantSpruce(int bx, int bz, int y0, int h, int R)
 bool ExportRun::plantJungleBig(int bx, int bz, int y0, quint32 hh)
 {
     const int h = 10 + int(hh % 17u);                               // the trunk 10..26 — the tree up to ~32 blocks tall (as in the game)
-    if (y0 + h + 6 > 255) return false;
+    if (y0 + h + 6 > kWorldMaxY) return false;
     for (int cxk = (bx - 5) >> 4; cxk <= ((bx + 6) >> 4); ++cxk)   // the crown and the branches entirely inside the fill
         for (int czk = (bz - 5) >> 4; czk <= ((bz + 6) >> 4); ++czk)
             if (!sprFill.contains(pairKey(cxk, czk))) return false;
@@ -6749,7 +6809,7 @@ bool ExportRun::plantJungleBig(int bx, int bz, int y0, quint32 hh)
 bool ExportRun::plantBigOak(int bx, int bz, int y0, quint32 hh)
 {
     const int h = 8 + int(hh % 5u);                                        // trunk 8..12 (an ordinary oak is 5..7)
-    if (y0 + h + 4 > 255) return false;
+    if (y0 + h + 4 > kWorldMaxY) return false;
     for (int cxk = (bx - 4) >> 4; cxk <= ((bx + 5) >> 4); ++cxk)           // the crown and the branches entirely inside the fill
         for (int czk = (bz - 4) >> 4; czk <= ((bz + 5) >> 4); ++czk)
             if (!sprFill.contains(pairKey(cxk, czk))) return false;
@@ -6800,7 +6860,7 @@ bool ExportRun::plantBigOak(int bx, int bz, int y0, quint32 hh)
 bool ExportRun::plantPalm(int bx, int bz, int y0, quint32 hh)
 {
     const int h = 7 + int(hh % 10u);                                  // trunk 7..16 (the tallest ones are 1.5 times taller than the shortest)
-    if (y0 + h + 2 > 255) return false;
+    if (y0 + h + 2 > kWorldMaxY) return false;
     for (int sx = -4; sx <= 4; sx += 8)                               // the crown reach (±4) entirely inside the fill
         for (int sz = -4; sz <= 4; sz += 8)
             if (!sprFill.contains(pairKey((bx + sx) >> 4, (bz + sz) >> 4))) return false;
@@ -7303,7 +7363,35 @@ bool ExportRun::buildGround()
         genGroundTop = planeSamples[qi];
         planeMax = *std::max_element(planeSamples.constBegin(), planeSamples.constEnd());
     }
-    genGroundTop = std::max(0, std::min(genGroundTop, 255));    // one height both for us and for the generator
+    genGroundTop = std::max(0, std::min(genGroundTop, kGroundTopMax));    // one height both for us and for the generator
+    // A seam with the generator (a user rule): the LOWEST terrain point along the export edge (the band a few matrix
+    // pixels deep along the outer apron ring) is what must stand at the generator's ~68 level — the whole export is
+    // raised or sunk so that it does. The inland plane (the 20th percentile) is a wrong mark for a mountain clip:
+    // pulling the mountain's mid-slope to 68 sank a Rio export by 200+ blocks and cut its top down to 208.
+    int edgeMin = std::numeric_limits<int>::max();
+    if (world.normalSurroundings && hasTerrain)
+    {
+        const qint64 bx0 = qint64(rcx0 - rectM) * 16, bx1 = qint64(rcx1 + rectM + 1) * 16 - 1;
+        const qint64 bz0 = qint64(rcz0 - rectM) * 16, bz1 = qint64(rcz1 + rectM + 1) * 16 - 1;
+        auto consider = [&](int x, int z)
+        {
+            const int t = terrainTopBlock(x, z);                 // yShift is still 0 here
+            if (t > std::numeric_limits<int>::min() / 2 && t < edgeMin) edgeMin = t;
+        };
+        const int band = 40, step = 4;                           // one matrix pixel deep, every 4th column
+        for (qint64 x = bx0; x <= bx1; x += step)
+            for (int d = 0; d < band; ++d)
+            {
+                consider(int(x), int(bz0 + d));
+                consider(int(x), int(bz1 - d));
+            }
+        for (qint64 z = bz0; z <= bz1; z += step)
+            for (int d = 0; d < band; ++d)
+            {
+                consider(int(bx0 + d), int(z));
+                consider(int(bx1 - d), int(z));
+            }
+    }
     // "Normal seed-based world" (user request): the marks of the WDF terrain are in no way connected with the
     // absolute Minecraft Y — in the free mode the city would stand at y≈0, i.e. 60+ blocks below
     // sea level, and the noise surroundings would surround it with a "huge pit". We raise the whole export
@@ -7312,10 +7400,12 @@ bool ExportRun::buildGround()
     // on a ledge, not in a pit.
     if (world.normalSurroundings)
     {
-        yShift = 68 - genGroundTop;                               // with terrain it can also go down: the reference level is 68, not "terrain 140 above the surroundings"
-        yShift = std::min(yShift, std::max(0, 200 - genGroundTop));   // a reserve for high-rises (the terrain is cut at 255)
-        yShift = std::min(yShift, 250 - planeMax);                    // the highest point is not above 250
-        yShift = std::max(yShift, -std::max(0, genGroundTop - 40));  // and we do not go too low: the reference level >= 40
+        const bool edgeRule = edgeMin < std::numeric_limits<int>::max();
+        const int ref = edgeRule ? edgeMin : genGroundTop;    // what must end up at the generator's level 68
+        yShift = 68 - ref;                                    // with terrain it can also go down: the reference level is 68, not "terrain 140 above the surroundings"
+        yShift = std::min(yShift, std::max(0, 440 - genGroundTop));   // a reserve for high-rises (the terrain is cut at kGroundTopMax)
+        yShift = std::min(yShift, kGroundTopMax - planeMax);              // the highest point is not above kGroundTopMax
+        yShift = std::max(yShift, -std::max(0, ref - 40));    // and we do not go too low: the reference level >= 40
         if (yShift != 0)
         {
             store.translateY(yShift);                                 // blocks (the sections will be rebuilt)
@@ -7333,8 +7423,8 @@ bool ExportRun::buildGround()
             for (LairZone& lz : lairZones) { lz.y0 += yShift; lz.y1 += yShift; }   // spawn zones — too
             for (IslandSite& is : islandSites) is.yTop += yShift;                  // islands — too
             for (SpawnerSite& sp : spawners) sp.y += yShift;          // spawners — their own BE
-            genGroundTop += yShift;                                   // terrainTopBlock will add it itself (by reference)
         }
+        genGroundTop = ref + yShift;              // the chamfer's target and the generator's mark: the seam level (with terrain — 68)
     }
     {   // BUILT-UP DISTANCE: how far a column is from the nearest building/road/pad/rail — a 4-block grid, capped at
         // 32 cells (128 blocks). groundTopCol() damps the noise near the houses and on plains (no abrupt two-block
@@ -7400,7 +7490,8 @@ bool ExportRun::buildGround()
         double bestD = 1e18;
         for (int fi = 0; fi < forests.size(); ++fi)
         {
-            if (forests[fi].park || forests[fi].intra || !isPaleForestCode(forests[fi].code)) continue;   // Pale Garden — only on the allowed vegpol codes (forest, undergrowth, shrubs, industrial crops, meadow); not parks 71126000, not lawns 71329000, not vgbpol                               // a park is not a "forest"
+            if (forests[fi].park || forests[fi].intra) continue;                   // a park is not a "forest"
+            if (havePick ? !isPaleForestCode(forests[fi].code) : forests[fi].code != 71111110) continue;   // the automatic choice takes ONLY vegpol 71111110 (dense tall forests, a user request: broad-code forests wreck mountain terrain); a chunk picked by the user keeps the broad code list
             qint64 a = 0;
             for (const ColSpan& c : forests[fi].spans) a += c.z1 - c.z0 + 1;
             if (havePick)
@@ -7428,12 +7519,13 @@ bool ExportRun::buildGround()
                 if (a > bestArea) { bestArea = a; paleIdx = fi; }
             }
         }
-        // Meadow/grassy vegetation without height is a candidate only if its area is MORE THAN TWICE the best forest with height; with comparable areas the forest with height wins
+        // Height-less vegetation (same 71111110 code only) is a candidate only if its area is MORE THAN TWICE the best forest with height; with comparable areas the forest with height wins
         if (!havePick && !grassPale.isEmpty())
         {
             int gBest = -1; qint64 gArea = 0;
             for (int gi = 0; gi < grassPale.size(); ++gi)
             {
+                if (grassPale[gi].code != 71111110) continue;                     // the same automatic rule: only 71111110, meadows of other codes never win
                 qint64 a = 0;
                 for (const ColSpan& c : grassPale[gi].spans) a += c.z1 - c.z0 + 1;
                 if (a > gArea) { gArea = a; gBest = gi; }
@@ -7694,7 +7786,7 @@ bool ExportRun::buildGround()
                         hdHere = int(std::lround(paleDonor.hd[seamDi] * (1.0 - su) + double(hdHere) * su));
                     }
                     const int t0 = groundTopCol(c.x, z);
-                    const int tn = std::max(1, std::min(250, int(std::lround(double(t0) * (1.0 - wv) + double(hdHere + shiftC) * wv))));
+                    const int tn = std::max(1, std::min(kGroundTopMax, int(std::lround(double(t0) * (1.0 - wv) + double(hdHere + shiftC) * wv))));
                     paleCol.insert(ck, PaleCol{ tn, qint16(tn - paleDonor.hd[di]), quint8(std::lround(wv * 255.0)), wv >= 0.5 ? paleDonor.surf[di] : quint16(0), qint32(di) });
                 }
             paleDonorUsed = !paleCol.isEmpty();
@@ -7759,7 +7851,7 @@ bool ExportRun::buildGround()
                     const double n = 0.45 * std::sin(c.x / 17.0 + ph1) * std::cos(z / 21.0 + ph2) + 0.35 * std::sin((c.x + z) / 29.0 + ph3)
                                    + 0.25 * std::sin(c.x / 8.5 + ph4) * std::sin(z / 9.5 + ph2) + 0.15 * std::cos((c.x - z) / 13.0 + ph1);
                     const int t0 = groundTopCol(c.x, z);
-                    const int tn = std::max(1, std::min(250, t0 + int(std::lround(A * n * wv))));
+                    const int tn = std::max(1, std::min(kGroundTopMax, t0 + int(std::lround(A * n * wv))));
                     if (tn != t0) ro.cells.append(qMakePair(ck, tn));
                     ++ro.n;
                 }
@@ -7892,7 +7984,7 @@ bool ExportRun::buildGround()
                             const int di = (inPatch ? uz : cuz) * pd.W + (inPatch ? ux : cux);
                             const int hdHere = ddx == 0 && ddz == 0 ? pd.hd[di] : pd.hd[cuz * pd.W + cux];
                             const int t0 = groundTopCol(x, z);
-                            const int tn = std::max(1, std::min(250, int(std::lround(double(t0) * (1.0 - wb) + (baseT + double(hdHere - hdRef)) * wb))));
+                            const int tn = std::max(1, std::min(kGroundTopMax, int(std::lround(double(t0) * (1.0 - wb) + (baseT + double(hdHere - hdRef)) * wb))));
                             if (inPatch)
                                 paleCol.insert(ck, PaleCol{ tn, qint16(tn - pd.hd[di]), quint8(std::lround(wb * 255.0)), wb >= 0.5 ? pd.surf[di] : quint16(0), qint32(di), qint16(pi) });
                             else
@@ -7918,7 +8010,7 @@ bool ExportRun::buildGround()
                             wb = wb * wb * (3.0 - 2.0 * wb);
                             wt = std::min(wv, wb);
                         }
-                        const int tn = std::max(1, std::min(250, int(std::lround(double(t0) * (1.0 - wt) + (baseT + double(pd.hd[di] - hdRef)) * wt))));
+                        const int tn = std::max(1, std::min(kGroundTopMax, int(std::lround(double(t0) * (1.0 - wt) + (baseT + double(pd.hd[di] - hdRef)) * wt))));
                         if (hasBox && pd.name.contains(QLatin1String("mansion")) && wt <= 0.0) continue;       // beyond the smoothing ring — the former forest
                         paleCol.insert(ck, PaleCol{ tn, qint16(tn - pd.hd[di]), quint8(std::lround(wv * 255.0)), wv >= 0.5 ? pd.surf[di] : quint16(0), qint32(di), qint16(pi) });
                     }
@@ -8050,7 +8142,7 @@ bool ExportRun::buildGround()
                     double prof = 1.0 - (1.0 - u) * (1.0 - u);
                     prof *= 0.85 + 0.15 * std::sin(x * 0.31 + z * 0.23) * std::cos(z * 0.27 - x * 0.19);
                     const int hh = int(std::lround(hHeap * std::max(0.0, std::min(1.0, prof))));
-                    const int tn = std::min(250, t0 + hh);
+                    const int tn = std::min(kGroundTopMax, t0 + hh);
                     const quint32 r = h % 100u;
                     quint16 surf = r < 55u ? stoneId : (r < 78u ? coalId : (r < 90u ? gravelId : quint16(IdCoarseDirt)));
                     paleCol.insert(ck, PaleCol{ tn, 0, 0, surf });
@@ -8589,7 +8681,7 @@ bool ExportRun::buildGround()
                                 }
                             int nv = std::min(h[i], mn + 1);
                             nv = std::max(nv, mx - 1);
-                            nv = std::max(0, std::min(255, nv));
+                            nv = std::max(0, std::min(kGroundTopMax, nv));
                             if (nv != h[i]) { h[i] = nv; changed = true; }
                         }
                     if (!changed) break;
@@ -8868,7 +8960,7 @@ bool ExportRun::buildGround()
                 fillChunks << gk;             // the approach cells painted into the ground must reach the zip too
                 return &ground[gk];
             };
-            qint64 nDeck = 0, nTun = 0, nPortal = 0, nPier = 0, nLamp = 0, nSurf = 0, nPara = 0, nApp = 0;
+            qint64 nDeck = 0, nTun = 0, nPortal = 0, nPier = 0, nLamp = 0, nSurf = 0, nPara = 0, nApp = 0, nBore = 0;
             QVector<QHash<ColKey, int>> deckYs(roadsElev.size()), floorYs(roadsElev.size());
             QVector<QSet<ColKey>> deckSlabs(roadsElev.size()), tunSlabs(roadsElev.size());   // ramp-step cells eased with half-blocks
             QVector<QVector<QPair<qint64, int>>> tunExt(roadsElev.size());   // the descents extended to the footpath
@@ -9001,6 +9093,139 @@ bool ExportRun::buildGround()
                 tFloor.insert(pk, it2 == tFloor.constEnd() ? minG - (ep.h + 1)
                                                            : std::min(it2.value(), minG - (ep.h + 1)));
             }
+            // (owner request) TUNNELS THROUGH MOUNTAINS: a tunnel is not only a road dug down under the street —
+            // when the mountain itself hides the road deep right behind the portals, the road stays FLAT at the
+            // ground level of its free ends and the tube bores straight through the hill. A component qualifies
+            // when it is a car road, every cell 8+ blocks along the line from a free end stands under 9+ rows of
+            // ground (the 4-block interior, the lid and the rock over it fit — the owner's "more than 8 blocks,
+            // at least 8 blocks after the start"), no water lies under the line, and no other roadway crosses it:
+            // the approach road straight ahead of a free end, a road high on the mountain over the bore and a
+            // parallel tube boring to the very same floor are not crossings. The descent onto the floor is then
+            // needed only at the end whose ground lies higher, and the extend channel digs it outside the line.
+            QHash<qint64, int> tBore;                                 // pairKey(component, level) -> the straight floor row
+            {
+                QHash<qint64, int> boreOwner;                         // the ribbon cell -> the living tunnel part owning it
+                for (int i = 0; i < tparts.size(); ++i)
+                {
+                    if (!talive[i]) continue;
+                    const RoadJob& j = roadsElev[tparts[i].ji];
+                    for (auto it = j.road.constBegin(); it != j.road.constEnd(); ++it) boreOwner.insert(it.key(), i);
+                }
+                for (auto it = tFloor.constBegin(); it != tFloor.constEnd(); ++it)
+                {   // (1) the relief test — the candidate floor Fb = the lowest free end of the component
+                    const int root = int(keyFirst(it.key())), lvl = int(keySecond(it.key()));
+                    int Fb = 0;
+                    bool any = false, ok = true;
+                    for (int i = 0; i < tparts.size(); ++i)
+                    {
+                        if (!talive[i] || tfind(i) != root || tparts[i].h != lvl) continue;
+                        const ElevPart& ep = tparts[i];
+                        if (!roadsElev[ep.ji].car) { ok = false; break; }    // foot underpasses keep the shallow trench
+                        if (!tconnA[i]) { Fb = any ? std::min(Fb, ep.v.first().second) : ep.v.first().second; any = true; }
+                        if (!tconnB[i]) { Fb = any ? std::min(Fb, ep.v.last().second) : ep.v.last().second; any = true; }
+                    }
+                    if (!any || !ok) continue;
+                    for (int i = 0; i < tparts.size() && ok; ++i)
+                    {   // a free end must stand at most 8 rows over the bore floor: the open-cut basin digs exactly
+                        // that descent, the tube never ends as a shaft cut open to the sky on the slope
+                        if (!talive[i] || tfind(i) != root || tparts[i].h != lvl) continue;
+                        const ElevPart& ep = tparts[i];
+                        if (!tconnA[i] && ep.v.first().second - Fb > 8) ok = false;
+                        if (!tconnB[i] && ep.v.last().second - Fb > 8) ok = false;
+                    }
+                    for (int i = 0; i < tparts.size() && ok; ++i)
+                    {
+                        if (!talive[i] || tfind(i) != root || tparts[i].h != lvl) continue;
+                        const ElevPart& ep = tparts[i];
+                        const int n = ep.v.size();
+                        for (int k = 0; k < n; ++k)
+                        {
+                            int dEnd = n + 1;                               // the mouth region near a free end may stay open
+                            if (!tconnA[i]) dEnd = std::min(dEnd, k);
+                            if (!tconnB[i]) dEnd = std::min(dEnd, n - 1 - k);
+                            if (dEnd >= 8 && ep.v[k].second - Fb < 9) { ok = false; break; }
+                        }
+                    }
+                    if (ok && Fb > it.value()) tBore.insert(it.key(), Fb);   // the bore only lies above the dug-down floor
+                }
+                bool boreAgain = true;
+                while (boreAgain)
+                {   // (2) the crossings test, iterated: a parallel tube is pardoned only while its own component is
+                    // a bore of the same floor, so dropping one component may drop its neighbour too
+                    boreAgain = false;
+                    QVector<qint64> drop;
+                    for (auto it = tBore.constBegin(); it != tBore.constEnd(); ++it)
+                    {
+                        const int root = int(keyFirst(it.key())), lvl = int(keySecond(it.key())), Fb = it.value();
+                        bool ok = true;
+                        for (int i = 0; i < tparts.size() && ok; ++i)
+                        {
+                            if (!talive[i] || tfind(i) != root || tparts[i].h != lvl) continue;
+                            const ElevPart& ep = tparts[i];
+                            const int n = ep.v.size();
+                            for (int k = 0; k < n && ok; ++k)
+                            {
+                                const qint64 ck = ep.v[k].first;
+                                const int x = int(keyFirst(ck)), z = int(keySecond(ck));
+                                GroundChunk* gp = ensureG(pairKey(x >> 4, z >> 4));
+                                if (gp->wd[(z & 15) * 16 + (x & 15)] > 0) { ok = false; break; }   // no bore under water
+                                for (int d = 0; d < 4 && ok; ++d)
+                                {
+                                    const qint64 nk = pairKey(x + kN4[d][0], z + kN4[d][1]);
+                                    if (railOwnCols.contains(nk)) { ok = false; break; }   // real rails own the column
+                                    if (railColsAll.contains(nk))
+                                    {   // the dispatcher parks the ribbons of EVERY elevated way in railColsAll next
+                                        // to the rrslin rails: the tube's own footprint is not a crossing, and a
+                                        // parallel tube is pardoned only while its component bores to the same floor
+                                        auto pit = boreOwner.constFind(nk);
+                                        if (pit == boreOwner.constEnd()) { ok = false; break; }   // rails or a deck ribbon
+                                        if (!(tfind(*pit) == root && tparts[*pit].h == lvl)
+                                            && tBore.value(pairKey(tfind(*pit), tparts[*pit].h), -1) != Fb)
+                                        { ok = false; break; }                               // a foreign elevated ribbon
+                                    }
+                                    if (roadCols.contains(nk))
+                                    {   // a foreign roadway next to the line; pardoned: a road high on the mountain
+                                        // over the bore (3+ rock rows above the lid), and the mouth zone in front of
+                                        // a free end — the tube's own approach, whose ribbon is wider than one cell
+                                        bool par = false;
+                                        const int x2 = int(keyFirst(nk)), z2 = int(keySecond(nk));
+                                        GroundChunk* gp2 = ensureG(pairKey(x2 >> 4, z2 >> 4));
+                                        if (int(gp2->top[(z2 & 15) * 16 + (x2 & 15)]) >= Fb + 12) par = true;
+                                        if (!par && n >= 2)
+                                        {   // the tube's own approach: every surface road cell at or ahead of a FREE
+                                            // end — the approach way is painted up to the shared node and its ribbon
+                                            // is wider than one cell, so a single collinear cell was not enough
+                                            auto mouthZone = [&](int side) -> bool
+                                            {
+                                                if (side ? tconnB[i] : tconnA[i]) return false;
+                                                const int mk = side ? n - 1 : 0, ak = side ? n - 2 : 1;
+                                                const int mx = int(keyFirst(ep.v[mk].first)), mz = int(keySecond(ep.v[mk].first));
+                                                const int ox = mx - int(keyFirst(ep.v[ak].first)), oz = mz - int(keySecond(ep.v[ak].first));
+                                                const int vx = x2 - mx, vz = z2 - mz;
+                                                const int fwd = vx * ox + vz * oz;                      // ahead of the portal plane
+                                                const int lat = std::abs(vx * oz - vz * ox);            // sideways off the axis
+                                                return fwd >= -1 && fwd <= 8 && lat <= 5;
+                                            };
+                                            par = mouthZone(0) || mouthZone(1);
+                                        }
+                                        if (!par) { ok = false; break; }
+                                    }
+                                    if (elevCells.contains(nk))
+                                    {   // the tube's own ribbon along the line is not a crossing; another tube —
+                                        // only a parallel bore of the very same floor (the dual carriageway through the pass)
+                                        auto pit = boreOwner.constFind(nk);
+                                        if (pit == boreOwner.constEnd()) { ok = false; break; }   // a viaduct deck or a lifted road beside the bore
+                                        if (tfind(*pit) == root && tparts[*pit].h == lvl) continue;
+                                        if (tBore.value(pairKey(tfind(*pit), tparts[*pit].h), -1) != Fb) { ok = false; break; }   // a parallel tube at another floor
+                                    }
+                                }
+                            }
+                        }
+                        if (!ok) drop << it.key();
+                    }
+                    for (qint64 pk : drop) { tBore.remove(pk); boreAgain = true; }
+                }
+            }
             for (int i = 0; i < tparts.size(); ++i)
             {   // the floor rows of every living tunnel part (floorYs — the tunnel road row)
                 if (!talive[i]) continue;
@@ -9008,7 +9233,11 @@ bool ExportRun::buildGround()
                 const RoadJob& j = roadsElev[ep.ji];
                 const int n = ep.v.size();
                 const int gA = ep.v.first().second, gB = ep.v.last().second;
-                const int F = tFloor.value(pairKey(tfind(i), ep.h), gA - j.h - 1);
+                const qint64 bkey = pairKey(tfind(i), ep.h);
+                const auto bit = tBore.constFind(bkey);
+                const bool boreRow = bit != tBore.constEnd();          // (owner request) this part bores straight through the hill
+                const int F = boreRow ? bit.value()
+                                      : tFloor.value(bkey, gA - j.h - 1);
                 const bool frA = !tconnA[i], frB = !tconnB[i];
                 // (owner request) the tunnel descent must be FLATTER than a viaduct grade: 1 block per 10
                 // cells for a car tunnel, per 3 for a pedestrian underpass — but each free end may spend only
@@ -9025,13 +9254,14 @@ bool ExportRun::buildGround()
                 {
                     const int top0 = ep.v[k].second;
                     int y = F;
-                    if (frA) y = std::max(y, gA - 1 - (k + stA - 1) / stA);               // the free end ramps: ceil(k / st) blocks down
-                    if (frB) y = std::max(y, gB - 1 - (n - 1 - k + stB - 1) / stB);
+                    if (!boreRow && frA) y = std::max(y, gA - 1 - (k + stA - 1) / stA);      // the free end ramps: ceil(k / st) blocks down
+                    if (!boreRow && frB) y = std::max(y, gB - 1 - (n - 1 - k + stB - 1) / stB);
                     y = std::min(y, top0 - 1);                                            // never pierce the surface
                     if (prev != std::numeric_limits<int>::min())                          // (owner: the underpass steps were too steep) the row
                         y = std::max(prev - 1, std::min(prev + 1, y));                   // walks at most 1 block per cell, the slabs ease the rest
                     y = std::min(y, top0 - 1);
                     floorYs[ep.ji].insert(ep.v[k].first, y);
+                    if (boreRow && top0 - F >= 9) ++nBore;               // the cell the tube bores straight through the hill
                     prev = y;
                 }
                 // (owner request, the LA test) the descent must start EARLIER than the tunnel-tagged cells:
@@ -9053,7 +9283,8 @@ bool ExportRun::buildGround()
                         cx += majX ? sgn : 0; cz += majX ? 0 : sgn;
                         const qint64 ck = pairKey(cx, cz);
                         const int y = gE - 1 - (m - 1) / st;
-                        if (y <= F || y < gE - 2) break;                      // the floor, or the depth where the tunnel's own ramp
+                        if (y <= F || (!boreRow && y < gE - 2)) break;         // the floor; normal mode also stops 2 under the
+                        // end ground (the tunnel's own ramp joins without a step), a bore digs the whole descent here
                         if (elevCells.contains(ck) || j.road.contains(ck)) break;  // (its first cell is gE-2) joins without a step back
                         if (!j.car && roadCols.contains(ck)) break;           // a foot underpass stops at the walkway
                         GroundChunk* gp = ensureG(pairKey(cx >> 4, cz >> 4));
@@ -9647,11 +9878,11 @@ bool ExportRun::buildGround()
             }
             if (nDeck + nTun > 0)
             {
-                res.lairInfo += QObject::tr("; elevated roads: %1 deck cells, %2 tunnel cells, %3 portal cells, %4 piers, %5 tunnel lamps, %6 parapets, %7 lifted approach cells")
-                                   .arg(nDeck).arg(nTun).arg(nPortal).arg(nPier).arg(nLamp).arg(nPara).arg(nApp);
-                char buf[200];
-                snprintf(buf, sizeof buf, "viaducts/tunnels: deck %d, tunnel %d, portals %d, piers %d, lamps %d, surface %d, parapets %d, lifted %d",
-                         int(nDeck), int(nTun), int(nPortal), int(nPier), int(nLamp), int(nSurf), int(nPara), int(nApp));
+                res.lairInfo += QObject::tr("; elevated roads: %1 deck cells, %2 tunnel cells, %3 portal cells, %4 piers, %5 tunnel lamps, %6 parapets, %7 lifted approach cells, %8 straight bore cells")
+                                   .arg(nDeck).arg(nTun).arg(nPortal).arg(nPier).arg(nLamp).arg(nPara).arg(nApp).arg(nBore);
+                char buf[240];
+                snprintf(buf, sizeof buf, "viaducts/tunnels: deck %d, tunnel %d, portals %d, piers %d, lamps %d, surface %d, parapets %d, lifted %d, bore %d",
+                         int(nDeck), int(nTun), int(nPortal), int(nPier), int(nLamp), int(nSurf), int(nPara), int(nApp), int(nBore));
                 tmcStepLog(buf);
             }
         }
@@ -9699,7 +9930,7 @@ bool ExportRun::buildGround()
                     for (quint32 k = pd.off[di]; k < pd.off[di + 1]; ++k)
                     {
                         const int y = pit->top + int(pd.ady[int(k)]);
-                        if (y > 319 || y < 1) continue;
+                        if (y > kWorldMaxY || y < 1) continue;
                         const quint16 id = pd.aid[int(k)];
                         if (pd.name.contains(QLatin1String("mansion")) && (id == IdLava || blockName(id) == QLatin1String("minecraft:lava"))) continue;   // there is no lava in the mansion
                         if (store.get(x, y, z) != IdAir) continue;
@@ -9844,7 +10075,7 @@ bool ExportRun::buildGround()
                         for (quint32 k = pd.off[di]; k < pd.off[di + 1]; ++k)
                         {
                             const int y = keelY + int(pd.hd[di]) + int(pd.ady[int(k)]) - keel;
-                            if (y < -63 || y > 318) continue;
+                            if (y < kWorldMinY + 1 || y > kWorldMaxY - 1) continue;
                             store.set(x, y, z, ids[int(k)]);
                         }
                     }
@@ -9905,7 +10136,7 @@ bool ExportRun::buildGround()
             for (quint32 k = paleDonor.off[di]; k < paleDonor.off[di + 1]; ++k)
             {
                 const int y = pit->top + int(paleDonor.ady[int(k)]);
-                if (y > 319) break;
+                if (y > kWorldMaxY) break;
                 if (store.get(x, y, z) != IdAir) continue;
                 quint16 id = paleDonor.aid[int(k)];
                 if (id == IdLava || blockName(id) == QLatin1String("minecraft:lava")) continue;          // there is no lava in the Pale Garden
@@ -11082,7 +11313,7 @@ bool ExportRun::prepareObjects()
     tf.sx = (world.unitsToMetersX > 1e-9) ? world.unitsToMetersX : 1.0;
     tf.sz = (world.unitsToMetersY > 1e-9) ? world.unitsToMetersY : 1.0;
     span = mxz - mnz;
-    if (span > 240.0) tf.zScale = 240.0 / span;   // height compression to fit into 0..255
+    if (span > 460.0) tf.zScale = 460.0 / span;   // height compression to fit the ground under the build cap (kGroundTopMax)
     // The flat patches (vegetation, water, sites) are rasterized only inside the world area: an OSM way may cross the
     // extract far beyond the boundary (a national park, a long river) — rasterizing it whole ate gigabytes and killed
     // the export (a fail-fast on a Grand Canyon extract).
@@ -12890,7 +13121,7 @@ bool ExportRun::buildObjects()
                     if (seen.contains(lc)) continue;
                     seen.insert(lc);
                     const int x = bx0 + (lc & 15), z = bz0 + (lc >> 4);
-                    for (int y = 319; y >= -64; --y)
+                    for (int y = kWorldMaxY; y >= kWorldMinY; --y)
                         if (store.get(x, y, z) != IdAir)
                         {
                             hostTop.insert(pairKey(x, z), y);

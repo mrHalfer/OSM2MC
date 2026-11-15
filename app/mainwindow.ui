@@ -63,7 +63,7 @@
            <item row="0" column="0">
             <widget class="QLabel" name="labelSource">
              <property name="text">
-              <string>Project / folder:</string>
+              <string>OSM file:</string>
              </property>
             </widget>
            </item>
@@ -72,7 +72,35 @@
              <item>
               <widget class="QLineEdit" name="sourceEdit">
                <property name="placeholderText">
-                <string>a .tqt file, an OSM extract (.osm/.pbf) or a folder with shapefiles (empty — the current folder)</string>
+                <string>an OpenStreetMap extract (.osm / .pbf)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnOsm">
+               <property name="text">
+                <string>Browse…</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="labelProject">
+             <property name="text">
+              <string>Project / folder:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <layout class="QHBoxLayout" name="rowProject">
+             <item>
+              <widget class="QLineEdit" name="projectEdit">
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+               <property name="placeholderText">
+                <string>a .tqt project or a folder with shapefiles</string>
                </property>
               </widget>
              </item>
@@ -87,106 +115,6 @@
               <widget class="QPushButton" name="btnFolder">
                <property name="text">
                 <string>Folder…</string>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="1" column="0">
-            <widget class="QLabel" name="labelT3d">
-             <property name="text">
-              <string>3D settings (.t3d):</string>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="1">
-            <layout class="QHBoxLayout" name="rowT3d">
-             <item>
-              <widget class="QLineEdit" name="t3dEdit">
-               <property name="placeholderText">
-                <string>empty — the .t3d from the shapefile folder, otherwise the project settings, otherwise default.t3d</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QPushButton" name="btnT3d">
-               <property name="text">
-                <string>Browse…</string>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="2" column="0">
-            <widget class="QLabel" name="labelOsmRules">
-             <property name="text">
-              <string>OSM rules (.json):</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="1">
-            <layout class="QHBoxLayout" name="rowOsmRules">
-             <item>
-              <widget class="QLineEdit" name="osmRulesEdit">
-               <property name="placeholderText">
-                <string>for an .osm/.pbf source; empty — osm_rules.json next to the file or the program</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QPushButton" name="btnOsmRules">
-               <property name="text">
-                <string>Browse…</string>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="3" column="0">
-            <widget class="QLabel" name="labelEnhancer">
-             <property name="text">
-              <string>Enhancer (.dat):</string>
-             </property>
-            </widget>
-           </item>
-           <item row="3" column="1">
-            <layout class="QHBoxLayout" name="rowEnhancer">
-             <item>
-              <widget class="QLineEdit" name="enhancerEdit">
-               <property name="placeholderText">
-                <string>for OSM data; empty — tmc_buildings.dat next to the program (fallback building type and height)</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QPushButton" name="btnEnhancer">
-               <property name="text">
-                <string>Browse…</string>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="4" column="0">
-            <widget class="QLabel" name="labelOut">
-             <property name="text">
-              <string>World file (zip):</string>
-             </property>
-            </widget>
-           </item>
-           <item row="4" column="1">
-            <layout class="QHBoxLayout" name="rowOut">
-             <item>
-              <widget class="QLineEdit" name="outEdit">
-               <property name="placeholderText">
-                <string>empty — &lt;project name&gt;.zip in the current folder</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QPushButton" name="btnOut">
-               <property name="text">
-                <string>Browse…</string>
                </property>
               </widget>
              </item>
@@ -261,10 +189,10 @@
              </property>
             </widget>
            </item>
-           <item row="3" column="1" colspan="2">
+           <item row="3" column="1">
             <widget class="QCheckBox" name="cavesCheck">
              <property name="text">
-              <string>Caves underground (from game world templates)</string>
+              <string>Caves underground</string>
              </property>
             </widget>
            </item>
@@ -292,20 +220,26 @@
              </property>
             </widget>
            </item>
-           <item row="5" column="1" colspan="2">
-            <widget class="QCheckBox" name="realMetersCheck">
+           <item row="3" column="2">
+            <widget class="QCheckBox" name="surfaceCheck">
+             <property name="toolTip">
+              <string>When it is off, the downloaded height matrix is ignored and the world keeps the terrain generated by the game.</string>
+             </property>
              <property name="text">
-              <string>Real meters (account for projection distortion)</string>
+              <string>Surface terrain</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
              </property>
             </widget>
            </item>
            <item row="4" column="1" colspan="2">
             <widget class="QCheckBox" name="datapackCheck">
              <property name="toolTip">
-              <string>The datapack is needed only for searching (/locate, the eye of ender) for the stronghold, the Ancient City, trial chambers and ruined portals. The structures themselves are in the world without it. With the datapack the game warns about experimental features.</string>
+              <string>Use of experimental features will be required.</string>
              </property>
              <property name="text">
-              <string>Datapack for finding structures (/locate; the game will ask for experimental features)</string>
+              <string>World datapack (for correct generation)</string>
              </property>
              <property name="checked">
               <bool>true</bool>
@@ -591,24 +525,18 @@
  </customwidgets>
  <tabstops>
   <tabstop>sourceEdit</tabstop>
+  <tabstop>btnOsm</tabstop>
+  <tabstop>projectEdit</tabstop>
   <tabstop>btnProject</tabstop>
   <tabstop>btnFolder</tabstop>
-  <tabstop>t3dEdit</tabstop>
-  <tabstop>btnT3d</tabstop>
-  <tabstop>osmRulesEdit</tabstop>
-  <tabstop>btnOsmRules</tabstop>
-  <tabstop>enhancerEdit</tabstop>
-  <tabstop>btnEnhancer</tabstop>
-  <tabstop>outEdit</tabstop>
-  <tabstop>btnOut</tabstop>
   <tabstop>fmt26Radio</tabstop>
   <tabstop>fmt121Radio</tabstop>
   <tabstop>noiseRadio</tabstop>
   <tabstop>flatRadio</tabstop>
-  <tabstop>cavesCheck</tabstop>
   <tabstop>seedEdit</tabstop>
   <tabstop>genSeedButton</tabstop>
-  <tabstop>realMetersCheck</tabstop>
+  <tabstop>cavesCheck</tabstop>
+  <tabstop>surfaceCheck</tabstop>
   <tabstop>datapackCheck</tabstop>
   <tabstop>goButton</tabstop>
   <tabstop>cancelButton</tabstop>

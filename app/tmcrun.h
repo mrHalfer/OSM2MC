@@ -24,6 +24,7 @@ struct TmcRunOptions
     quint64 seed = 0;                     //!< 0 — random
     bool locateDatapack = true;           //!< datapack for /locate and the eye of ender (stronghold, Ancient City, trial chambers, ruined portals); without it the game does not ask for experimental features
     bool realMeters = true;               //!< convert map units to meters by the projection
+    bool useDtm = true;                   //!< "Surface terrain" in the window: false — the height matrix is ignored even when it lies next to the data
     QString strongholdChunk, cityChunk, paleForestChunk;   //!< F3 format "x y z" / "x z"; empty — automatic
     bool hasSpawn = false;                //!< a spawn point is set (otherwise — the data center)
     double spawnX = 0, spawnY = 0;        //!< spawn point in the data project coordinates (chosen by a click in the preview)

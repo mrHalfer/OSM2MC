@@ -60,7 +60,7 @@ RC_LANG = 0x0419
 win32: QMAKE_CXXFLAGS += /utf-8
 win32: QMAKE_CFLAGS += /utf-8
 
-    VERSION = 1.7.26.11141
+    VERSION = 1.7.26.11161
 # The version string in the code (export info, app/exportmeta.cpp)
 DEFINES += TMC_VERSION_STR=\\\"$$VERSION\\\"
 win32:{
@@ -96,6 +96,8 @@ HEADERS += \
     scene/modeldata.h \
     export/climate.h \
     export/anvil.h \
+    export/highworld.h \
+    export/worldy.h \
     export/blocks.h \
     export/buildingmerge.h \
     export/colkey.h \
@@ -164,6 +166,7 @@ SOURCES += \
     export/mcworldexporter.cpp \
     export/anvil.cpp \
     export/blocks.cpp \
+    export/highworld.cpp \
     export/buildingmerge.cpp \
     export/carset.cpp \
     export/playgroundset.cpp \

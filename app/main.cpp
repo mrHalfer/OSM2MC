@@ -114,7 +114,7 @@ int main(int argc, char* argv[])
     p.addOption({ QStringLiteral("no-greenery"), QObject::tr("do not top up vegetation for OSM data (yards, taiga, forests, parks)") });
     p.addOption({ QStringLiteral("dry-run"), QObject::tr("only load and classify the data (summary in the log), do not build the world") });
     p.addOption({ QStringLiteral("theme"), QObject::tr("window theme: auto (as in Windows, default), light or dark"), QStringLiteral("auto|light|dark") });
-    p.addOption({ QStringLiteral("debug"), QObject::tr("show the service fields in the window: paths to .t3d, the OSM rules and the enhancer, \"real meters\" (without the key the default files are always used)") });
+    p.addOption({ QStringLiteral("debug"), QObject::tr("add the \"Project / folder\" row to the window: a .tqt project or a shapefile folder as the source (the service paths .t3d, OSM rules and enhancer and \"real meters\" are command-line options only)") });
     p.addOption({ QStringLiteral("gui-online"), QObject::tr("(for testing, with --gui-screenshot) online mode: \"lon lat zoom; lon lat; lon lat; …\" — map view and boundary vertices"), QStringLiteral("view") });
     p.addOption({ QStringLiteral("download-osm"), QObject::tr("download OSM data for the polygon \"lon lat; lon lat; …\" (up to 25 km²) into the --out file and exit; the result goes to the --log file"), QStringLiteral("vertices") });
     p.addOption({ QStringLiteral("climate"), QObject::tr("climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid"), QStringLiteral("zone") });

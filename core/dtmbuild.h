@@ -10,7 +10,7 @@ struct DtmBuildParams
     double lon0 = 0, lat0 = 0, lon1 = 0, lat1 = 0;   //!< the extent, degrees (the boundary bbox + a margin)
     double pixel = 0;                                //!< the pixel size, EPSG:3857 meters (the tile pixel at the download zoom)
     double smoothMeters = 80.0;                      //!< the blur radius dropping the small relief, ground meters
-    double maxRaise = 150.0;                         //!< the highest rise above the base, blocks
+    double maxRaise = 480.0;                         //!< the highest rise above the base, blocks (the tall world, see export/worldy.h)
     QString sourceNote;                              //!< the attribution, written into the GeoTIFF metadata
 };
 

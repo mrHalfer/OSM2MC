@@ -181,10 +181,15 @@ bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QSt
     else if (isTqt ? !project.loadTqt(srcInfo.absoluteFilePath(), &e) : !project.loadFolder(srcInfo.absoluteFilePath(), &e))
         return fail(e);
     // terrain: the matrix named after the data file, then DTM.tif — from the working folder, then from the shapefile/project folder
-    const QString srcName = QFileInfo(opt.source).fileName();
-    if (!project.addDefaultDtm(QDir::currentPath(), srcName))
-        if (!project.addDefaultDtm(sourceDir, srcName))
-            log(QObject::tr("Height matrix not found (neither %1.tif nor DTM.tif) — the terrain is flat.").arg(QFileInfo(opt.source).completeBaseName()));
+    if (!opt.useDtm)
+        log(QObject::tr("Surface terrain is switched off — the height matrix is ignored."));
+    else
+    {
+        const QString srcName = QFileInfo(opt.source).fileName();
+        if (!project.addDefaultDtm(QDir::currentPath(), srcName))
+            if (!project.addDefaultDtm(sourceDir, srcName))
+                log(QObject::tr("Height matrix not found (neither %1.tif nor DTM.tif) — the terrain is flat.").arg(QFileInfo(opt.source).completeBaseName()));
+    }
     log(QObject::tr("3D settings: %1").arg(t3dUsed));
     QVector<QPointF> clip = opt.clipPolygon;
     if (clip.isEmpty())

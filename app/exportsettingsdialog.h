@@ -33,6 +33,9 @@ public:
     //! the game version and the mod loader, e.g. "pack (1.20.1, Forge 47.2.0)" (CurseForge: from the manifest,
     //! Modrinth: from its app.db; when unreadable — the plain name)
     static QVector<QPair<QString, QString>> scanInstances(const QString& root, const char* manifestFile);
+    //! The instance's own name WITHOUT the version note (for the window's "Export:" label): the manifest's "name",
+    //! the folder name as a fallback
+    static QString instanceDisplayName(const QString& folder);
 
 private:
     void updateEnabled();                               // rows follow the chosen radio; OK needs a valid choice

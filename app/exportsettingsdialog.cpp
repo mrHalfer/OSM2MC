@@ -134,6 +134,20 @@ QString ExportSettingsDialog::curseRoot()
     return QDir(userHome()).filePath(QStringLiteral("curseforge/minecraft/Instances"));
 }
 
+QString ExportSettingsDialog::instanceDisplayName(const QString& folder)
+{
+    const QString fallback = QFileInfo(folder).fileName();
+    if (folder.isEmpty()) return fallback;
+    for (const char* mf : { "mcinstance.json", "minecraftinstance.json" })
+    {   // the same manifests scanInstances reads; an empty or unreadable one leaves the folder name
+        QFile f(QDir(folder).filePath(QLatin1String(mf)));
+        if (!f.open(QIODevice::ReadOnly)) continue;
+        const QString n = QJsonDocument::fromJson(f.readAll()).object().value(QStringLiteral("name")).toString();
+        return n.isEmpty() ? fallback : n;
+    }
+    return fallback;
+}
+
 QVector<QPair<QString, QString>> ExportSettingsDialog::scanInstances(const QString& root, const char* manifestFile)
 {
     QVector<QPair<QString, QString>> out;

@@ -14,13 +14,15 @@ class QEvent;
 class QButtonGroup;
 class QAbstractButton;
 
-//! The exporter window: source (.tqt, OSM or a folder), 3D settings (.t3d), world parameters, progress and the log; on the right a basic map preview
+//! The exporter window: an OpenStreetMap file (in the -debug window also a .tqt project or a shapefile folder),
+//! world parameters, progress and the log; on the right a basic map preview
 //! with the spawn point chosen by a click. The layout is in mainwindow.ui (edit it in Qt Designer), only the logic is here.
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 public:
-    //! debug (the -debug command-line key) shows the service fields: paths to .t3d, the OSM rules and the enhancer, "real meters"; otherwise the default files are always used
+    //! debug (the -debug command-line key) adds the "Project / folder" row: a .tqt project or a shapefile folder as the source;
+    //! the service paths (.t3d, OSM rules, enhancer) and "real meters" are set on the command line only
     explicit MainWindow(const TmcRunOptions& initial, bool debug = false, QWidget* parent = nullptr);
     ~MainWindow() override;
     //! The project file without dialogs (for the command-line checks): write / read it
@@ -33,13 +35,10 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;   // the export-destination label: a click opens its folder
 
 private slots:
-    void browseProject();
-    void browseFolder();
-    void browseT3d();
-    void browseOsmRules();
-    void browseEnhancer();
-    void browseOut();
-    void openExportSettings();                          //!< "Export settings": the destination of the exported world (zip / launcher / instance)
+    void browseOsm();                                 //!< "OSM file" row: an .osm/.pbf extract
+    void browseProject();                             //!< the -debug "Project" button: a .tqt project
+    void browseFolder();                              //!< the -debug "Folder" button: shapefiles folder
+    void openExportSettings();                        //!< "Export settings": the destination of the exported world (zip / launcher / instance)
     void generateSeed();
     void startExport();
     void cancelExport();
@@ -78,13 +77,11 @@ private:
     void saveProjectFile();                                //!< "Save project…": the map view, the boundary, the marks and the world options into a .tmc file
     QString resolvedSavesDir() const;                      //!< saves folder for the chosen export destination; empty — the zip (the saved path is gone)
     QString exportFolderToOpen() const;                    //!< the folder opened by a click on the export-destination label (saves / output / source)
-    void updateExportDestUi();                             //!< greys out the zip file row when the world goes to a launcher/instance
+    void updateExportDestUi();                             //!< the "Export: …" label above the buttons (a chosen instance is named there)
     void openProjectFile();                                //!< "Open project…"
     bool writeProject(const QString& path);
     bool readProject(const QString& path, QString* error);
     void retranslate();                                    //!< sets again every text that is set in the code (the .ui ones — by retranslateUi)
-    void applyEditionTexts();                              //!< the texts of the simple (non-debug) window
-    void updateDefaultHints();                             //!< "default: path" placeholders of the service fields
     void updateClimateItems();                             //!< the names in the climate list
     void updateClimateAutoZone();                          //!< re-detects the "auto" zone: the export boundary's center, else the loaded data's center
     void updateStageLabel();                               //!< the stage caption under the progress bar
@@ -98,6 +95,7 @@ private:
     QLabel* mClimateLabel = nullptr;
     int mExportDest = 0;              //!< export destination setting: 0 — zip, 1 — launcher saves, 2 — Modrinth, 3 — CurseForge
     QString mSavesLauncher, mSavesModrinth, mSavesCurse;   //!< saved choices of the "Export settings" dialog
+    QString mOutPath;                 //!< the world zip path (command line -o / the project file): the window has no field for it since 1.7
     int mClimateAutoZone = -1;          //!< the climate zone detected for the data (-1 — not known yet)
     int mPreviewObjects = -1;           //!< the object count of the loaded preview (-1 — no preview)
     int mStageIdx = -1, mStageDone = 0, mStageTotal = 0;   //!< the current export stage (for the caption)

@@ -2,6 +2,7 @@
 // The voxel storage: chunk -> section (16^3) -> block id, and the per-column ground metadata.
 #include "export/blocks.h"
 #include "export/colkey.h"
+#include "export/worldy.h"
 #include <QHash>
 #include <QVector>
 #include <limits>
@@ -9,12 +10,12 @@
 class VoxelStore
 {
 public:
-    //! chunk key = pairKey(chunkX, chunkZ); value: section index (y>>4, -4..19 — a 26.x world: -64..319) -> 4096 ids.
+    //! chunk key = pairKey(chunkX, chunkZ); value: section index (y>>4, kSecMin..kSecMax — the tall world, see export/worldy.h) -> 4096 ids.
     QHash<ColKey, QHash<int, QVector<quint16>>> chunks;
 
     quint16 get(int x, int y, int z) const
     {
-        if (y < -64 || y > 319) return 0;
+        if (y < kWorldMinY || y > kWorldMaxY) return 0;
         auto it = chunks.constFind(pairKey(x >> 4, z >> 4));
         if (it == chunks.constEnd()) return 0;
         auto sit = it->constFind(y >> 4);
@@ -24,7 +25,7 @@ public:
 
     void set(int x, int y, int z, quint16 id)
     {
-        if (y < -64 || y > 319 || id == IdAir) return;
+        if (y < kWorldMinY || y > kWorldMaxY || id == IdAir) return;
         QVector<quint16>& sec = chunks[pairKey(x >> 4, z >> 4)][y >> 4];
         if (sec.isEmpty())
             sec.fill(0, 4096);
@@ -34,7 +35,7 @@ public:
     //! Erase a block (set() ignores air): needed for cutting down trees under a village plot.
     void erase(int x, int y, int z)
     {
-        if (y < -64 || y > 319) return;
+        if (y < kWorldMinY || y > kWorldMaxY) return;
         auto it = chunks.find(pairKey(x >> 4, z >> 4));
         if (it == chunks.end()) return;
         auto sit = it->find(y >> 4);
@@ -74,7 +75,7 @@ public:
 //! The column index is lz*16+lx (as in the arrays below), the values are as of after the yShift lift.
 struct GroundChunk
 {
-    QVector<qint16> top;    //!< the column top (-1..255; signed — the junction chamfer lowers the edge below 0, see 3.59b)
+    QVector<qint16> top;    //!< the column top (kWorldMinY..kGroundTopMax; signed — the junction chamfer lowers the edge below 0, see 3.59b)
     QVector<quint16> surf;  //!< the top block: turf or the wool of a csrpol plate
     QVector<quint16> wd;    //!< the depth of the water pit (0 — land); the water occupies (top-wd, top]
     QVector<quint8> art;    //!< 1 — the column of an artificial reservoir (without a sandy bottom); empty — all are natural
