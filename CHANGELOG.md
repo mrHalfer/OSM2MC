@@ -5,6 +5,16 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.7.26.11162] — 2026-11-16
+
+### Fixed
+
+- The `tmc_tall` build-height datapack now loads in every game of the 1.21 line, not only from 1.21.4: its
+  supported format range now starts at data pack format 48 (Minecraft 1.21.0)
+- A world saved in the 1.21.x format no longer loses the spawn point (a user report on 1.21.0): it now carries
+  the classic SpawnX/Y/Z fields, which the older games read — instead they ignored our 26.x `spawn` compound
+  and dropped the player at (0,0,0), in the generated land around the export
+
 ## [1.7.26.11161] — 2026-11-16
 
 ### Added

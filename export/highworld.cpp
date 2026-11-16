@@ -4,15 +4,17 @@
 // an "attributes" block later, a clock/dragon field in the newest ones), and a wrong field silently drops the
 // whole override. The pack therefore carries the base file plus two overlays selected by the pack format, the
 // same layout the game itself ships overlays with. All three copies widen the world to kWorldMinY..kWorldMaxY
-// (export/worldy.h): height 720 from min_y -128.
+// (export/worldy.h): height 720 from min_y -64. The base fields are all valid since 1.19, and the game honours
+// a dimension_type height override since 1.18.2, so the pack is loadable from data pack format 48 (Minecraft
+// 1.21.0) - the whole "1.21.x" version the exporter offers, not only 1.21.4+.
 namespace
 {
 const char kPackMeta[] = R"({
   "pack": {
     "description": "OSMC extended build height",
-    "pack_format": 61,
-    "supported_formats": { "min_inclusive": 61, "max_inclusive": 2147483647 },
-    "min_format": [61, 0],
+    "pack_format": 48,
+    "supported_formats": { "min_inclusive": 48, "max_inclusive": 2147483647 },
+    "min_format": [48, 0],
     "max_format": [2147483647, 2147483647]
   },
   "overlays": {

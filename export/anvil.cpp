@@ -1254,12 +1254,24 @@ QByteArray buildLevelDat(const QString& levelName, int spawnX, int spawnY, int s
     w.writeLong("LastPlayed", QDateTime::currentMSecsSinceEpoch());
     w.writeByte("initialized", 1);
     w.writeByte("WasModded", 0);
-    w.beginCompound("spawn");                         // the new replacement of SpawnX/Y/Z
-    w.writeIntArray("pos", QVector<qint32>{ spawnX, spawnY, spawnZ });  // above the center of mass
-    w.writeFloat("pitch", 0.0f);                     // of objects: the player falls onto their scene
-    w.writeString("dimension", QStringLiteral("minecraft:overworld"));
-    w.writeFloat("yaw", 0.0f);
-    w.endCompound();
+    if (legacy)
+    {   // 1.21.x reads ONLY the classic SpawnX/Y/Z — the "spawn" compound is the 26.x replacement and the old
+        // games ignore it, and a world without them spawned the player at (0,0,0): outside the exported area,
+        // in the noise surroundings (a user report on a 1.21.0 instance)
+        w.writeInt("SpawnX", spawnX);
+        w.writeInt("SpawnY", spawnY);
+        w.writeInt("SpawnZ", spawnZ);
+        w.writeFloat("SpawnAngle", 0.0f);
+    }
+    else
+    {
+        w.beginCompound("spawn");                         // the new replacement of SpawnX/Y/Z
+        w.writeIntArray("pos", QVector<qint32>{ spawnX, spawnY, spawnZ });  // above the center of mass
+        w.writeFloat("pitch", 0.0f);                     // of objects: the player falls onto their scene
+        w.writeString("dimension", QStringLiteral("minecraft:overworld"));
+        w.writeFloat("yaw", 0.0f);
+        w.endCompound();
+    }
     w.beginList("ServerBrands", Nbt::String, 1);
     w.writeStringElem(QStringLiteral("vanilla"));
     w.beginCompound("DataPacks");
