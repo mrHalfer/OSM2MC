@@ -5,6 +5,30 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.7.26.11163] — 2026-11-16
+
+### Added
+
+- A new "Export rules" button (bottom-left of the main window) opens a dialog to edit the reference files
+  visually, without a text editor: OSM tag rules (`osm_rules.json`), the layer sources with their effect and
+  point-model/material columns (`default.t3d` - the tab shows only the fields OSMC really reads, the rest of the
+  file is kept as is), point structure models (`point_models.csv`, with an isometric preview of the model of
+  the selected row) and typical building heights (`heights.csv`). The next export reads the saved files right
+  away
+
+### Changed
+
+- The 3D settings colors (`colorMode`, `singleColor`, `color1`, `color2`) no longer reach the exported world:
+  they decorate only the tqt 3D window. OSMC paints the objects itself - the building walls (and the glass and
+  panel material tinted by them) are the gray-blue concrete, the pedestrian road carpets are white; the other
+  kinds were already decided by their code
+
+### Fixed
+
+- `--version` (and the window that shows it) prints the real program version instead of the placeholder "1.0"
+- The "Export rules" dialog returns the OSM rule list to ascending "#" order every time it reloads the rules -
+  a stray click on the "#" header used to keep the descending order across reloads and filters
+
 ## [1.7.26.11162] — 2026-11-16
 
 ### Fixed

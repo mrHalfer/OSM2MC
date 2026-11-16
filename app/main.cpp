@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QThread>
 #include <ogr_srs_api.h>
+#include "app/exportmeta.h"
 #include "app/httpclient.h"
 #include "app/i18n.h"
 #include "export/climate.h"
@@ -74,7 +75,7 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("EL-MODS MEDIA"));
     QCoreApplication::setApplicationName(QStringLiteral("OSMC"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.0"));
+    QCoreApplication::setApplicationVersion(TmcExportMeta::version());   // the real version from osmc.pro (the --version option shows it)
     setupGdalEnvironment();
     {   // the language must be known before any message is built: look for --lang in the raw arguments
         QString langArg;

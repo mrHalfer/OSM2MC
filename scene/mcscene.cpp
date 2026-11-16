@@ -181,41 +181,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
         Bound b{ s, layer, colorIndex, 0.0, 0.0 };
         b.src.vs.layer = layer;
         ++colorIndex;                                 // as in the tqt 3D window, setModel(): over all sources with a found layer
-        if (b.src.vs.colorMode == ModelColorMode::GradientByHeight)
-        {   // the gradient scale range — the 5th/95th percentiles of the layer height values (as ModelBuilder::CollectLayerCandidates)
-            const int fieldNo = b.src.vs.noExtrusion ? -1 : layer->fieldIndex(b.src.vs.heightField);
-            QVector<double> rels;
-            for (MapFeature* o : layer->features)
-            {
-                if (!o || !o->g) continue;
-                double rel = 0.0;
-                if (!b.src.vs.noExtrusion)
-                {
-                    bool ok = false;
-                    const double raw = o->fields.value(fieldNo).toDouble(&ok);
-                    rel = (ok ? raw : 0.0) * b.src.vs.heightMultiplier;
-                }
-                rel += b.src.vs.extraExtrusion;
-                if (!b.src.vs.noExtrusion && rel == 0.0) rel = 0.5;
-                rels << rel;
-            }
-            if (!rels.isEmpty())
-            {
-                std::sort(rels.begin(), rels.end());
-                auto percentile = [&](double p) -> double
-                {
-                    const double idx = p * (rels.size() - 1);
-                    const int lo = std::max(0, std::min(int(std::floor(idx)), int(rels.size()) - 1));
-                    const int hi = std::max(0, std::min(int(std::ceil(idx)), int(rels.size()) - 1));
-                    return rels[lo] + (rels[hi] - rels[lo]) * (idx - lo);
-                };
-                b.relMin = percentile(0.05); b.relMax = percentile(0.95);
-                if (b.relMax <= b.relMin) { b.relMin = rels.first(); b.relMax = rels.last(); }
-            }
-        }
-        if (b.src.vs.colorMode == ModelColorMode::ByClassifier)
-            out.warnings << QObject::tr("Layer '%1': coloring by a classifier is not supported in OSMC — the default color is used").arg(s.layer);
-        bound << b;
+        bound << b;                                    // the colors from the settings take no part (see mo.color below)
     }
     if (bound.isEmpty())
     {
@@ -566,18 +532,13 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
         {
             McWorldExporter::McObject mo;
             mo.vertices.reserve(mesh.vertices.size());
-            double rs = 0, gs = 0, bs = 0;
-            for (int k = 0; k < mesh.vertices.size(); ++k)
-            {
-                const QVector3D& v = mesh.vertices[k];
+            for (const QVector3D& v : mesh.vertices)
                 mo.vertices << QVector3D(v.x() + origin.x(), v.y() + origin.y(), (v.z() + origin.z()) * float(invZ));
-                if (k < mesh.colors.size())
-                {
-                    rs += mesh.colors[k].x(); gs += mesh.colors[k].y(); bs += mesh.colors[k].z();
-                }
-            }
-            const double cn = std::max(1, int(mesh.colors.size()));
-            mo.color = QColor::fromRgbF(std::min(1.0, rs / cn), std::min(1.0, gs / cn), std::min(1.0, bs / cn));
+            // The colors of the 3D settings belong to tqt (input/t3dsettings.cpp does not read them): OSMC paints
+            // the objects itself. Only two colors ever reach the world (export/exportrun.cpp, export/voxelize.cpp):
+            // the wall concrete of buildings (and the glass/panels material tinted by it) and the white carpet of
+            // the pedestrian roads — the other kinds decide by their CODE, the object color means nothing to them.
+            mo.color = (e.kind == Kind::Road) ? QColor(QStringLiteral("#ffffff")) : QColor(QStringLiteral("#8c99a6"));
             mo.indices = mesh.indices;
             mo.closed = e.polygon && std::abs(rel) > 1e-9;
             mo.kind = e.kind;

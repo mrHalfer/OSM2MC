@@ -276,6 +276,16 @@
         <item>
          <layout class="QHBoxLayout" name="rowButtons">
           <item>
+           <widget class="QPushButton" name="rulesButton">
+            <property name="toolTip">
+             <string>Edit the reference files the exporter reads: OSM rules, OSMC rules, point models, typical heights</string>
+            </property>
+            <property name="text">
+             <string>Export rules</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <spacer name="spacerButtons">
             <property name="orientation">
              <enum>Qt::Horizontal</enum>

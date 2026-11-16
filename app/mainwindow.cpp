@@ -4,6 +4,7 @@
 #include "app/exportmeta.h"                             // the "export" section of the .tmc project file
 #include "app/landmarkdialog.h"
 #include "app/mappreview.h"
+#include "app/rulesdialog.h"
 #include "app/i18n.h"
 #include "app/osmonlinepanel.h"
 #include "app/osmtilemap.h"
@@ -137,6 +138,11 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
     connect(ui->genSeedButton, &QPushButton::clicked, this, &MainWindow::generateSeed);
     connect(ui->goButton, &QPushButton::clicked, this, &MainWindow::startExport);
     connect(ui->exportDirButton, &QPushButton::clicked, this, &MainWindow::openExportSettings);
+    connect(ui->rulesButton, &QPushButton::clicked, this, [this]
+    {
+        RulesDialog dlg(this);                                   // the reference files are re-read by the next export
+        dlg.exec();
+    });
     connect(ui->cancelButton, &QPushButton::clicked, this, &MainWindow::cancelExport);
     connect(ui->flatRadio, &QRadioButton::toggled, this, [this](bool flat)
     {

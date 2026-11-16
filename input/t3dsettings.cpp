@@ -2,7 +2,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QColor>
 
 QString t3dStripSchema(const QString& name)
 {
@@ -47,10 +46,8 @@ bool parseT3dSettings(const QByteArray& json, T3dSettings& out, QString* err)
         vs.noExtrusion = isGround;
         vs.heightField = field;
         vs.heightMultiplier = ro["multiplier"].toDouble(1.0);
-        vs.colorMode = ModelColorMode(ro["colorMode"].toInt(0));
-        vs.singleColor = QColor(ro["singleColor"].toString(QStringLiteral("#cc5a4d")));
-        vs.gradientLowColor = QColor(ro["color1"].toString(QStringLiteral("#469a56")));
-        vs.gradientHighColor = QColor(ro["color2"].toString(QStringLiteral("#be3c37")));
+        // colorMode/singleColor/color1/color2 are deliberately NOT read: they only decorate the model in the
+        // tqt 3D window. OSMC decides the object colors in code itself (the mo.color assignment in scene/mcscene.cpp).
         int effectValue = ro["effect"].toInt(0);
         if (legacyEffectFormat && effectValue == 3) effectValue = int(ModelEffect::RadialGlow);
         vs.effect = ModelEffects(effectValue);

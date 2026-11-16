@@ -43,6 +43,7 @@ Instead of the online map you can use a file: type the path to an OpenStreetMap 
 | **Climate** | Biomes, ground and trees according to the climate zone; *Auto* works it out from the coordinates. |
 | **Boundary, Spawn, Stronghold, Ancient City, Pale Garden** | Map tools: outline the area, place the player's spawn, mark the secret entrances. *Remove the boundary* and *Reset the marks* undo them; *Copy /tp* copies the teleport command to the marked point. |
 | **3D figures** | The 3D model list with a voxel preview (plus a button to load any STL): pick a model, click on the map and the figure stands there; a click on its mark opens the settings of this copy (material, azimuth, size). `stl/landmarks.json` is never changed; the figures live in the `.tmc` project. |
+| **Export rules** | A visual editor of the files in the "Tuning" section below - the OSM tag rules, the layer sources, the point models (with a 3D preview) and the typical heights - no text editor needed; the next export reads the saved files right away. |
 | **Open project… / Save project…** | Save and restore your work (the map view, the boundary, the marks, the options) in a `.tmc` file. |
 | **Language** | English, Russian or Chinese, switches at once; by default the system language is used. |
 
@@ -84,7 +85,7 @@ A `.tmc` project file passed as the argument opens in the window.
 
 ## Tuning (for true gurus)
 
-These files lie next to `osmc.exe` and can be edited with any text editor:
+These files lie next to `osmc.exe` and can be edited with any text editor - or visually, in the **Export rules** dialog of the main window (the first four of them):
 
 - **`osm_rules.json`** - which OpenStreetMap tags make which kind of object; the format is described inside the file (the `_help` section).
 - **`default.t3d`** - the 3D settings: materials, heights, the look of object types.
