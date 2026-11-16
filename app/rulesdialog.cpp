@@ -101,6 +101,18 @@ static void swapJson(QJsonArray& a, int i, int j)
     a[j] = t;
 }
 
+// The layer fields the exporter reads (scene/mcscene.cpp, input/tmcproject.cpp). Both JSON tabs offer them in
+// their combos: the "Fields of the layer" table of the rules tab, the model/material columns of the t3d tab.
+static QStringList knownLayerFields()
+{
+    return { QStringLiteral("CODE"), QStringLiteral("REL"), QStringLiteral("MAT"), QStringLiteral("PART"),
+             QStringLiteral("PH"), QStringLiteral("MINH"), QStringLiteral("MINL"), QStringLiteral("ROOF"),
+             QStringLiteral("ROOFH"), QStringLiteral("ROOFD"), QStringLiteral("ROOFC"), QStringLiteral("ROOFM"),
+             QStringLiteral("LIFT"), QStringLiteral("BRG"), QStringLiteral("TUN"), QStringLiteral("LVL"),
+             QStringLiteral("LYR"), QStringLiteral("ELEC"), QStringLiteral("STREET"), QStringLiteral("TYSTR"),
+             QStringLiteral("NUMBR"), QStringLiteral("ADDNUM") };
+}
+
 // ---------------------------------------------------------------- tab base
 
 class RulesTabBase : public QWidget
@@ -323,16 +335,6 @@ public:
 private:
     QJsonObject ruleAt(int i) const { return mRules.at(i).toObject(); }
 
-    static QStringList knownFields()
-    {   // the layer fields the exporter reads (scene/mcscene.cpp, input/tmcproject.cpp)
-        return { QStringLiteral("CODE"), QStringLiteral("REL"), QStringLiteral("MAT"), QStringLiteral("PART"),
-                 QStringLiteral("PH"), QStringLiteral("MINH"), QStringLiteral("MINL"), QStringLiteral("ROOF"),
-                 QStringLiteral("ROOFH"), QStringLiteral("ROOFD"), QStringLiteral("ROOFC"), QStringLiteral("ROOFM"),
-                 QStringLiteral("LIFT"), QStringLiteral("BRG"), QStringLiteral("TUN"), QStringLiteral("LVL"),
-                 QStringLiteral("LYR"), QStringLiteral("ELEC"), QStringLiteral("STREET"), QStringLiteral("TYSTR"),
-                 QStringLiteral("NUMBR"), QStringLiteral("ADDNUM") };
-    }
-
     static QString fieldPurpose(const QString& name)
     {
         if (name == QLatin1String("CODE")) return QCoreApplication::translate("RulesDialog", "the classifier code: what the object is (drives blocks, roads, vegetation)");
@@ -488,7 +490,7 @@ private:
     {
         QComboBox* cb = new NoWheelComboBox;
         cb->setEditable(true);
-        cb->addItems(knownFields());
+        cb->addItems(knownLayerFields());
         connect(cb, &QComboBox::currentTextChanged, this,
                 [this](const QString&) { fieldEdited(qobject_cast<QComboBox*>(sender())); });
         return cb;
@@ -670,8 +672,8 @@ private:
 
 // A brand-new source gets a full set of the tqt keys with harmless random values: tqt must still open the file the
 // same way, while OSMC only ever reads layer/effect/modelField/absorptionColumn (the colors decorate the tqt 3D
-// window for it too). The swamp bit (128) is never rolled at random - it is the one effect value that changes the
-// exported world.
+// window for it too). The effect stays 0 ("Not game"): only the swamp bit would change the exported world, and the
+// user picks it consciously.
 static QJsonObject randomT3dSource()
 {
     QRandomGenerator* rg = QRandomGenerator::global();
@@ -685,7 +687,7 @@ static QJsonObject randomT3dSource()
     o[QStringLiteral("color1")] = hex();
     o[QStringLiteral("color2")] = hex();
     o[QStringLiteral("colorMode")] = rg->bounded(2);             // tqt's own decoration, never the classifier
-    o[QStringLiteral("effect")] = rg->bounded(128);
+    o[QStringLiteral("effect")] = 0;                                 // "Not game (0)": a new source never touches the world by itself
     o[QStringLiteral("extraExtrusion")] = 0;
     o[QStringLiteral("field")] = QString();
     o[QStringLiteral("isGround")] = true;
@@ -711,18 +713,15 @@ public:
         // the radio absorption...) stays in the file untouched for tqt to open the same default.t3d back.
         QVBoxLayout* lay = new QVBoxLayout(this);
         lay->setContentsMargins(6, 6, 6, 6);
-        lay->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "The layer sources (the order matters)")));
-        mSources = makeTable({ QCoreApplication::translate("RulesDialog", "Layer"), QCoreApplication::translate("RulesDialog", "Effect"),
-                               QCoreApplication::translate("RulesDialog", "Model field"), QCoreApplication::translate("RulesDialog", "Material column") });
-        mSources->setColumnWidth(0, 120);                        // the headers must not clip ("Колонка моделей" is wide)
-        mSources->setColumnWidth(1, 90);
-        mSources->setColumnWidth(2, 170);
+        lay->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "The layer sources")));
+        mSources = makeTable({ QCoreApplication::translate("RulesDialog", "Layer"), QCoreApplication::translate("RulesDialog", "Model field"),
+                               QCoreApplication::translate("RulesDialog", "Material column"), QCoreApplication::translate("RulesDialog", "Effect") });
+        // every column at least as wide as its header (fixed pixel widths clipped on a scaled display); the effect combo takes the rest
+        mSources->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
         if (mSources->horizontalHeaderItem(1))
-            mSources->horizontalHeaderItem(1)->setToolTip(QCoreApplication::translate("RulesDialog", "a bit mask, see the decode below the table"));
+            mSources->horizontalHeaderItem(1)->setToolTip(QCoreApplication::translate("RulesDialog", "the column with the object codes looked up in point_models.csv (a source of point structures); empty - no models"));
         if (mSources->horizontalHeaderItem(2))
-            mSources->horizontalHeaderItem(2)->setToolTip(QCoreApplication::translate("RulesDialog", "the column with the object codes looked up in point_models.csv (a source of point structures); empty - no models"));
-        if (mSources->horizontalHeaderItem(3))
-            mSources->horizontalHeaderItem(3)->setToolTip(QCoreApplication::translate("RulesDialog", "buildings take their material from this column instead of MAT; empty - MAT"));
+            mSources->horizontalHeaderItem(2)->setToolTip(QCoreApplication::translate("RulesDialog", "buildings take their material from this column instead of MAT; empty - MAT"));
         lay->addWidget(mSources, 1);
         mAdd = new QPushButton(QCoreApplication::translate("RulesDialog", "Add"));
         mDup = new QPushButton(QCoreApplication::translate("RulesDialog", "Duplicate"));
@@ -730,13 +729,9 @@ public:
         mUp = new QPushButton(QCoreApplication::translate("RulesDialog", "Up"));
         mDown = new QPushButton(QCoreApplication::translate("RulesDialog", "Down"));
         lay->addLayout(toolRow({ mAdd, mDup, mDel, mUp, mDown }));
-        mEffectHelp = new QPlainTextEdit;                       // what the Effect number actually means
-        mEffectHelp->setReadOnly(true);
-        mEffectHelp->setFixedHeight(84);
-        lay->addWidget(mEffectHelp);
 
         connect(mSources, &QTableWidget::currentCellChanged, this,
-                [this](int row, int, int, int) { selectSource(row); });
+                [this](int row, int, int, int) { mCur = row; });
         connect(mSources, &QTableWidget::cellChanged, this, [this](int row, int col) { commitCell(row, col); });
         connect(mAdd, &QPushButton::clicked, this, [this] { addSource(false); });
         connect(mDup, &QPushButton::clicked, this, [this] { addSource(true); });
@@ -772,15 +767,31 @@ public:
     }
 
 private:
-    enum { kColLayer = 0, kColEffect, kColModel, kColMaterial };
+    enum { kColLayer = 0, kColModel, kColMaterial, kColEffect };
 
     QJsonArray sources() const { return mRoot.value(QStringLiteral("vectorSources")).toArray(); }
     QJsonObject sourceAt(int i) const { return sources().at(i).toObject(); }
+
+    void writeSource(int row, const QJsonObject& o)
+    {
+        QJsonArray arr = sources();
+        arr[row] = o;
+        mRoot[QStringLiteral("vectorSources")] = arr;
+        markDirty();
+    }
 
     void rebuildSources(int selectIdx)
     {
         const QJsonArray arr = sources();
         mSources->blockSignals(true);
+        // the cell combos die with the rows, and ~QLineEdit emits editingFinished on deletion — unhook them first
+        for (int r = 0; r < mSources->rowCount(); ++r)
+            for (int c : { kColModel, kColMaterial, kColEffect })
+                if (QComboBox* old = qobject_cast<QComboBox*>(mSources->cellWidget(r, c)))
+                {
+                    if (old->lineEdit()) disconnect(old->lineEdit(), nullptr, nullptr, nullptr);
+                    disconnect(old, nullptr, nullptr, nullptr);
+                }
         mSources->setRowCount(0);
         for (int i = 0; i < arr.size(); ++i)
         {
@@ -788,75 +799,98 @@ private:
             const int r = mSources->rowCount();
             mSources->insertRow(r);
             mSources->setItem(r, kColLayer, new QTableWidgetItem(o.value(QStringLiteral("layer")).toString()));
-            const int eff = o.value(QStringLiteral("effect")).toInt(0);
-            QTableWidgetItem* ef = new QTableWidgetItem(QString::number(eff));
-            ef->setToolTip(effectDecode(eff));
-            mSources->setItem(r, kColEffect, ef);
-            mSources->setItem(r, kColModel, new QTableWidgetItem(o.value(QStringLiteral("modelField")).toString()));
-            mSources->setItem(r, kColMaterial, new QTableWidgetItem(o.value(QStringLiteral("absorptionColumn")).toString()));
+            mSources->setCellWidget(r, kColModel, makeColumnCombo(o.value(QStringLiteral("modelField")).toString()));
+            mSources->setCellWidget(r, kColMaterial, makeColumnCombo(o.value(QStringLiteral("absorptionColumn")).toString()));
+            mSources->setCellWidget(r, kColEffect, makeEffectCombo(o.value(QStringLiteral("effect")).toInt(0)));
         }
         mSources->blockSignals(false);
         if (selectIdx >= arr.size()) selectIdx = arr.size() - 1;
         if (selectIdx >= 0) mSources->selectRow(selectIdx);
-        else selectSource(-1);
+        else mCur = -1;
     }
 
-    static QString effectNames(int v)                    //!< "101 -> shadow + lamps + ..." for the decode pane
+    // An editable column picker: the exporter's fields plus any custom name (the combos of the rules tab work the
+    // same way, and MapLayer::fieldIndex matches names case-insensitively). The empty entry = "no column".
+    QComboBox* makeColumnCombo(const QString& value)
     {
-        const QPair<int, QString> kBits[] = {
-            { 1, QCoreApplication::translate("RulesDialog", "shadow") },
-            { 2, QCoreApplication::translate("RulesDialog", "glow") },
-            { 4, QCoreApplication::translate("RulesDialog", "lamps") },
-            { 8, QCoreApplication::translate("RulesDialog", "rounded edges") },
-            { 16, QCoreApplication::translate("RulesDialog", "light outline") },
-            { 32, QCoreApplication::translate("RulesDialog", "dark outline") },
-            { 64, QCoreApplication::translate("RulesDialog", "supports") },
-            { 128, QCoreApplication::translate("RulesDialog", "swamp biome") },
-        };
-        QStringList on;
-        for (const auto& b : kBits)
-            if (v & b.first) on << QStringLiteral("%1 (%2)").arg(b.first).arg(b.second);
-        return on.isEmpty() ? QCoreApplication::translate("RulesDialog", "no bits set") : on.join(QStringLiteral(" + "));
+        QComboBox* cb = new NoWheelComboBox;
+        cb->setEditable(true);
+        cb->addItem(QString());
+        cb->addItems(knownLayerFields());
+        cb->setCurrentText(value);
+        connect(cb, QOverload<int>::of(&QComboBox::activated), this, [this, cb] { commitColumnCombo(cb); });
+        connect(cb->lineEdit(), &QLineEdit::editingFinished, this, [this, cb] { commitColumnCombo(cb); });
+        return cb;
     }
 
-    static QString effectDecode(int v)
+    // What the effect number means in words. Only the 128 bit (swamp) ever changes the exported world; the rest
+    // are tqt decoration bits, so any other combination is one value of this file, not a choice to offer.
+    static QString effectLabel(int v)
     {
-        return QCoreApplication::translate("RulesDialog", "Effect %1 = %2").arg(v).arg(effectNames(v)) + QLatin1Char('\n')
-             + QCoreApplication::translate("RulesDialog", "Only the 128 bit (swamp biome) matters to the Minecraft export.");
+        if (v == 0) return QCoreApplication::translate("RulesDialog", "Not game (%1)").arg(0);
+        if (v == 128) return QCoreApplication::translate("RulesDialog", "Swamp");
+        return (v & 128) ? QCoreApplication::translate("RulesDialog", "Swamp, not game (%1)").arg(v & ~128)
+                         : QCoreApplication::translate("RulesDialog", "Not game (%1)").arg(v);
     }
 
-    void selectSource(int idx)
+    QComboBox* makeEffectCombo(int value)
     {
-        mCur = idx;
-        QString s;
-        if (idx >= 0)
-            s = effectDecode(sourceAt(idx).value(QStringLiteral("effect")).toInt(0)) + QLatin1Char('\n');
-        s += QCoreApplication::translate("RulesDialog",
-               "Mask bits: 1 shadow, 2 glow, 4 lamps, 8 rounded edges, 16 light outline, 32 dark outline, 64 supports - all of them only decorate the model in the tqt 3D window. 128 is the swamp biome, the only bit the Minecraft export uses: the ground inside the layer outline becomes a swamp (swamp oaks, vines, mushrooms).");
-        mEffectHelp->setPlainText(s);
+        QComboBox* cb = new NoWheelComboBox;
+        cb->addItem(effectLabel(0), 0);
+        cb->addItem(effectLabel(128), 128);
+        if (value != 0 && value != 128)
+        {   // the file carries tqt decoration bits: the value shows in words, but once replaced it is gone for good
+            cb->insertItem(0, effectLabel(value), value);
+            cb->setCurrentIndex(0);
+        }
+        else
+            cb->setCurrentIndex(value == 0 ? 0 : 1);
+        cb->setToolTip(QCoreApplication::translate("RulesDialog",
+               "Swamp (128) is the only effect the Minecraft export reads: the ground inside the layer outline becomes a swamp. The other tqt bits only decorate the model in the tqt 3D window."));
+        connect(cb, QOverload<int>::of(&QComboBox::activated), this, [this, cb] { commitEffect(cb); });
+        return cb;
+    }
+
+    void commitEffect(QComboBox* cb)
+    {
+        for (int r = 0; r < mSources->rowCount(); ++r)
+            if (mSources->cellWidget(r, kColEffect) == cb)
+            {
+                if (r >= sources().size()) return;
+                const int v = cb->currentData().toInt();
+                if (cb->count() > 2 && cb->currentIndex() != 0)      // keep the file's own value only while it is selected
+                    cb->removeItem(0);
+                QJsonObject o = sourceAt(r);
+                o[QStringLiteral("effect")] = v;
+                writeSource(r, o);
+                return;
+            }
+    }
+
+    void commitColumnCombo(QComboBox* cb)
+    {
+        for (int r = 0; r < mSources->rowCount(); ++r)
+        {
+            const bool isModel = mSources->cellWidget(r, kColModel) == cb;
+            const bool isMaterial = mSources->cellWidget(r, kColMaterial) == cb;
+            if (!isModel && !isMaterial) continue;
+            if (r >= sources().size()) return;
+            const QString text = cb->currentText().trimmed().toUpper();
+            if (text != cb->currentText()) cb->setCurrentText(text);     // the shapes keep their columns upper case
+            QJsonObject o = sourceAt(r);
+            o[isModel ? QStringLiteral("modelField") : QStringLiteral("absorptionColumn")] = text;
+            if (isMaterial) o[QStringLiteral("absorptionMode")] = text.isEmpty() ? 0 : 1;   // a column means the "material from a column" mode
+            writeSource(r, o);
+            return;
+        }
     }
 
     void commitCell(int row, int col)
-    {
-        if (row < 0 || row >= sources().size() || col < 0 || col > kColMaterial) return;
-        static const char* kKeys[] = { "layer", "effect", "modelField", "absorptionColumn" };
+    {   // only the layer name is a text cell; the other three are combo widgets committing from their own signals
+        if (row < 0 || row >= sources().size() || col != kColLayer) return;
         QJsonObject o = sourceAt(row);
-        const QString text = cellText(mSources, row, col).trimmed();
-        if (col == kColEffect)
-        {   // the effect is a number: keep the digits out of whatever else was typed
-            static const QRegularExpression re(QStringLiteral("-?\\d+"));
-            const QRegularExpressionMatch m = re.match(text);
-            o[QLatin1String(kKeys[col])] = m.hasMatch() ? QJsonValue(m.captured(0).toInt()) : QJsonValue(0);
-        }
-        else
-            o[QLatin1String(kKeys[col])] = text;
-        if (col == kColMaterial) o[QStringLiteral("absorptionMode")] = text.isEmpty() ? 0 : 1;   // a column means the "material from a column" mode
-        QJsonArray arr = sources();
-        arr[row] = o;
-        mRoot[QStringLiteral("vectorSources")] = arr;
-        markDirty();
-        if (col == kColEffect)                                   // re-show the normalized number and its decode,
-            QTimer::singleShot(0, this, [this] { rebuildSources(mCur); });   // after the cell editor has closed
+        o[QStringLiteral("layer")] = cellText(mSources, row, col).trimmed();
+        writeSource(row, o);
     }
 
     void addSource(bool duplicate)
@@ -896,7 +930,6 @@ private:
 
     QJsonObject mRoot;
     QTableWidget* mSources = nullptr;
-    QPlainTextEdit* mEffectHelp = nullptr;
     QPushButton *mAdd = nullptr, *mDup = nullptr, *mDel = nullptr, *mUp = nullptr, *mDown = nullptr;
     int mCur = -1;
 };
@@ -1444,6 +1477,7 @@ RulesDialog::RulesDialog(QWidget* parent) : QDialog(parent)
 {
     setWindowTitle(tr("Export rules"));
     setModal(true);
+    setWindowFlag(Qt::WindowMaximizeButtonHint);               // the dialog is meant to be worked in full screen too
     resize(1150, 700);
 
     QVBoxLayout* lay = new QVBoxLayout(this);
