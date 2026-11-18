@@ -153,6 +153,7 @@ struct NpcSite
     QString animal;                       // kind=5 — an animal (the entity id: minecraft:sheep, wolf, fox...)
     double yoff = 0.0;                    // an addition to y in blocks (a patient lies/stands on a bed: 0.5625)
     bool captain = false;                 // the lair standard-bearer: a pillager captain with an ominous banner on the head
+    bool cross = false;                   // a garrison piglin with a crossbow in the main hand
     QString petVariant;                   // kind=5: the cat coat (minecraft:tabby, black...) — written into the variant field
 };
 
@@ -176,11 +177,19 @@ extern const char* const kToolMatNames[5];
 extern const char* const kToolKindNames[5];
 extern const char* const kProfs[];
 extern const char* const kVTypes[];
-constexpr int kSpawnerTypesCount = 4;                 // zombie / skeleton / spider / witch (witch — only the basement nests)
+constexpr int kSpawnerTypesCount = 5;                 // zombie / skeleton / spider / witch (witch — only the basement nests) / iron golem (the "prison" refuge only)
 constexpr int kBooksCount = 8;
 constexpr int kSciBooksCount = 6;
 constexpr int kBarrelLootCount = 8;
 constexpr int kChestLootCount = 20;
+
+//! Special loot tables OUTSIDE kChestLoot (adding a line there would shift the pickChestLoot roll and all the
+//! old worlds): a negative ChestSite::tbl means these tables.
+inline const char* specialChestLoot(int tbl)
+{
+    return tbl == -1 ? "minecraft:chests/bastion_other"        // piglin loot (the military base): gold and crossbows, middling on average
+                     : "minecraft:chests/pillager_outpost";    // a reserve negative code — the bandit loot
+}
 
 int pickChestLoot(quint32 r, int pCheap, int pMid);
 bool zoneInside(const IslandSite& is, int px, int pz, int R);

@@ -206,6 +206,17 @@ private:
     QVector<int> padCode;             // the CODE of the plate object (53700000/53710000 — sports/children's: we place equipment)
     QVector<SpotSite> spots;
     QSet<ColKey> swampCols;
+    QHash<ColKey, quint8> lcapCol;                      // lcapol "grounds" overlay: 1 — bare rock (22410000), 2 — forced sand (72251100)
+    struct OverlayPoly                                  // a contour of the game-effect overlay ("prison" / "military base"), pre-scanned before voxelization
+    {
+        int cx = 0, cz = 0;                             // the contour center (the ground decoration spreads from here)
+        int nCols = 0;                                  // the number of columns (decides how much decoration)
+        QList<qint64> cols;                             // all the columns of the contour (the garrison and the spawners are scattered over them)
+        QVector<qint64> border;                         // the edge columns of the contour (the bandit flags and the military wall stand on them)
+    };
+    QSet<ColKey> prisonCols;                            // all the columns under the "prison" (pripol) contours: forced lairs there
+    QSet<ColKey> milCols;                               // ... under the "military base" (milpol) contours: piglin loot, no residents
+    QVector<OverlayPoly> prisonPolys, milPolys;
     QSet<ColKey> cemeteryCols;              // csrpol 53510000 (landuse=cemetery): dark oaks, crosses, jack o'lanterns,
     QVector<PortalForest> portalForests;
     QVector<ParkCand> parkCands;                                  // parks 71126000: candidates for floating islands
@@ -391,6 +402,9 @@ private:
     void buildStreetFurniture();
     // Villages (beginStep 10): squares with bells, address plates, signposts, basements.
     void buildVillages();
+    // The "prison" (pripol) and "military base" (milpol) grounds: after the villages, so that residents inside
+    // a military contour are removed there; laid over the ready ground (surfaceTop works since 3.5).
+    void buildOverlayGround();
 
     // 3.5 Vegetation (trees, flora, swamp/cemetery plots, islands).
     bool buildVegetation();
@@ -1793,6 +1807,27 @@ GroundChunk ExportRun::makeGround(qint64 ckKey)
                     if (h % 100u < (nearD == 1 ? 70u : 35u)) surface = g_sandId;
                 }
             }
+            if (!lcapCol.isEmpty())
+            {   // GROUNDS (lcapol): a bare rock contour turns the turf into stone mixed with terracotta (rare magma
+                // outcrops on top), a forced sand contour — into sand; the dunes ride over the relief from the empty-lands
+                // pass, the dirt sub-layer is replaced in groundBlockAt. A road cover, a water body and a quarry win.
+                const auto lit = lcapCol.constFind(ck);
+                if (lit != lcapCol.constEnd() && wit == colWool.constEnd() && witW == colWater.constEnd() &&
+                    (paleCol.isEmpty() || !paleCol.contains(ck)))
+                {
+                    if (lit.value() == 1)
+                    {
+                        quint32 h = quint32(cx) * 374761393u ^ quint32(cz) * 668265263u ^ 0x22410u;
+                        h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+                        static const quint16 qTerra = quint16(IdPaletteStart + paletteIndexOf("minecraft:terracotta"));
+                        static const quint16 qMagma = quint16(IdPaletteStart + paletteIndexOf("minecraft:magma_block"));
+                        const quint32 r = h % 100u;
+                        surface = r < 2u ? qMagma : (r < 20u ? qTerra : IdStone);
+                    }
+                    else if (g_sandId)
+                        surface = g_sandId;
+                }
+            }
             const auto bit = hasBed ? railBedCols.constFind(ck) : railBedCols.constEnd();
             if (bit != railBedCols.constEnd() && wit == colWool.constEnd() && witW == colWater.constEnd())
                 surface = bit.value();      // the track bed: the rails lie on stone/brick, not on turf
@@ -1980,33 +2015,12 @@ void ExportRun::buildStreetFurniture()
             const int gateA = findFree(int(h0 % quint32(ring.size())));
             const int gateB = findFree((gateA >= 0 ? gateA : 0) + int(ring.size()) / 2
                                        + int(h0 >> 8) % 3);
-            const bool militaryPad = (padCode.value(padIdx, 0) == 53210000);
-            const quint16 milBrick = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
-            const quint16 milMossy = quint16(IdPaletteStart + paletteIndexOf("minecraft:mossy_stone_bricks"));
             for (int ri = 0; ri < int(ring.size()); ++ri)
             {
                 if (!freeAt(ri)) continue;              // occupied (a fence of a neighboring spot/a post/a planting)
                 const qint64 ck = ring.at(ri);
                 const int x = keyFirst(ck), z = keySecond(ck);
                 const int y = surfaceTop(ck) + 1;
-                if (militaryPad)
-                {   // a military ground (landuse=military): a stone boundary wall two rows high with
-                    // brick pillars every few cells and two open gateways; guards patrol inside
-                    if (ri == gateA || ri == gateB) continue;                    // the gateway is left open
-                    const quint32 hm = colHash(ck ^ 0x4C177ull);
-                    if (hm % 5u == 0u && store.get(x, y + 1, z) == IdAir && store.get(x, y + 2, z) == IdAir)
-                    {   // a pillar: a brick column taller than the wall
-                        store.set(x, y, z, milBrick);
-                        store.set(x, y + 1, z, (hm >> 8) % 4u == 0u ? milMossy : milBrick);
-                        store.set(x, y + 2, z, milBrick);
-                    }
-                    else
-                    {
-                        store.set(x, y, z, IdStoneBrickWall);
-                        if (store.get(x, y + 1, z) == IdAir) store.set(x, y + 1, z, IdStoneBrickWall);
-                    }
-                    continue;
-                }
                 store.set(x, y, z, (ri == gateA || ri == gateB) ? gateIdFor(ck, pad) : IdFence);
             }
             // Iron golems: on a fenced site (except lakes) a 25% chance is counted TWICE (deterministically
@@ -2030,19 +2044,17 @@ void ExportRun::buildStreetFurniture()
                 const quint32 hpNow = colHash(ring.first() ^ 0x5B027ull);
                 const bool kidsPad = padCode.value(padIdx, 0) == 53710000 ||
                     (padCode.value(padIdx, 0) == 53700000 && padCols.size() < 700 && hpNow % 100u < 30u);
-                // a military ground is guarded for real: 2 golems up to 10 for a huge base, standing in a ring
-                // around the center; other sites keep the old deterministic 25% chance of 0, 1 or 2 golems;
-                // a children's playground gets a full gang of 4-6 kids instead, always (they came to play)
+                // other sites keep the old deterministic 25% chance of 0, 1 or 2 golems; a children's playground
+                // gets a full gang of 4-6 kids instead, always (they came to play)
                 const int wantKids = kidsPad ? 4 + int((hpNow >> 8) % 3u) : 0;
-                const int wantGolems = militaryPad ? std::min(10, 2 + int(padCols.size()) / 100000)
-                                                   : (kidsPad ? wantKids : 2);
+                const int wantGolems = kidsPad ? wantKids : 2;
                 for (int roll = 0; roll < wantGolems; ++roll)
                 {
-                    if (!militaryPad && !kidsPad &&
+                    if (!kidsPad &&
                         colHash(ring.first() ^ (0x601E3ull + quint64(roll) * 0x9E37ull)) % 100u >= 25u)
                         continue;
                     const double fa = 6.283185307179586 * roll / std::max(1, wantGolems);
-                    const bool spread = militaryPad || kidsPad;           // kids roam the whole plot too
+                    const bool spread = kidsPad;                      // kids roam the whole plot
                     const double fx = spread ? mx + 0.3 * (gx1 - gx0) * std::cos(fa) : mx;
                     const double fz = spread ? mz + 0.3 * (gz1 - gz0) * std::sin(fa) : mz;
                     qint64 best = 0; double bestD = 1e18; bool have = false;
@@ -2072,7 +2084,6 @@ void ExportRun::buildStreetFurniture()
                     golemAt.append(QPoint(g.x, g.z));
                 }
             }
-            if (militaryPad) continue;      // the wall and the guards are enough; no courts, lawns or benches
             // SPORTS EQUIPMENT on sites (CODE 53700000 — sports, 53710000 — children's): by the size and shape of the site — a football pitch (goals, the center
             // line and circle in white wool), volleyball/tennis (a net on posts), basketball (two backboards with cauldron hoops), workout (pull-up bars, parallel bars, benches) or a children's
             // playground (swings, a sandbox, a carousel, benches). We place only on free columns inside the spot not closer than 1 block to the fence and with air above them.
@@ -3054,6 +3065,7 @@ void ExportRun::buildStreetFurniture()
                 {
                     const int bx = keyFirst(ck), bz = keySecond(ck);
                     if (!spansContain(parkSpansAll, bx, bz)) continue;
+                    if (milCols.contains(ck)) continue;             // a park lamp post does not light a road inside the guarded base
                     if (colHash(ck ^ 0x9A8Cull) % 3u != 0u) continue;
                     for (int d = 0; d < 4; ++d)
                     {
@@ -3725,7 +3737,8 @@ void ExportRun::buildVillages()
                     const int x = cx + dx, z = cz + dz;
                     const qint64 ck = pairKey(x, z);
                     if (colMin.contains(ck) || colWater.contains(ck) || colWool.contains(ck)
-                        || roadCols.contains(ck) || railColsAll.contains(ck)) return false;
+                        || roadCols.contains(ck) || railColsAll.contains(ck) || milCols.contains(ck))
+                        return false;                               // the guarded military territory is not a free spot for a village square (a request)
                     if (!ground.contains(pairKey(x >> 4, z >> 4))) return false;
                     const int t = surfaceTop(ck);
                     if (t > 235) return false;
@@ -5290,7 +5303,8 @@ bool ExportRun::buildVegetation()
                 if (pcit != paleCol.constEnd() && pcit->pid < 0 && pcit->w >= 235 && pcit->surf != 0) continue;
             }
             if (paleDonorUsed && !pale && spansContain(forests[paleIdx].spans, tx, tz)) continue;
-            if (!patchCols.isEmpty() && patchCols.contains(pairKey(tx, tz))) continue;      // outposts/camps: trees do not climb into the structures   // other (overlapping) forests do not plant extra trees into the Pale Garden
+            if (!patchCols.isEmpty() && patchCols.contains(pairKey(tx, tz))) continue;
+            if (!lcapCol.isEmpty() && lcapCol.contains(ck)) continue;             // the grounds (lcapol): bare rock and forced sand grow no trees      // outposts/camps: trees do not climb into the structures   // other (overlapping) forests do not plant extra trees into the Pale Garden
             if (pale)
             {   // pale oak: taller than usual (6..9), 2×2 — free neighboring columns are needed
                 const quint32 hp = colHash(ck ^ 0x9A1Eull);
@@ -5748,6 +5762,42 @@ bool ExportRun::buildVegetation()
         }
         tmcStepLog(QString("3.5 swamp biome: %1 columns, %2 open-ground oaks").arg(swampCols.size()).arg(nSwampTrees).toUtf8().constData());
     }
+    // Grounds (lcapol 72251100, forced sand): what the sand contour does BY ITSELF. Forests skip these columns and 3.51
+    // does not plant single trees there; the open sand ground gets a rare desert flora — stacked cacti (1..3 blocks) and
+    // dead bushes. Water, roads and built-up columns under the contour are left alone — the overlay is not an owner of the land.
+    if (!lcapCol.isEmpty())
+    {
+        const quint16 qCact = quint16(IdPaletteStart + paletteIndexOf("minecraft:cactus")),
+                    qDb = quint16(IdPaletteStart + paletteIndexOf("minecraft:dead_bush"));
+        int nCacti = 0, nBush = 0;
+        for (auto it = lcapCol.constBegin(); it != lcapCol.constEnd(); ++it)
+        {
+            if (it.value() != 2) continue;                                     // bare rock grows nothing (its touch is the magma outcrops on the surface)
+            const ColKey ck = it.key();
+            const quint32 hd = colHash(ck ^ 0x501CDull);
+            const quint32 r = hd % 100u;
+            if (r >= 5u) continue;                                             // flora on ~5% of the columns: 2% cacti, 3% dead bushes
+            if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck)) continue;
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            const int y0 = surfaceTop(ck) + 1;
+            if (store.get(bx, y0, bz) != IdAir) continue;                      // not on an object or on somebody's cactus
+            if (r < 2u)
+            {   // a cactus: 1..3 blocks tall (as in the game, like the desert flora of 3.51)
+                const int hc = 1 + int((hd >> 8) % 3u);
+                if (y0 + hc > 254) continue;
+                for (int dy = 0; dy < hc; ++dy)
+                    store.set(bx, y0 + dy, bz, qCact);
+                ++nCacti;
+            }
+            else
+            {
+                store.set(bx, y0, bz, qDb);
+                ++nBush;
+            }
+        }
+        if (nCacti || nBush)
+            tmcStepLog(QString("3.5 forced sand: %1 cacti, %2 dead bushes").arg(nCacti).arg(nBush).toUtf8().constData());
+    }
     // Cemeteries (csrpol 53510000, a user request): the dark-forest plot of the dead. Forests under the contour
     // already became dark-oak groves in the forest loop; the OPEN cemetery ground gets dense dark oaks (a 5x5 grid),
     // stone crosses between them (a 3x3 grid), a lit jack o'lantern on a fence post by some crosses, rare carved
@@ -5932,6 +5982,7 @@ void ExportRun::buildUserTrees()
         const quint16 birchLogS = quint16(IdPaletteStart + paletteIndexOf("minecraft:birch_log"));
         auto plantTree = [&](qint64 ck, int h, bool birch = false) -> bool
         {
+            if (!lcapCol.isEmpty() && lcapCol.contains(ck)) return false;         // the grounds (lcapol): no trees on rock and sand (the sand gets its own rare flora in 3.5)
             const int bx = keyFirst(ck), bz = keySecond(ck);
             // The crown (±2) must not stick out of the fill: otherwise the chunk will be written without ground
             // ("GROUND FAIL" in verify, holes along the chunk grid in the game).
@@ -7027,6 +7078,13 @@ bool ExportRun::buildGround()
     // (it also goes to the generator so that neighboring chunks join without steps); the terrain above the
     // level is kept as a hill, below it is filled up to the level (no pits remain).
     hasTerrain = bool(heightAt);
+    // A MILITARY CONTOUR IS NEVER A PARK (a request): the kindergarten/school floating islands (and the trees
+    // and the biome zone that grow out of them) do not stand on a military base - the sites inside
+    // milCols are dropped BEFORE anything consumes the list (ground apron, biomes, builders).
+    if (!milCols.isEmpty())
+        for (int i = islandSites.size() - 1; i >= 0; --i)
+            if (milCols.contains(pairKey(islandSites[i].cx, islandSites[i].cz)))
+                islandSites.removeAt(i);
     // FALLBACK PALE GARDEN (data without big forests and meadows, e.g. an OSM extract): if there is neither a forest nor a meadow with an allowed code
     // with an area of 2000 columns or more, we allocate an empty 15×15 chunk site nearest to the data (on the export border or in a big void
     // inside it) and declare it a forest with an allowed code — then it is processed as an ordinary Pale Garden (biome, donor, mansion).
@@ -7581,7 +7639,10 @@ bool ExportRun::buildGround()
         if (fi != paleIdx && !forests[fi].spruce)
             for (const ColSpan& c : forests[fi].spans)
                 for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
+                {
+                    if (forests[fi].park && !milCols.isEmpty() && milCols.contains(pairKey(c.x, z4 * 4 + 2))) continue;   // a military contour is never a park - no flower_forest over the base by definition (a request)
                     biomeCells.insert(pairKey(c.x >> 2, z4), quint8(forests[fi].park ? 6 : 3));   // a park — flower_forest (a flowery forest), other forests — forest
+                }
     for (const IslandSite& is : islandSites)
         if (is.kind != 2)
         for (int z4 = (is.cz - is.rz - kZoneMax) >> 2; z4 <= ((is.cz + is.rz + kZoneMax) >> 2); ++z4)
@@ -7614,6 +7675,7 @@ bool ExportRun::buildGround()
         for (int i : ord)
         {
             const ParkCand& pc = parkCands[i];
+            if (!milCols.isEmpty() && milCols.contains(pairKey(pc.cx, pc.cz))) continue;         // no park island floats over the guarded base (a request)
             if (pc.areaM2 < 40000 && pc.h % 100u >= 70u) continue;                 // 70% of the suitable parks, big ones (>= 4 ha) always: the biggest park massifs were skipped whole
             bool far = true;
             for (const QPoint& q : chosen) if (std::hypot(double(q.x() - pc.cx), double(q.y() - pc.cz)) < 250.0) { far = false; break; }
@@ -8218,11 +8280,65 @@ bool ExportRun::buildGround()
             for (qsizetype i = 0; i < delta.size(); ++i) if (delta[i]) ++nEmpty;
             erX0 = ex0; erZ0 = ez0; erW = W3; erH = H3;
             emptyDelta = std::move(delta);
+            // DUNES OF THE FORCED SAND (lcapol 72251100): the sand contour gets its own relief — soft dune hummocks
+            // (0..6 blocks) over the ready terrain. The dune replaces the empty-lands noise INSIDE the contour and yields
+            // to it smoothly at the contour edge and near the occupied columns (roads, buildings).
+            qint64 nDune = 0;
+            if (!lcapCol.isEmpty())
+            {
+                QVector<quint8> sd(qsizetype(W3) * H3, 0);                      // 0 — not sand, otherwise the distance (in cells) to the contour edge (255 before the passes)
+                for (auto it = lcapCol.constBegin(); it != lcapCol.constEnd(); ++it)
+                    if (it.value() == 2)
+                    {
+                        const int gx = (keyFirst(it.key()) - ex0) / kEGrid, gz = (keySecond(it.key()) - ez0) / kEGrid;
+                        if (gx >= 0 && gx < W3 && gz >= 0 && gz < H3) sd[qsizetype(gz) * W3 + gx] = 255;
+                    }
+                bool anySand = false;
+                for (qsizetype i = 0; i < sd.size(); ++i) if (sd[i]) { anySand = true; break; }
+                if (anySand)
+                {
+                    for (int x = 0; x < W3; ++x) { sd[x] = 0; sd[qsizetype(H3 - 1) * W3 + x] = 0; }
+                    for (int z = 0; z < H3; ++z) { sd[qsizetype(z) * W3] = 0; sd[qsizetype(z) * W3 + W3 - 1] = 0; }
+                    for (int z = 1; z < H3; ++z)                                // forward pass (Manhattan, like the empty-lands distance above)
+                        for (int x = 1; x < W3; ++x)
+                        {
+                            quint8& dv = sd[qsizetype(z) * W3 + x];
+                            if (!dv) continue;
+                            dv = quint8(std::min<int>(dv, std::min(sd[qsizetype(z) * W3 + x - 1], sd[qsizetype(z - 1) * W3 + x]) + 1));
+                        }
+                    for (int z = H3 - 2; z >= 0; --z)                            // backward
+                        for (int x = W3 - 2; x >= 0; --x)
+                        {
+                            quint8& dv = sd[qsizetype(z) * W3 + x];
+                            if (!dv) continue;
+                            dv = quint8(std::min<int>(dv, std::min(sd[qsizetype(z) * W3 + x + 1], sd[qsizetype(z + 1) * W3 + x]) + 1));
+                        }
+                    for (int gz = 0; gz < H3; ++gz)
+                        for (int gx = 0; gx < W3; ++gx)
+                        {
+                            const qsizetype i = qsizetype(gz) * W3 + gx;
+                            const quint8 dv = sd[i];
+                            if (!dv) continue;                                  // not a sand cell
+                            if (ed[i] < 3) continue;                            // the dune does not climb onto roads and buildings
+                            double wv = std::min(1.0, double(dv) / 3.0);        // fade out over 12 blocks at the contour edge
+                            wv = wv * wv * (3.0 - 2.0 * wv);
+                            const double x = gx * kEGrid + ex0 + 2.0, z = gz * kEGrid + ez0 + 2.0;
+                            double v = 2.4 + 1.9 * std::sin(x / 21.0 + 1.1) * std::cos(z / 16.0 + 2.3)
+                                     + 1.3 * std::sin((x + z * 0.7) / 11.0 + 0.4)
+                                     + 0.6 * std::sin(x / 6.3 + 5.0) * std::sin(z / 7.1 + 1.7);
+                            v = std::max(0.0, v);
+                            emptyDelta[i] = qint8(std::lround(double(emptyDelta[i]) * (1.0 - wv) + v * wv));
+                            ++nDune;
+                        }
+                }
+            }
             if (nEmpty > 0) res.lairInfo += QObject::tr("; terrain of the empty lands: %1 cells").arg(nEmpty);
+            if (nDune > 0) res.lairInfo += QObject::tr("; dunes of the forced sand: %1 cells").arg(nDune);
         }
     }
     g_sandId = quint16(IdPaletteStart + paletteIndexOf("minecraft:sand"));
     g_clayId = quint16(IdPaletteStart + paletteIndexOf("minecraft:clay"));
+    g_lcapCols = lcapCol.isEmpty() ? nullptr : &lcapCol;        // the grounds overlay for groundBlockAt (the dirt sub-layer under rock/sand)
     // CLIMATE ZONE (export/climate.h): the chunk biomes, the surface and the tree species of the export area (the world around — as before)
     g_zone = std::max(0, std::min(int(Climate::Count) - 1, world.climateZone));
     {
@@ -11421,6 +11537,8 @@ bool ExportRun::buildObjects()
                 vo.npcs = &j->npcs; vo.frames = &j->frames; vo.basements = &j->basements;
                 vo.signs = &j->signs; vo.banners = &j->banners; vo.zones = &j->zones; vo.islands = &j->islands;
                 vo.privMats = j->privMats;
+                vo.prison = &prisonCols;                                  // the overlay contours: the voxelizer decides the forced lair and the special loot there
+                vo.military = &milCols;
                 j->added = voxelizeObject(*j->o, tf, j->id, j->store, vo, cancel, j->sink,
                                           j->extraBlocks, j->building,
                                           j->structId, j->woodSingle, j->privMode, j->deepRole, j->roofId, j->trimId);
@@ -11592,7 +11710,8 @@ bool ExportRun::buildObjects()
             const McObject& q = objects[i];
             if (q.kind == McObject::Vegetation || q.kind == McObject::Water
                 || (q.kind == McObject::Plate && (q.extrudeH < 1.0 || q.code == 71323000)) || q.kind == McObject::ParkingLot || q.kind == McObject::BlockCover
-                || q.kind == McObject::Spot || q.kind == McObject::Biome)
+                || q.kind == McObject::Spot || q.kind == McObject::Biome || q.kind == McObject::Surface
+                || q.kind == McObject::Prison || q.kind == McObject::Military)
                 todo.append(i);
         }
         std::atomic<int> next { 0 };
@@ -11614,6 +11733,38 @@ bool ExportRun::buildObjects()
             });
         for (QFuture<void>& f : fs) f.waitForFinished();
         if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return false; }
+    }
+    // The game-effect overlays ("prison" pripol and "military base" milpol) are collected BEFORE the main loop:
+    // buildings are voxelized in parallel batches, and by that moment the contours must already be known (a forced
+    // lair on a bandit refuge, piglin loot in a guarded territory) — the order of objects in the loop does not help here.
+    prisonCols.clear(); milCols.clear(); prisonPolys.clear(); milPolys.clear();
+    for (int oi = 0; oi < objects.size(); ++oi)
+    {
+        const McObject& q = objects[oi];
+        if (q.kind != McObject::Prison && q.kind != McObject::Military) continue;
+        const QList<qint64>& cols = pre[oi];
+        if (cols.isEmpty()) continue;
+        QSet<ColKey> set;
+        int x0 = std::numeric_limits<int>::max(), x1 = std::numeric_limits<int>::min();
+        int z0 = x0, z1 = x1;
+        for (qint64 ck : cols)
+        {
+            set.insert(ck);
+            x0 = std::min(x0, keyFirst(ck)); x1 = std::max(x1, keyFirst(ck));
+            z0 = std::min(z0, keySecond(ck)); z1 = std::max(z1, keySecond(ck));
+        }
+        OverlayPoly pp;
+        pp.cx = int((x0 + x1) / 2); pp.cz = int((z0 + z1) / 2); pp.nCols = int(cols.size());
+        pp.cols = cols;                                                 // the garrison walks the contour columns, the spiral from the center is too sparse
+        static const int nbx[4] = { 1, -1, 0, 0 }, nbz[4] = { 0, 0, 1, -1 };
+        for (qint64 ck : cols)                                       // an edge column — one with a neighbor outside the contour
+        {
+            const int x = keyFirst(ck), z = keySecond(ck);
+            for (int d = 0; d < 4; ++d)
+                if (!set.contains(pairKey(x + nbx[d], z + nbz[d]))) { pp.border.append(ck); break; }
+        }
+        if (q.kind == McObject::Prison) { prisonCols.unite(set); prisonPolys.append(std::move(pp)); }
+        else { milCols.unite(set); milPolys.append(std::move(pp)); }
     }
     objDone = 0;
     objTotal = objects.size();
@@ -11887,6 +12038,34 @@ bool ExportRun::buildObjects()
             ++res.objectCount;
             continue;
         }
+        if (o.kind == McObject::Surface)
+        {   // grounds (lcapol): a contour of bare rock or forced sand lying over the terrain. Like the swamp biome it is
+            // an overlay that builds nothing itself: the columns are only marked here — the ground pass turns the turf into
+            // stone mixed with terracotta (rare magma outcrops) or into sand with dunes, the vegetation step skips the trees
+            // on them (only rare cacti and dead bushes grow on the sand).
+            QList<qint64> cols = std::move(pre[objDone - 1]);
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            const quint8 t = (o.code == 22410000) ? quint8(1) : quint8(2);       // 1 — bare rock, 2 — forced sand
+            for (qint64 ck : cols) lcapCol.insert(ck, t);
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::Prison)
+        {   // the "prison" contour (pripol): the columns were collected in the pre-scan before the loop (the building
+            // voxelization needs them); the branch only keeps the polygon out of the ordinary path.
+            QList<qint64> cols = std::move(pre[objDone - 1]);
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            ++res.objectCount;
+            continue;
+        }
+        if (o.kind == McObject::Military)
+        {   // the "military base" contour (milpol): likewise — the columns are in the pre-scan, the wall and the
+            // piglin garrison are laid by buildOverlayGround() over the ready ground.
+            QList<qint64> cols = std::move(pre[objDone - 1]);
+            if (cols.isEmpty()) { ++res.skippedCount; continue; }
+            ++res.objectCount;
+            continue;
+        }
         if (o.kind == McObject::Spot)
         {   // a point object (a source with a modelField): the rasterized square of the point gives the ANCHOR only
             // (the rule's "as: square:N" centers it on the point). The model was resolved in mcscene by the code
@@ -11953,8 +12132,7 @@ bool ExportRun::buildObjects()
             // The coverage by csrpol code: grass stays (a cemetery, the territories of social and religious facilities, an apiary, a farm), stone (a memorial), dark concrete (a gas station, an airport,
             // an industrial enterprise, a substation); the rest (sports, etc.) — calm gray wool
             const bool grassPad = (o.code == 53510000 || o.code == 53600000 || o.code == 53400000 || o.code == 52400000 || o.code == 52100000
-                                   || o.code == 51111000 || o.code == 51123000 || o.code == 71323000
-                                   || o.code == 53210000);   // a quarry/a spoil heap/a greenhouse/a military ground: the surface is set by their own logic
+                                   || o.code == 51111000 || o.code == 51123000 || o.code == 71323000);   // a quarry/a spoil heap/a greenhouse: the surface is set by their own logic
             if (o.code == 53530000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:stone_bricks"));
             else if (o.code == 51220000 || o.code == 53110000 || o.code == 51130000 || o.code == 51460000) wid = quint16(IdPaletteStart + paletteIndexOf("minecraft:gray_concrete"));
             const bool lake = (o.code == 51480000);                  // a lake: water instead of wool, the fence — as for plates
@@ -11971,8 +12149,7 @@ bool ExportRun::buildObjects()
             else if (!grassPad)
                 for (qint64 ck : cols)
                     colWool.insert(ck, wid);
-            if (o.code == 52400000 || o.code == 52100000 || o.code == 51111000 || o.code == 51123000 || o.code == 71323000
-                || o.code == 53210000)   // a military ground: the grass stays, but a base is not a forest
+            if (o.code == 52400000 || o.code == 52100000 || o.code == 51111000 || o.code == 51123000 || o.code == 71323000)
                 for (qint64 ck : cols) noTreePadCols.insert(ck);
             if (o.code == 53510000)      // a cemetery: the biome, groves, crosses and monsters are built in 3.5
                 for (qint64 ck : cols) cemeteryCols.insert(ck);
@@ -13476,6 +13653,239 @@ bool ExportRun::buildObjects()
     return true;
 }
 
+// THE "PRISON" AND "MILITARY BASE" GROUNDS (pripol/milpol overlays). Runs AFTER the villages: the ground and its
+// heights are ready by then (surfaceTop), the residents are already settled - and those who got inside a guarded
+// territory are removed there. The bandit refuge gets iron golem spawners (the golems and the raiders keep fighting
+// forever) and bandit banners on the border; the military base gets a four-block stone wall along the contour (a
+// road through it stays a gate), a piglin garrison inside (seven in ten sun-protected, three in ten armed with
+// crossbows) and nobody living there.
+void ExportRun::buildOverlayGround()
+{
+    if (prisonPolys.isEmpty() && milPolys.isEmpty()) return;
+    static const int sdx[4] = { 0, 1, 0, -1 }, sdz[4] = { -1, 0, 1, 0 };   // the banner "facing" numbering, as in voxelize
+    int nGolem = 0, nFlag = 0, nBandit = 0, nWall = 0, nPig = 0, nErase = 0;
+
+    // Plants are cut down above the ground in the column: a spawner must not stand inside a bush, a wall must not
+    // fall apart because of a forest along the perimeter, a patrol must not get stuck in a trunk. Only vegetation
+    // is erased (isVegBlockId) - solid blocks stay.
+    auto clearVeg = [&](int x, int z, int y0, int h)
+    {
+        for (int y = y0; y <= y0 + h; ++y)
+            if (isVegBlockId(store.get(x, y, z)))
+                store.erase(x, y, z);
+    };
+    // Scattering over the contour columns (deterministic: their order + the column hash, the spiral from the center
+    // sampled too sparse and the objects clustered). First every 8th column by the hash, then the step loosens to
+    // the full pass - so the decoration spreads over the WHOLE contour; "placed" decides the column (false - it
+    // did not fit it, e.g. no headroom).
+    auto scatter = [&](const OverlayPoly &p, int want, int spacing, quint64 salt,
+                       const QSet<ColKey> &inner, QVector<QPoint> &placedPts, auto &&placed)
+    {
+        // "want" is set ABOVE what the "spacing" can fit (a density formula): then the ceiling never cuts the
+        // raster halfway and the greedy walk fills the contour evenly - "want" only guards small contours from
+        // absurd numbers. The free-distance check works through spacing-side cells (thousands of objects on a
+        // huge contour would turn the placedPts loop into billions of comparisons).
+        auto cellOf = [spacing](int v) { return v >= 0 ? v / spacing : -(( -v + spacing - 1 ) / spacing); };
+        QHash<qint64, QVector<QPoint>> cellPts;
+        int got = 0;
+        for (int step = 8; step >= 1 && got < want; step /= 2)
+            for (const qint64 ck : p.cols)
+            {
+                if (got >= want) break;                                       // "want" is a ceiling, not a floor: the
+                if (step > 1 && colHash(ck ^ salt) % quint32(step) != 0u) continue;   // inner pass must stop at it too
+                const int bx = keyFirst(ck), bz = keySecond(ck);
+                if (!inner.contains(ck) || colWater.contains(ck) || roadCols.contains(ck) ||
+                    colMin.contains(ck)) continue;
+                bool near = false;
+                for (int ddx = -1; ddx <= 1 && !near; ++ddx)
+                    for (int ddz = -1; ddz <= 1 && !near; ++ddz)
+                    {
+                        const auto it = cellPts.constFind(pairKey(cellOf(bx) + ddx, cellOf(bz) + ddz));
+                        if (it == cellPts.constEnd()) continue;
+                        for (const QPoint &q : *it)
+                            if (qAbs(q.x() - bx) < spacing && qAbs(q.y() - bz) < spacing) { near = true; break; }
+                    }
+                if (near) continue;
+                const int y0 = surfaceTop(ck) + 1;
+                clearVeg(bx, bz, y0, 3);
+                if (store.get(bx, y0, bz) != IdAir || store.get(bx, y0 + 1, bz) != IdAir) continue;
+                if (placed(bx, bz, y0))
+                {
+                    placedPts.append(QPoint(bx, bz));
+                    cellPts[pairKey(cellOf(bx), cellOf(bz))].append(QPoint(bx, bz));   // cell of the winner
+                    ++got;
+                }
+            }
+        return got;
+    };
+    // THE FENCE of a guarded territory (a bandit refuge and a military base alike, a request): four stone_brick_wall
+    // over the ground along the whole contour. Water and roadways are skipped - a road through the contour stays
+    // the checkpoint; built-up and rock columns (colMin) are left alone - the wall must not grow out of a building
+    // or a boulder. Vegetation on the way columns is cut down - otherwise a bush or a tree tears a hole into the
+    // fence. "skip" are the columns given to other perimeter decoration (the flag posts stay lower than the fence).
+    QSet<ColKey> wallDone;
+    auto wallCol = [&](const qint64 bk) -> bool
+    {
+        const int bx = keyFirst(bk), bz = keySecond(bk);
+        const ColKey ck = pairKey(bx, bz);
+        if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck)) return false;
+        const int y0 = surfaceTop(ck) + 1;
+        clearVeg(bx, bz, y0, 24);
+        int n = 0;
+        for (int dy = 0; dy < 4; ++dy)
+        {
+            if (store.get(bx, y0 + dy, bz) != IdAir) break;                  // the stack is built only through free air
+            store.set(bx, y0 + dy, bz, quint16(IdStoneBrickWall));
+            ++n;
+        }
+        if (n == 0) return false;
+        wallDone.insert(ck);
+        nWall += n;
+        return true;
+    };
+    auto wallRing = [&](const OverlayPoly &p, const QSet<ColKey> *skip)
+    {
+        for (const qint64 bk : p.border)
+            if (!skip || !skip->contains(pairKey(keyFirst(bk), keySecond(bk)))) wallCol(bk);
+        // The raster leaves a diagonal seam at the corners of the contour: when two wall cells stand corner to
+        // corner and BOTH "bridge" cells between them are free, we close one of them - the fence must be unbroken.
+        static const int ddx[4] = { 1, 1, -1, -1 }, ddz[4] = { 1, -1, 1, -1 };
+        const QList<ColKey> built(wallDone.constBegin(), wallDone.constEnd());
+        for (const ColKey ck : built)
+        {
+            const int bx = keyFirst(ck), bz = keySecond(ck);
+            for (int d = 0; d < 4; ++d)
+            {
+                if (!wallDone.contains(pairKey(bx + ddx[d], bz + ddz[d]))) continue;
+                const ColKey b1 = pairKey(bx + ddx[d], bz), b2 = pairKey(bx, bz + ddz[d]);
+                if (wallDone.contains(b1) || wallDone.contains(b2)) continue;
+                if (!wallCol(b1)) wallCol(b2);
+            }
+        }
+    };
+
+    QVector<QPoint> golemPts;                                   // the golems of ALL refuges must not clump together
+    for (const OverlayPoly &p : prisonPolys)
+    {
+        // GOLEM SPAWNERS - a refuge does not fall asleep: the golems coming out of the cages keep fighting the
+        // raiders forever. The bigger the refuge, the more cages (up to 14), on the open ground, 20 blocks apart.
+        nGolem += scatter(p, qBound(6, p.nCols / 2100, 900), 53, 0x601E5ull, prisonCols, golemPts,
+                          [&](int bx, int bz, int y0) -> bool
+        {
+            if (patchCols.contains(pairKey(bx, bz))) return false;               // no cages on the park lawn
+            if (store.get(bx, y0 + 2, bz) != IdAir) return false;                // the golem needs a headroom
+            store.set(bx, y0, bz, quint16(IdSpawner));
+            spawners.append(SpawnerSite{ bx, y0, bz, 4 });                       // kSpawnerTypes index 4 - iron golem
+            return true;
+        });
+        // BANDIT PATROLS walk the refuge ground (the lair raiders behind the walls are barely seen outside):
+        // 60% pillagers, 30% vindicators, 10% evokers; every sixth pillager is the standard-bearer.
+        QVector<QPoint> banditPts;
+        nBandit += scatter(p, qBound(8, p.nCols / 90, 6000), 11, 0x501BDull, prisonCols, banditPts,
+                           [&](int bx, int bz, int y0) -> bool
+        {
+            const quint32 h = colHash(pairKey(bx, bz) ^ 0x9E3779B9ull);      // a different salt: scatter already ate the low bits
+            NpcSite m;
+            m.kind = 4;                                                          // the night squad kind: the variant picks the mob
+            const int rr = int(h % 100u);
+            m.variant = rr < 60 ? 4 : (rr < 90 ? 5 : 6);                         // pillager / vindicator / evoker
+            m.captain = m.variant == 4 && (h >> 8) % 6u == 0u;
+            m.x = bx; m.y = y0; m.z = bz;
+            m.yaw = int((h >> 11) % 360u);
+            npcs.append(m);
+            return true;
+        });
+        // BANDIT FLAGS ON THE GROUND: the border columns, every next one not closer than 16 blocks after the
+        // previous - a post of two stone_brick_wall and a wall banner on the free neighbour, facing away from the refuge.
+        QVector<QPoint> flagPts;
+        QSet<ColKey> flagCols;                                   // the flag posts are lower than the fence - the fence goes around them
+        for (const qint64 bk : p.border)
+        {
+            const int bx = keyFirst(bk), bz = keySecond(bk);
+            const ColKey ck = pairKey(bx, bz);
+            if (colWater.contains(ck) || roadCols.contains(ck)) continue;           // no post in water or on the roadway
+            bool near = false;
+            for (const QPoint &f : flagPts)
+                if (qAbs(f.x() - bx) < 16 && qAbs(f.y() - bz) < 16) { near = true; break; }
+            if (near) continue;
+            const int y0 = surfaceTop(ck) + 1;
+            clearVeg(bx, bz, y0, 6);                                                        // the post stands on the cut ground, not in a bush
+            if (store.get(bx, y0, bz) != IdAir || store.get(bx, y0 + 1, bz) != IdAir) continue;
+            int fd = -1;                                                                    // the free neighbour outside the contour
+            for (int d = 0; d < 4; ++d)
+            {
+                const int ox = bx + sdx[d], oz = bz + sdz[d];
+                if (prisonCols.contains(pairKey(ox, oz)) || colWater.contains(pairKey(ox, oz)) ||
+                    roadCols.contains(pairKey(ox, oz))) continue;
+                clearVeg(ox, oz, y0 + 1, 2);
+                if (store.get(ox, y0 + 1, oz) != IdAir) continue;
+                fd = d; break;
+            }
+            if (fd < 0) continue;
+            store.set(bx, y0, bz, quint16(IdStoneBrickWall));
+            store.set(bx, y0 + 1, bz, quint16(IdStoneBrickWall));
+            const int ox = bx + sdx[fd], oz = bz + sdz[fd];
+            store.set(ox, y0 + 1, oz, quint16(int(IdWallBannerBase) + fd));         // the banner is attached to the post
+            BannerSite bs{ ox, y0 + 1, oz, fd };
+            bannerSites.append(bs);                                                 // the bannersByChunk split in 3.577
+            bannersByChunk[pairKey(ox >> 4, oz >> 4)].append(bs);                   // is already behind - we add directly
+            flagPts.append(QPoint(bx, bz));
+            flagCols.insert(ck);
+            ++nFlag;
+        }
+        wallRing(p, &flagCols);                                   // the refuge is fenced in too (a request), the posts stand in the gaps
+    }
+
+    for (const OverlayPoly &p : milPolys)
+    {
+        wallRing(p, nullptr);                                     // four stone_brick_wall along the whole contour
+        // THE GARRISON: piglins walk the WHOLE territory, not closer than 21 blocks to each other (the step of
+        // 21, not 22, is the +10% of the request: "want" only guards small contours, the crowd is what fits);
+        // the sun protection (IsImmuneToZombification) goes to seven in ten, a quarter are brutal piglin_brutes
+        // and three in ten carry a crossbow - the hashes are taken with salts different from scatter's (its
+        // column filter zeroes the low bits) and from each other (sun takes bits 3..6, brute takes bits 1..2).
+        QVector<QPoint> pigPts;
+        nPig += scatter(p, qBound(9, p.nCols / 395, 460), 21, 0x501E7ull, milCols, pigPts,
+                        [&](int bx, int bz, int y0) -> bool
+        {
+            const quint32 hp = colHash(pairKey(bx, bz) ^ 0x9E3779B9ull);
+            NpcSite pig;
+            pig.kind = 4;                                                       // the night squad kind: variant 10..13 - piglin
+            const bool sun = ((hp >> 3) % 10u) < 7u;                            // seven in ten walk in the sun
+            const bool brute = ((hp >> 1) % 4u) == 0u;                          // a quarter - the brutal ones
+            pig.cross = (colHash(pairKey(bx, bz) ^ 0x2C9277B5ull) % 100u) < 30u; // three in ten shoot from a crossbow (its own salt)
+            pig.variant = (brute ? 12 : 10) + (sun ? 1 : 0);
+            pig.yaw = int((hp >> 8) % 360u);
+            pig.x = bx; pig.y = y0; pig.z = bz;
+            npcs.append(pig);
+            return true;
+        });
+    }
+
+    // The residents of a guarded territory are not residents: villagers, traders and llamas inside the military
+    // contours are removed (the golems of 3.577 squares stay - they fight the piglins, that is the whole point).
+    if (!milCols.isEmpty())
+    {
+        int keep = 0;
+        for (int i = 0; i < npcs.size(); ++i)
+        {
+            const NpcSite &n = npcs.at(i);
+            if ((n.kind == 0 || n.kind == 1 || n.kind == 2) && milCols.contains(pairKey(n.x, n.z)))
+            {   ++nErase;
+                continue;
+            }
+            if (keep != i) npcs[keep] = n;
+            ++keep;
+        }
+        if (keep < npcs.size()) npcs.resize(keep);
+    }
+
+    tmcStepLog(QString("overlays: golem spawners %1, bandit flags %2, bandit patrols %3, wall blocks %4, piglins %5, residents removed %6"
+                       " (prison %7 cols, military %8 cols)")
+               .arg(nGolem).arg(nFlag).arg(nBandit).arg(nWall).arg(nPig).arg(nErase)
+               .arg(prisonCols.size()).arg(milCols.size()).toUtf8().constData());
+}
+
 McWorldExporter::Result ExportRun::run()
 {
     if (!prepareObjects()) return res;
@@ -13508,6 +13918,8 @@ McWorldExporter::Result ExportRun::run()
     // trees and grass on it are cut down (VoxelStore::erase).
     beginStep(10);                                                   // "villages, signs, basements"
     buildVillages();
+    buildOverlayGround();                         // the "prison"/"military base" grounds (see the definition's comment)
+    lap("before overlays");
     lap("before 3.575");
     buildPointObjects();
     lap("before 3.577");

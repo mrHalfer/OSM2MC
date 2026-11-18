@@ -9,4 +9,5 @@ const char* g_biomeName[10] = { "minecraft:plains", "minecraft:pale_garden", "mi
                                                                                       // 9 — a dark forest (a cemetery, csrpol 53510000); both the same in every zone
 quint16 g_zoneSurface = 1;                                   // the top block of natural ground (1 = IdGrass; desert — sand, tundra — a snow block)
 quint16 g_sandId = 0, g_clayId = 0;                      // the sand and clay ids (palette ones; set in Export before the chunk assembly)
+const QHash<ColKey, quint8>* g_lcapCols = nullptr;     // the lcapol "grounds" overlay (set in buildGround, read by groundBlockAt)
 

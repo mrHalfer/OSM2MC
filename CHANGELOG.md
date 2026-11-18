@@ -5,6 +5,34 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [1.8.26.11181] — 2026-11-18
+
+### Added
+
+- A new "Grounds" source (`lcapol`): `natural=bare_rock` turns the ground under the contour into stone mixed
+  with terracotta with rare magma outcrops, `natural=sand` turns it into forced sand with dune hummocks over the
+  relief; trees do not grow under either contour (rare cacti and dead bushes grow on the sand)
+- A new "Prison refuge" source (`pripol`, the prison effect bit): a bandit refuge — every building inside the
+  contour becomes a raider lair whatever its tags are, the interiors and the chests follow the raiders, iron
+  golem spawners keep the fight going, bandit patrols walk the ground, and the whole refuge is fenced with a
+  stone wall like a military base is (the banner posts stand in the gaps of the fence)
+- A new "Military base" source (`milpol`, the military effect bit): a strictly guarded territory — a four-block
+  stone wall along the contour (a road through it stays a gate), a piglin garrison inside (seven in ten of them
+  sun-protected, a quarter of them brutal piglin brutes, three in ten carry a crossbow), no ordinary residents,
+  and the buildings hold piglin loot; the "Effect" column of the "Export rules" dialog offers both new bits
+
+### Changed
+
+- `landuse=military` no longer lands in `csrpol` as a fenced park with golem guards (code 53210000 is gone):
+  a military ground is a separate "Military base" overlay now (code 53220000)
+- A military base no longer turns into a park: by definition a `milpol` contour is not a park, a kindergarten
+  or a village - no floating island (park or kindergarten/school) hangs over it, the flower_forest park biome,
+  park lamps and a bell square never go inside the contour either. Everything else follows the cover: forests,
+  meadows and lone trees grow on the base wherever the corresponding polygons lie under it
+- The automatic greening pass adds parks only over large lawns (the code marking OSM squares and big flower
+  beds); previously a city short of its park quota also grew parks from the largest empty lots near buildings,
+  and a base parade ground could thereby turn into a full park with floating island and flower fields
+
 ## [1.7.26.11163] — 2026-11-16
 
 ### Added

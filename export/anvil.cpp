@@ -759,7 +759,8 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
                 w.endCompound();                              // a list element
                 continue;
             }
-            w.writeString("LootTable", QLatin1String(kChestLoot[cs.tbl % kChestLootCount]));
+            w.writeString("LootTable", cs.tbl >= 0 ? QLatin1String(kChestLoot[cs.tbl % kChestLootCount])
+                                                    : QLatin1String(specialChestLoot(cs.tbl)));
             w.endCompound();                                  // a list element
         }
         for (const BannerSite& bn : bannersHere)
@@ -974,6 +975,8 @@ QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
                                                 : n.variant == 6 ? QStringLiteral("minecraft:evoker")
                                                 : n.variant == 8 ? QStringLiteral("minecraft:slime")
                                                 : n.variant == 9 ? QStringLiteral("minecraft:creeper")
+                                                : n.variant >= 12 ? QStringLiteral("minecraft:piglin_brute")   // the brutal quarter of the garrison (13 - sun-protected)
+                                                : n.variant >= 10 ? QStringLiteral("minecraft:piglin")    // the military base garrison (11 — protected from zombification)
                                                                  : QStringLiteral("minecraft:enderman"))
                                               : QStringLiteral("minecraft:iron_golem"));
             pos3(n.x + 0.5, double(n.y) + n.yoff, n.z + 0.5);
@@ -1059,6 +1062,29 @@ QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
                     w.endCompound();
                 }
                 w.endCompound();
+            }
+            if (n.kind == 4 && n.variant >= 10)
+            {   // a piglin in the overworld: seven in ten of the garrison (the odd variants) walk in the sun
+                w.writeByte("IsImmuneToZombification", (n.variant == 11 || n.variant == 13) ? 1 : 0);
+                if (n.cross)
+                {   // a crossbow in the hand (both formats: HandItems before 1.21.4, equipment since 1.21.5)
+                    if (legacy)
+                    {
+                        w.beginList("HandItems", Nbt::Compound, 2);
+                        w.beginCompound(nullptr);
+                        w.writeString("id", QStringLiteral("minecraft:crossbow"));
+                        w.writeInt("count", 1);
+                        w.endCompound();
+                        w.beginCompound(nullptr);
+                        w.endCompound();
+                    }
+                    w.beginCompound("equipment");
+                    w.beginCompound("mainhand");
+                    w.writeString("id", QStringLiteral("minecraft:crossbow"));
+                    w.writeInt("count", 1);
+                    w.endCompound();
+                    w.endCompound();
+                }
             }
             w.endCompound();
         }

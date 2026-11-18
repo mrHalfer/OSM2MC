@@ -3,7 +3,7 @@
   "Rules that turn OpenStreetMap tags into tqt layers (the working file of tMC). Edited by hand; the program does not read the \"examples\" array.",
   "The rules are checked from top to bottom; an object goes into the layer of the FIRST matching rule (unless \"continue\": true is set).",
   "from  : the OSM driver layer — multipolygons (buildings, plots, sites), lines (roads, rails), points (points).",
-  "layer : the tqt layer suffix: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin, csrlin (linear cultural objects, by CODE: 82200000 — a fence), csrpnt (point cultural/industrial objects), hdtpnt (point hydrography objects), mrspol (wetlands and salt flats); \"-\" — drop the object (no further rules are checked).",
+  "layer : the tqt layer suffix: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin, csrlin (linear cultural objects, by CODE: 82200000 — a fence), csrpnt (point cultural/industrial objects), hdtpnt (point hydrography objects), mrspol (wetlands and salt flats), lcapol (ground surfaces, by CODE: 22410000 — bare rock, 72251100 — forced sand), pripol (prison refuge contours, CODE 53230000), milpol (military base contours, CODE 53220000); \"-\" — drop the object (no further rules are checked).",
   "as    : polygon (a closed line -> a polygon), line (a polygon boundary -> a line), square:N (a point -> a square with a side of N meters), crosswalk:N (a crossing node -> a line of N meters across the nearest motor road).",
   "pass  : 1 (default) — by tags; 2 — a \"guess\" for buildings not recognized on the 1st pass: they see the nb:* tags about the neighbors.",
   "when  : conditions on tags (all at once). \"v\" — equals; \"*\" — the tag exists; \"-\" or null — no tag; \"!v\" — the tag exists and is not equal to v;",
@@ -709,6 +709,19 @@
     "REL": "auto",
     "MAT": "{building:material,building:facade:material}"
    }
+  },
+  {
+   "note": "A prison (amenity=prison) → pripol 53230000: a bandit refuge — buildings inside the contour become raider lairs whatever they are, iron golem spawners roam the ground, bandit banners on the border. The rule continues: the prison's own building (if it is one) is classified by the bldpol rules below",
+   "from": "multipolygons",
+   "layer": "pripol",
+   "when": {
+    "amenity": "prison"
+   },
+   "fields": {
+    "CODE": "53230000",
+    "REL": "0"
+   },
+   "continue": true
   },
   {
    "note": "Administrative: administration, police, emergency service, court, post office (on the building)",
@@ -1609,6 +1622,30 @@
    }
   },
   {
+   "note": "Bare rock (natural=bare_rock) → lcapol 22410000: the ground under the contour turns to stone mixed with terracotta (rare magma outcrops on the surface), trees do not grow there",
+   "from": "multipolygons",
+   "layer": "lcapol",
+   "when": {
+    "natural": "bare_rock"
+   },
+   "fields": {
+    "CODE": "22410000",
+    "REL": "0"
+   }
+  },
+  {
+   "note": "Sand (natural=sand) → lcapol 72251100: the ground under the contour becomes sand with dune hummocks over the relief, trees do not grow — only rare cacti and dead bushes",
+   "from": "multipolygons",
+   "layer": "lcapol",
+   "when": {
+    "natural": "sand"
+   },
+   "fields": {
+    "CODE": "72251100",
+    "REL": "0"
+   }
+  },
+  {
    "note": "PRELIMINARY: park (parks get trees, lawn, islands)",
    "from": "multipolygons",
    "layer": "vegpol",
@@ -1764,14 +1801,14 @@
    }
   },
   {
-   "note": "Military grounds: the exporter walls the plot with a stone boundary wall and posts golem guards",
+   "note": "Military grounds (landuse=military) → milpol 53220000: a strictly guarded territory — a four-block stone wall along the contour (roads stay gates), a piglin garrison inside, no ordinary residents, piglin loot in the buildings",
    "from": "multipolygons",
-   "layer": "csrpol",
+   "layer": "milpol",
    "when": {
     "landuse": "military"
    },
    "fields": {
-    "CODE": "53210000",
+    "CODE": "53220000",
     "REL": "0"
    }
   },

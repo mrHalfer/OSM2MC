@@ -4,7 +4,7 @@
 //   a yard between houses  -> vgbpol, internal code 71126190 (trees denser than ordinary courtyard vegetation, relief of empty lands);
 //   private sector        -> vegpol, internal code 71111111 (forced taiga: spruces at any area);
 //   forests, if there are few -> vegpol 71111110 on large free places far from buildings;
-//   parks, if there are few  -> large lawns become parks, then parks are cut out of free places near buildings (vegpol 71126000).
+//   parks, if there are few  -> only large lawns become parks (vegpol 71126000); an empty lot never grows into a park.
 // Anything occupied (buildings, roads, rails, water, plates, parking lots, existing vegetation) is not touched: everything is computed on a raster grid with margins.
 #include "input/tmcproject.h"
 #include "osm/tmcosmrules.h"
@@ -205,7 +205,7 @@ void TmcProject::synthesizeGreenery(const GreeneryOptions& opt)
     const Mask vegM = readBand(Veg);
     const qsizetype N = qsizetype(W) * H;
 
-    Mask freeM(N, 0), yardM(N, 0), taigaM(N, 0), forestM(N, 0), parkM(N, 0);
+    Mask freeM(N, 0), yardM(N, 0), taigaM(N, 0), forestM(N, 0);
     for (qsizetype i = 0; i < N; ++i)
     {
         if (vegM[i]) continue;
@@ -214,13 +214,11 @@ void TmcProject::synthesizeGreenery(const GreeneryOptions& opt)
         const bool priv = dPriv[i] * dm <= 22.0 && dBlock[i] * dm > 18.0;                          // private sector: private houses nearby, no block buildings
         const bool block = !priv && dBlock[i] * dm <= 45.0;                                         // block: houses of a non-private kind nearby
         if (priv) { if (dAny[i] * dm >= 4.5) taigaM[i] = 1; }
-        else if (block) { yardM[i] = 1; if (dBlock[i] * dm <= 90.0 && dAny[i] * dm >= 5.0) parkM[i] = 1; }
+        else if (block) yardM[i] = 1;
         else
         {
             if (dAny[i] * dm >= 14.0 && dWide[i] * dm >= 12.0) forestM[i] = 1;                     // an open place far from buildings
-            if (dBlock[i] * dm <= 90.0 && dAny[i] * dm >= 5.0) parkM[i] = 1;
         }
-        if (block && dBlock[i] * dm <= 90.0 && dAny[i] * dm >= 5.0) parkM[i] = 1;
     }
 
     // --- what already exists: forests and parks (in m²) ---
@@ -255,10 +253,10 @@ void TmcProject::synthesizeGreenery(const GreeneryOptions& opt)
     auto minCells = [&](double areaM) { return std::max(4, int(std::ceil(areaM / (cellM * cellM)))); };
     auto clip = [&](Mask m) { for (qsizetype i = 0; i < N; ++i) if (label[i]) m[i] = 0; return m; };
 
-    int nPark = 0, nPromoted = 0, nYard = 0, nTaiga = 0, nForest = 0;
+    int nPromoted = 0, nYard = 0, nTaiga = 0, nForest = 0;
     double aYard = 0, aTaiga = 0, aForest = 0;
 
-    // 1) parks: first large lawns, then cut out of free places near buildings
+    // 1) parks: only large lawns (OSM squares and big flower beds) become parks; an empty lot never grows into a park
     // the "built-up" area — cells not farther than 100 m from a building (the data frame includes long roads and empty edges, which would give too many parks)
     qint64 devCells = 0;
     for (qsizetype i = 0; i < N; ++i) if (dAny[i] * dm <= 100.0) ++devCells;
@@ -289,12 +287,6 @@ void TmcProject::synthesizeGreenery(const GreeneryOptions& opt)
             if (ri >= 0) lw.second->fields[ri] = QStringLiteral("17");
             ++parksHave; ++nPromoted;
         }
-    }
-    if (parksHave < parksNeeded)
-    {
-        const auto comps = components(opening(clip(parkM), W, H), W, H, minCells(8000.0));
-        const auto r = take(comps, 4, parksNeeded - parksHave, 0);
-        nPark = r.first;
     }
     // 2) yards between houses
     if (opt.yards)
@@ -442,6 +434,6 @@ void TmcProject::synthesizeGreenery(const GreeneryOptions& opt)
     }
     log(QObject::tr("Vegetation topped up for OSM (grid %1 m): parks %2 (lawns turned into parks %3; there were %4 parks, %5 needed for %14 km² of built-up area), yards %6 (%7 m²), "
                     "taiga in the private sector %8 (%9 m²), forests %10 (%11 m²; there were %12 m² of forests out of the needed %13 m²), wild forests for camps %15 (%16 m²)")
-            .arg(cellM, 0, 'f', 1).arg(nPark).arg(nPromoted).arg(parkCount).arg(parksNeeded).arg(nYard).arg(qRound(aYard)).arg(nTaiga).arg(qRound(aTaiga))
+            .arg(cellM, 0, 'f', 1).arg(parksHave).arg(nPromoted).arg(parkCount).arg(parksNeeded).arg(nYard).arg(qRound(aYard)).arg(nTaiga).arg(qRound(aTaiga))
             .arg(nForest).arg(qRound(aForest)).arg(qRound(forestArea)).arg(qRound(opt.forestShare * totalM2)).arg(devKm2, 0, 'f', 1).arg(nWild).arg(qRound(aWild)));
 }

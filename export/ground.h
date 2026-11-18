@@ -2,13 +2,18 @@
 // The per-column ground rules shared by the exporter and the chunk writer:
 // the climate zone, biome names and groundBlockAt (moved out of mcworldexporter.cpp).
 #include "export/blocks.h"
+#include "export/colkey.h"
 #include <QtGlobal>
+#include <QHash>
 
 //! The climate zone of the current export (Climate::Zone) and the chunk biome names for the cell values 0..9 (see biomeCells); set in Export before the chunk assembly.
 extern int g_zone;
 extern const char* g_biomeName[10];
 extern quint16 g_zoneSurface;
 extern quint16 g_sandId, g_clayId;   // the sand and clay ids (palette ones; set in Export before the chunk assembly)
+//! The "grounds" overlay of lcapol (column key → 1 bare rock, 2 forced sand), may be null or empty (set in buildGround):
+//! it changes the two ground blocks under the surface in groundBlockAt (stone under the rock, sand under the sand).
+extern const QHash<ColKey, quint8>* g_lcapCols;
 
 
 //! The ground block in a column (top/surf/wd — metadata) at height y; IdAir above the surface.
@@ -30,7 +35,16 @@ inline quint16 groundBlockAt(int top, quint16 surf, int wd, int y, int wx = 0, i
         return g_sandId;
     }
     if (y == top) return surf;
-    if (y >= top - 2) return IdDirt;
+    if (y >= top - 2)
+    {   // the grounds (lcapol) replace the dirt sub-layer: solid stone under bare rock, sand under the forced sand
+        if (g_lcapCols && !g_lcapCols->isEmpty())
+        {
+            const quint8 t = g_lcapCols->value(pairKey(wx, wz), 0);
+            if (t == 1) return IdStone;
+            if (t == 2 && g_sandId) return g_sandId;
+        }
+        return IdDirt;
+    }
     return IdStone;
 }
 

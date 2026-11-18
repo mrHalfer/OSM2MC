@@ -85,6 +85,8 @@ private:
     bool office = false, resid = false, hospital = false;
     bool priv = false, shedThin = false, lowF = false, thinW = false, wide2 = false;
     bool lair = false;                                          // the bandit lair roll outcome
+    bool prisonRaid = false;                                    // the building stands on the "prison" (pripol) contour: a forced lair with bandit loot
+    bool milPost = false;                                       // the building stands on the "military base" (milpol) contour: piglin loot
 
     // Counters and marks of the building passes.
     int added = 0;                                              // the written blocks (the return value)
@@ -208,6 +210,13 @@ private:
         h = (h ^ (h >> 13)) * 1274126177u;
         return h ^ (h >> 16);
     }
+
+    // The loot of the overlay territories (a request): bandit loot in the "prison" (the last kChestLoot table is
+    // pillager_outpost), piglin loot in the "military base" (a special table outside the list — the usual roll must not move).
+    int chestLootFor(quint32 r, int pCheap, int pMid) const
+    { return prisonRaid ? kChestLootCount - 1 : (milPost ? -1 : pickChestLoot(r, pCheap, pMid)); }
+    int barrelLootFor(int roll) const
+    { return prisonRaid ? kBarrelLootCount - 1 : roll; }        // the shipwreck supply — barrels like plunder; piglins keep the ordinary barrels
 };
 
 ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const VxTransform& tf_, quint16 id_,
@@ -576,12 +585,18 @@ void ObjectVoxelizer::calcFloors()
     // hang ominous banners, the interiors are camp-style (barrels, hay bales, chests with outpost loot, banners), raiders live inside.
     // A test hook: MCX_FORCE_LAIR=1 makes any such building a lair.
     lair = false;
+    // The overlay contours (pre-scanned in buildObjects): the building center decides whose territory it is.
+    prisonRaid = out.prison && !out.prison->isEmpty() &&
+                 out.prison->contains(pairKey(minx + sx / 2, minz + sz / 2));       // a building on the "prison" (pripol) contour
+    milPost = out.military && !out.military->isEmpty() &&
+              out.military->contains(pairKey(minx + sx / 2, minz + sz / 2));        // a building on the "military base" (milpol) contour
     if (floors && obj.closed && storyP > 0 && !obj.lift && obj.kind == McWorldExporter::McObject::Building)
     {
         const quint32 hl = lineHash(pairKey(minx, minz) ^ 0x1A1E5ull) % 100u;
         const bool force = qEnvironmentVariableIsSet("MCX_FORCE_LAIR");
         const bool never = qEnvironmentVariableIsSet("MCX_NO_LAIR");                 // a test hook: no lairs at all
-        if (never) lair = false;
+        if (prisonRaid) lair = true;                    // a bandit refuge (a request): every building under the contour is a lair, whatever its code
+        else if (never) lair = false;
         else if (obj.code == 44340000) lair = force || hl < 30u;
         else if (obj.code == 44400000 && nStories >= 2) lair = force || hl < 5u;
     }
@@ -1849,8 +1864,8 @@ void ObjectVoxelizer::buildPartitions()
                     {
                         addVoxel(bx, by, bz, IdChestL);
                         addVoxel(bx + 1, by, bz, IdChestR);         // each block with its own table — in a double one 2 locs
-                        chests->append(ChestSite{ bx, by - sink, bz, pickChestLoot(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
-                        chests->append(ChestSite{ bx + 1, by - sink, bz, pickChestLoot(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
+                        chests->append(ChestSite{ bx, by - sink, bz, chestLootFor(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
+                        chests->append(ChestSite{ bx + 1, by - sink, bz, chestLootFor(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
                         added += 2;
                         dbl = true;
                     }
@@ -1858,7 +1873,7 @@ void ObjectVoxelizer::buildPartitions()
                 if (!dbl)
                 {
                     addVoxel(bx, by, bz, IdChest);
-                    chests->append(ChestSite{ bx, by - sink, bz, pickChestLoot(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
+                    chests->append(ChestSite{ bx, by - sink, bz, chestLootFor(quint32(rnd(1 << 24)), shedChest ? 45 : 55, shedChest ? 20 : 30) });
                     ++added;
                 }
                 if (shedChest && npcs && chests->last().tbl >= kLootT1)
@@ -2257,7 +2272,7 @@ void ObjectVoxelizer::buildInteriors()
                 addVoxel(bx, byc, bz, vid);
                 if (vid == IdBarrel && chests)                     // a barrel is a container with loot (the BE barrel)
                     chests->append(ChestSite{ bx, byc - sink,
-                                              bz, int(lineHash(pairKey(bx, bz) ^ (qint64(byc) << 32) ^ 0xBA77E1ull) % quint32(kBarrelLootCount)), true });
+                                              bz, barrelLootFor(int(lineHash(pairKey(bx, bz) ^ (qint64(byc) << 32) ^ 0xBA77E1ull) % quint32(kBarrelLootCount))), true });
                 if (priv && chests && (vid == IdFurnace || (vid >= IdFurnaceBase && vid < IdFurnaceMax)))
                 {   // a private-house stove is a WORKING one (a user request): the BE carries fuel (and often food),
                     // the contents are a hash of the cell — stable between the runs of the same seed
@@ -2736,7 +2751,7 @@ void ObjectVoxelizer::buildInteriors()
                         else if (roll < 64 && chests)
                         {   // a chest with outpost loot: more often outposts, sometimes better
                             put(lx, lz, 0, IdChest, &dm);
-                            chests->append(ChestSite{ bx, byc - sink, bz, (h >> 12) % 100u < 60u ? outpostTbl : pickChestLoot(h >> 5, 40, 40) });
+                            chests->append(ChestSite{ bx, byc - sink, bz, (prisonRaid || (h >> 12) % 100u < 60u) ? outpostTbl : pickChestLoot(h >> 5, 40, 40) });
                         }
                         else if (roll < 82 && banners && cellFree(lx, lz, 1))
                         {   // an ominous banner on the wall (looking into the room)
@@ -2843,7 +2858,7 @@ void ObjectVoxelizer::buildInteriors()
                         {   // a crate-chest in front of a rack
                             const int cx2 = lx + dvec[fd][0], cz2 = lz + dvec[fd][1];
                             put(cx2, cz2, 0, IdChest, &dm);
-                            chests->append(ChestSite{ minx + cx2, byc - sink, minz + cz2, pickChestLoot(h >> 5, 80, 20) });
+                            chests->append(ChestSite{ minx + cx2, byc - sink, minz + cz2, chestLootFor(h >> 5, 80, 20) });
                         }
                     }
                     else
@@ -4128,10 +4143,12 @@ void ObjectVoxelizer::buildInteriors()
                                 const char g0 = grid[lz * sxy + rowA * sx + lx];
                                 if (g0 == char(3) || g0 == char(4)) ++area;
                             }
-                        lairCapsLeft = qBound(1, 1 + area / 350, 8);
+                        lairCapsLeft = prisonRaid ? qBound(2, 1 + area / 300, 8)      // a bandit refuge: a shade more standard-bearers than a usual lair
+                                                  : qBound(1, 1 + area / 350, 8);
                     }
                     const int capsPerFloor = std::max(1, (lairCapsLeft + std::max(1, nStories - k) - 1) / std::max(1, nStories - k));   // evenly over the remaining floors
-                    const int nM = std::max(qBound(2, openN / 45, 5), capsPerFloor + 1);
+                    const int nM = prisonRaid ? std::max(qBound(3, openN / 35, 6), capsPerFloor + 1)   // the visible "war" is made by the street patrols,
+                                              : std::max(qBound(2, openN / 45, 5), capsPerFloor + 1);
                     int capsHere = 0;
                     for (int n = 0; n < nM; ++n)
                     {

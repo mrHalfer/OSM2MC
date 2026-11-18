@@ -208,6 +208,8 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
         // new objects — the usual dependence on the 3D settings.
         Kind kind = Kind::Generic;
         if (b.src.vs.effect.testFlag(ModelEffect::Swamp)) kind = Kind::Biome;
+        else if (b.src.vs.effect.testFlag(ModelEffect::Prison)) kind = Kind::Prison;        // the "prison" layer (pripol): a bandit refuge overlay
+        else if (b.src.vs.effect.testFlag(ModelEffect::Military)) kind = Kind::Military;    // the "military base" layer (milpol): a guarded territory overlay
         else if (!b.src.vs.modelField.isEmpty()) kind = Kind::Spot;
         else if (sfx == QLatin1String("bldpol")) kind = Kind::Building;
         else if (sfx == QLatin1String("vegpol") || sfx == QLatin1String("vgbpol")) kind = Kind::Vegetation;
@@ -217,6 +219,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
         else if (sfx == QLatin1String("csrpol")) kind = Kind::Plate;
         else if (sfx == QLatin1String("rdcpol")) kind = Kind::ParkingLot;
         else if (sfx == QLatin1String("blkpol")) kind = Kind::BlockCover;
+        else if (sfx == QLatin1String("lcapol")) kind = Kind::Surface;
         else if (sfx == QLatin1String("hdrpol") || sfx == QLatin1String("hdrlin")) kind = Kind::Water;
         const bool polygonLayer = layer->geom == GeomKind::Polygon;
         if (kind == Kind::Spot && !spotModelsLoaded)
@@ -278,6 +281,8 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             }
             // blkpol: only asphalt without markings (62231000) and squares (45300000)
             if (kind == Kind::BlockCover && e.code != 62231000 && e.code != 45300000) continue;
+            // lcapol: only bare rock (22410000) and forced sand (72251100)
+            if (kind == Kind::Surface && e.code != 22410000 && e.code != 72251100) continue;
             // LIFT: the walls of elevator shafts are 1 block thick
             if (kind == Kind::Building)
             {

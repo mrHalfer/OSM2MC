@@ -142,6 +142,8 @@ const NamedColor kBlockPalette[] = {
     { "minecraft:lightning_rod",          85,  68,  56 },
     // Landmark models (STL): the patina of the Statue of Liberty
     { "minecraft:oxidized_copper",        82, 162, 132 },
+    // Grounds (lcapol 22410000 bare rock): terracotta mixed into the stone surface
+    { "minecraft:terracotta",            152,  94,  67 },
 };
 
 

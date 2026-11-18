@@ -1527,18 +1527,18 @@ It loads automatically when the data is ready.</source>
     <message>
         <location filename="../app/tmcrun.cpp" line="264"/>
         <location filename="../app/tmcrun.cpp" line="422"/>
-        <location filename="../export/exportrun.cpp" line="449"/>
-        <location filename="../export/exportrun.cpp" line="610"/>
-        <location filename="../export/exportrun.cpp" line="688"/>
-        <location filename="../export/exportrun.cpp" line="809"/>
-        <location filename="../export/exportrun.cpp" line="1490"/>
-        <location filename="../export/exportrun.cpp" line="5267"/>
-        <location filename="../export/exportrun.cpp" line="6509"/>
-        <location filename="../export/exportrun.cpp" line="8808"/>
-        <location filename="../export/exportrun.cpp" line="11616"/>
-        <location filename="../export/exportrun.cpp" line="11826"/>
-        <location filename="../export/exportrun.cpp" line="12830"/>
-        <location filename="../export/exportrun.cpp" line="13098"/>
+        <location filename="../export/exportrun.cpp" line="462"/>
+        <location filename="../export/exportrun.cpp" line="623"/>
+        <location filename="../export/exportrun.cpp" line="701"/>
+        <location filename="../export/exportrun.cpp" line="822"/>
+        <location filename="../export/exportrun.cpp" line="1503"/>
+        <location filename="../export/exportrun.cpp" line="5277"/>
+        <location filename="../export/exportrun.cpp" line="6557"/>
+        <location filename="../export/exportrun.cpp" line="8910"/>
+        <location filename="../export/exportrun.cpp" line="11721"/>
+        <location filename="../export/exportrun.cpp" line="11962"/>
+        <location filename="../export/exportrun.cpp" line="12992"/>
+        <location filename="../export/exportrun.cpp" line="13260"/>
         <source>Export cancelled.</source>
         <translation>Экспорт отменён.</translation>
     </message>
@@ -1653,314 +1653,319 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>Пещерные шаблоны: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11221"/>
+        <location filename="../export/exportrun.cpp" line="11323"/>
         <source>lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)</source>
         <translation>не найден lair_structures.bin (положите рядом с cave_templates.bin; искал в: %1)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11225"/>
+        <location filename="../export/exportrun.cpp" line="11327"/>
         <source>lair_structures.bin is damaged</source>
         <translation>lair_structures.bin повреждён</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11229"/>
+        <location filename="../export/exportrun.cpp" line="11331"/>
         <source>caves must be enabled together with the normal surroundings (a noise world)</source>
         <translation>нужны включённые пещеры и обычное окружение (noise-мир)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11305"/>
+        <location filename="../export/exportrun.cpp" line="11407"/>
         <source>Nothing to export: all meshes are empty.</source>
         <translation>Нечего экспортировать: все меши пусты.</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13395"/>
+        <location filename="../export/exportrun.cpp" line="13557"/>
         <source>; zebra on the roads: crossings %1 of %2 (cells %3)</source>
         <translation>; зебра на дорогах: переходов %1 из %2 (клеток %3)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13472"/>
+        <location filename="../export/exportrun.cpp" line="13634"/>
         <source>Could not voxelize a single object (empty or too huge meshes).</source>
         <translation>Не удалось вокселизировать ни один объект (пустые или слишком огромные меши).</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7126"/>
+        <location filename="../export/exportrun.cpp" line="7174"/>
         <source>%1Pale Garden: there is no suitable vegetation in the data — an empty site of %2×%2 chunks was allocated (chunks %3…%4 along X, %5…%6 along Z, gap to the data %7 chunks)</source>
         <translation>%1лес скрипунов: в данных нет подходящей растительности — выделена пустая площадка %2×%2 чанков (чанки %3…%4 по X, %5…%6 по Z, зазор до данных %7 чанк.)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3614"/>
-        <location filename="../export/exportrun.cpp" line="3620"/>
+        <location filename="../export/exportrun.cpp" line="3624"/>
+        <location filename="../export/exportrun.cpp" line="3630"/>
         <source>; landmark %1 skipped: %2</source>
         <translation>; модель %1 пропущена: %2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3675"/>
+        <location filename="../export/exportrun.cpp" line="3685"/>
         <source>; landmark models: %1 (buildings razed: %2)</source>
         <translation>; моделей достопримечательностей: %1 (зданий снесено: %2)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3676"/>
+        <location filename="../export/exportrun.cpp" line="3686"/>
         <source>; landmark models: %1</source>
         <translation>; моделей достопримечательностей: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6104"/>
+        <location filename="../export/exportrun.cpp" line="6152"/>
         <source>; single trees on the empty lands: %1 (greenery zones: %2)</source>
         <translation>; одиночных деревьев на пустых землях: %1 (зон озеленения: %2)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6318"/>
+        <location filename="../export/exportrun.cpp" line="6366"/>
         <source>; household pets: %1</source>
         <translation>; домашние животные: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7305"/>
+        <location filename="../export/exportrun.cpp" line="7353"/>
         <source>; fields and grass extended to the chunk edge on the export border: %1 chunks</source>
         <translation>; поля и трава продлены до края чанка на границе экспорта: %1 чанков</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7307"/>
+        <location filename="../export/exportrun.cpp" line="7355"/>
         <source>; forest extended to the chunk edge on the export border: %1 chunks</source>
         <translation>; лес продлён до края чанка на границе экспорта: %1 чанков</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7512"/>
+        <location filename="../export/exportrun.cpp" line="7560"/>
         <source>%1Pale Garden: there is no forest near the given chunk</source>
         <translation>%1лес скрипунов: рядом с заданным чанком леса нет</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7539"/>
+        <location filename="../export/exportrun.cpp" line="7587"/>
         <source>%1Pale Garden: meadow vegetation was chosen (%2 m², more than twice the best forest with height — %3 m²)</source>
         <translation>%1лес скрипунов: выбрана луговая растительность (%2 м², более чем вдвое больше лучшего леса с высотой — %3 м²)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7558"/>
+        <location filename="../export/exportrun.cpp" line="7606"/>
         <source>%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10</source>
         <translation>%1лес скрипунов: %2 м², центр x=%3 z=%4 (чанк %5 %6), границы x %7…%8, z %9…%10</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7566"/>
+        <location filename="../export/exportrun.cpp" line="7614"/>
         <source>%1Pale Garden: no suitable forest</source>
         <translation>%1лес скрипунов: подходящего леса нет</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7747"/>
+        <location filename="../export/exportrun.cpp" line="7795"/>
         <source>; forest mansion: 1 of %1 kept</source>
         <translation>; лесной особняк: оставлен 1 из %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7796"/>
+        <location filename="../export/exportrun.cpp" line="7844"/>
         <source>; Pale Garden: pale_garden.bin was not found next to cave_templates.bin — a procedural forest without the donor terrain</source>
         <translation>; лес скрипунов: pale_garden.bin не найден рядом с cave_templates.bin — процедурный лес без донорного рельефа</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7868"/>
+        <location filename="../export/exportrun.cpp" line="7916"/>
         <source>; terrain in forests: %1 columns</source>
         <translation>; рельеф в лесах: %1 колонок</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8041"/>
+        <location filename="../export/exportrun.cpp" line="8089"/>
         <source>; forest mansion (cut out of the game world) placed: center x=%1 z=%2 (chunk %3 %4)</source>
         <translation>; лесной особняк (вырезан из мира игры) поставлен: центр x=%1 z=%2 (чанк %3 %4)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8044"/>
+        <location filename="../export/exportrun.cpp" line="8092"/>
         <source>; forest mansion: no place was found in the Pale Garden</source>
         <translation>; лесной особняк: в лесу скрипунов не нашлось места</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8080"/>
+        <location filename="../export/exportrun.cpp" line="8128"/>
         <source>; bandit outposts: %1, abandoned camps: %2, small ruins: %3</source>
         <translation>; аванпосты бандитов: %1, заброшенные лагеря: %2, мелкие руины: %3</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8221"/>
+        <location filename="../export/exportrun.cpp" line="8321"/>
         <source>; terrain of the empty lands: %1 cells</source>
         <translation>; рельеф пустых земель: %1 клеток</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="9881"/>
+        <location filename="../export/exportrun.cpp" line="8322"/>
+        <source>; dunes of the forced sand: %1 cells</source>
+        <translation>; барханы принудительного песка: %1 ячеек</translation>
+    </message>
+    <message>
+        <location filename="../export/exportrun.cpp" line="9983"/>
         <source>; elevated roads: %1 deck cells, %2 tunnel cells, %3 portal cells, %4 piers, %5 tunnel lamps, %6 parapets, %7 lifted approach cells, %8 straight bore cells</source>
         <translation>; эстакады и тоннели: %1 клеток настила, %2 клеток тоннеля, %3 клеток порталов, %4 опор, %5 ламп в тоннелях, %6 парапетов, %7 подъёмных клеток подходов, %8 клеток прямого прохода</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11798"/>
+        <location filename="../export/exportrun.cpp" line="11934"/>
         <source>; houses straightened to the axes: %1 (kept off other buildings: %2)</source>
         <translation>; домов выровнено по осям: %1 (отступов от других зданий: %2)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="12848"/>
+        <location filename="../export/exportrun.cpp" line="13010"/>
         <source>; private houses: %1 brick (%2 with a mansard floor), %3 log</source>
         <translation>; частных домов: %1 кирпичных (%2 с мансардным этажом), %3 бревенчатых</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13259"/>
+        <location filename="../export/exportrun.cpp" line="13421"/>
         <source>; road width trimmed near buildings and fences: %1 sections, cells under buildings removed: %2</source>
         <translation>; ширина дорог уменьшена у зданий и заборов: %1 участков, клеток под зданиями убрано: %2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8153"/>
+        <location filename="../export/exportrun.cpp" line="8201"/>
         <source>; quarries: %1 columns of the stepped excavation</source>
         <translation>; карьеры: %1 колонок ступенчатой выемки</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8154"/>
+        <location filename="../export/exportrun.cpp" line="8202"/>
         <source>; spoil heaps: %1 columns of the mound</source>
         <translation>; терриконы: %1 колонок насыпи</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8250"/>
+        <location filename="../export/exportrun.cpp" line="8352"/>
         <source>; climate zone: %1</source>
         <translation>; климатическая зона: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8442"/>
+        <location filename="../export/exportrun.cpp" line="8544"/>
         <source>; road columns moved onto the relief: %1</source>
         <translation>; колонок дорог перенесено на рельеф: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="9915"/>
+        <location filename="../export/exportrun.cpp" line="10017"/>
         <source>; bridge columns over water (roads and railways): %1</source>
         <translation>; колонок мостов над водой (дороги и железные дороги): %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="9988"/>
+        <location filename="../export/exportrun.cpp" line="10090"/>
         <source>; mansion inhabitants: %1</source>
         <translation>; обитателей особняка: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10003"/>
+        <location filename="../export/exportrun.cpp" line="10105"/>
         <source>; outpost and camp blocks: %1</source>
         <translation>; блоков аванпостов и лагерей: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10095"/>
+        <location filename="../export/exportrun.cpp" line="10197"/>
         <source>; shipwrecks in big water bodies: %1 (on the bottom %2, on the water %3)</source>
         <translation>; кораблекрушения в больших водоёмах: %1 (на дне %2, на воде %3)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10124"/>
+        <location filename="../export/exportrun.cpp" line="10226"/>
         <source>; seaweed: kelp %1, seagrass %2 columns</source>
         <translation>; водоросли: ламинария %1, морская трава %2 колонок</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10192"/>
+        <location filename="../export/exportrun.cpp" line="10294"/>
         <source>; terrain and trees of the real Pale Garden: %1 blocks</source>
         <translation>; рельеф и деревья настоящего бледного сада: %1 блоков</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11001"/>
+        <location filename="../export/exportrun.cpp" line="11103"/>
         <source>; subway: %1 tunnels, %2 rails (%3 electrified), %4 lamps</source>
         <translation>; метро: тоннелей %1, рельсов %2 (электрофицировано %3), светильников %4</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11126"/>
+        <location filename="../export/exportrun.cpp" line="11228"/>
         <source>; secret rooms in the metro: %1</source>
         <translation>; секретные комнаты в метро: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11163"/>
+        <location filename="../export/exportrun.cpp" line="11265"/>
         <source>; station halls: %1</source>
         <translation>; залы вокзалов: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5481"/>
+        <location filename="../export/exportrun.cpp" line="5492"/>
         <source>; creaking hearts: %1 (extra removed %2, added %3)</source>
         <translation>; сердец скрипунов: %1 (убрано лишних %2, добавлено %3)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6265"/>
+        <location filename="../export/exportrun.cpp" line="6313"/>
         <source>; animals in forests: %1</source>
         <translation>; зверей в лесах: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6408"/>
+        <location filename="../export/exportrun.cpp" line="6456"/>
         <source>; aquatic fauna: %1</source>
         <translation>; водная фауна: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3009"/>
+        <location filename="../export/exportrun.cpp" line="3019"/>
         <source>; equipment on sports grounds: %1 items</source>
         <translation>; снаряжение на спортивных площадках: %1 предметов</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4827"/>
+        <location filename="../export/exportrun.cpp" line="4837"/>
         <source>churches: %1, with a maze: %2</source>
         <translation>церквей: %1, с лабиринтом: %2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4903"/>
+        <location filename="../export/exportrun.cpp" line="4913"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (здание, ближайшее к точке на карте)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4905"/>
+        <location filename="../export/exportrun.cpp" line="4915"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (лаборатория под научным зданием или школой, запасной вход)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4907"/>
+        <location filename="../export/exportrun.cpp" line="4917"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (церковь №%4 из %5 по размеру)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4943"/>
+        <location filename="../export/exportrun.cpp" line="4953"/>
         <source>; no church with a maze in chunk (%1, %2)</source>
         <translation>; в чанке (%1, %2) нет церкви с лабиринтом</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4970"/>
+        <location filename="../export/exportrun.cpp" line="4980"/>
         <source>; %1: no church with a maze in chunk (%2, %3)</source>
         <translation>; %1: в чанке (%2, %3) нет церкви с лабиринтом</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4997"/>
+        <location filename="../export/exportrun.cpp" line="5007"/>
         <source>; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other&apos;s way</source>
         <translation>; ancient_city — точка на карте слишком близко к стронгхолду: входы мешали бы друг другу</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5016"/>
+        <location filename="../export/exportrun.cpp" line="5026"/>
         <source>; the entrances cannot be placed in the given buildings — choosing automatically</source>
         <translation>; входы не удаётся разместить в заданных зданиях — выбираю автоматически</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5024"/>
+        <location filename="../export/exportrun.cpp" line="5034"/>
         <source>; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically</source>
         <translation>; в заданных церквях оба входа не разместить (мало чанков вокруг или шахты мешают друг другу) — выбираю автоматически</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5042"/>
+        <location filename="../export/exportrun.cpp" line="5052"/>
         <source>; stronghold — no suitable church was found</source>
         <translation>; стронгхолд — не нашлось подходящей церкви</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5072"/>
+        <location filename="../export/exportrun.cpp" line="5082"/>
         <source>; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)</source>
         <translation>; ancient_city — не нашлось ни подходящей церкви, ни научного здания, ни школы с лабораторией (край экспорта или шахты мешают друг другу)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="509"/>
+        <location filename="../export/exportrun.cpp" line="522"/>
         <source>chunks added so that the buildings and lakes on the boundary stay whole: %1</source>
         <translation>чанков добавлено, чтобы здания и озёра на границе остались целыми: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="512"/>
+        <location filename="../export/exportrun.cpp" line="525"/>
         <source>polygon boundary: %1 of %2 chunks written</source>
         <translation>граница-многоугольник: записано %1 из %2 чанков</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="856"/>
+        <location filename="../export/exportrun.cpp" line="869"/>
         <source>The scene is too big for a save zip archive (%1 region files, ~%2 MB). Export a smaller area.</source>
         <translation>Сцена слишком велика для zip-архива сохранений (%1 region-файлов, ~%2 МБ). Экспортируйте меньшую область.</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="841"/>
-        <location filename="../export/exportrun.cpp" line="870"/>
+        <location filename="../export/exportrun.cpp" line="854"/>
+        <location filename="../export/exportrun.cpp" line="883"/>
         <source>Could not write the file %1: %2</source>
         <translation>Не удалось записать файл %1: %2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="875"/>
+        <location filename="../export/exportrun.cpp" line="888"/>
         <source>The file %1 was not written completely (quota/disk?).</source>
         <translation>Файл %1 записан не полностью (квота/диск?).</translation>
     </message>
@@ -2287,27 +2292,27 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     </message>
     <message>
         <location filename="../scene/mcscene.cpp" line="194"/>
-        <location filename="../scene/mcscene.cpp" line="492"/>
+        <location filename="../scene/mcscene.cpp" line="497"/>
         <source>No objects in the data: the terrain is exported without them.</source>
         <translation>В данных нет объектов: рельеф экспортируется без них.</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="365"/>
+        <location filename="../scene/mcscene.cpp" line="370"/>
         <source>%1 objects on layer &apos;%2&apos; were skipped: no model for their codes in point_models.csv</source>
         <translation>%1 объектов на слое «%2» пропущено: для их кодов нет модели в point_models.csv</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="371"/>
+        <location filename="../scene/mcscene.cpp" line="376"/>
         <source>There are no objects to export</source>
         <translation>Нет объектов для экспорта</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="485"/>
+        <location filename="../scene/mcscene.cpp" line="490"/>
         <source>There are no objects with geometry</source>
         <translation>Нет объектов с геометрией</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="646"/>
+        <location filename="../scene/mcscene.cpp" line="651"/>
         <source>No object gave any geometry (check the height field in the 3D settings)</source>
         <translation>Ни один объект не дал геометрии (проверьте поле высоты в настройках 3D)</translation>
     </message>
@@ -2388,31 +2393,31 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="195"/>
-        <location filename="../app/rulesdialog.cpp" line="726"/>
+        <location filename="../app/rulesdialog.cpp" line="730"/>
         <source>Add</source>
         <translation>Добавить</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="196"/>
-        <location filename="../app/rulesdialog.cpp" line="727"/>
+        <location filename="../app/rulesdialog.cpp" line="731"/>
         <source>Duplicate</source>
         <translation>Дублировать</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="197"/>
-        <location filename="../app/rulesdialog.cpp" line="728"/>
+        <location filename="../app/rulesdialog.cpp" line="732"/>
         <source>Delete</source>
         <translation>Удалить</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="198"/>
-        <location filename="../app/rulesdialog.cpp" line="729"/>
+        <location filename="../app/rulesdialog.cpp" line="733"/>
         <source>Up</source>
         <translation>Вверх</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="199"/>
-        <location filename="../app/rulesdialog.cpp" line="730"/>
+        <location filename="../app/rulesdialog.cpp" line="734"/>
         <source>Down</source>
         <translation>Вниз</translation>
     </message>
@@ -2423,7 +2428,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="216"/>
-        <location filename="../app/rulesdialog.cpp" line="717"/>
+        <location filename="../app/rulesdialog.cpp" line="720"/>
         <source>Layer</source>
         <translation>Слой</translation>
     </message>
@@ -2470,16 +2475,16 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../app/rulesdialog.cpp" line="245"/>
         <location filename="../app/rulesdialog.cpp" line="257"/>
-        <location filename="../app/rulesdialog.cpp" line="1244"/>
-        <location filename="../app/rulesdialog.cpp" line="1387"/>
+        <location filename="../app/rulesdialog.cpp" line="1314"/>
+        <location filename="../app/rulesdialog.cpp" line="1457"/>
         <source>Add row</source>
         <translation>Добавить строку</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="246"/>
         <location filename="../app/rulesdialog.cpp" line="258"/>
-        <location filename="../app/rulesdialog.cpp" line="1245"/>
-        <location filename="../app/rulesdialog.cpp" line="1388"/>
+        <location filename="../app/rulesdialog.cpp" line="1315"/>
+        <location filename="../app/rulesdialog.cpp" line="1458"/>
         <source>Remove row</source>
         <translation>Убрать строку</translation>
     </message>
@@ -2510,15 +2515,15 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="317"/>
-        <location filename="../app/rulesdialog.cpp" line="753"/>
+        <location filename="../app/rulesdialog.cpp" line="757"/>
         <source>JSON error (%1, position %2)</source>
         <translation>Ошибка JSON (%1, позиция %2)</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="330"/>
-        <location filename="../app/rulesdialog.cpp" line="765"/>
-        <location filename="../app/rulesdialog.cpp" line="1294"/>
-        <location filename="../app/rulesdialog.cpp" line="1433"/>
+        <location filename="../app/rulesdialog.cpp" line="769"/>
+        <location filename="../app/rulesdialog.cpp" line="1364"/>
+        <location filename="../app/rulesdialog.cpp" line="1503"/>
         <source>the file was not loaded — nothing to save</source>
         <translation>файл не загружен — нечего сохранять</translation>
     </message>
@@ -2643,232 +2648,261 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>Кликните строку поля — здесь появится его назначение</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="710"/>
+        <location filename="../app/rulesdialog.cpp" line="712"/>
         <source>OSMC rules</source>
         <translation>Правила OSMC</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="716"/>
+        <location filename="../app/rulesdialog.cpp" line="719"/>
         <source>The layer sources</source>
         <translation>Источники слоёв</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="717"/>
+        <location filename="../app/rulesdialog.cpp" line="720"/>
+        <source>Description</source>
+        <translation>Описание</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="721"/>
         <source>Model field</source>
         <translation>Колонка моделей</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="718"/>
+        <location filename="../app/rulesdialog.cpp" line="721"/>
+        <source>Geometry</source>
+        <translation>Геометрия</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="722"/>
         <source>Material column</source>
         <translation>Колонка материала</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="722"/>
-        <source>the column with the object codes looked up in point_models.csv (a source of point structures); empty - no models</source>
-        <translation>колонка с кодами объектов, модели для которых ищутся в point_models.csv (источник точечных структур); пусто — без моделей</translation>
+        <location filename="../app/rulesdialog.cpp" line="898"/>
+        <source>Prison refuge</source>
+        <translation>Убежище бандитов</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="724"/>
-        <source>buildings take their material from this column instead of MAT; empty - MAT</source>
-        <translation>здания берут материал из этой колонки вместо MAT; пусто — MAT</translation>
+        <location filename="../app/rulesdialog.cpp" line="899"/>
+        <source>Military base</source>
+        <translation>Военная база</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1072"/>
+        <location filename="../app/rulesdialog.cpp" line="1142"/>
         <source>No preview for model number %1</source>
         <translation>Превью для модели №%1 недоступно</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1073"/>
+        <location filename="../app/rulesdialog.cpp" line="1143"/>
         <source>Select a row - the model that the exporter builds on such a point shows here</source>
         <translation>Выберите строку — здесь появится модель, которую экспортёр строит на такой точке</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="718"/>
+        <location filename="../app/rulesdialog.cpp" line="722"/>
         <source>Effect</source>
         <translation>Эффект</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="830"/>
-        <location filename="../app/rulesdialog.cpp" line="833"/>
+        <location filename="../app/rulesdialog.cpp" line="823"/>
+        <source>Used for visualizing point objects</source>
+        <translation>Используется для визуализации точечных объектов</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="828"/>
+        <source>Used for the wall material display and the radio wave modeling system</source>
+        <translation>Используется для отображения материала стен и системы моделирования радиоволн</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="836"/>
+        <source>Points</source>
+        <translation>Точки</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="837"/>
+        <source>Lines</source>
+        <translation>Линии</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="838"/>
+        <source>Polygons</source>
+        <translation>Полигоны</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="895"/>
+        <location filename="../app/rulesdialog.cpp" line="902"/>
         <source>Not game (%1)</source>
         <translation>Не игра (%1)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="831"/>
+        <location filename="../app/rulesdialog.cpp" line="897"/>
         <source>Swamp</source>
         <translation>Болото</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="832"/>
         <source>Swamp, not game (%1)</source>
-        <translation>Болото, не игра (%1)</translation>
+        <translation type="vanished">Болото, не игра (%1)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="848"/>
-        <source>Swamp (128) is the only effect the Minecraft export reads: the ground inside the layer outline becomes a swamp. The other tqt bits only decorate the model in the tqt 3D window.</source>
-        <translation>Болото (128) — единственный эффект, который читает экспорт в Minecraft: земля внутри контура слоя становится болотом. Остальные биты tqt только украшают модель в 3D-окне tqt.</translation>
-    </message>
-    <message>
-        <location filename="../app/rulesdialog.cpp" line="1235"/>
+        <location filename="../app/rulesdialog.cpp" line="1305"/>
         <source>Point models</source>
         <translation>Модели точек</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1241"/>
+        <location filename="../app/rulesdialog.cpp" line="1311"/>
         <source>An object code -&gt; the model the exporter builds on such points</source>
         <translation>Код объекта -&gt; модель, которую экспортёр строит на таких точках</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1242"/>
-        <location filename="../app/rulesdialog.cpp" line="1385"/>
+        <location filename="../app/rulesdialog.cpp" line="1312"/>
+        <location filename="../app/rulesdialog.cpp" line="1455"/>
         <source>Code</source>
         <translation>Код</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1242"/>
+        <location filename="../app/rulesdialog.cpp" line="1312"/>
         <source>Model</source>
         <translation>Модель</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1305"/>
+        <location filename="../app/rulesdialog.cpp" line="1375"/>
         <source>memorial statue</source>
         <translation>памятник-скульптура</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1306"/>
+        <location filename="../app/rulesdialog.cpp" line="1376"/>
         <source>monument stele</source>
         <translation>памятник-стела</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1307"/>
+        <location filename="../app/rulesdialog.cpp" line="1377"/>
         <source>fountain</source>
         <translation>фонтан</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1308"/>
+        <location filename="../app/rulesdialog.cpp" line="1378"/>
         <source>communication tower</source>
         <translation>телебашня</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1309"/>
+        <location filename="../app/rulesdialog.cpp" line="1379"/>
         <source>composter</source>
         <translation>мусорный бак</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1310"/>
+        <location filename="../app/rulesdialog.cpp" line="1380"/>
         <source>lighting mast</source>
         <translation>опора освещения</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1311"/>
+        <location filename="../app/rulesdialog.cpp" line="1381"/>
         <source>street bench</source>
         <translation>скамейка</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1312"/>
+        <location filename="../app/rulesdialog.cpp" line="1382"/>
         <source>small sculpture</source>
         <translation>малая скульптура</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1313"/>
+        <location filename="../app/rulesdialog.cpp" line="1383"/>
         <source>bus stop shelter</source>
         <translation>павильон остановки</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1377"/>
+        <location filename="../app/rulesdialog.cpp" line="1447"/>
         <source>Typical heights</source>
         <translation>Типовые высоты</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1382"/>
+        <location filename="../app/rulesdialog.cpp" line="1452"/>
         <source>Filter (a code or a word of the name)</source>
         <translation>Фильтр (код или слово названия)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1385"/>
+        <location filename="../app/rulesdialog.cpp" line="1455"/>
         <source>Height, blocks</source>
         <translation>Высота, блоков</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1385"/>
+        <location filename="../app/rulesdialog.cpp" line="1455"/>
         <source>Name</source>
         <translation>Название</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1478"/>
-        <location filename="../app/rulesdialog.cpp" line="1518"/>
-        <location filename="../app/rulesdialog.cpp" line="1542"/>
-        <location filename="../app/rulesdialog.cpp" line="1559"/>
-        <location filename="../app/rulesdialog.cpp" line="1567"/>
-        <location filename="../app/rulesdialog.cpp" line="1573"/>
-        <location filename="../app/rulesdialog.cpp" line="1583"/>
+        <location filename="../app/rulesdialog.cpp" line="1548"/>
+        <location filename="../app/rulesdialog.cpp" line="1588"/>
+        <location filename="../app/rulesdialog.cpp" line="1612"/>
+        <location filename="../app/rulesdialog.cpp" line="1629"/>
+        <location filename="../app/rulesdialog.cpp" line="1637"/>
+        <location filename="../app/rulesdialog.cpp" line="1643"/>
+        <location filename="../app/rulesdialog.cpp" line="1653"/>
         <source>Export rules</source>
         <translation>Правила экспорта</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1489"/>
+        <location filename="../app/rulesdialog.cpp" line="1559"/>
         <source>Save</source>
         <translation>Сохранить</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1490"/>
+        <location filename="../app/rulesdialog.cpp" line="1560"/>
         <source>Save as...</source>
         <translation>Сохранить как...</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1491"/>
+        <location filename="../app/rulesdialog.cpp" line="1561"/>
         <source>Reload</source>
         <translation>Перечитать</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1492"/>
+        <location filename="../app/rulesdialog.cpp" line="1562"/>
         <source>Close</source>
         <translation>Закрыть</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1518"/>
+        <location filename="../app/rulesdialog.cpp" line="1588"/>
         <source>Could not read the settings files:
 %1</source>
         <translation>Не удалось прочитать файлы настроек:
 %1</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1528"/>
+        <location filename="../app/rulesdialog.cpp" line="1598"/>
         <source>not found</source>
         <translation>не найден</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1529"/>
+        <location filename="../app/rulesdialog.cpp" line="1599"/>
         <source>not saved</source>
         <translation>не сохранён</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1542"/>
-        <location filename="../app/rulesdialog.cpp" line="1559"/>
+        <location filename="../app/rulesdialog.cpp" line="1612"/>
+        <location filename="../app/rulesdialog.cpp" line="1629"/>
         <source>Could not save %1:
 %2</source>
         <translation>Не удалось сохранить %1:
 %2</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1549"/>
+        <location filename="../app/rulesdialog.cpp" line="1619"/>
         <source>Save %1 as</source>
         <translation>Сохранить %1 как</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1567"/>
+        <location filename="../app/rulesdialog.cpp" line="1637"/>
         <source>Discard the unsaved changes in %1?</source>
         <translation>Отменить несохранённые изменения в %1?</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1573"/>
+        <location filename="../app/rulesdialog.cpp" line="1643"/>
         <source>Could not read %1:
 %2</source>
         <translation>Не удалось прочитать %1:
 %2</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1584"/>
+        <location filename="../app/rulesdialog.cpp" line="1654"/>
         <source>The files %1 were changed but not saved. Close without saving?</source>
         <translation>Файлы %1 изменены, но не сохранены. Закрыть без сохранения?</translation>
     </message>

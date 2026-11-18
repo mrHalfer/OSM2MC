@@ -94,6 +94,13 @@ enum class ModelEffect
                            //!< into a swamp biome (the trees of any forest under the contour become swamp oaks with
                            //!< vines; open swamp ground gets rare oaks, mushrooms and dead branches). The 3D window
                            //!< does not draw the effect — the layer is shown by its ordinary color
+    Prison     = 1 << 8,  //!< Bandit refuge — an exporter mark (tMC): the whole layer's outline turns the ground under it
+                          //!< into a bandit refuge (every building under the contour becomes a lair with raider
+                          //!< interiors, bandit loot and banners; iron golem spawners stand on the open ground, so the
+                          //!< refuge keeps fighting). The 3D window does not draw the effect
+    Military   = 1 << 9,  //!< Military base — an exporter mark (tMC): the whole layer's outline becomes a strictly
+                          //!< guarded territory (a 4-block stone wall around the contour, piglins instead of residents,
+                          //!< piglin loot in the buildings). The 3D window does not draw the effect
     Rounded    = 1 << 3   //!< Smoothing — the top edge of polygon walls is rounded with a static chamfer
                            //!< (several quarter-circle sub-rings in section, see
                            //!< ModelBuilder::BuildObjectMesh()) instead of a sharp wall/roof corner —

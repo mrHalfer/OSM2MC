@@ -150,7 +150,16 @@ public:
                     BlockCover = 8,   //!< BlockCover (blkpol, only CODE 62231000 asphalt without markings and 45300000 square): a surface instead of turf — gray concrete / stone bricks
                     Spot = 9,         //!< Spot (a source with a modelField) — see above
                     Biome = 10,       //!< Biome (a source with ModelEffect::Swamp) — a wetland overlay, see above
-                    CSRLine = 11 };   //!< CSRLine (csrlin) — a linear cultural object by CODE (82200000 — a fence), see above
+                    CSRLine = 11,     //!< CSRLine (csrlin) — a linear cultural object by CODE (82200000 — a fence), see above
+                    Surface = 12,     //!< Surface (lcapol, only CODE 22410000 bare rock and 72251100 forced sand): a ground
+                                      //!< overlay — the turf under the contour turns to stone with terracotta (rare magma
+                                      //!< outcrops) or to sand with dunes; nothing is built from the polygon itself
+                    Prison = 13,      //!< Prison (a source with ModelEffect::Prison, e.g. pripol) — a bandit refuge
+                                      //!< overlay: every building under the contour becomes a lair (raider interiors, bandit
+                                      //!< loot, banners), iron golem spawners dot the open ground; the polygon builds nothing itself
+                    Military = 14 };  //!< Military base (a source with ModelEffect::Military, e.g. milpol) — a guarded
+                                      //!< territory overlay: a 4-block stone wall along the contour, piglins inside instead
+                                      //!< of residents, piglin loot in the buildings; the polygon builds nothing itself
         //! ParkingLot (rdcpol) — a surface: dark gray concrete instead of turf + parking place markings; the outlines are in paths
 
         QVector<QVector3D> vertices;
