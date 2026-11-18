@@ -1,0 +1,13 @@
+{
+ "Layer": "hdtpnt",
+ "Family": "Point",
+ "Objects": [
+  {
+   "Uid": "d30a52ce-dbe2-5e31-a290-55f40668839a",
+   "Code": 31650000,
+   "Name": "Fountains",
+   "Effect": null,
+   "Model": 3
+  }
+ ]
+}

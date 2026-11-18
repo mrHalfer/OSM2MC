@@ -1,0 +1,55 @@
+{
+ "Layer": "csrpnt",
+ "Family": "Point",
+ "Objects": [
+  {
+   "Uid": "455e7882-ae7d-5f03-ab0c-4e573cbea471",
+   "Code": 51000101,
+   "Name": "Waste bins",
+   "Effect": null,
+   "Model": 5
+  },
+  {
+   "Uid": "30325cbd-9988-5070-b337-0f9b2f348fba",
+   "Code": 53340900,
+   "Name": "Communication towers",
+   "Effect": null,
+   "Model": 4
+  },
+  {
+   "Uid": "845ab360-24c5-538f-801a-d795c930241b",
+   "Code": 53340910,
+   "Name": "Lighting masts",
+   "Effect": null,
+   "Model": 6
+  },
+  {
+   "Uid": "4c21b87b-6b91-5d77-903a-07301aa698ed",
+   "Code": 53520000,
+   "Name": "Monument steles",
+   "Effect": null,
+   "Model": 2
+  },
+  {
+   "Uid": "aa22f435-ed6c-5c9c-9f23-874dbf572ada",
+   "Code": 53520900,
+   "Name": "Memorial statues",
+   "Effect": null,
+   "Model": 1
+  },
+  {
+   "Uid": "01efb4e1-4ac6-5a65-ab77-b6ed1ff304f1",
+   "Code": 53520930,
+   "Name": "Sculptures",
+   "Effect": null,
+   "Model": 8
+  },
+  {
+   "Uid": "0cc357af-965c-507b-bb20-56810fda8c17",
+   "Code": 53520950,
+   "Name": "Benches",
+   "Effect": null,
+   "Model": 7
+  }
+ ]
+}

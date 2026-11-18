@@ -1,0 +1,14 @@
+{
+ "Layer": "csrlin",
+ "Family": "Line",
+ "WidthBase": 2,
+ "Objects": [
+  {
+   "Uid": "81c3d5c9-3161-5939-a1e9-84fb59cb6d68",
+   "Code": 82200000,
+   "Name": "Fences",
+   "Effect": null,
+   "Model": 40
+  }
+ ]
+}

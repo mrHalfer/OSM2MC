@@ -1,0 +1,212 @@
+{
+ "Layer": "bldpol",
+ "Family": "Poly",
+ "MaterialColumn": "MAT",
+ "DbCodes": true,
+ "Objects": [
+  {
+   "Uid": "92c43250-3656-5142-bc2a-cef586bc2751",
+   "Code": 44000000,
+   "Name": "Separate structures",
+   "Effect": null,
+   "Model": 26,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 3
+   }
+  },
+  {
+   "Uid": "41386fe4-1524-55cf-a13c-af7aa4fc6c70",
+   "Code": 44310000,
+   "Name": "Non-residential structure",
+   "Effect": null,
+   "Model": 10,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 3
+   }
+  },
+  {
+   "Uid": "47d47151-e9b0-5ff8-a467-17fb3b4d8047",
+   "Code": 44311000,
+   "Name": "Administrative building",
+   "Effect": null,
+   "Model": 11,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 14
+   }
+  },
+  {
+   "Uid": "14ed0938-4e04-5b63-9038-8de31209019b",
+   "Code": 44312000,
+   "Name": "Educational institution",
+   "Effect": null,
+   "Model": 12,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 15
+   }
+  },
+  {
+   "Uid": "fa561ca3-95a7-5617-8be9-b223b63eb9c0",
+   "Code": 44313000,
+   "Name": "Children's institution",
+   "Effect": null,
+   "Model": 13,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 10
+   }
+  },
+  {
+   "Uid": "73ae8516-c544-5353-9563-7faeb5bc5a39",
+   "Code": 44314000,
+   "Name": "Healthcare institution",
+   "Effect": null,
+   "Model": 14,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 13
+   }
+  },
+  {
+   "Uid": "bc5dda08-4da3-53ae-8119-601c26fde19d",
+   "Code": 44315000,
+   "Name": "Scientific institution",
+   "Effect": null,
+   "Model": 15,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 14
+   }
+  },
+  {
+   "Uid": "9bb25282-dadc-5a0f-87b9-cdd123ed4d21",
+   "Code": 44316000,
+   "Name": "Cultural events building",
+   "Effect": null,
+   "Model": 16,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 15
+   }
+  },
+  {
+   "Uid": "1764e0cb-e9ce-5b37-851b-3b3dae5e3261",
+   "Code": 44317000,
+   "Name": "Museum",
+   "Effect": null,
+   "Model": 17,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 15
+   }
+  },
+  {
+   "Uid": "cdf2cb24-7c01-5d67-abd4-47e765cf3117",
+   "Code": 44318000,
+   "Name": "Shopping center",
+   "Effect": null,
+   "Model": 18,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 15
+   }
+  },
+  {
+   "Uid": "4e8eef45-f9fd-59b2-ae8a-73d002447490",
+   "Code": 44319000,
+   "Name": "Religious building",
+   "Effect": null,
+   "Model": 19,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 18
+   }
+  },
+  {
+   "Uid": "b4d66afd-7a4a-5900-a174-3178e27b526c",
+   "Code": 44330000,
+   "Name": "Railway station",
+   "Effect": null,
+   "Model": 20,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 12
+   }
+  },
+  {
+   "Uid": "2db17880-d308-52ea-98c3-e9c821f99f34",
+   "Code": 44340000,
+   "Name": "Industrial structure",
+   "Effect": null,
+   "Model": 21,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 12
+   }
+  },
+  {
+   "Uid": "e1133505-a77c-50c9-ab2b-dd121ffd1691",
+   "Code": 44400000,
+   "Name": "Residential structure",
+   "Effect": null,
+   "Model": 22,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 29
+   }
+  },
+  {
+   "Uid": "bf2fa46b-8957-592d-9b18-cb4c774340b4",
+   "Code": 44400002,
+   "Name": "Rural structure",
+   "Effect": null,
+   "Model": 23,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 7
+   }
+  },
+  {
+   "Uid": "ee7329f3-1039-5420-9801-72d477ac3966",
+   "Code": 44400100,
+   "Name": "Country house outbuildings",
+   "Effect": null,
+   "Model": 24,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 5
+   }
+  },
+  {
+   "Uid": "2080e7d9-c15c-522e-9154-6ace40d79262",
+   "Code": 44400110,
+   "Name": "Cottage",
+   "Effect": null,
+   "Model": 25,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 15
+   }
+  }
+ ]
+}

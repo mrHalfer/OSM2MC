@@ -1,0 +1,13 @@
+{
+ "Layer": "rdcpnt",
+ "Family": "Point",
+ "Objects": [
+  {
+   "Uid": "0831f5bc-d48d-5a2c-946c-9855aad19677",
+   "Code": 62211000,
+   "Name": "Bus stops",
+   "Effect": null,
+   "Model": 9
+  }
+ ]
+}

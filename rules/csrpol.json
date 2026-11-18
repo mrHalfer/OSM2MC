@@ -1,0 +1,40 @@
+{
+ "Layer": "csrpol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "74f13c21-23ca-5a33-822b-4a8a857f08f2",
+   "Code": 53510000,
+   "Name": "Cemeteries",
+   "Effect": null,
+   "Model": 30,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 1.2
+   }
+  },
+  {
+   "Uid": "9f2ebbc7-c113-58c8-a9d0-1cba52f0951b",
+   "Code": 53700000,
+   "Name": "Sports facilities",
+   "Effect": null,
+   "Model": 31,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL"
+   }
+  },
+  {
+   "Uid": "a063dedf-dfd8-5913-b42d-35307b8a3735",
+   "Code": 53710000,
+   "Name": "Sports and children's playgrounds",
+   "Effect": null,
+   "Model": 32,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL"
+   }
+  }
+ ]
+}

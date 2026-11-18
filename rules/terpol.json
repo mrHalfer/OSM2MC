@@ -1,0 +1,20 @@
+{
+ "Layer": "terpol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "c5455c08-937b-5337-b6a1-5a65ba555cb2",
+   "Code": 53220000,
+   "Name": "Military bases",
+   "Effect": "military",
+   "Model": 60
+  },
+  {
+   "Uid": "49b43ab1-64a1-534b-912a-430649211e18",
+   "Code": 53230000,
+   "Name": "Prisons",
+   "Effect": "prison",
+   "Model": 61
+  }
+ ]
+}

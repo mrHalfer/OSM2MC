@@ -1,0 +1,20 @@
+{
+ "Layer": "lcapol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "a5320ee2-4581-5500-ad2c-d871c825cedf",
+   "Code": 22410000,
+   "Name": "Bare rock",
+   "Effect": null,
+   "Model": 50
+  },
+  {
+   "Uid": "eb89f5c8-c421-5b36-806a-0c58690d4951",
+   "Code": 72251100,
+   "Name": "Sand",
+   "Effect": null,
+   "Model": 51
+  }
+ ]
+}

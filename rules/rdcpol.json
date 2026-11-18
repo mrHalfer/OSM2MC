@@ -1,0 +1,24 @@
+{
+ "Layer": "rdcpol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "d83b1e7e-aaa5-57f6-9c03-b12692c72587",
+   "Code": 62134000,
+   "Name": "Platforms",
+   "Effect": null,
+   "Model": 35,
+   "Rel": {
+    "Auto": true,
+    "Default": 3
+   }
+  },
+  {
+   "Uid": "4f886462-6731-5c48-bb0b-85c02f3b7a42",
+   "Code": 62230000,
+   "Name": "Vehicle parking on motorways and roads",
+   "Effect": null,
+   "Model": 36
+  }
+ ]
+}

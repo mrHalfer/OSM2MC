@@ -1,0 +1,28 @@
+{
+ "Layer": "hdrlin",
+ "Family": "Line",
+ "WidthBase": 3.5,
+ "Objects": [
+  {
+   "Uid": "f968150d-96dd-53b2-8c42-c23de38dcd58",
+   "Code": 31420000,
+   "Name": "Rivers",
+   "Effect": null,
+   "Model": 45
+  },
+  {
+   "Uid": "52bf0ae9-bc76-5183-ab68-91c4580613c4",
+   "Code": 31421000,
+   "Name": "Streams",
+   "Effect": null,
+   "Model": 46
+  },
+  {
+   "Uid": "4c2a017e-35c1-5e1e-9cb0-cdf8b86a09d7",
+   "Code": 31440000,
+   "Name": "Canals",
+   "Effect": null,
+   "Model": 47
+  }
+ ]
+}

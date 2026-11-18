@@ -1,0 +1,20 @@
+{
+ "Layer": "blkpol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "00b0473a-e173-58a6-a675-af255dc67bf4",
+   "Code": 45300000,
+   "Name": "Squares",
+   "Effect": null,
+   "Model": 40
+  },
+  {
+   "Uid": "eb5b2069-9c79-5dc7-a2a9-65f66d9c2b64",
+   "Code": 62231000,
+   "Name": "Asphalt sites",
+   "Effect": null,
+   "Model": 41
+  }
+ ]
+}

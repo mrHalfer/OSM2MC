@@ -1,0 +1,123 @@
+{
+ "Layer": "vegpol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "1ed71730-a840-5101-b6dc-2d21eb6cd514",
+   "Code": 71111110,
+   "Name": "Dense tall forests (ordinary)",
+   "Effect": null,
+   "Model": 70,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 22
+   }
+  },
+  {
+   "Uid": "10e9aa62-2d66-5b43-baf4-6b082cb75a4d",
+   "Code": 71111111,
+   "Name": "Forced taiga plantings",
+   "Effect": null,
+   "Model": 70,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 22
+   },
+   "Internal": true
+  },
+  {
+   "Uid": "e2b8b3f2-768e-5e4c-9ff3-28a4e34123ee",
+   "Code": 71123000,
+   "Name": "Fruit and citrus orchards",
+   "Effect": null,
+   "Model": 71,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 3
+   }
+  },
+  {
+   "Uid": "599afdcf-9bef-5365-879b-4f4d24e6abb5",
+   "Code": 71126000,
+   "Name": "Parks",
+   "Effect": null,
+   "Model": 72,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 17
+   }
+  },
+  {
+   "Uid": "0f0cdc04-cb90-5325-9d76-34883e1caae1",
+   "Code": 71211200,
+   "Name": "Ordinary shrubs",
+   "Effect": null,
+   "Model": 73,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 2
+   }
+  },
+  {
+   "Uid": "21f3c284-1f2c-57d5-b39f-c00391685e0b",
+   "Code": 71222000,
+   "Name": "Vineyards",
+   "Effect": null,
+   "Model": 74,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 1
+   }
+  },
+  {
+   "Uid": "ac3aee58-b60a-54db-a0e8-64bbaf851b5e",
+   "Code": 71314000,
+   "Name": "Herbaceous meadow vegetation",
+   "Effect": null,
+   "Model": 75,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL"
+   }
+  },
+  {
+   "Uid": "5468ad65-cfca-577f-8a05-d2139b89825e",
+   "Code": 71324000,
+   "Name": "Arable land",
+   "Effect": null,
+   "Model": 76,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL"
+   }
+  },
+  {
+   "Uid": "9e93280e-13a3-5681-86a7-15a993ad8107",
+   "Code": 71328000,
+   "Name": "Vegetable gardens",
+   "Effect": null,
+   "Model": 77,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL"
+   }
+  },
+  {
+   "Uid": "21afa370-7492-54c0-9ae6-b85b4adbf2db",
+   "Code": 71329000,
+   "Name": "Lawns and flower beds",
+   "Effect": null,
+   "Model": 78,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL"
+   }
+  }
+ ]
+}

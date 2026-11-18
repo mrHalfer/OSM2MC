@@ -1,0 +1,114 @@
+{
+ "Layer": "rdslin",
+ "Family": "Line",
+ "WidthBase": 4.5,
+ "Objects": [
+  {
+   "Uid": "eb79b8c5-2e31-5bef-b85e-d08bd918906e",
+   "Code": 45210000,
+   "Name": "Main streets",
+   "Effect": null,
+   "Model": 10,
+   "Props": {
+    "WidthScale": 2.5,
+    "Marking": true
+   }
+  },
+  {
+   "Uid": "176c3582-e231-58f9-b08b-ab5e080a3081",
+   "Code": 45220000,
+   "Name": "Major streets",
+   "Effect": null,
+   "Model": 11,
+   "Props": {
+    "WidthScale": 2.0,
+    "Marking": true
+   }
+  },
+  {
+   "Uid": "f042de3e-f422-523e-98b4-82328432577c",
+   "Code": 45230000,
+   "Name": "Other named streets",
+   "Effect": null,
+   "Model": 12,
+   "Props": {
+    "WidthScale": 2.0,
+    "Marking": true
+   }
+  },
+  {
+   "Uid": "d8d26869-70be-5139-b590-d505dadbe43d",
+   "Code": 45260000,
+   "Name": "Footpaths",
+   "Effect": null,
+   "Model": 14
+  },
+  {
+   "Uid": "de5fa62a-cd50-569e-9430-e1614a8fe6f4",
+   "Code": 45261000,
+   "Name": "Bike paths",
+   "Effect": null,
+   "Model": 15
+  },
+  {
+   "Uid": "ad9d45b2-6368-56ec-bdcb-87bf8a84ec71",
+   "Code": 45262000,
+   "Name": "Pedestrian crossing (zebra), an internal tMC code",
+   "Effect": null,
+   "Model": 16
+  },
+  {
+   "Uid": "0b873c9e-2041-5be1-9220-7001fc5714f2",
+   "Code": 45270000,
+   "Name": "Intra-block passages",
+   "Effect": null,
+   "Model": 17
+  },
+  {
+   "Uid": "d9d267c0-9e35-51a2-a2bf-d16961baf3ca",
+   "Code": 61210000,
+   "Name": "Motorways (highways)",
+   "Effect": null,
+   "Model": 10,
+   "Props": {
+    "WidthScale": 2.5,
+    "Marking": true
+   }
+  },
+  {
+   "Uid": "2b92c712-f5fa-507c-96e9-312022234b76",
+   "Code": 61220000,
+   "Name": "Roads with an improved surface (improved highways)",
+   "Effect": null,
+   "Model": 10,
+   "Props": {
+    "WidthScale": 2.5,
+    "Marking": true
+   }
+  },
+  {
+   "Uid": "afe00d19-c20b-5043-aa86-e95db652441f",
+   "Code": 61231000,
+   "Name": "An element of a road interchange",
+   "Effect": null,
+   "Model": 18,
+   "Props": {
+    "WidthScale": 2.0
+   }
+  },
+  {
+   "Uid": "88aa9a3d-aaa9-5336-8f5e-59f0003959c8",
+   "Code": 61330000,
+   "Name": "Field and forest roads",
+   "Effect": null,
+   "Model": 20
+  },
+  {
+   "Uid": "ea834828-41ae-53a8-b7a9-97029c2e3a4a",
+   "Code": 61420000,
+   "Name": "Footpaths and trails",
+   "Effect": null,
+   "Model": 21
+  }
+ ]
+}

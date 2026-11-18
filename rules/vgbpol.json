@@ -1,0 +1,19 @@
+{
+ "Layer": "vgbpol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "29052a69-305f-59dc-9b00-d98816a7b845",
+   "Code": 71126190,
+   "Name": "Courtyard tree plantings",
+   "Effect": null,
+   "Model": 70,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 15
+   },
+   "Internal": true
+  }
+ ]
+}

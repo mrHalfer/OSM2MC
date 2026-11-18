@@ -1,0 +1,48 @@
+{
+ "Layer": "hdrpol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "4f7a7368-3e29-5901-a095-2e92584dc9f0",
+   "Code": 31120000,
+   "Name": "Lakes",
+   "Effect": null,
+   "Model": 45
+  },
+  {
+   "Uid": "226a7641-71b9-5ab0-9d86-8f91006f8044",
+   "Code": 31131000,
+   "Name": "Reservoirs",
+   "Effect": null,
+   "Model": 45
+  },
+  {
+   "Uid": "c1576b97-0b9c-5c10-a9e2-e4fdb4cb8091",
+   "Code": 31132000,
+   "Name": "Ponds",
+   "Effect": null,
+   "Model": 45
+  },
+  {
+   "Uid": "e765ea36-728d-5687-b603-1f9702a34470",
+   "Code": 31133000,
+   "Name": "Swimming pools",
+   "Effect": null,
+   "Model": 45
+  },
+  {
+   "Uid": "5cf2f76b-28d4-5bb8-85a3-6ffdb6e37558",
+   "Code": 31410000,
+   "Name": "Rivers",
+   "Effect": null,
+   "Model": 45
+  },
+  {
+   "Uid": "730c3918-d961-5be9-961c-3977842d14d1",
+   "Code": 31430000,
+   "Name": "Canals and ditches (areas)",
+   "Effect": null,
+   "Model": 45
+  }
+ ]
+}

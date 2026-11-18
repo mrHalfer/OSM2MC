@@ -1,0 +1,42 @@
+{
+ "Layer": "rrslin",
+ "Family": "Line",
+ "WidthBase": 8,
+ "Objects": [
+  {
+   "Uid": "f2032774-1465-5af2-9a73-d786a7add7d5",
+   "Code": 61111000,
+   "Name": "Broad-gauge railways",
+   "Effect": null,
+   "Model": 30
+  },
+  {
+   "Uid": "2b23b02b-42d2-5c19-920e-f55d254deda1",
+   "Code": 61112000,
+   "Name": "Narrow-gauge railways",
+   "Effect": null,
+   "Model": 31
+  },
+  {
+   "Uid": "d1e79fdc-1219-5ddf-b605-a922f31a69ba",
+   "Code": 61113000,
+   "Name": "Monorail railways",
+   "Effect": null,
+   "Model": 32
+  },
+  {
+   "Uid": "b8d17c6e-32ff-5138-934c-d6c67830cb87",
+   "Code": 61123100,
+   "Name": "Underground metro",
+   "Effect": null,
+   "Model": 33
+  },
+  {
+   "Uid": "0d77f4b8-994f-5012-8ab6-fd4d710c460f",
+   "Code": 61124000,
+   "Name": "Tram lines",
+   "Effect": null,
+   "Model": 34
+  }
+ ]
+}

@@ -1,0 +1,13 @@
+{
+ "Layer": "mrspol",
+ "Family": "Poly",
+ "Objects": [
+  {
+   "Uid": "f997f0d7-29fa-570e-af06-1dd6f59e628b",
+   "Code": 72310000,
+   "Name": "Wetlands",
+   "Effect": "swamp",
+   "Model": 55
+  }
+ ]
+}
