@@ -14,6 +14,8 @@
 # it back. Golden world diffs guard that the record is faithful.
 #
 # Usage: py -3 devtools/make_rules.py [--out DIR]   (default out = rules/ in the repo root)
+# One-time migration tool: its inputs (default.t3d, heights.csv, point_models.csv) leave the
+# repository in v2.0 — a rerun is only possible against the v1.x files from the git history.
 import argparse, io, json, os, re, uuid
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -39,10 +41,10 @@ LAYERS = {
     "lcapol":  "Poly",   # ground surfaces (bare rock, sand)
     "terpol":  "Poly",   # territories: military base / prison (effect per code)
 }
-# legacy t3d source order — the loader must enumerate layers in exactly this order (P2);
-# milpol+pripol are merged into terpol at pripol's place; vgbpol is synthetic, never enumerated
+# the v2.0 loader enumerates every catalog layer in exactly this order (the old default.t3d
+# source order: milpol+pripol merged into terpol at pripol's place; vgbpol last, as in the old file)
 T3D_ORDER = ["hdrlin", "rdslin", "rrslin", "bldpol", "blkpol", "csrpol", "csrpnt", "csrlin",
-             "hdtpnt", "rdcpnt", "rdcpol", "hdrpol", "vegpol", "mrspol", "lcapol", "terpol"]
+             "hdtpnt", "rdcpnt", "rdcpol", "hdrpol", "vegpol", "mrspol", "lcapol", "terpol", "vgbpol"]
 
 # the legacy t3d effect bit of the source -> the v2.0 per-code effect (owner: the effect belongs
 # to the object, not to the layer); mrspol/milpol/pripol bits 128/512/256 -> swamp/military/prison
@@ -131,6 +133,11 @@ NAME_FALLBACK = {
 # codes arriving from the tmc_buildings.dat enhancer (the {db:code} rule): the layer takes them
 # with the generic behavior — the loader must not reject unknown db codes
 DB_CODE_LAYERS = {"bldpol"}
+# heights.csv codes no osm rule produces but that can still arrive on a layer which extrudes
+# (the {db:code} enhancer codes, the CODE column of shapefiles from the old classifier): their
+# typical heights are seeded into the catalog before heights.csv dies. Flat layers are not here:
+# a height means nothing on a layer that never reads the REL column. Keys: 2-digit code prefixes.
+HEIGHTS_TO_LAYER = {"44": "bldpol", "51": "csrpol", "52": "csrpol", "53": "csrpol", "71": "vegpol"}
 
 UUID_NS = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/mrHalfer/OSM2MC/rules")
 
@@ -195,6 +202,10 @@ def main():
         rules.setdefault(layer, set()).add(code)
     for layer, codes in SEED_CODES.items():
         rules.setdefault(layer, set()).update(codes)
+    for code in heights:                                   # leftover classifier heights by prefix (HEIGHTS_TO_LAYER)
+        lay = HEIGHTS_TO_LAYER.get(str(code).zfill(8)[:2])
+        if lay:
+            rules.setdefault(lay, set()).add(code)
 
     os.makedirs(a.out, exist_ok=True)
     for fn in sorted(os.listdir(a.out)):
@@ -204,9 +215,7 @@ def main():
     warnings = []
     # the effect comes from the legacy source bit of the layer the code used to live on
     CODE_EFFECT = {53220000: "military", 53230000: "prison", 72310000: "swamp"}
-    # vgbpol is synthetic (tmcgreen creates it at runtime): its file exists for the preview and
-    # the internal codes, the loader never enumerates it (enumerated order = T3D_ORDER without it)
-    for layer in T3D_ORDER + ["vgbpol"]:
+    for layer in T3D_ORDER:
         fam = LAYERS[layer]
         meta = {}
         if fam == "Line" and layer in t3d:
@@ -240,10 +249,10 @@ def main():
             rel = {}
             if col:
                 rel = {"Auto": True, "Column": col}
-                if high:
+                if high is not None:                         # an explicit zero is a height too (lawns, meadows)
                     rel["Default"] = num(high)
-            elif high:
-                rel = {"Auto": True, "Default": num(high)}
+            # a layer without a height column (flat, isGround in the old t3d) never reads a height:
+            # such objects carry no Rel key at all — the old code ignored REL there
             if rel:
                 o["Rel"] = rel
             internal = (layer, code) in INTERNAL_CODES

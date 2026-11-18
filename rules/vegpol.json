@@ -28,6 +28,42 @@
    "Internal": true
   },
   {
+   "Uid": "fe07d289-ae29-5839-a581-df8e7b08e40d",
+   "Code": 71111120,
+   "Name": "Dense low-growing forests",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 10
+   }
+  },
+  {
+   "Uid": "a0f26129-f3d6-501b-9e3c-4b4b35e87edb",
+   "Code": 71113000,
+   "Name": "Forest undergrowth",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 2
+   }
+  },
+  {
+   "Uid": "8cf58a90-37a7-5508-8815-7f3570009a78",
+   "Code": 71122000,
+   "Name": "Plantations of woody industrial crops",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 1
+   }
+  },
+  {
    "Uid": "e2b8b3f2-768e-5e4c-9ff3-28a4e34123ee",
    "Code": 71123000,
    "Name": "Fruit and citrus orchards",
@@ -52,6 +88,54 @@
    }
   },
   {
+   "Uid": "6e3e2b9c-00e2-50b9-9c7b-829f774f75bf",
+   "Code": 71126100,
+   "Name": "Woody vegetation in blocks",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 15
+   }
+  },
+  {
+   "Uid": "f15f8b35-afed-54b3-a49d-4c191dcf2953",
+   "Code": 71126300,
+   "Name": "Woody vegetation in rural blocks",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 10
+   }
+  },
+  {
+   "Uid": "188d8915-51de-5ed1-bc10-589b8897c8de",
+   "Code": 71126500,
+   "Name": "Woody vegetation in dacha blocks",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 10
+   }
+  },
+  {
+   "Uid": "69e103da-54e3-5d5c-9706-155560a59287",
+   "Code": 71211100,
+   "Name": "Thorny shrubs",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 2
+   }
+  },
+  {
    "Uid": "0f0cdc04-cb90-5325-9d76-34883e1caae1",
    "Code": 71211200,
    "Name": "Ordinary shrubs",
@@ -61,6 +145,18 @@
     "Auto": true,
     "Column": "REL",
     "Default": 2
+   }
+  },
+  {
+   "Uid": "8e346cac-95a0-5c2e-869f-20ee73ea5acf",
+   "Code": 71221000,
+   "Name": "Plantations of shrub industrial crops",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 1
    }
   },
   {
@@ -76,6 +172,18 @@
    }
   },
   {
+   "Uid": "2565d8ed-a268-548d-9008-4c6521047afb",
+   "Code": 71313000,
+   "Name": "Herbaceous vegetation, low-grass, moisture-loving",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 0
+   }
+  },
+  {
    "Uid": "ac3aee58-b60a-54db-a0e8-64bbaf851b5e",
    "Code": 71314000,
    "Name": "Herbaceous meadow vegetation",
@@ -83,7 +191,32 @@
    "Model": 75,
    "Rel": {
     "Auto": true,
-    "Column": "REL"
+    "Column": "REL",
+    "Default": 0
+   }
+  },
+  {
+   "Uid": "e2639a82-e251-5bf4-966b-4a2ac5920852",
+   "Code": 71321000,
+   "Name": "Plantations of herbaceous industrial crops",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 0
+   }
+  },
+  {
+   "Uid": "3ea6be41-1c4a-567a-869f-262c84a55441",
+   "Code": 71323000,
+   "Name": "Hotbeds, orangeries, greenhouses",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 4
    }
   },
   {
@@ -94,7 +227,8 @@
    "Model": 76,
    "Rel": {
     "Auto": true,
-    "Column": "REL"
+    "Column": "REL",
+    "Default": 0
    }
   },
   {
@@ -105,7 +239,8 @@
    "Model": 77,
    "Rel": {
     "Auto": true,
-    "Column": "REL"
+    "Column": "REL",
+    "Default": 0
    }
   },
   {
@@ -116,7 +251,8 @@
    "Model": 78,
    "Rel": {
     "Auto": true,
-    "Column": "REL"
+    "Column": "REL",
+    "Default": 0
    }
   }
  ]

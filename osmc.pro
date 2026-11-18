@@ -89,6 +89,7 @@ HEADERS += \
     input/tmcproject.h \
     input/t3dsettings.h \
     osm/tmcosmrules.h \
+    osm/tmcrulesrepo.h \
     osm/tmcrel.h \
     osm/tmcenhancer.h \
     osm/tmcaddress.h \
@@ -159,6 +160,7 @@ SOURCES += \
     input/tmcproject.cpp \
     input/t3dsettings.cpp \
     osm/tmcosmrules.cpp \
+    osm/tmcrulesrepo.cpp \
     osm/tmcrel.cpp \
     osm/tmcenhancer.cpp \
     osm/tmcaddress.cpp \
@@ -211,6 +213,13 @@ for(f, TMC_RES) {
 win32: QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/templates/*.bin)\" \"$$shell_path($$TMC_OUTDIR/assets)\" >nul
 else:  QMAKE_POST_LINK += mkdir -p $$shell_path($$TMC_OUTDIR/assets) && cp -u $$PWD/resources/templates/*.bin $$shell_path($$TMC_OUTDIR/assets)
 QMAKE_POST_LINK += $$escape_expand(\n\t)
+# v2.0: the rules catalog (rules/*.json) is copied as a folder next to the exe (the loader reads
+# <exe>/rules); it stays a real folder, not a resource — the user's regenerated catalog must win.
+exists($$PWD/rules) {
+    win32: QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/rules/*.json)\" \"$$shell_path($$TMC_OUTDIR/rules)\" >nul
+    else:  QMAKE_POST_LINK += mkdir -p $$shell_path($$TMC_OUTDIR/rules) && cp -u $$PWD/rules/*.json $$shell_path($$TMC_OUTDIR/rules)
+    QMAKE_POST_LINK += $$escape_expand(\n\t)
+}
 # The GDAL runtime (gdal.dll and its dependencies, gdal-data, projlib, gdalplugins) is not in the repository (about 100 MB): if it is put into <GDAL folder>/bin
 # (third_party/gdal/bin by default, see third_party/gdal/README.md), it is copied next to the exe too, so the program starts right from Qt Creator.
 # Windows only: on Linux the system libgdal already brings its own data files.

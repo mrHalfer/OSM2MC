@@ -3,6 +3,162 @@
  "Family": "Poly",
  "Objects": [
   {
+   "Uid": "bfac24a5-5fb8-5b63-905c-ad1dc50aa795",
+   "Code": 51111000,
+   "Name": "Quarries",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 0
+   }
+  },
+  {
+   "Uid": "7617b0b8-3560-5b61-ac83-eb88e9584a0c",
+   "Code": 51123000,
+   "Name": "Spoil heaps and dumps",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 21
+   }
+  },
+  {
+   "Uid": "cce9a11f-adb6-5bd4-b5ab-0421e67ee4ec",
+   "Code": 51130000,
+   "Name": "Industrial enterprises (plants, factories, combines)",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 14
+   }
+  },
+  {
+   "Uid": "f0db6819-7eb6-5e4d-ab4e-817fd321c246",
+   "Code": 51133000,
+   "Name": "Production facilities",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 14
+   }
+  },
+  {
+   "Uid": "daa91519-5737-50be-a1dc-a64ab13206f4",
+   "Code": 51220000,
+   "Name": "Gas stations and fuel pumps",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 4
+   }
+  },
+  {
+   "Uid": "451fa99e-467b-508d-80db-61063d107d7c",
+   "Code": 51230000,
+   "Name": "Separate tanks, vats and gasholders",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 5
+   }
+  },
+  {
+   "Uid": "c06b6923-76d6-588a-8a00-265f9dea09dc",
+   "Code": 51410000,
+   "Name": "Capital tower-type structures",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 28
+   }
+  },
+  {
+   "Uid": "e181be83-2d6b-5175-9ada-72d93b9b247f",
+   "Code": 51460000,
+   "Name": "Electric substations",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 5
+   }
+  },
+  {
+   "Uid": "a40a6292-f826-5e01-b7fe-f2ad40a8dabf",
+   "Code": 51480000,
+   "Name": "Settling ponds",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 0
+   }
+  },
+  {
+   "Uid": "c45639ae-f60a-596b-a31b-ef94c633e156",
+   "Code": 52100000,
+   "Name": "Agricultural enterprises (farms, stations, workshops)",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 5
+   }
+  },
+  {
+   "Uid": "a81f6222-8606-5c7f-a2d5-1ee4dc9d2cf6",
+   "Code": 52400000,
+   "Name": "Apiaries",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 0
+   }
+  },
+  {
+   "Uid": "df407253-60ed-54ff-a58a-4373f4bdc98e",
+   "Code": 53110000,
+   "Name": "Airports",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 0
+   }
+  },
+  {
+   "Uid": "1a2ae9a0-5416-5afa-8571-323b8f2639d1",
+   "Code": 53400000,
+   "Name": "Religious structures",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 23
+   }
+  },
+  {
    "Uid": "74f13c21-23ca-5a33-822b-4a8a857f08f2",
    "Code": 53510000,
    "Name": "Cemeteries",
@@ -15,6 +171,30 @@
    }
   },
   {
+   "Uid": "ad427599-27c4-5a25-91b7-f9bb82e328e6",
+   "Code": 53530000,
+   "Name": "Other monuments, memorials, cairns, stone pillars",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 3
+   }
+  },
+  {
+   "Uid": "cbd1cc34-0862-5576-b923-a24e67681bff",
+   "Code": 53600000,
+   "Name": "Scientific, educational, medical and other institutions",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 17
+   }
+  },
+  {
    "Uid": "9f2ebbc7-c113-58c8-a9d0-1cba52f0951b",
    "Code": 53700000,
    "Name": "Sports facilities",
@@ -22,7 +202,8 @@
    "Model": 31,
    "Rel": {
     "Auto": true,
-    "Column": "REL"
+    "Column": "REL",
+    "Default": 0
    }
   },
   {
@@ -33,7 +214,8 @@
    "Model": 32,
    "Rel": {
     "Auto": true,
-    "Column": "REL"
+    "Column": "REL",
+    "Default": 0
    }
   }
  ]

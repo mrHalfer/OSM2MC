@@ -7,11 +7,7 @@
    "Code": 62134000,
    "Name": "Platforms",
    "Effect": null,
-   "Model": 35,
-   "Rel": {
-    "Auto": true,
-    "Default": 3
-   }
+   "Model": 35
   },
   {
    "Uid": "4f886462-6731-5c48-bb0b-85c02f3b7a42",

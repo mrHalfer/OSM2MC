@@ -17,6 +17,18 @@
    }
   },
   {
+   "Uid": "65054ab1-ee78-5c1f-b32e-119e3ac4e6f7",
+   "Code": 44300000,
+   "Name": "Ruins",
+   "Effect": null,
+   "Model": 27,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 3
+   }
+  },
+  {
    "Uid": "41386fe4-1524-55cf-a13c-af7aa4fc6c70",
    "Code": 44310000,
    "Name": "Non-residential structure",
@@ -137,6 +149,18 @@
    }
   },
   {
+   "Uid": "30140d8d-0704-5250-8817-c637345342f8",
+   "Code": 44320000,
+   "Name": "Building under construction",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 4
+   }
+  },
+  {
    "Uid": "b4d66afd-7a4a-5900-a174-3178e27b526c",
    "Code": 44330000,
    "Name": "Railway station",
@@ -161,6 +185,18 @@
    }
   },
   {
+   "Uid": "918f0cd4-b599-54ca-95b9-31057cb69dcc",
+   "Code": 44350000,
+   "Name": "Courtyard",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 0
+   }
+  },
+  {
    "Uid": "e1133505-a77c-50c9-ab2b-dd121ffd1691",
    "Code": 44400000,
    "Name": "Residential structure",
@@ -170,6 +206,18 @@
     "Auto": true,
     "Column": "REL",
     "Default": 29
+   }
+  },
+  {
+   "Uid": "146c39fd-10f8-58db-93f1-d1116302a9d4",
+   "Code": 44400001,
+   "Name": "Multi-storey residential structure",
+   "Effect": null,
+   "Model": 0,
+   "Rel": {
+    "Auto": true,
+    "Column": "REL",
+    "Default": 32
    }
   },
   {
