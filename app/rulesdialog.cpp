@@ -1,6 +1,7 @@
 #include "rulesdialog.h"
 #include <QtWidgets>
 #include <functional>
+#include "osm/tmcrulesrepo.h"
 
 // The one reference file the dialog edits is the OSM rules of the rules catalog (rules/osmrules.json). The tab keeps
 // the whole file as a QJsonObject and re-emit it on save: unknown keys ("_help", "greenery", "neighbors" and any
@@ -261,9 +262,20 @@ public:
                                "then from the typical height of the code in the rules catalog; a fixed floor count can be written instead"));
         rightLay->addLayout(toolRow({ mFieldsAdd, mFieldsDel, mRelAuto }));
         split->addWidget(right);
+
+        // what the selected rule builds: the CODE resolved in the rules catalog, live
+        QWidget* cat = new QWidget;
+        QVBoxLayout* catLay = new QVBoxLayout(cat);
+        catLay->setContentsMargins(0, 0, 0, 0);
+        catLay->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "Resolution in the rules catalog")));
+        mCatalog = new QTextBrowser;
+        mCatalog->setOpenExternalLinks(false);
+        catLay->addWidget(mCatalog, 1);
+        split->addWidget(cat);
         split->setStretchFactor(0, 2);
         split->setStretchFactor(1, 3);
-        split->setSizes({ 460, 640 });
+        split->setStretchFactor(2, 2);
+        split->setSizes({ 460, 640, 300 });
 
         QVBoxLayout* lay = new QVBoxLayout(this);
         lay->setContentsMargins(6, 6, 6, 6);
@@ -453,6 +465,7 @@ private:
         }
         mFilling = false;
         showFieldHelp(mFields->currentRow());
+        updateCatalogHint();
     }
 
     static void fillTable(QTableWidget* t, const QJsonObject& o)
@@ -611,6 +624,7 @@ private:
             it->setText(3, o.value(QStringLiteral("note")).toString());
             mTree->setSortingEnabled(true);
         }
+        updateCatalogHint();
         markDirty();
     }
 
@@ -651,6 +665,110 @@ private:
         markDirty();
     }
 
+    void updateCatalogHint()                               //!< the live "what does this code build" pane
+    {
+        TmcRulesRepo& repo = TmcRulesRepo::instance();
+        if (!repo.isLoaded())
+        {   // the dialog may open before the first export or preview — nobody has read the catalog yet
+            const QString dir = TmcRulesRepo::discover();
+            if (!dir.isEmpty())
+            {
+                QString e;
+                repo.load(dir, &e);
+            }
+        }
+        QString html;
+        const QJsonObject o = mCur >= 0 ? ruleAt(mCur) : QJsonObject();
+        const QString layer = o.value(QStringLiteral("layer")).toString().trimmed().toLower();
+        if (mCur < 0)
+            html = QCoreApplication::translate("RulesDialog", "Select a rule - what its code builds on the layer shows here");
+        else if (layer.isEmpty())
+            html = QCoreApplication::translate("RulesDialog", "The rule has no layer - it matches nothing");
+        else if (layer == QLatin1String("-"))
+            html = QCoreApplication::translate("RulesDialog", "The object is dropped by this rule (the rules below are not checked)");
+        else if (!repo.isLoaded())
+            html = QCoreApplication::translate("RulesDialog", "The rules catalog was not found next to the program");
+        else
+        {   // the CODE being typed lives in the fields table, not in the committed rule yet
+            QString code;
+            for (int r = 0; r < mFields->rowCount(); ++r)
+            {
+                const QComboBox* cb = qobject_cast<const QComboBox*>(mFields->cellWidget(r, 0));
+                if (cb && cb->currentText().trimmed().toUpper() == QLatin1String("CODE"))
+                { code = cellText(mFields, r, 1).trimmed(); break; }
+            }
+            if (code.isEmpty())
+                html = QCoreApplication::translate("RulesDialog", "The rule sets no CODE - the exporter falls back to the generic behavior of the layer");
+            else if (code.contains(QLatin1Char('{')))
+                html = QCoreApplication::translate("RulesDialog", "The code comes from the tags - it resolves per object, not per rule");
+            else
+            {
+                bool ok = false;
+                const int value = code.toInt(&ok);
+                const TmcRulesRepo::Layer* lay = repo.layer(layer);
+                if (!ok)
+                    html = QCoreApplication::translate("RulesDialog", "\"%1\" is not a code number").arg(code.toHtmlEscaped());
+                else if (!lay)
+                    html = QCoreApplication::translate("RulesDialog", "Layer \"%1\" is not in the catalog - the exporter warns and falls back to the generic behavior").arg(layer.toHtmlEscaped());
+                else if (const TmcRulesRepo::Object* ob = repo.object(layer, value))
+                    html = catalogHtml(*lay, *ob);
+                else if (const TmcRulesRepo::Object* other = repo.objectByCode(value))
+                    html = QCoreApplication::translate("RulesDialog", "This code is cataloged as \"%1\" on another layer - here it is unknown (generic behavior + a warning)").arg(other->name.toHtmlEscaped());
+                else
+                    html = QCoreApplication::translate("RulesDialog", "Unknown code - the exporter warns and the object keeps the generic behavior of \"%1\"").arg(layer.toHtmlEscaped());
+            }
+        }
+        mCatalog->setHtml(QStringLiteral("<div>%1</div>").arg(html));
+    }
+
+    static QString catalogHtml(const TmcRulesRepo::Layer& lay, const TmcRulesRepo::Object& ob)
+    {
+        static const char* const kSpotNames[] = { "statue", "stele", "fountain", "communication tower", "composter",
+                                                  "light pole", "bench", "sculpture", "bus stop" };        // ModelPoint 1..9 (see exportrun.cpp)
+        QString html = QStringLiteral("<b>%1</b><br>code %2").arg(ob.name.toHtmlEscaped()).arg(ob.code);
+        const char* family = lay.family == TmcRulesRepo::FamilyLine ? "line"
+                           : lay.family == TmcRulesRepo::FamilyPoint ? "point" : "polygon";
+        html += QStringLiteral("<br>%1 layer").arg(QCoreApplication::translate("RulesDialog", family));
+        if (!ob.effect.isEmpty())
+            html += QStringLiteral("<br>%1 effect").arg(ob.effect.toHtmlEscaped());
+        if (lay.family == TmcRulesRepo::FamilyPoint)
+        {
+            const QString name = ob.model >= 1 && ob.model <= 9
+                               ? QString::fromLatin1(kSpotNames[ob.model - 1])
+                               : QCoreApplication::translate("RulesDialog", "unknown figure %1").arg(ob.model);
+            html += QStringLiteral("<br>model: %1 (No.%2)").arg(name).arg(ob.model);
+        }
+        switch (ob.relMode)
+        {
+        case TmcRulesRepo::RelAuto:
+            if (!ob.relColumn.isEmpty())
+                html += ob.relHasDefault
+                    ? QStringLiteral("<br>height: column %1, the code's Default %2 m").arg(ob.relColumn.toHtmlEscaped()).arg(ob.relDefault)
+                    : QStringLiteral("<br>height: column %1, no Default for the code - the 6-floor fallback").arg(ob.relColumn.toHtmlEscaped());
+            else
+                html += ob.relHasDefault
+                    ? QStringLiteral("<br>height: the code's Default %1 m").arg(ob.relDefault)
+                    : QStringLiteral("<br>height: no Default for the code - the 6-floor fallback");
+            break;
+        case TmcRulesRepo::RelFixed:
+            html += QStringLiteral("<br>height: strict %1 m").arg(ob.relValue);
+            break;
+        default:
+            html += QStringLiteral("<br>%1").arg(QCoreApplication::translate("RulesDialog", "flat - the height is not read"));
+            break;
+        }
+        if (!lay.materialColumn.isEmpty())
+            html += QStringLiteral("<br>material: column %1").arg(lay.materialColumn.toHtmlEscaped());
+        const double ws = TmcRulesRepo::widthScale(ob);
+        if (!qFuzzyCompare(ws, 1.0))
+            html += QStringLiteral("<br>width x%1").arg(ws);
+        if (TmcRulesRepo::marking(ob))
+            html += QStringLiteral("<br>%1").arg(QCoreApplication::translate("RulesDialog", "road markings"));
+        if (ob.internal)
+            html += QStringLiteral("<br><i>%1</i>").arg(QCoreApplication::translate("RulesDialog", "internal code - the exporter synthesizes such objects, the OSM data never carries it"));
+        return html;
+    }
+
     QJsonObject mRoot;
     QJsonArray mRules;
     QTreeWidget* mTree = nullptr;
@@ -662,6 +780,7 @@ private:
     QCheckBox* mCont = nullptr;
     QTableWidget *mWhen = nullptr, *mFields = nullptr;
     QPlainTextEdit* mFieldHelp = nullptr;
+    QTextBrowser* mCatalog = nullptr;
     QPushButton *mWhenAdd = nullptr, *mWhenDel = nullptr, *mFieldsAdd = nullptr, *mFieldsDel = nullptr, *mRelAuto = nullptr;
     int mCur = -1;
     bool mFilling = false;
