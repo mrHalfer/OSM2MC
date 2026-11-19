@@ -44,7 +44,7 @@ Instead of the online map you can use a file: type the path to an OpenStreetMap 
 | **Climate** | Biomes, ground and trees according to the climate zone; *Auto* works it out from the coordinates. |
 | **Boundary, Spawn, Stronghold, Ancient City, Pale Garden** | Map tools: outline the area, place the player's spawn, mark the secret entrances. *Remove the boundary* and *Reset the marks* undo them; *Copy /tp* copies the teleport command to the marked point. |
 | **3D figures** | The 3D model list with a voxel preview (plus a button to load any STL): pick a model, click on the map and the figure stands there; a click on its mark opens the settings of this copy (material, azimuth, size). `stl/landmarks.json` is never changed; the figures live in the `.tmc` project. |
-| **Export rules** | A visual editor of the files in the "Tuning" section below - the OSM tag rules, the layer sources, the point models (with a 3D preview) and the typical heights - no text editor needed; the next export reads the saved files right away. |
+| **Export rules** | A visual editor of `rules/osmrules.json` - no text editor needed: a live pane shows what the rule's code builds on its layer (family, effect, point figure, heights, materials), the "Model..." button picks a catalog spot structure with a 3D preview, the "As" field chooses the shape a point or a line makes (structure, area, crosswalk); the next export reads the saved rules right away. |
 | **Open project… / Save project…** | Save and restore your work (the map view, the boundary, the marks, the options) in a `.tmc` file. |
 | **Language** | English, Russian or Chinese, switches at once; by default the system language is used. |
 
