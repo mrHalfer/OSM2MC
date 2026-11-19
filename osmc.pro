@@ -76,6 +76,7 @@ HEADERS += \
     app/exportmeta.h \
     app/exportsettingsdialog.h \
     app/landmarkdialog.h \
+    app/modelpreview.h \
     app/rulesdialog.h \
     app/tmcrun.h \
     app/mappreview.h \

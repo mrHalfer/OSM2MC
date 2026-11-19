@@ -2452,220 +2452,274 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
 <context>
     <name>RulesDialog</name>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="171"/>
+        <location filename="../app/rulesdialog.cpp" line="271"/>
         <source>OSM rules</source>
         <translation>OSM 规则</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="180"/>
+        <location filename="../app/rulesdialog.cpp" line="280"/>
         <source>Filter (a word from a line)</source>
         <translation>筛选（行中的文字）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="184"/>
+        <location filename="../app/rulesdialog.cpp" line="284"/>
         <source>Layer OSM</source>
         <translation>OSM 图层</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="184"/>
+        <location filename="../app/rulesdialog.cpp" line="284"/>
         <source>Layer OSMC</source>
         <translation>OSMC 图层</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="184"/>
-        <location filename="../app/rulesdialog.cpp" line="208"/>
+        <location filename="../app/rulesdialog.cpp" line="284"/>
+        <location filename="../app/rulesdialog.cpp" line="308"/>
         <source>Comment</source>
         <translation>注释</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="195"/>
+        <location filename="../app/rulesdialog.cpp" line="295"/>
         <source>Add</source>
         <translation>添加</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="196"/>
+        <location filename="../app/rulesdialog.cpp" line="296"/>
         <source>Duplicate</source>
         <translation>复制</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="197"/>
+        <location filename="../app/rulesdialog.cpp" line="297"/>
         <source>Delete</source>
         <translation>删除</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="198"/>
+        <location filename="../app/rulesdialog.cpp" line="298"/>
         <source>Up</source>
         <translation>上移</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="199"/>
+        <location filename="../app/rulesdialog.cpp" line="299"/>
         <source>Down</source>
         <translation>下移</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="212"/>
+        <location filename="../app/rulesdialog.cpp" line="312"/>
         <source>From</source>
         <translation>来自</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="216"/>
+        <location filename="../app/rulesdialog.cpp" line="316"/>
         <source>Layer</source>
         <translation>图层</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="226"/>
+        <location filename="../app/rulesdialog.cpp" line="326"/>
         <source>As</source>
         <translation>作为</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="232"/>
         <source>as is</source>
-        <translation>保持原样</translation>
+        <translation type="vanished">保持原样</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="234"/>
+        <location filename="../app/rulesdialog.cpp" line="328"/>
+        <source>What the exporter builds from the matched object; the numbers are meters</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="337"/>
+        <source>Size in meters: the side of the square, the length of the crosswalk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="341"/>
         <source>Pass</source>
         <translation>轮次</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="237"/>
+        <location filename="../app/rulesdialog.cpp" line="344"/>
         <source>2 — a guess for objects not recognized on pass 1 (they see the nb:* tags about neighbors)</source>
         <translation>2 — 对第 1 轮未识别对象的猜测（可见关于邻居的 nb:* 标签）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="239"/>
+        <location filename="../app/rulesdialog.cpp" line="346"/>
         <source>Continue (the object may also match the rules below)</source>
         <translation>继续（对象也可匹配下方规则）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="243"/>
+        <location filename="../app/rulesdialog.cpp" line="348"/>
+        <source>Structure...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="349"/>
+        <source>Choose a catalog spot structure for this point rule - the CODE is set (and the layer too when the structure lives on another one)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="354"/>
         <source>Conditions — every tag must match; an empty condition means &quot;the tag exists&quot;</source>
         <translation>条件 — 每个标签都必须匹配；空条件表示&quot;标签存在&quot;</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="244"/>
+        <location filename="../app/rulesdialog.cpp" line="355"/>
         <source>Tag</source>
         <translation>标签</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="244"/>
+        <location filename="../app/rulesdialog.cpp" line="355"/>
         <source>Condition (JSON: &quot;yes&quot;, [&quot;a&quot;,&quot;b&quot;], &quot;!a&quot;, &quot;&gt;=3&quot;, &quot;~regex&quot;, &quot;*&quot;, &quot;-&quot;)</source>
         <translation>条件 (JSON: &quot;yes&quot;, [&quot;a&quot;,&quot;b&quot;], &quot;!a&quot;, &quot;&gt;=3&quot;, &quot;~regex&quot;, &quot;*&quot;, &quot;-&quot;)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="246"/>
-        <location filename="../app/rulesdialog.cpp" line="258"/>
+        <location filename="../app/rulesdialog.cpp" line="357"/>
+        <location filename="../app/rulesdialog.cpp" line="369"/>
         <source>Add row</source>
         <translation>添加行</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="247"/>
-        <location filename="../app/rulesdialog.cpp" line="259"/>
+        <location filename="../app/rulesdialog.cpp" line="358"/>
+        <location filename="../app/rulesdialog.cpp" line="370"/>
         <source>Remove row</source>
         <translation>删除行</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="250"/>
+        <location filename="../app/rulesdialog.cpp" line="361"/>
         <source>Fields of the layer — a value or a {tag} template</source>
         <translation>图层字段 — 值或 {tag} 模板</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="251"/>
+        <location filename="../app/rulesdialog.cpp" line="362"/>
         <source>Field</source>
         <translation>字段</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="251"/>
+        <location filename="../app/rulesdialog.cpp" line="362"/>
         <source>Value or template</source>
         <translation>值或模板</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="260"/>
+        <location filename="../app/rulesdialog.cpp" line="371"/>
         <source>REL = &quot;auto&quot;</source>
         <translation>REL = &quot;auto&quot;</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="261"/>
+        <location filename="../app/rulesdialog.cpp" line="372"/>
         <source>auto - the height is taken from the OSM tags (height, building:levels, min_height), then from the typical height of the code in the rules catalog; a fixed floor count can be written instead</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="270"/>
+        <location filename="../app/rulesdialog.cpp" line="381"/>
         <source>Resolution in the rules catalog</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="353"/>
+        <location filename="../app/rulesdialog.cpp" line="474"/>
         <source>the building height in floors; &quot;auto&quot; - from the OSM tags, then from the typical height of the code in the rules catalog</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="684"/>
+        <location filename="../app/rulesdialog.cpp" line="803"/>
+        <source>Point (as is)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="804"/>
+        <source>Square footprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="805"/>
+        <source>Crosswalk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="809"/>
+        <source>Line (as is)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="810"/>
+        <source>Polygon (a closed line)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="814"/>
+        <source>Polygon (as is)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="815"/>
+        <source>Line (a polygon boundary)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="915"/>
         <source>Select a rule - what its code builds on the layer shows here</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="686"/>
+        <location filename="../app/rulesdialog.cpp" line="917"/>
         <source>The rule has no layer - it matches nothing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="688"/>
+        <location filename="../app/rulesdialog.cpp" line="919"/>
         <source>The object is dropped by this rule (the rules below are not checked)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="690"/>
+        <location filename="../app/rulesdialog.cpp" line="921"/>
         <source>The rules catalog was not found next to the program</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="701"/>
+        <location filename="../app/rulesdialog.cpp" line="932"/>
         <source>The rule sets no CODE - the exporter falls back to the generic behavior of the layer</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="703"/>
+        <location filename="../app/rulesdialog.cpp" line="934"/>
         <source>The code comes from the tags - it resolves per object, not per rule</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="710"/>
+        <location filename="../app/rulesdialog.cpp" line="941"/>
         <source>&quot;%1&quot; is not a code number</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="712"/>
+        <location filename="../app/rulesdialog.cpp" line="943"/>
         <source>Layer &quot;%1&quot; is not in the catalog - the exporter warns and falls back to the generic behavior</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="716"/>
+        <location filename="../app/rulesdialog.cpp" line="954"/>
         <source>This code is cataloged as &quot;%1&quot; on another layer - here it is unknown (generic behavior + a warning)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="718"/>
+        <location filename="../app/rulesdialog.cpp" line="956"/>
         <source>Unknown code - the exporter warns and the object keeps the generic behavior of &quot;%1&quot;</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="738"/>
+        <location filename="../app/rulesdialog.cpp" line="978"/>
         <source>unknown figure %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="757"/>
+        <location filename="../app/rulesdialog.cpp" line="998"/>
         <source>flat - the height is not read</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="766"/>
+        <location filename="../app/rulesdialog.cpp" line="1007"/>
         <source>road markings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="768"/>
+        <location filename="../app/rulesdialog.cpp" line="1009"/>
         <source>internal code - the exporter synthesizes such objects, the OSM data never carries it</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2674,17 +2728,17 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">auto — 高度先取 OSM 标签（height、building:levels、min_height），再按代码查典型高度表 heights.csv；也可改写固定层数</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="329"/>
+        <location filename="../app/rulesdialog.cpp" line="450"/>
         <source>JSON error (%1, position %2)</source>
         <translation>JSON 错误（%1，位置 %2）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="342"/>
+        <location filename="../app/rulesdialog.cpp" line="463"/>
         <source>the file was not loaded — nothing to save</source>
         <translation>文件未加载 — 没有可保存的内容</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="352"/>
+        <location filename="../app/rulesdialog.cpp" line="473"/>
         <source>the classifier code: what the object is (drives blocks, roads, vegetation)</source>
         <translation>分类代码：对象是什么（决定方块、道路、植被）</translation>
     </message>
@@ -2693,112 +2747,112 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">建筑高度（层数）；&quot;auto&quot; — 先取 OSM 标签，再查 heights.csv 表</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="354"/>
+        <location filename="../app/rulesdialog.cpp" line="475"/>
         <source>the building facade material</source>
         <translation>建筑外墙材料</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="355"/>
+        <location filename="../app/rulesdialog.cpp" line="476"/>
         <source>the building:part marker (the outline is a fragment of a building)</source>
         <translation>building:part 标记（轮廓是建筑的一部分）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="356"/>
+        <location filename="../app/rulesdialog.cpp" line="477"/>
         <source>helper: the part&apos;s own height ({height}||{building:levels}); an empty PH lets the part inherit the host building height</source>
         <translation>辅助字段:部件自身高度 ({height}||{building:levels}); PH 为空时部件继承主建筑高度</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="357"/>
+        <location filename="../app/rulesdialog.cpp" line="478"/>
         <source>the lowest height of a building part, meters (min_height)</source>
         <translation>建筑部件的最低高度（米，min_height）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="358"/>
+        <location filename="../app/rulesdialog.cpp" line="479"/>
         <source>the lowest floor of a building part (min_level)</source>
         <translation>建筑部件的最低层（min_level）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="359"/>
+        <location filename="../app/rulesdialog.cpp" line="480"/>
         <source>the roof kind: &quot;onion&quot; (a church dome) or &quot;skillion&quot; (one-slope)</source>
         <translation>屋顶类型：&quot;onion&quot;（教堂穹顶）或 &quot;skillion&quot;（单坡）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="360"/>
+        <location filename="../app/rulesdialog.cpp" line="481"/>
         <source>the onion/skillion roof height, meters</source>
         <translation>洋葱头/单坡屋顶高度（米）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="361"/>
+        <location filename="../app/rulesdialog.cpp" line="482"/>
         <source>the skillion roof direction, degrees</source>
         <translation>单坡屋顶朝向（度数）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="362"/>
+        <location filename="../app/rulesdialog.cpp" line="483"/>
         <source>the church dome color (a name known to the exporter)</source>
         <translation>教堂穹顶颜色（导出器认识的颜色名）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="363"/>
+        <location filename="../app/rulesdialog.cpp" line="484"/>
         <source>the church dome material</source>
         <translation>教堂穹顶材料</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="364"/>
+        <location filename="../app/rulesdialog.cpp" line="485"/>
         <source>1 - the building has an elevator shaft (1-block inner walls)</source>
         <translation>1 — 建筑有电梯井（1 方块宽的内墙）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="365"/>
+        <location filename="../app/rulesdialog.cpp" line="486"/>
         <source>the OSM bridge: not empty and not &quot;no&quot; - an elevated roadway</source>
         <translation>OSM 桥梁：非空且非 &quot;no&quot; — 高架道路</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="366"/>
+        <location filename="../app/rulesdialog.cpp" line="487"/>
         <source>the OSM tunnel: not empty and not &quot;no&quot; - an underground roadway</source>
         <translation>OSM 隧道：非空且非 &quot;no&quot; — 地下道路</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="367"/>
+        <location filename="../app/rulesdialog.cpp" line="488"/>
         <source>the OSM level - a junction height level</source>
         <translation>OSM level — 交叉路口的层级</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="368"/>
+        <location filename="../app/rulesdialog.cpp" line="489"/>
         <source>the OSM layer - which of the overlapping lines stands on top</source>
         <translation>OSM layer — 重叠线中哪条在上</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="369"/>
+        <location filename="../app/rulesdialog.cpp" line="490"/>
         <source>not empty and not &quot;no&quot; - the railway has a contact wire</source>
         <translation>非空且非 &quot;no&quot; — 铁路有接触网</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="370"/>
+        <location filename="../app/rulesdialog.cpp" line="491"/>
         <source>the street name of the address plate (usually filled automatically from addr:*)</source>
         <translation>地址牌街名（通常由 addr:* 自动填写）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="371"/>
+        <location filename="../app/rulesdialog.cpp" line="492"/>
         <source>the street type word of the address (&quot;street&quot;, &quot;avenue&quot;, ...)</source>
         <translation>地址的街道类型词（&quot;street&quot;、&quot;avenue&quot; 等）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="372"/>
+        <location filename="../app/rulesdialog.cpp" line="493"/>
         <source>the house number of the address plate (usually filled automatically from addr:*)</source>
         <translation>地址牌门牌号（通常由 addr:* 自动填写）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="373"/>
+        <location filename="../app/rulesdialog.cpp" line="494"/>
         <source>the second half of the house number (the plate shows NUMBR+ADDNUM)</source>
         <translation>门牌号的后半部分（牌上显示 NUMBR+ADDNUM）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="374"/>
+        <location filename="../app/rulesdialog.cpp" line="495"/>
         <source>a custom column - it can be read by the 3D settings (their Field/Lift field/Absorption columns)</source>
         <translation>自定义列 — 3D 设置可读取它（其 Field/Lift field/Absorption 列）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="517"/>
+        <location filename="../app/rulesdialog.cpp" line="639"/>
         <source>Click a field row - what the field does shows here</source>
         <translation>点击字段行 — 此处显示其用途</translation>
     </message>
@@ -2835,12 +2889,14 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">军事基地</translation>
     </message>
     <message>
+        <location filename="../app/modelpreview.h" line="146"/>
         <source>No preview for model number %1</source>
-        <translation type="vanished">模型编号 %1 没有预览</translation>
+        <translation>模型编号 %1 没有预览</translation>
     </message>
     <message>
+        <location filename="../app/modelpreview.h" line="147"/>
         <source>Select a row - the model that the exporter builds on such a point shows here</source>
-        <translation type="vanished">选择一行 — 这里将显示导出器在此类点上建造的模型</translation>
+        <translation>选择一行 — 这里将显示导出器在此类点上建造的模型</translation>
     </message>
     <message>
         <source>Effect</source>
@@ -2895,40 +2951,49 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">模型</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="111"/>
         <source>memorial statue</source>
-        <translation type="vanished">纪念雕像</translation>
+        <translation>纪念雕像</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="112"/>
         <source>monument stele</source>
-        <translation type="vanished">纪念碑碑石</translation>
+        <translation>纪念碑碑石</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="113"/>
         <source>fountain</source>
-        <translation type="vanished">喷泉</translation>
+        <translation>喷泉</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="114"/>
         <source>communication tower</source>
-        <translation type="vanished">通信塔</translation>
+        <translation>通信塔</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="115"/>
         <source>composter</source>
-        <translation type="vanished">垃圾箱</translation>
+        <translation>垃圾箱</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="116"/>
         <source>lighting mast</source>
-        <translation type="vanished">照明灯杆</translation>
+        <translation>照明灯杆</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="117"/>
         <source>street bench</source>
-        <translation type="vanished">长椅</translation>
+        <translation>长椅</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="118"/>
         <source>small sculpture</source>
-        <translation type="vanished">小型雕塑</translation>
+        <translation>小型雕塑</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="119"/>
         <source>bus stop shelter</source>
-        <translation type="vanished">公交车站候车亭</translation>
+        <translation>公交车站候车亭</translation>
     </message>
     <message>
         <source>Typical heights</source>
@@ -2947,82 +3012,100 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">名称</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="794"/>
-        <location filename="../app/rulesdialog.cpp" line="834"/>
-        <location filename="../app/rulesdialog.cpp" line="858"/>
-        <location filename="../app/rulesdialog.cpp" line="875"/>
-        <location filename="../app/rulesdialog.cpp" line="883"/>
-        <location filename="../app/rulesdialog.cpp" line="889"/>
-        <location filename="../app/rulesdialog.cpp" line="899"/>
+        <location filename="../app/rulesdialog.cpp" line="1037"/>
+        <location filename="../app/rulesdialog.cpp" line="1077"/>
+        <location filename="../app/rulesdialog.cpp" line="1101"/>
+        <location filename="../app/rulesdialog.cpp" line="1118"/>
+        <location filename="../app/rulesdialog.cpp" line="1126"/>
+        <location filename="../app/rulesdialog.cpp" line="1132"/>
+        <location filename="../app/rulesdialog.cpp" line="1142"/>
         <source>Export rules</source>
         <translation>导出规则</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="805"/>
+        <location filename="../app/rulesdialog.cpp" line="1048"/>
         <source>Save</source>
         <translation>保存</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="806"/>
+        <location filename="../app/rulesdialog.cpp" line="1049"/>
         <source>Save as...</source>
         <translation>另存为...</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="807"/>
+        <location filename="../app/rulesdialog.cpp" line="1050"/>
         <source>Reload</source>
         <translation>重新读取</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="808"/>
+        <location filename="../app/rulesdialog.cpp" line="1051"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="834"/>
+        <location filename="../app/rulesdialog.cpp" line="1077"/>
         <source>Could not read the settings files:
 %1</source>
         <translation>无法读取设置文件：
 %1</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="844"/>
+        <location filename="../app/rulesdialog.cpp" line="1087"/>
         <source>not found</source>
         <translation>未找到</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="845"/>
+        <location filename="../app/rulesdialog.cpp" line="1088"/>
         <source>not saved</source>
         <translation>未保存</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="858"/>
-        <location filename="../app/rulesdialog.cpp" line="875"/>
+        <location filename="../app/rulesdialog.cpp" line="1101"/>
+        <location filename="../app/rulesdialog.cpp" line="1118"/>
         <source>Could not save %1:
 %2</source>
         <translation>无法保存 %1：
 %2</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="865"/>
+        <location filename="../app/rulesdialog.cpp" line="1108"/>
         <source>Save %1 as</source>
         <translation>将 %1 另存为</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="883"/>
+        <location filename="../app/rulesdialog.cpp" line="1126"/>
         <source>Discard the unsaved changes in %1?</source>
         <translation>放弃 %1 中未保存的更改？</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="889"/>
+        <location filename="../app/rulesdialog.cpp" line="1132"/>
         <source>Could not read %1:
 %2</source>
         <translation>无法读取 %1：
 %2</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="900"/>
+        <location filename="../app/rulesdialog.cpp" line="1143"/>
         <source>The files %1 were changed but not saved. Close without saving?</source>
         <translation>文件 %1 已更改但未保存。不保存直接关闭？</translation>
+    </message>
+</context>
+<context>
+    <name>SpotPickDialog</name>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="179"/>
+        <source>Spot structures</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="190"/>
+        <source>Choose</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="191"/>
+        <source>Cancel</source>
+        <translation type="unfinished">取消</translation>
     </message>
 </context>
 </TS>

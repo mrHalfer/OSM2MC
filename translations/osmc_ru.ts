@@ -2452,220 +2452,274 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
 <context>
     <name>RulesDialog</name>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="171"/>
+        <location filename="../app/rulesdialog.cpp" line="271"/>
         <source>OSM rules</source>
         <translation>Правила OSM</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="180"/>
+        <location filename="../app/rulesdialog.cpp" line="280"/>
         <source>Filter (a word from a line)</source>
         <translation>Фильтр (слово из строки)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="184"/>
+        <location filename="../app/rulesdialog.cpp" line="284"/>
         <source>Layer OSM</source>
         <translation>Слой OSM</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="184"/>
+        <location filename="../app/rulesdialog.cpp" line="284"/>
         <source>Layer OSMC</source>
         <translation>Слой OSMC</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="184"/>
-        <location filename="../app/rulesdialog.cpp" line="208"/>
+        <location filename="../app/rulesdialog.cpp" line="284"/>
+        <location filename="../app/rulesdialog.cpp" line="308"/>
         <source>Comment</source>
         <translation>Комментарий</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="195"/>
+        <location filename="../app/rulesdialog.cpp" line="295"/>
         <source>Add</source>
         <translation>Добавить</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="196"/>
+        <location filename="../app/rulesdialog.cpp" line="296"/>
         <source>Duplicate</source>
         <translation>Дублировать</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="197"/>
+        <location filename="../app/rulesdialog.cpp" line="297"/>
         <source>Delete</source>
         <translation>Удалить</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="198"/>
+        <location filename="../app/rulesdialog.cpp" line="298"/>
         <source>Up</source>
         <translation>Вверх</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="199"/>
+        <location filename="../app/rulesdialog.cpp" line="299"/>
         <source>Down</source>
         <translation>Вниз</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="212"/>
+        <location filename="../app/rulesdialog.cpp" line="312"/>
         <source>From</source>
         <translation>Откуда</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="216"/>
+        <location filename="../app/rulesdialog.cpp" line="316"/>
         <source>Layer</source>
         <translation>Слой</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="226"/>
+        <location filename="../app/rulesdialog.cpp" line="326"/>
         <source>As</source>
         <translation>Вид</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="232"/>
         <source>as is</source>
-        <translation>как есть</translation>
+        <translation type="vanished">как есть</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="234"/>
+        <location filename="../app/rulesdialog.cpp" line="328"/>
+        <source>What the exporter builds from the matched object; the numbers are meters</source>
+        <translation>Что экспортёр строит из подошедшего объекта; числа — это метры</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="337"/>
+        <source>Size in meters: the side of the square, the length of the crosswalk</source>
+        <translation>Размер в метрах: сторона квадрата, длина зебры</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="341"/>
         <source>Pass</source>
         <translation>Проход</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="237"/>
+        <location filename="../app/rulesdialog.cpp" line="344"/>
         <source>2 — a guess for objects not recognized on pass 1 (they see the nb:* tags about neighbors)</source>
         <translation>2 — предположение для объектов, не распознанных на проходе 1 (они видят теги nb:* о соседях)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="239"/>
+        <location filename="../app/rulesdialog.cpp" line="346"/>
         <source>Continue (the object may also match the rules below)</source>
         <translation>Продолжать (объект может попасть и под правила ниже)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="243"/>
+        <location filename="../app/rulesdialog.cpp" line="348"/>
+        <source>Structure...</source>
+        <translation>Конструкция...</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="349"/>
+        <source>Choose a catalog spot structure for this point rule - the CODE is set (and the layer too when the structure lives on another one)</source>
+        <translation>Выбрать точечную конструкцию из каталога для этого правила — заполнится CODE (а если конструкция лежит на другом слое, то и слой)</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="354"/>
         <source>Conditions — every tag must match; an empty condition means &quot;the tag exists&quot;</source>
         <translation>Условия — каждый тег должен совпадать; пустое условие означает «тег существует»</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="244"/>
+        <location filename="../app/rulesdialog.cpp" line="355"/>
         <source>Tag</source>
         <translation>Тег</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="244"/>
+        <location filename="../app/rulesdialog.cpp" line="355"/>
         <source>Condition (JSON: &quot;yes&quot;, [&quot;a&quot;,&quot;b&quot;], &quot;!a&quot;, &quot;&gt;=3&quot;, &quot;~regex&quot;, &quot;*&quot;, &quot;-&quot;)</source>
         <translation>Условие (JSON: &quot;yes&quot;, [&quot;a&quot;,&quot;b&quot;], &quot;!a&quot;, &quot;&gt;=3&quot;, &quot;~regex&quot;, &quot;*&quot;, &quot;-&quot;)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="246"/>
-        <location filename="../app/rulesdialog.cpp" line="258"/>
+        <location filename="../app/rulesdialog.cpp" line="357"/>
+        <location filename="../app/rulesdialog.cpp" line="369"/>
         <source>Add row</source>
         <translation>Добавить строку</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="247"/>
-        <location filename="../app/rulesdialog.cpp" line="259"/>
+        <location filename="../app/rulesdialog.cpp" line="358"/>
+        <location filename="../app/rulesdialog.cpp" line="370"/>
         <source>Remove row</source>
         <translation>Убрать строку</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="250"/>
+        <location filename="../app/rulesdialog.cpp" line="361"/>
         <source>Fields of the layer — a value or a {tag} template</source>
         <translation>Поля слоя — значение или шаблон {tag}</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="251"/>
+        <location filename="../app/rulesdialog.cpp" line="362"/>
         <source>Field</source>
         <translation>Поле</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="251"/>
+        <location filename="../app/rulesdialog.cpp" line="362"/>
         <source>Value or template</source>
         <translation>Значение или шаблон</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="260"/>
+        <location filename="../app/rulesdialog.cpp" line="371"/>
         <source>REL = &quot;auto&quot;</source>
         <translation>REL = «auto»</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="261"/>
+        <location filename="../app/rulesdialog.cpp" line="372"/>
         <source>auto - the height is taken from the OSM tags (height, building:levels, min_height), then from the typical height of the code in the rules catalog; a fixed floor count can be written instead</source>
         <translation>авто — высота берётся из тегов OSM (height, building:levels, min_height), затем из типовой высоты кода в каталоге правил; можно вместо этого вписать фиксированное число этажей</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="270"/>
+        <location filename="../app/rulesdialog.cpp" line="381"/>
         <source>Resolution in the rules catalog</source>
         <translation>Резолвинг в каталоге правил</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="353"/>
+        <location filename="../app/rulesdialog.cpp" line="474"/>
         <source>the building height in floors; &quot;auto&quot; - from the OSM tags, then from the typical height of the code in the rules catalog</source>
         <translation>высота здания в этажах; «авто» — из тегов OSM, затем из типовой высоты кода в каталоге правил</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="684"/>
+        <location filename="../app/rulesdialog.cpp" line="803"/>
+        <source>Point (as is)</source>
+        <translation>Точка (как есть)</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="804"/>
+        <source>Square footprint</source>
+        <translation>Квадрат в плане</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="805"/>
+        <source>Crosswalk</source>
+        <translation>Пешеходная зебра</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="809"/>
+        <source>Line (as is)</source>
+        <translation>Линия (как есть)</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="810"/>
+        <source>Polygon (a closed line)</source>
+        <translation>Многоугольник (замкнутая линия)</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="814"/>
+        <source>Polygon (as is)</source>
+        <translation>Многоугольник (как есть)</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="815"/>
+        <source>Line (a polygon boundary)</source>
+        <translation>Линия (граница многоугольника)</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="915"/>
         <source>Select a rule - what its code builds on the layer shows here</source>
         <translation>Выберите правило — здесь видно, что его код строит на слое</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="686"/>
+        <location filename="../app/rulesdialog.cpp" line="917"/>
         <source>The rule has no layer - it matches nothing</source>
         <translation>У правила нет слоя — оно ни с чем не сработает</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="688"/>
+        <location filename="../app/rulesdialog.cpp" line="919"/>
         <source>The object is dropped by this rule (the rules below are not checked)</source>
         <translation>Объект отбрасывается этим правилом (правила ниже не проверяются)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="690"/>
+        <location filename="../app/rulesdialog.cpp" line="921"/>
         <source>The rules catalog was not found next to the program</source>
         <translation>Каталог правил не найден рядом с программой</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="701"/>
+        <location filename="../app/rulesdialog.cpp" line="932"/>
         <source>The rule sets no CODE - the exporter falls back to the generic behavior of the layer</source>
         <translation>Правило не задаёт CODE — экспортёр применит общее поведение слоя</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="703"/>
+        <location filename="../app/rulesdialog.cpp" line="934"/>
         <source>The code comes from the tags - it resolves per object, not per rule</source>
         <translation>Код берётся из тегов — он решается для каждого объекта, а не для правила</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="710"/>
+        <location filename="../app/rulesdialog.cpp" line="941"/>
         <source>&quot;%1&quot; is not a code number</source>
         <translation>«%1» — не число кода</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="712"/>
+        <location filename="../app/rulesdialog.cpp" line="943"/>
         <source>Layer &quot;%1&quot; is not in the catalog - the exporter warns and falls back to the generic behavior</source>
         <translation>Слоя «%1» нет в каталоге — экспортёр предупредит и применит общее поведение</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="716"/>
+        <location filename="../app/rulesdialog.cpp" line="954"/>
         <source>This code is cataloged as &quot;%1&quot; on another layer - here it is unknown (generic behavior + a warning)</source>
         <translation>Этот код описан как «%1» на другом слое — здесь он неизвестен (общее поведение + предупреждение)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="718"/>
+        <location filename="../app/rulesdialog.cpp" line="956"/>
         <source>Unknown code - the exporter warns and the object keeps the generic behavior of &quot;%1&quot;</source>
         <translation>Неизвестный код — экспортёр предупредит, и объект получит общее поведение «%1»</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="738"/>
+        <location filename="../app/rulesdialog.cpp" line="978"/>
         <source>unknown figure %1</source>
         <translation>неизвестная фигура %1</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="757"/>
+        <location filename="../app/rulesdialog.cpp" line="998"/>
         <source>flat - the height is not read</source>
         <translation>плоско — высота не читается</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="766"/>
+        <location filename="../app/rulesdialog.cpp" line="1007"/>
         <source>road markings</source>
         <translation>разметка дорог</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="768"/>
+        <location filename="../app/rulesdialog.cpp" line="1009"/>
         <source>internal code - the exporter synthesizes such objects, the OSM data never carries it</source>
         <translation>служебный код — экспортёр создаёт такие объекты сам, в данных OSM его не бывает</translation>
     </message>
@@ -2674,17 +2728,17 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">auto — высота берётся из тегов OSM (height, building:levels, min_height), затем из таблицы типовых высот heights.csv по коду; вместо этого можно записать фиксированное число этажей</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="329"/>
+        <location filename="../app/rulesdialog.cpp" line="450"/>
         <source>JSON error (%1, position %2)</source>
         <translation>Ошибка JSON (%1, позиция %2)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="342"/>
+        <location filename="../app/rulesdialog.cpp" line="463"/>
         <source>the file was not loaded — nothing to save</source>
         <translation>файл не загружен — нечего сохранять</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="352"/>
+        <location filename="../app/rulesdialog.cpp" line="473"/>
         <source>the classifier code: what the object is (drives blocks, roads, vegetation)</source>
         <translation>код классификатора: что это за объект (определяет блоки, дороги, растительность)</translation>
     </message>
@@ -2693,112 +2747,112 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">высота здания в этажах; &quot;auto&quot; — из тегов OSM, затем из таблицы heights.csv</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="354"/>
+        <location filename="../app/rulesdialog.cpp" line="475"/>
         <source>the building facade material</source>
         <translation>материал фасадов здания</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="355"/>
+        <location filename="../app/rulesdialog.cpp" line="476"/>
         <source>the building:part marker (the outline is a fragment of a building)</source>
         <translation>признак building:part (контур — фрагмент здания)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="356"/>
+        <location filename="../app/rulesdialog.cpp" line="477"/>
         <source>helper: the part&apos;s own height ({height}||{building:levels}); an empty PH lets the part inherit the host building height</source>
         <translation>вспомогательное: собственная высота части ({height}||{building:levels}); при пустом PH часть наследует высоту основного здания</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="357"/>
+        <location filename="../app/rulesdialog.cpp" line="478"/>
         <source>the lowest height of a building part, meters (min_height)</source>
         <translation>низшая высота части здания, метры (min_height)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="358"/>
+        <location filename="../app/rulesdialog.cpp" line="479"/>
         <source>the lowest floor of a building part (min_level)</source>
         <translation>низший этаж части здания (min_level)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="359"/>
+        <location filename="../app/rulesdialog.cpp" line="480"/>
         <source>the roof kind: &quot;onion&quot; (a church dome) or &quot;skillion&quot; (one-slope)</source>
         <translation>вид крыши: &quot;onion&quot; (луковка храма) или &quot;skillion&quot; (односкатная)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="360"/>
+        <location filename="../app/rulesdialog.cpp" line="481"/>
         <source>the onion/skillion roof height, meters</source>
         <translation>высота луковки/односкатной крыши, метры</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="361"/>
+        <location filename="../app/rulesdialog.cpp" line="482"/>
         <source>the skillion roof direction, degrees</source>
         <translation>направление односкатной крыши, градусы</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="362"/>
+        <location filename="../app/rulesdialog.cpp" line="483"/>
         <source>the church dome color (a name known to the exporter)</source>
         <translation>цвет купола храма (имя, известное экспортёру)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="363"/>
+        <location filename="../app/rulesdialog.cpp" line="484"/>
         <source>the church dome material</source>
         <translation>материал купола храма</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="364"/>
+        <location filename="../app/rulesdialog.cpp" line="485"/>
         <source>1 - the building has an elevator shaft (1-block inner walls)</source>
         <translation>1 — у здания есть лифтовая шахта (внутренние стены в 1 блок)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="365"/>
+        <location filename="../app/rulesdialog.cpp" line="486"/>
         <source>the OSM bridge: not empty and not &quot;no&quot; - an elevated roadway</source>
         <translation>мост OSM: не пусто и не &quot;no&quot; — проезд поверху</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="366"/>
+        <location filename="../app/rulesdialog.cpp" line="487"/>
         <source>the OSM tunnel: not empty and not &quot;no&quot; - an underground roadway</source>
         <translation>тоннель OSM: не пусто и не &quot;no&quot; — проезд понизу</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="367"/>
+        <location filename="../app/rulesdialog.cpp" line="488"/>
         <source>the OSM level - a junction height level</source>
         <translation>этажность OSM — уровень пересечения по высоте</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="368"/>
+        <location filename="../app/rulesdialog.cpp" line="489"/>
         <source>the OSM layer - which of the overlapping lines stands on top</source>
         <translation>слой OSM — какая из пересекающихся линий выше</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="369"/>
+        <location filename="../app/rulesdialog.cpp" line="490"/>
         <source>not empty and not &quot;no&quot; - the railway has a contact wire</source>
         <translation>не пусто и не &quot;no&quot; — на железной дороге есть контактная сеть</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="370"/>
+        <location filename="../app/rulesdialog.cpp" line="491"/>
         <source>the street name of the address plate (usually filled automatically from addr:*)</source>
         <translation>название улицы адресной таблички (обычно заполняется само из addr:*)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="371"/>
+        <location filename="../app/rulesdialog.cpp" line="492"/>
         <source>the street type word of the address (&quot;street&quot;, &quot;avenue&quot;, ...)</source>
         <translation>род улицы в адресе («улица», «проспект», ...)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="372"/>
+        <location filename="../app/rulesdialog.cpp" line="493"/>
         <source>the house number of the address plate (usually filled automatically from addr:*)</source>
         <translation>номер дома адресной таблички (обычно заполняется само из addr:*)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="373"/>
+        <location filename="../app/rulesdialog.cpp" line="494"/>
         <source>the second half of the house number (the plate shows NUMBR+ADDNUM)</source>
         <translation>вторая половина номера дома (на табличке NUMBR+ADDNUM)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="374"/>
+        <location filename="../app/rulesdialog.cpp" line="495"/>
         <source>a custom column - it can be read by the 3D settings (their Field/Lift field/Absorption columns)</source>
         <translation>произвольная колонка — её могут читать 3D-настройки (их колонки Field/Lift field/Absorption)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="517"/>
+        <location filename="../app/rulesdialog.cpp" line="639"/>
         <source>Click a field row - what the field does shows here</source>
         <translation>Кликните строку поля — здесь появится его назначение</translation>
     </message>
@@ -2835,12 +2889,14 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">Военная база</translation>
     </message>
     <message>
+        <location filename="../app/modelpreview.h" line="146"/>
         <source>No preview for model number %1</source>
-        <translation type="vanished">Превью для модели №%1 недоступно</translation>
+        <translation>Превью для модели №%1 недоступно</translation>
     </message>
     <message>
+        <location filename="../app/modelpreview.h" line="147"/>
         <source>Select a row - the model that the exporter builds on such a point shows here</source>
-        <translation type="vanished">Выберите строку — здесь появится модель, которую экспортёр строит на такой точке</translation>
+        <translation>Выберите строку — здесь появится модель, которую экспортёр строит на такой точке</translation>
     </message>
     <message>
         <source>Effect</source>
@@ -2895,40 +2951,49 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">Модель</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="111"/>
         <source>memorial statue</source>
-        <translation type="vanished">памятник-скульптура</translation>
+        <translation>памятник-скульптура</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="112"/>
         <source>monument stele</source>
-        <translation type="vanished">памятник-стела</translation>
+        <translation>памятник-стела</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="113"/>
         <source>fountain</source>
-        <translation type="vanished">фонтан</translation>
+        <translation>фонтан</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="114"/>
         <source>communication tower</source>
-        <translation type="vanished">телебашня</translation>
+        <translation>телебашня</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="115"/>
         <source>composter</source>
-        <translation type="vanished">мусорный бак</translation>
+        <translation>мусорный бак</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="116"/>
         <source>lighting mast</source>
-        <translation type="vanished">опора освещения</translation>
+        <translation>опора освещения</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="117"/>
         <source>street bench</source>
-        <translation type="vanished">скамейка</translation>
+        <translation>скамейка</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="118"/>
         <source>small sculpture</source>
-        <translation type="vanished">малая скульптура</translation>
+        <translation>малая скульптура</translation>
     </message>
     <message>
+        <location filename="../app/rulesdialog.cpp" line="119"/>
         <source>bus stop shelter</source>
-        <translation type="vanished">павильон остановки</translation>
+        <translation>павильон остановки</translation>
     </message>
     <message>
         <source>Typical heights</source>
@@ -2947,82 +3012,100 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation type="vanished">Название</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="794"/>
-        <location filename="../app/rulesdialog.cpp" line="834"/>
-        <location filename="../app/rulesdialog.cpp" line="858"/>
-        <location filename="../app/rulesdialog.cpp" line="875"/>
-        <location filename="../app/rulesdialog.cpp" line="883"/>
-        <location filename="../app/rulesdialog.cpp" line="889"/>
-        <location filename="../app/rulesdialog.cpp" line="899"/>
+        <location filename="../app/rulesdialog.cpp" line="1037"/>
+        <location filename="../app/rulesdialog.cpp" line="1077"/>
+        <location filename="../app/rulesdialog.cpp" line="1101"/>
+        <location filename="../app/rulesdialog.cpp" line="1118"/>
+        <location filename="../app/rulesdialog.cpp" line="1126"/>
+        <location filename="../app/rulesdialog.cpp" line="1132"/>
+        <location filename="../app/rulesdialog.cpp" line="1142"/>
         <source>Export rules</source>
         <translation>Правила экспорта</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="805"/>
+        <location filename="../app/rulesdialog.cpp" line="1048"/>
         <source>Save</source>
         <translation>Сохранить</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="806"/>
+        <location filename="../app/rulesdialog.cpp" line="1049"/>
         <source>Save as...</source>
         <translation>Сохранить как...</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="807"/>
+        <location filename="../app/rulesdialog.cpp" line="1050"/>
         <source>Reload</source>
         <translation>Перечитать</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="808"/>
+        <location filename="../app/rulesdialog.cpp" line="1051"/>
         <source>Close</source>
         <translation>Закрыть</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="834"/>
+        <location filename="../app/rulesdialog.cpp" line="1077"/>
         <source>Could not read the settings files:
 %1</source>
         <translation>Не удалось прочитать файлы настроек:
 %1</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="844"/>
+        <location filename="../app/rulesdialog.cpp" line="1087"/>
         <source>not found</source>
         <translation>не найден</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="845"/>
+        <location filename="../app/rulesdialog.cpp" line="1088"/>
         <source>not saved</source>
         <translation>не сохранён</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="858"/>
-        <location filename="../app/rulesdialog.cpp" line="875"/>
+        <location filename="../app/rulesdialog.cpp" line="1101"/>
+        <location filename="../app/rulesdialog.cpp" line="1118"/>
         <source>Could not save %1:
 %2</source>
         <translation>Не удалось сохранить %1:
 %2</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="865"/>
+        <location filename="../app/rulesdialog.cpp" line="1108"/>
         <source>Save %1 as</source>
         <translation>Сохранить %1 как</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="883"/>
+        <location filename="../app/rulesdialog.cpp" line="1126"/>
         <source>Discard the unsaved changes in %1?</source>
         <translation>Отменить несохранённые изменения в %1?</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="889"/>
+        <location filename="../app/rulesdialog.cpp" line="1132"/>
         <source>Could not read %1:
 %2</source>
         <translation>Не удалось прочитать %1:
 %2</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="900"/>
+        <location filename="../app/rulesdialog.cpp" line="1143"/>
         <source>The files %1 were changed but not saved. Close without saving?</source>
         <translation>Файлы %1 изменены, но не сохранены. Закрыть без сохранения?</translation>
+    </message>
+</context>
+<context>
+    <name>SpotPickDialog</name>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="179"/>
+        <source>Spot structures</source>
+        <translation>Точечные конструкции</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="190"/>
+        <source>Choose</source>
+        <translation>Выбрать</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="191"/>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
     </message>
 </context>
 </TS>

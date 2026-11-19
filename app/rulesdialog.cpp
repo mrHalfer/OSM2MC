@@ -2,6 +2,7 @@
 #include <QtWidgets>
 #include <functional>
 #include "osm/tmcrulesrepo.h"
+#include "modelpreview.h"
 
 // The one reference file the dialog edits is the OSM rules of the rules catalog (rules/osmrules.json). The tab keeps
 // the whole file as a QJsonObject and re-emit it on save: unknown keys ("_help", "greenery", "neighbors" and any
@@ -101,6 +102,25 @@ static void swapJson(QJsonArray& a, int i, int j)
     a[j] = t;
 }
 
+// The figure a ModelPoint number builds (1..9, step 3.575 of export/exportrun.cpp). The dialog captions
+// spot codes with it; the ModelPreview widget draws it. Empty for the numbers outside the table.
+static QString spotFigureName(int id)
+{
+    switch (id)
+    {
+    case 1: return QCoreApplication::translate("RulesDialog", "memorial statue");
+    case 2: return QCoreApplication::translate("RulesDialog", "monument stele");
+    case 3: return QCoreApplication::translate("RulesDialog", "fountain");
+    case 4: return QCoreApplication::translate("RulesDialog", "communication tower");
+    case 5: return QCoreApplication::translate("RulesDialog", "composter");
+    case 6: return QCoreApplication::translate("RulesDialog", "lighting mast");
+    case 7: return QCoreApplication::translate("RulesDialog", "street bench");
+    case 8: return QCoreApplication::translate("RulesDialog", "small sculpture");
+    case 9: return QCoreApplication::translate("RulesDialog", "bus stop shelter");
+    default: return QString();
+    }
+}
+
 // The layer fields the exporter reads (scene/mcscene.cpp, input/tmcproject.cpp). Both JSON tabs offer them in
 // their combos: the "Fields of the layer" table of the rules tab, the model/material columns of the t3d tab.
 static QStringList knownLayerFields()
@@ -145,6 +165,86 @@ protected:
     std::function<void()> mChanged;
     QByteArray mEol = "\n";
 };
+
+// ---------------------------------------------------------------- spot structure picker
+
+// Lists every catalog point code whose figure the exporter knows (ModelPoint 1..9, internal codes left
+// out) and previews the figure; the rules tab writes the chosen code into the rule's CODE field.
+class SpotPickDialog : public QDialog
+{
+public:
+    SpotPickDialog(const QString& curLayer, const QString& curCode, QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle(QCoreApplication::translate("SpotPickDialog", "Spot structures"));
+        setModal(true);
+        resize(700, 460);
+        QHBoxLayout* lay = new QHBoxLayout(this);
+        mList = new QListWidget;
+        lay->addWidget(mList, 1);
+        QVBoxLayout* col = new QVBoxLayout;
+        mPreview = new ModelPreview(this);
+        col->addWidget(mPreview, 1);
+        QHBoxLayout* btns = new QHBoxLayout;
+        btns->addStretch(1);
+        QPushButton* ok = new QPushButton(QCoreApplication::translate("SpotPickDialog", "Choose"));
+        QPushButton* cancel = new QPushButton(QCoreApplication::translate("SpotPickDialog", "Cancel"));
+        btns->addWidget(ok);
+        btns->addWidget(cancel);
+        col->addLayout(btns);
+        lay->addLayout(col);
+
+        TmcRulesRepo& repo = TmcRulesRepo::instance();
+        for (const QString& name : repo.order())
+        {
+            const TmcRulesRepo::Layer* la = repo.layer(name);
+            if (!la || la->family != TmcRulesRepo::FamilyPoint) continue;
+            for (const TmcRulesRepo::Object& ob : la->objects)
+            {
+                if (ob.internal || ob.model < 1 || ob.model > 9) continue;
+                QListWidgetItem* it = new QListWidgetItem(QStringLiteral("%1  (%2)").arg(ob.name).arg(ob.code));
+                it->setData(Qt::UserRole, la->name);
+                it->setData(Qt::UserRole + 1, ob.model);
+                it->setData(Qt::UserRole + 2, ob.name);
+                it->setData(Qt::UserRole + 3, ob.code);
+                it->setToolTip(QStringLiteral("%1 - %2").arg(spotFigureName(ob.model), la->name));
+                mList->addItem(it);
+            }
+        }
+        connect(ok, &QPushButton::clicked, this, [this] { accept(); });
+        connect(cancel, &QPushButton::clicked, this, [this] { reject(); });
+        connect(mList, &QListWidget::currentItemChanged, this,
+                [this](QListWidgetItem* it, QListWidgetItem*) { showCurrent(it); });
+        connect(mList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { accept(); });
+        for (int i = 0; i < mList->count(); ++i)
+        {
+            QListWidgetItem* it = mList->item(i);
+            if (it->data(Qt::UserRole).toString() == curLayer
+                && QString::number(it->data(Qt::UserRole + 3).toInt()) == curCode)
+            { mList->setCurrentItem(it); break; }
+        }
+        if (!mList->currentItem() && mList->count())
+            mList->setCurrentRow(0);
+        showCurrent(mList->currentItem());
+        ok->setEnabled(mList->count() > 0);
+    }
+
+    QString pickedLayer() const { return mList->currentItem() ? mList->currentItem()->data(Qt::UserRole).toString() : QString(); }
+    int pickedCode() const { return mList->currentItem() ? mList->currentItem()->data(Qt::UserRole + 3).toInt() : 0; }
+
+private:
+    void showCurrent(QListWidgetItem* it)
+    {
+        if (!it) return;
+        const int model = it->data(Qt::UserRole + 1).toInt();
+        mPreview->showModel(model, QStringLiteral("%1 - %2").arg(it->data(Qt::UserRole + 2).toString(),
+                                                                 spotFigureName(model)));
+    }
+
+    QListWidget* mList = nullptr;
+    ModelPreview* mPreview = nullptr;
+};
+
 
 // ---------------------------------------------------------------- rules/osmrules.json
 
@@ -225,19 +325,30 @@ public:
         form->addWidget(mLayer, 1, 3);
         form->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "As")), 2, 0);
         mAs = new NoWheelComboBox;
-        mAs->setEditable(true);
-        mAs->addItems({ QString(), QStringLiteral("polygon"), QStringLiteral("line"),
-                        QStringLiteral("square:10"), QStringLiteral("crosswalk:5") });
-        mAs->setInsertPolicy(QComboBox::NoInsert);
-        mAs->lineEdit()->setPlaceholderText(QCoreApplication::translate("RulesDialog", "as is"));
-        form->addWidget(mAs, 2, 1);
+        mAs->setToolTip(QCoreApplication::translate("RulesDialog", "What the exporter builds from the matched object; the numbers are meters"));
+        fillAsChoices(QStringLiteral("multipolygons"), QString());
+        QHBoxLayout* asRow = new QHBoxLayout;
+        asRow->setContentsMargins(0, 0, 0, 0);
+        asRow->addWidget(mAs, 1);
+        mAsSize = new NoWheelSpinBox;
+        mAsSize->setRange(1, 200);
+        mAsSize->setValue(10);
+        mAsSize->setSuffix(QStringLiteral(" m"));
+        mAsSize->setToolTip(QCoreApplication::translate("RulesDialog", "Size in meters: the side of the square, the length of the crosswalk"));
+        mAsSize->setVisible(false);
+        asRow->addWidget(mAsSize);
+        form->addLayout(asRow, 2, 1);
         form->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "Pass")), 2, 2);
         mPass = new NoWheelSpinBox;
         mPass->setRange(1, 2);
         mPass->setToolTip(QCoreApplication::translate("RulesDialog", "2 — a guess for objects not recognized on pass 1 (they see the nb:* tags about neighbors)"));
         form->addWidget(mPass, 2, 3);
         mCont = new QCheckBox(QCoreApplication::translate("RulesDialog", "Continue (the object may also match the rules below)"));
-        form->addWidget(mCont, 3, 0, 1, 4);
+        form->addWidget(mCont, 3, 0, 1, 3);
+        mSpot = new QPushButton(QCoreApplication::translate("RulesDialog", "Structure..."));
+        mSpot->setToolTip(QCoreApplication::translate("RulesDialog", "Choose a catalog spot structure for this point rule - the CODE is set (and the layer too when the structure lives on another one)"));
+        mSpot->setEnabled(false);
+        form->addWidget(mSpot, 3, 3);
         rightLay->addLayout(form);
 
         rightLay->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "Conditions — every tag must match; an empty condition means \"the tag exists\"")));
@@ -270,6 +381,9 @@ public:
         catLay->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "Resolution in the rules catalog")));
         mCatalog = new QTextBrowser;
         mCatalog->setOpenExternalLinks(false);
+        mPanePreview = new ModelPreview(cat, 150, 190);          // the figure of a spot code, live
+        mPanePreview->setVisible(false);
+        catLay->addWidget(mPanePreview);
         catLay->addWidget(mCatalog, 1);
         split->addWidget(cat);
         split->setStretchFactor(0, 2);
@@ -290,9 +404,16 @@ public:
         connect(mUp, &QPushButton::clicked, this, [this] { moveRule(-1); });
         connect(mDown, &QPushButton::clicked, this, [this] { moveRule(1); });
         connect(mNote, &QPlainTextEdit::textChanged, this, [this] { commitWidgets(); });   // selectRule fills it under mFilling
-        connect(mFrom, QOverload<int>::of(&QComboBox::activated), this, [this] { commitWidgets(); });
+        connect(mFrom, QOverload<int>::of(&QComboBox::activated), this, [this]
+                {
+                    commitWidgets();
+                    refillAsChoices();                           // the offered "as" values follow the source geometry
+                    commitWidgets();
+                });
         connect(mLayer, &QComboBox::editTextChanged, this, [this] { if (!mFilling) commitWidgets(); });
-        connect(mAs, &QComboBox::editTextChanged, this, [this] { if (!mFilling) commitWidgets(); });
+        connect(mAs, QOverload<int>::of(&QComboBox::activated), this, [this] { commitWidgets(); updateAsSizeVisible(); });
+        connect(mAsSize, QOverload<int>::of(&QSpinBox::valueChanged), this, [this] { if (!mFilling) commitWidgets(); });
+        connect(mSpot, &QPushButton::clicked, this, [this] { pickSpot(); });
         connect(mPass, QOverload<int>::of(&QSpinBox::valueChanged), this, [this] { if (!mFilling) commitWidgets(); });
         connect(mCont, &QCheckBox::toggled, this, [this] { if (!mFilling) commitWidgets(); });
         connect(mWhen, &QTableWidget::cellChanged, this, [this] { if (!mFilling) commitTables(); });
@@ -436,7 +557,7 @@ private:
 
     void setEnabledDepth(bool on)
     {
-        QWidget* ws[] = { mNote, mFrom, mLayer, mAs, mPass, mCont, mWhen, mFields,
+        QWidget* ws[] = { mNote, mFrom, mLayer, mAs, mAsSize, mPass, mCont, mWhen, mFields,
                           mWhenAdd, mWhenDel, mFieldsAdd, mFieldsDel, mRelAuto };
         for (QWidget* w : ws) w->setEnabled(on);
     }
@@ -452,7 +573,8 @@ private:
             mNote->setPlainText(o.value(QStringLiteral("note")).toString());
             mFrom->setCurrentText(o.value(QStringLiteral("from")).toString(QStringLiteral("multipolygons")));
             mLayer->setEditText(o.value(QStringLiteral("layer")).toString());
-            mAs->setEditText(o.value(QStringLiteral("as")).toString());
+            fillAsChoices(o.value(QStringLiteral("from")).toString(QStringLiteral("multipolygons")),
+                          o.value(QStringLiteral("as")).toString());
             mPass->setValue(o.value(QStringLiteral("pass")).toInt(1));
             mCont->setChecked(o.value(QStringLiteral("continue")).toBool(false));
             fillTable(mWhen, o.value(QStringLiteral("when")).toObject());
@@ -576,7 +698,7 @@ private:
         putKey(o, QStringLiteral("note"), mNote->toPlainText().replace(QLatin1Char('\n'), QLatin1Char(' ')).trimmed());   // the note stays a single line in the JSON
         o[QStringLiteral("from")] = mFrom->currentText().trimmed().toLower();
         o[QStringLiteral("layer")] = mLayer->currentText().trimmed().toLower();
-        const QString as = mAs->currentText().trimmed().toLower();
+        const QString as = asValue();
         if (as.isEmpty()) o.remove(QStringLiteral("as")); else o[QStringLiteral("as")] = as;
         if (mPass->value() == 1) o.remove(QStringLiteral("pass")); else o[QStringLiteral("pass")] = mPass->value();
         if (!mCont->isChecked()) o.remove(QStringLiteral("continue")); else o[QStringLiteral("continue")] = true;
@@ -665,6 +787,114 @@ private:
         markDirty();
     }
 
+    // The "As" combo is not editable and offers only what the source geometry can build. The item data
+    // holds the JSON value ("" = as is, "polygon", "line"); square/crosswalk append the meters of mAsSize.
+    void fillAsChoices(const QString& from, const QString& curAs)
+    {
+        const QString kind = curAs.startsWith(QLatin1String("square:")) ? QStringLiteral("square")
+                           : curAs.startsWith(QLatin1String("crosswalk:")) ? QStringLiteral("crosswalk")
+                           : curAs;                              // "", "polygon", "line" or an odd legacy value
+        bool ok = false;
+        const int size = curAs.section(QLatin1Char(':'), 1, 1).toInt(&ok);
+        mAs->blockSignals(true);
+        mAs->clear();
+        if (from == QLatin1String("points"))
+        {
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Point (as is)"), QString());
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Square footprint"), QStringLiteral("square"));
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Crosswalk"), QStringLiteral("crosswalk"));
+        }
+        else if (from == QLatin1String("lines"))
+        {
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Line (as is)"), QString());
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Polygon (a closed line)"), QStringLiteral("polygon"));
+        }
+        else
+        {
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Polygon (as is)"), QString());
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Line (a polygon boundary)"), QStringLiteral("line"));
+        }
+        int at = mAs->findData(kind);
+        if (at < 0 && !curAs.isEmpty())
+        {   // something the old editable combo could type - keep it verbatim, the rule must not lose it
+            mAs->addItem(QStringLiteral("\"%1\"").arg(curAs), curAs);
+            at = mAs->count() - 1;
+        }
+        mAs->setCurrentIndex(qMax(0, at));
+        if (mAsSize && at >= 0 && ok && (kind == QLatin1String("square") || kind == QLatin1String("crosswalk")))
+            mAsSize->setValue(qBound(mAsSize->minimum(), size, mAsSize->maximum()));
+        mAs->blockSignals(false);
+        updateAsSizeVisible();
+    }
+
+    void refillAsChoices()                                 //!< the offered values follow the "From" geometry
+    {
+        fillAsChoices(mFrom->currentText().trimmed().toLower(), asValue());
+    }
+
+    QString asValue() const                                //!< the combo + the size spin -> the JSON "as"
+    {
+        const QString kind = mAs->currentData().toString();
+        if (kind == QLatin1String("square"))
+            return QStringLiteral("square:%1").arg(mAsSize->value());
+        if (kind == QLatin1String("crosswalk"))
+            return QStringLiteral("crosswalk:%1").arg(mAsSize->value());
+        return kind;
+    }
+
+    void updateAsSizeVisible()
+    {
+        if (!mAsSize) return;                                  // the first fillAsChoices runs before the spin exists
+        const QString kind = mAs->currentData().toString();
+        mAsSize->setVisible(kind == QLatin1String("square") || kind == QLatin1String("crosswalk"));
+    }
+
+    void pickSpot()                                          //!< the "Structure..." button: the catalog spot zoo
+    {
+        SpotPickDialog dlg(mLayer->currentText().trimmed().toLower(), currentFieldCode(), this);
+        if (dlg.exec() != QDialog::Accepted) return;
+        const int code = dlg.pickedCode();
+        if (!code) return;
+        const QString layer = dlg.pickedLayer();
+        if (!layer.isEmpty() && layer != mLayer->currentText().trimmed().toLower())
+            mLayer->setEditText(layer);                        // editTextChanged -> commitWidgets
+        setFieldCode(QString::number(code));                   // cellChanged -> commitTables
+        updateCatalogHint();                                   // the CODE may have stayed the same -> no cellChanged
+    }
+
+    void setFieldCode(const QString& value)                   //!< the CODE row of the fields table, added when absent
+    {
+        int r = -1;
+        for (int i = 0; i < mFields->rowCount(); ++i)
+        {
+            QComboBox* cb = qobject_cast<QComboBox*>(mFields->cellWidget(i, 0));
+            if (cb && cb->currentText().trimmed().toUpper() == QLatin1String("CODE")) { r = i; break; }
+        }
+        if (r < 0)
+        {
+            addFieldRow();
+            r = mFields->rowCount() - 1;
+            QComboBox* cb = qobject_cast<QComboBox*>(mFields->cellWidget(r, 0));
+            mFilling = true;                                   // the row is being filled, commitTables runs once below
+            if (cb) cb->setEditText(QStringLiteral("CODE"));
+            mFilling = false;
+            showFieldHelp(r);
+        }
+        if (!mFields->item(r, 1)) mFields->setItem(r, 1, new QTableWidgetItem);
+        mFields->item(r, 1)->setText(value);
+    }
+
+    QString currentFieldCode() const
+    {
+        for (int r = 0; r < mFields->rowCount(); ++r)
+        {
+            const QComboBox* cb = qobject_cast<const QComboBox*>(mFields->cellWidget(r, 0));
+            if (cb && cb->currentText().trimmed().toUpper() == QLatin1String("CODE"))
+                return cellText(mFields, r, 1).trimmed();
+        }
+        return QString();
+    }
+
     void updateCatalogHint()                               //!< the live "what does this code build" pane
     {
         TmcRulesRepo& repo = TmcRulesRepo::instance();
@@ -678,6 +908,7 @@ private:
             }
         }
         QString html;
+        mPanePreview->setVisible(false);
         const QJsonObject o = mCur >= 0 ? ruleAt(mCur) : QJsonObject();
         const QString layer = o.value(QStringLiteral("layer")).toString().trimmed().toLower();
         if (mCur < 0)
@@ -711,7 +942,14 @@ private:
                 else if (!lay)
                     html = QCoreApplication::translate("RulesDialog", "Layer \"%1\" is not in the catalog - the exporter warns and falls back to the generic behavior").arg(layer.toHtmlEscaped());
                 else if (const TmcRulesRepo::Object* ob = repo.object(layer, value))
+                {
                     html = catalogHtml(*lay, *ob);
+                    if (lay->family == TmcRulesRepo::FamilyPoint && ob->model >= 1 && ob->model <= 9)
+                    {
+                        mPanePreview->setVisible(true);
+                        mPanePreview->showModel(ob->model, ob->name);
+                    }
+                }
                 else if (const TmcRulesRepo::Object* other = repo.objectByCode(value))
                     html = QCoreApplication::translate("RulesDialog", "This code is cataloged as \"%1\" on another layer - here it is unknown (generic behavior + a warning)").arg(other->name.toHtmlEscaped());
                 else
@@ -719,12 +957,14 @@ private:
             }
         }
         mCatalog->setHtml(QStringLiteral("<div>%1</div>").arg(html));
+        mSpot->setEnabled(mCur >= 0 && repo.isLoaded()
+                          && o.value(QStringLiteral("from")).toString() == QLatin1String("points")
+                          && o.value(QStringLiteral("as")).toString().isEmpty()
+                          && repo.layer(layer) && repo.layer(layer)->family == TmcRulesRepo::FamilyPoint);
     }
 
     static QString catalogHtml(const TmcRulesRepo::Layer& lay, const TmcRulesRepo::Object& ob)
     {
-        static const char* const kSpotNames[] = { "statue", "stele", "fountain", "communication tower", "composter",
-                                                  "light pole", "bench", "sculpture", "bus stop" };        // ModelPoint 1..9 (see exportrun.cpp)
         QString html = QStringLiteral("<b>%1</b><br>code %2").arg(ob.name.toHtmlEscaped()).arg(ob.code);
         const char* family = lay.family == TmcRulesRepo::FamilyLine ? "line"
                            : lay.family == TmcRulesRepo::FamilyPoint ? "point" : "polygon";
@@ -733,9 +973,10 @@ private:
             html += QStringLiteral("<br>%1 effect").arg(ob.effect.toHtmlEscaped());
         if (lay.family == TmcRulesRepo::FamilyPoint)
         {
-            const QString name = ob.model >= 1 && ob.model <= 9
-                               ? QString::fromLatin1(kSpotNames[ob.model - 1])
-                               : QCoreApplication::translate("RulesDialog", "unknown figure %1").arg(ob.model);
+            const QString figure = spotFigureName(ob.model);
+            const QString name = figure.isEmpty()
+                               ? QCoreApplication::translate("RulesDialog", "unknown figure %1").arg(ob.model)
+                               : figure;
             html += QStringLiteral("<br>model: %1 (No.%2)").arg(name).arg(ob.model);
         }
         switch (ob.relMode)
@@ -776,11 +1017,13 @@ private:
     QPushButton *mAdd = nullptr, *mDup = nullptr, *mDel = nullptr, *mUp = nullptr, *mDown = nullptr;
     QPlainTextEdit* mNote = nullptr;
     QComboBox *mFrom = nullptr, *mLayer = nullptr, *mAs = nullptr;
-    QSpinBox* mPass = nullptr;
+    QSpinBox *mPass = nullptr, *mAsSize = nullptr;
+    QPushButton* mSpot = nullptr;
     QCheckBox* mCont = nullptr;
     QTableWidget *mWhen = nullptr, *mFields = nullptr;
     QPlainTextEdit* mFieldHelp = nullptr;
     QTextBrowser* mCatalog = nullptr;
+    ModelPreview* mPanePreview = nullptr;
     QPushButton *mWhenAdd = nullptr, *mWhenDel = nullptr, *mFieldsAdd = nullptr, *mFieldsDel = nullptr, *mRelAuto = nullptr;
     int mCur = -1;
     bool mFilling = false;
