@@ -326,7 +326,7 @@ public:
         form->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "As")), 2, 0);
         mAs = new NoWheelComboBox;
         mAs->setToolTip(QCoreApplication::translate("RulesDialog", "What the exporter builds from the matched object; the numbers are meters"));
-        fillAsChoices(QStringLiteral("multipolygons"), QString());
+        fillAsChoices(QStringLiteral("multipolygons"), QString(), false);
         QHBoxLayout* asRow = new QHBoxLayout;
         asRow->setContentsMargins(0, 0, 0, 0);
         asRow->addWidget(mAs, 1);
@@ -334,7 +334,7 @@ public:
         mAsSize->setRange(0, 200);
         mAsSize->setSpecialValueText(QCoreApplication::translate("RulesDialog", "no footprint"));
         mAsSize->setSuffix(QStringLiteral(" m"));
-        mAsSize->setToolTip(QCoreApplication::translate("RulesDialog", "Size in meters: the side of the structure footprint (\"no footprint\" leaves the bare point), the length of the crosswalk"));
+        mAsSize->setToolTip(QCoreApplication::translate("RulesDialog", "Size in meters: the side of a structure footprint (\"no footprint\" leaves the bare point), the side of the area square, the length of the crosswalk"));
         mAsSize->setVisible(false);
         asRow->addWidget(mAsSize);
         form->addLayout(asRow, 2, 1);
@@ -411,6 +411,12 @@ public:
                     commitWidgets();
                 });
         connect(mLayer, &QComboBox::editTextChanged, this, [this] { if (!mFilling) commitWidgets(); });
+        connect(mLayer, QOverload<int>::of(&QComboBox::activated), this, [this]
+                {
+                    commitWidgets();
+                    refillAsChoices();                           // the point layer takes structures, a polygon layer areas
+                    commitWidgets();
+                });
         connect(mAs, QOverload<int>::of(&QComboBox::activated), this, [this] { commitWidgets(); updateAsSizeVisible(); });
         connect(mAsSize, QOverload<int>::of(&QSpinBox::valueChanged), this, [this] { if (!mFilling) commitWidgets(); });
         connect(mSpot, &QPushButton::clicked, this, [this] { pickSpot(); });
@@ -574,7 +580,7 @@ private:
             mFrom->setCurrentText(o.value(QStringLiteral("from")).toString(QStringLiteral("multipolygons")));
             mLayer->setEditText(o.value(QStringLiteral("layer")).toString());
             fillAsChoices(o.value(QStringLiteral("from")).toString(QStringLiteral("multipolygons")),
-                          o.value(QStringLiteral("as")).toString());
+                          o.value(QStringLiteral("as")).toString(), layerIsPoint());
             mPass->setValue(o.value(QStringLiteral("pass")).toInt(1));
             mCont->setChecked(o.value(QStringLiteral("continue")).toBool(false));
             fillTable(mWhen, o.value(QStringLiteral("when")).toObject());
@@ -788,10 +794,13 @@ private:
     }
 
     // The "As" combo is not editable and offers only what the source geometry can build. The item data
-    // holds the kind ("struct"/"crosswalk" add the meters of mAsSize, 0 m leaves a bare point; "" = as
-    // is, "polygon", "line"). A point is always a small structure or a crossing - the old "square:N"
-    // form is only the footprint size of a structure, so the two share one item.
-    void fillAsChoices(const QString& from, const QString& curAs)
+    // holds the kind; the meters spin box completes it: a "struct" footprint of 0 m leaves the plain
+    // point and N m writes the old "square:N", an "area" is a square of N m that falls into a polygon
+    // layer (a park/playground marked by a point), a "crosswalk" is a zebra N m long. "square:N" alone
+    // cannot tell a structure with a footprint from an area - the layer family decides (the point zoo
+    // builds figures, a polygon layer takes the square as the object itself). "" = as is, "polygon",
+    // "line" stay for the line and polygon sources.
+    void fillAsChoices(const QString& from, const QString& curAs, bool pointLayer)
     {
         QString kind;                                              // the item to select
         int size = 0;
@@ -799,7 +808,7 @@ private:
         if (curAs.isEmpty())
             kind = QStringLiteral("struct");
         else if (curAs.startsWith(QLatin1String("square:")))
-            { kind = QStringLiteral("struct"); size = curAs.mid(7).toInt(&ok); }
+            { kind = pointLayer ? QStringLiteral("struct") : QStringLiteral("area"); size = curAs.mid(7).toInt(&ok); }
         else if (curAs.startsWith(QLatin1String("crosswalk:")))
             { kind = QStringLiteral("crosswalk"); size = curAs.mid(10).toInt(&ok); }
         else
@@ -809,6 +818,7 @@ private:
         if (from == QLatin1String("points"))
         {
             mAs->addItem(QCoreApplication::translate("RulesDialog", "Structure"), QStringLiteral("struct"));
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Area (a square footprint)"), QStringLiteral("area"));
             mAs->addItem(QCoreApplication::translate("RulesDialog", "Crosswalk"), QStringLiteral("crosswalk"));
         }
         else if (from == QLatin1String("lines"))
@@ -834,9 +844,15 @@ private:
         updateAsSizeVisible();
     }
 
+    bool layerIsPoint() const                                  //!< is the typed layer a point layer of the catalog
+    {
+        const TmcRulesRepo::Layer* lay = TmcRulesRepo::instance().layer(mLayer->currentText().trimmed().toLower());
+        return lay && lay->family == TmcRulesRepo::FamilyPoint;
+    }
+
     void refillAsChoices()                                 //!< the offered values follow the "From" geometry
     {
-        fillAsChoices(mFrom->currentText().trimmed().toLower(), asValue());
+        fillAsChoices(mFrom->currentText().trimmed().toLower(), asValue(), layerIsPoint());
     }
 
     QString asValue() const                                //!< the combo + the size spin -> the JSON "as"
@@ -844,6 +860,8 @@ private:
         const QString kind = mAs->currentData().toString();
         if (kind == QLatin1String("struct"))
             return mAsSize->value() <= 0 ? QString() : QStringLiteral("square:%1").arg(mAsSize->value());
+        if (kind == QLatin1String("area"))
+            return QStringLiteral("square:%1").arg(qMax(1, mAsSize->value()));
         if (kind == QLatin1String("crosswalk"))
             return QStringLiteral("crosswalk:%1").arg(qMax(1, mAsSize->value()));
         return kind;
@@ -853,7 +871,8 @@ private:
     {
         if (!mAsSize) return;                                  // the first fillAsChoices runs before the spin exists
         const QString kind = mAs->currentData().toString();
-        mAsSize->setVisible(kind == QLatin1String("struct") || kind == QLatin1String("crosswalk"));
+        mAsSize->setVisible(kind == QLatin1String("struct") || kind == QLatin1String("area")
+                            || kind == QLatin1String("crosswalk"));
     }
 
     void pickSpot()                                          //!< the "Model..." button: the catalog spot zoo

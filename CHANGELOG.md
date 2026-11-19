@@ -15,6 +15,10 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 - The "Export rules" dialog shows a live "Resolution in the rules catalog" pane: what the code of the
   selected rule builds on its layer (family, effect, point figure, height mode and typical value, material
   column, road width and markings), refreshed while the rule is being edited
+- A spot structure picker in the "Export rules" dialog: the "Model..." button lists the catalog point
+  codes (bus stops, communication towers, monuments...) with an isometric preview of the figure each one
+  builds; the choice fills the CODE of the rule (and the layer when the structure lives on another one),
+  and the resolution pane shows the figure of the resolved code
 
 ### Changed
 
@@ -32,6 +36,11 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   object code decides (53230000 prison, 53220000 military base)
 - An object code the catalog does not describe is no longer dropped: the object keeps the generic behavior
   of its layer and the export log warns about the code
+- The "As" field of the "Export rules" dialog offers a choice instead of free text: points are a Structure
+  (with an optional square footprint, the meters spin box next to it), an Area (a park or a playground
+  marked by a point — a square N m of side) or a Crosswalk N m long; lines and polygons may trade geometry
+  (a closed line becomes a polygon, a polygon its boundary line); the old "square:10"/"crosswalk:5" items
+  were example leftovers, the number always meant meters
 
 ## [1.8.26.11181] — 2026-11-18
 
