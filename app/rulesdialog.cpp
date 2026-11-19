@@ -331,10 +331,10 @@ public:
         asRow->setContentsMargins(0, 0, 0, 0);
         asRow->addWidget(mAs, 1);
         mAsSize = new NoWheelSpinBox;
-        mAsSize->setRange(1, 200);
-        mAsSize->setValue(10);
+        mAsSize->setRange(0, 200);
+        mAsSize->setSpecialValueText(QCoreApplication::translate("RulesDialog", "no footprint"));
         mAsSize->setSuffix(QStringLiteral(" m"));
-        mAsSize->setToolTip(QCoreApplication::translate("RulesDialog", "Size in meters: the side of the square, the length of the crosswalk"));
+        mAsSize->setToolTip(QCoreApplication::translate("RulesDialog", "Size in meters: the side of the structure footprint (\"no footprint\" leaves the bare point), the length of the crosswalk"));
         mAsSize->setVisible(false);
         asRow->addWidget(mAsSize);
         form->addLayout(asRow, 2, 1);
@@ -345,7 +345,7 @@ public:
         form->addWidget(mPass, 2, 3);
         mCont = new QCheckBox(QCoreApplication::translate("RulesDialog", "Continue (the object may also match the rules below)"));
         form->addWidget(mCont, 3, 0, 1, 3);
-        mSpot = new QPushButton(QCoreApplication::translate("RulesDialog", "Structure..."));
+        mSpot = new QPushButton(QCoreApplication::translate("RulesDialog", "Model..."));
         mSpot->setToolTip(QCoreApplication::translate("RulesDialog", "Choose a catalog spot structure for this point rule - the CODE is set (and the layer too when the structure lives on another one)"));
         mSpot->setEnabled(false);
         form->addWidget(mSpot, 3, 3);
@@ -788,20 +788,27 @@ private:
     }
 
     // The "As" combo is not editable and offers only what the source geometry can build. The item data
-    // holds the JSON value ("" = as is, "polygon", "line"); square/crosswalk append the meters of mAsSize.
+    // holds the kind ("struct"/"crosswalk" add the meters of mAsSize, 0 m leaves a bare point; "" = as
+    // is, "polygon", "line"). A point is always a small structure or a crossing - the old "square:N"
+    // form is only the footprint size of a structure, so the two share one item.
     void fillAsChoices(const QString& from, const QString& curAs)
     {
-        const QString kind = curAs.startsWith(QLatin1String("square:")) ? QStringLiteral("square")
-                           : curAs.startsWith(QLatin1String("crosswalk:")) ? QStringLiteral("crosswalk")
-                           : curAs;                              // "", "polygon", "line" or an odd legacy value
+        QString kind;                                              // the item to select
+        int size = 0;
         bool ok = false;
-        const int size = curAs.section(QLatin1Char(':'), 1, 1).toInt(&ok);
+        if (curAs.isEmpty())
+            kind = QStringLiteral("struct");
+        else if (curAs.startsWith(QLatin1String("square:")))
+            { kind = QStringLiteral("struct"); size = curAs.mid(7).toInt(&ok); }
+        else if (curAs.startsWith(QLatin1String("crosswalk:")))
+            { kind = QStringLiteral("crosswalk"); size = curAs.mid(10).toInt(&ok); }
+        else
+            kind = curAs;                                          // "polygon", "line" or an odd legacy value
         mAs->blockSignals(true);
         mAs->clear();
         if (from == QLatin1String("points"))
         {
-            mAs->addItem(QCoreApplication::translate("RulesDialog", "Point (as is)"), QString());
-            mAs->addItem(QCoreApplication::translate("RulesDialog", "Square footprint"), QStringLiteral("square"));
+            mAs->addItem(QCoreApplication::translate("RulesDialog", "Structure"), QStringLiteral("struct"));
             mAs->addItem(QCoreApplication::translate("RulesDialog", "Crosswalk"), QStringLiteral("crosswalk"));
         }
         else if (from == QLatin1String("lines"))
@@ -821,8 +828,8 @@ private:
             at = mAs->count() - 1;
         }
         mAs->setCurrentIndex(qMax(0, at));
-        if (mAsSize && at >= 0 && ok && (kind == QLatin1String("square") || kind == QLatin1String("crosswalk")))
-            mAsSize->setValue(qBound(mAsSize->minimum(), size, mAsSize->maximum()));
+        if (mAsSize && at >= 0)
+            mAsSize->setValue(ok ? qBound(mAsSize->minimum(), size, mAsSize->maximum()) : 0);
         mAs->blockSignals(false);
         updateAsSizeVisible();
     }
@@ -835,10 +842,10 @@ private:
     QString asValue() const                                //!< the combo + the size spin -> the JSON "as"
     {
         const QString kind = mAs->currentData().toString();
-        if (kind == QLatin1String("square"))
-            return QStringLiteral("square:%1").arg(mAsSize->value());
+        if (kind == QLatin1String("struct"))
+            return mAsSize->value() <= 0 ? QString() : QStringLiteral("square:%1").arg(mAsSize->value());
         if (kind == QLatin1String("crosswalk"))
-            return QStringLiteral("crosswalk:%1").arg(mAsSize->value());
+            return QStringLiteral("crosswalk:%1").arg(qMax(1, mAsSize->value()));
         return kind;
     }
 
@@ -846,10 +853,10 @@ private:
     {
         if (!mAsSize) return;                                  // the first fillAsChoices runs before the spin exists
         const QString kind = mAs->currentData().toString();
-        mAsSize->setVisible(kind == QLatin1String("square") || kind == QLatin1String("crosswalk"));
+        mAsSize->setVisible(kind == QLatin1String("struct") || kind == QLatin1String("crosswalk"));
     }
 
-    void pickSpot()                                          //!< the "Structure..." button: the catalog spot zoo
+    void pickSpot()                                          //!< the "Model..." button: the catalog spot zoo
     {
         SpotPickDialog dlg(mLayer->currentText().trimmed().toLower(), currentFieldCode(), this);
         if (dlg.exec() != QDialog::Accepted) return;
@@ -957,9 +964,10 @@ private:
             }
         }
         mCatalog->setHtml(QStringLiteral("<div>%1</div>").arg(html));
+        const QString asVal = o.value(QStringLiteral("as")).toString();
         mSpot->setEnabled(mCur >= 0 && repo.isLoaded()
                           && o.value(QStringLiteral("from")).toString() == QLatin1String("points")
-                          && o.value(QStringLiteral("as")).toString().isEmpty()
+                          && !asVal.startsWith(QLatin1String("crosswalk:"))
                           && repo.layer(layer) && repo.layer(layer)->family == TmcRulesRepo::FamilyPoint);
     }
 
