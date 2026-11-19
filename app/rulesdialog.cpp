@@ -333,16 +333,21 @@ public:
         mAs = new NoWheelComboBox;
         mAs->setToolTip(QCoreApplication::translate("RulesDialog", "What the exporter builds from the matched object; the numbers are meters"));
         fillAsChoices(QStringLiteral("multipolygons"), QString(), false);
-        QHBoxLayout* asRow = new QHBoxLayout;
-        asRow->setContentsMargins(0, 0, 0, 0);
-        asRow->addWidget(mAs, 1);
+        mSpot = new QPushButton(QCoreApplication::translate("RulesDialog", "Model..."));
+        mSpot->setToolTip(QCoreApplication::translate("RulesDialog", "Choose a catalog spot structure for this point rule - the CODE is set (and the layer too when the structure lives on another one)"));
+        mSpot->setEnabled(false);
+        mSpot->setVisible(false);
         mAsSize = new NoWheelSpinBox;
         mAsSize->setRange(0, 200);
         mAsSize->setSpecialValueText(QCoreApplication::translate("RulesDialog", "no footprint"));
         mAsSize->setSuffix(QStringLiteral(" m"));
-        mAsSize->setToolTip(QCoreApplication::translate("RulesDialog", "Size in meters: the side of a structure footprint (\"no footprint\" leaves the bare point), the side of the area square, the length of the crosswalk"));
+        mAsSize->setToolTip(QCoreApplication::translate("RulesDialog", "Size in meters: the side of the area square, the length of the crosswalk"));
         mAsSize->setVisible(false);
+        QHBoxLayout* asRow = new QHBoxLayout;
+        asRow->setContentsMargins(0, 0, 0, 0);
+        asRow->addWidget(mAs, 1);
         asRow->addWidget(mAsSize);
+        asRow->addWidget(mSpot);
         form->addLayout(asRow, 2, 1);
         form->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "Pass")), 2, 2);
         mPass = new NoWheelSpinBox;
@@ -350,11 +355,7 @@ public:
         mPass->setToolTip(QCoreApplication::translate("RulesDialog", "2 — a guess for objects not recognized on pass 1 (they see the nb:* tags about neighbors)"));
         form->addWidget(mPass, 2, 3);
         mCont = new QCheckBox(QCoreApplication::translate("RulesDialog", "Continue (the object may also match the rules below)"));
-        form->addWidget(mCont, 3, 0, 1, 3);
-        mSpot = new QPushButton(QCoreApplication::translate("RulesDialog", "Model..."));
-        mSpot->setToolTip(QCoreApplication::translate("RulesDialog", "Choose a catalog spot structure for this point rule - the CODE is set (and the layer too when the structure lives on another one)"));
-        mSpot->setEnabled(false);
-        form->addWidget(mSpot, 3, 3);
+        form->addWidget(mCont, 3, 0, 1, 4);
         rightLay->addLayout(form);
 
         rightLay->addWidget(new QLabel(QCoreApplication::translate("RulesDialog", "Conditions — every tag must match; an empty condition means \"the tag exists\"")));
@@ -423,7 +424,16 @@ public:
                     refillAsChoices();                           // the point layer takes structures, a polygon layer areas
                     commitWidgets();
                 });
-        connect(mAs, QOverload<int>::of(&QComboBox::activated), this, [this] { commitWidgets(); updateAsSizeVisible(); });
+        connect(mAs, QOverload<int>::of(&QComboBox::activated), this, [this]
+                {
+                    const QString prev = mAsKind;
+                    mAsKind = mAs->currentData().toString();
+                    if (mAsKind == QLatin1String("struct") && prev != QLatin1String("struct"))
+                        mAsSize->setValue(0);                      // the pad belonged to the previous choice
+                    else if (mAsKind != QLatin1String("struct") && mAsSize->value() <= 0)
+                        mAsSize->setValue(mAsKind == QLatin1String("crosswalk") ? 12 : 20);
+                    commitWidgets();
+                });
         connect(mAsSize, QOverload<int>::of(&QSpinBox::valueChanged), this, [this] { if (!mFilling) commitWidgets(); });
         connect(mSpot, &QPushButton::clicked, this, [this] { pickSpot(); });
         connect(mPass, QOverload<int>::of(&QSpinBox::valueChanged), this, [this] { if (!mFilling) commitWidgets(); });
@@ -847,7 +857,8 @@ private:
         if (mAsSize && at >= 0)
             mAsSize->setValue(ok ? qBound(mAsSize->minimum(), size, mAsSize->maximum()) : 0);
         mAs->blockSignals(false);
-        updateAsSizeVisible();
+        mAsKind = mAs->currentData().toString();
+        updateAsExtrasVisible();
     }
 
     bool layerIsPoint() const                                  //!< is the typed layer a point layer of the catalog
@@ -873,13 +884,13 @@ private:
         return kind;
     }
 
-    void updateAsSizeVisible()
+    void updateAsExtrasVisible()
     {
-        if (!mAsSize) return;                                  // the first fillAsChoices runs before the spin exists
+        if (!mAsSize || !mSpot) return;                      // the first fillAsChoices runs before the spin and the button exist
         const QString kind = mAs->currentData().toString();
-        mAsSize->setVisible(kind == QLatin1String("struct") || kind == QLatin1String("area")
-                            || kind == QLatin1String("crosswalk"));
-    }
+        mAsSize->setVisible(kind == QLatin1String("area") || kind == QLatin1String("crosswalk"));
+        mSpot->setVisible(kind == QLatin1String("struct")); // the meters of a structure are its old "square:N" pad,
+    }                                                        // a hidden value: the figure is fixed by the code
 
     void pickSpot()                                          //!< the "Model..." button: the catalog spot zoo
     {
@@ -994,6 +1005,7 @@ private:
                           && o.value(QStringLiteral("from")).toString() == QLatin1String("points")
                           && !asVal.startsWith(QLatin1String("crosswalk:"))
                           && repo.layer(layer) && repo.layer(layer)->family == TmcRulesRepo::FamilyPoint);
+        updateAsExtrasVisible();
     }
 
     static QString catalogHtml(const TmcRulesRepo::Layer& lay, const TmcRulesRepo::Object& ob)
@@ -1060,6 +1072,7 @@ private:
     QPushButton *mWhenAdd = nullptr, *mWhenDel = nullptr, *mFieldsAdd = nullptr, *mFieldsDel = nullptr, *mRelAuto = nullptr;
     int mCur = -1;
     bool mFilling = false;
+    QString mAsKind;                                       // the kind the "As" combo currently selects
 };
 
 

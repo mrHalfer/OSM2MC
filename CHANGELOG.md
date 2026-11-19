@@ -37,7 +37,8 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 - An object code the catalog does not describe is no longer dropped: the object keeps the generic behavior
   of its layer and the export log warns about the code
 - The "As" field of the "Export rules" dialog offers a choice instead of free text: points are a Structure
-  (with an optional square footprint, the meters spin box next to it), an Area (a park or a playground
+  (the "Model..." button beside it picks the catalog figure with a preview; the leveled ground square of
+  the old "square:N" stays behind as the rule's own value), an Area (a park or a playground
   marked by a point — a square N m of side) or a Crosswalk N m long; lines and polygons may trade geometry
   (a closed line becomes a polygon, a polygon its boundary line); the old "square:10"/"crosswalk:5" items
   were example leftovers, the number always meant meters
