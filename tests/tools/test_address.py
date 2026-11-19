@@ -92,7 +92,7 @@ path = os.path.join(tcfg.WORLDS, 'osm_addr.osm')
 with open(path, 'w', encoding='utf-8') as f:
     f.write("<?xml version='1.0' encoding='UTF-8'?>\n<osm version='0.6'>\n" + '\n'.join(nodes) + '\n' + '\n'.join(ways) + '\n</osm>\n')
 
-rules = os.path.join(tcfg.RESOURCES, 'osm_rules.json')
+rules = os.path.join(tcfg.RULES, 'osmrules.json')
 code, log, sec = run_tmc([path, '--osm-rules', rules, '--dry-run', '--no-enhancer', '--no-greenery'],
                          os.path.join(tcfg.WORLDS, 'osm_addr.log'), env_extra={'TMC_OSM_DEBUG': '1'})
 print('tMC exit %d, %.1f c' % (code, sec))

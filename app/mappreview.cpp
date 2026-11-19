@@ -2,7 +2,7 @@
 #include "app/polygoneditor.h"
 #include "app/theme.h"
 #include "input/tmcproject.h"
-#include "input/t3dsettings.h"
+#include "osm/tmcrulesrepo.h"
 #include "core/maplayer.h"
 #include "scene/mcscene.h"
 #include "ogrsf_frmts.h"
@@ -115,9 +115,9 @@ TmcPreview tmcBuildPreview(const TmcRunOptions& optIn, const std::function<void(
     opt.noEnhancer = true;                // for the picture the OSM building types are accurate enough, and the enhancer and the vegetation top-up are just extra seconds
     opt.noGreenery = true;
     TmcProject project;
-    T3dSettings settings;
+    TmcRulesRepo& repo = TmcRulesRepo::instance();    // the same catalog the export uses (the loader reads heights through it)
     QString err;
-    if (!tmcLoadProject(opt, logFn, project, settings, &err)) { P.error = err; return P; }
+    if (!tmcLoadProject(opt, logFn, project, repo, &err)) { P.error = err; return P; }
     double bx0, by0, bx1, by1;
     if (!project.bounds(bx0, by0, bx1, by1) || bx1 <= bx0 || by1 <= by0) { P.error = QObject::tr("There are no objects in the data."); return P; }
     const double mx = (bx1 - bx0) * 0.02, my = (by1 - by0) * 0.02;

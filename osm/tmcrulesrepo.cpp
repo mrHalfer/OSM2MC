@@ -43,7 +43,7 @@ const TmcRulesRepo::Object* TmcRulesRepo::objectByCode(int code) const
     return byCode_.value(code, nullptr);
 }
 
-QString TmcRulesRepo::discover(const QString& explicitDir)
+QString TmcRulesRepo::discover(const QString& explicitDir, const QString& hintDir)
 {
     QStringList cand;
     if (!explicitDir.isEmpty())
@@ -53,6 +53,8 @@ QString TmcRulesRepo::discover(const QString& explicitDir)
         cand << QDir(explicitDir).filePath(QStringLiteral("rules"));
     const QString app = QCoreApplication::applicationDirPath();
     cand << app + QStringLiteral("/rules") << QDir::currentPath() + QStringLiteral("/rules");
+    if (!hintDir.isEmpty())
+        cand << QDir(hintDir).filePath(QStringLiteral("rules")) << hintDir;
     for (const QString& d : cand)
         if (QFileInfo::exists(QDir(d).filePath(marker)))
             return QDir(d).absolutePath();

@@ -12,7 +12,7 @@ import json, os, re, subprocess, sys
 import tcfg
 from tmc_run import run_tmc
 
-RULES = os.path.join(tcfg.RESOURCES, 'osm_rules.json')
+RULES = os.path.join(tcfg.RULES, 'osmrules.json')
 
 
 def main():

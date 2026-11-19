@@ -64,9 +64,9 @@ public:
     static double widthScale(const Object& o) { return o.props.value(QStringLiteral("WidthScale"), 1.0).toDouble(); }
     static bool marking(const Object& o) { return o.props.value(QStringLiteral("Marking")).toBool(); }
 
-    // The catalog folder: an explicit --rules path, then <exe>/rules, then <cwd>/rules —
-    // whichever contains the layer files. Empty when nothing found.
-    static QString discover(const QString& explicitDir = QString());
+    // The catalog folder: an explicit --rules path, then <exe>/rules, then <cwd>/rules, then the
+    // hint folder (its own rules/ subfolder first) — whichever contains the layer files. Empty when nothing found.
+    static QString discover(const QString& explicitDir = QString(), const QString& hintDir = QString());
 
 private:
     TmcRulesRepo() = default;

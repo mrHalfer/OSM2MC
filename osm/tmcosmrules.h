@@ -1,6 +1,6 @@
 #pragma once
 // The rules that turn OpenStreetMap tags into "virtual tqt layers" (bldpol, vegpol, rdslin ... with the CODE, REL, MAT ... fields).
-// The rules live in an external JSON file (osm_rules.json) so that the tag/code mapping can be changed without a rebuild.
+// The rules live in an external JSON file (rules/osmrules.json) so that the tag/code mapping can be changed without a rebuild.
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -41,7 +41,7 @@ struct OsmClassified
     QVector<QPair<QString, QString>> fields;        //!< computed field values
 };
 
-//! Parameters of the vegetation "top-up" for OSM data (the "greenery" block in osm_rules.json), see TmcProject::synthesizeGreenery()
+//! Parameters of the vegetation "top-up" for OSM data (the "greenery" block in rules/osmrules.json), see TmcProject::synthesizeGreenery()
 struct GreeneryOptions
 {
     bool enabled = true;

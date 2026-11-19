@@ -515,7 +515,7 @@ int main(int argc, char** argv)
     }
 
     // Elevated and underground roadways (the OSM bridge=yes / tunnel=yes tags, the BRG/TUN/LVL columns
-    // of osm_rules.json): two 60-block highways (CODE 45210000, marking) lifted/sunk by 6 blocks (level 0 —
+    // of rules/osmrules.json): two 60-block highways (CODE 45210000, marking) lifted/sunk by 6 blocks (level 0 —
     // one 6-block level, trapezoid ramps at both ends). The viaduct — a gray_concrete deck on a stone_bricks
     // girder above the ground, stone_brick_wall parapets, piers, the marking on the deck; the tunnel — a
     // gray_concrete floor 7 blocks under the surface, a 4-block interior with a stone_bricks lid and lanterns,

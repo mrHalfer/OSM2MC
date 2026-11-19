@@ -2,7 +2,7 @@
 """A test of the "folder with shape files" mode on real data (optional: a data directory is needed).
 
 The directory is taken from the variable TMC_TEST_SHP . No directory — SKIP (code 77).
-Checks: loading of layers (bldpol, csrpol, rdcpol, rdslin, vegpol, vgbpol), the default settings (default.t3d),
+Checks: loading of layers (bldpol, csrpol, rdcpol, rdslin, vegpol, vgbpol), the rules catalog,
 an export without errors, a non-empty result by categories.
 """
 import os, re, sys
@@ -21,7 +21,7 @@ def main():
     ok = code == 0 and os.path.exists(out)
     print('tMC exit %d, %.1f c' % (code, sec))
     for pat, title in ((r'Layer [^\n]*bldpol: \d+ objects', 'the bldpol layer is loaded'),
-                       (r'3D settings: [^\n]*default\.t3d', 'the default settings (default.t3d)'),
+                       (r'Rules catalog: [^\n]*rules', 'the rules catalog was found'),
                        (r'Objects: \d+ \(skipped: 0\)', 'all objects were exported'),
                        (r'Roads:', 'the result by categories')):
         hit = re.search(pat, log) is not None

@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """make_heights_table.py — FOR THE DEVELOPER ONLY (not included in the release).
 
+LEGACY (pre-v2.0): it built heights.csv, which the rules catalog (rules/<layer>.json, the "Default"
+height of a code) has replaced. Kept only as a way to look up the classifier value of a code.
+
 Builds a compact table of typical heights heights.csv from the full classifier clutters.dbf: only the CODES that really
 occur in the layers in use (bldpol, csrpol, rdcpol, rdslin, rrslin, blkpol, hdrpol, hdrlin, vegpol, vgbpol) get into it:
   1) in the shape files of your data (all directories found, passed through --data);
-  2) in the OSM rules (osm_rules.json: the CODE fields) and in the enhancer data (11 building codes);
+  2) in the OSM rules (rules/osmrules.json: the CODE fields) and in the enhancer data (11 building codes);
   3) in the codes known to the exporter (roads, sites, vegetation, shopping centers/churches etc.) — the list below.
-Only heights.csv (CODE;HIGH;OBJNAME50) goes into the release, the full clutters.dbf — does not.
 
-    py -3 make_heights_table.py --dbf clutters.dbf --data <data_directory> ... -o ..\\resources\\heights.csv
+    py -3 make_heights_table.py --dbf clutters.dbf --data <data_directory> ... -o heights-lookup.csv
 """
 import argparse, collections, csv, json, os, re, struct
 
@@ -52,7 +54,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--dbf', required=True, help='the full clutters.dbf')
     ap.add_argument('--data', nargs='*', default=[], help='directories with shape files (searched recursively)')
-    ap.add_argument('--rules', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'resources', 'osm_rules.json'))
+    ap.add_argument('--rules', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rules', 'osmrules.json'))
     ap.add_argument('-o', '--out', required=True)
     a = ap.parse_args()
 

@@ -1,5 +1,5 @@
 #pragma once
-// The full export cycle: load a project/folder -> 3D settings -> objects -> a Minecraft world (zip). Shared by the window and the command line.
+// The full export cycle: load the rules catalog + data -> objects -> a Minecraft world (zip). Shared by the window and the command line.
 #include <QImage>
 #include <QString>
 #include <functional>
@@ -8,11 +8,11 @@
 
 struct TmcRunOptions
 {
-    QString source;                       //!< a .tqt project file, an OSM extract (.osm/.pbf) or a folder with shapefiles; empty — the current folder
-    QString t3dPath;                      //!< .t3d settings file; empty — look for default.t3d (current folder, next to the exe, source folder), otherwise Wdf3D= from the project
+    QString source;                       //!< an OSM extract (.osm/.pbf) or a folder with shapefiles; empty — the current folder
+    QString rulesPath;                    //!< rules catalog folder (rules/<layer>.json); empty — look for rules/ next to the exe, in the current folder, in the source folder
     QString outPath;                      //!< world zip; empty — <project name>.zip in the current folder
     QString savesDir;                     //!< GUI export setting: save the world UNPACKED into this "saves" folder (launcher/Modrinth/CurseForge); empty — the zip of outPath
-    QString osmRulesPath;                 //!< JSON with the "OSM tags -> layer/code" rules (for an .osm/.pbf source); empty — osm_rules.json next to the file, the exe or in the current folder
+    QString osmRulesPath;                 //!< JSON with the "OSM tags -> layer/code" rules (for an .osm/.pbf source); empty — osmrules.json next to the file, in the catalog, the exe or the current folder
     QString enhancerPath;                 //!< enhancer file tmc_buildings.dat; empty — look next to the exe / in the current folder
     bool noEnhancer = false;              //!< do not use the enhancer
     bool noGreenery = false;              //!< do not top up vegetation for OSM data (yards, taiga, forests, parks)
@@ -56,9 +56,9 @@ TmcRunResult tmcRunExport(const TmcRunOptions& opt, const std::function<void(con
                           const std::function<void(int, int, int)>& progressFn, const std::atomic_bool* cancel);
 
 class TmcProject;
-struct T3dSettings;
-//! Loading of the data and 3D settings (shared by the export and the preview). false + err — failed.
-bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QString&)>& logFn, TmcProject& project, T3dSettings& settings, QString* err);
+class TmcRulesRepo;
+//! Loading of the data and the rules catalog (shared by the export and the preview). false + err — failed.
+bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QString&)>& logFn, TmcProject& project, TmcRulesRepo& repo, QString* err);
 
 //! Basic preview: pictures of the whole area at several resolutions (no 3D) + the mapping of pixels to project coordinates for choosing the spawn point.
 #include <QVector>
@@ -99,7 +99,5 @@ struct LandmarkPreset
 //! jsonPath — not null: the path of the JSON that was read (empty when none was found).
 QVector<LandmarkPreset> tmcLoadLandmarkPresets(QString* jsonPath = nullptr);
 
-//! Default settings file name
-extern const char* const kTmcDefaultT3dName;
-//! Default OSM rules file name
+//! Default OSM rules file name (since v2.0 it lives in the rules catalog folder)
 extern const char* const kTmcDefaultOsmRulesName;

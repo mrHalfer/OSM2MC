@@ -14,16 +14,15 @@ class QEvent;
 class QButtonGroup;
 class QAbstractButton;
 
-//! The exporter window: an OpenStreetMap file (in the -debug window also a .tqt project or a shapefile folder),
+//! The exporter window: an OpenStreetMap file (or a folder with shapefiles typed in by hand),
 //! world parameters, progress and the log; on the right a basic map preview
 //! with the spawn point chosen by a click. The layout is in mainwindow.ui (edit it in Qt Designer), only the logic is here.
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 public:
-    //! debug (the -debug command-line key) adds the "Project / folder" row: a .tqt project or a shapefile folder as the source;
-    //! the service paths (.t3d, OSM rules, enhancer) and "real meters" are set on the command line only
-    explicit MainWindow(const TmcRunOptions& initial, bool debug = false, QWidget* parent = nullptr);
+    //! the service paths (rules catalog, OSM rules, enhancer) and "real meters" are set on the command line only
+    explicit MainWindow(const TmcRunOptions& initial, QWidget* parent = nullptr);
     ~MainWindow() override;
     //! The project file without dialogs (for the command-line checks): write / read it
     bool saveProjectTo(const QString& path) { return writeProject(path); }
@@ -36,8 +35,6 @@ protected:
 
 private slots:
     void browseOsm();                                 //!< "OSM file" row: an .osm/.pbf extract
-    void browseProject();                             //!< the -debug "Project" button: a .tqt project
-    void browseFolder();                              //!< the -debug "Folder" button: shapefiles folder
     void openExportSettings();                        //!< "Export settings": the destination of the exported world (zip / launcher / instance)
     void generateSeed();
     void startExport();
@@ -113,7 +110,6 @@ private:
     QVector<LandmarkPreset> mLandmarks;                         //!< the placed figures with their per-instance settings (longitude/latitude)
     QVector<QPointF> mPendingClip;     //!< boundary (longitude/latitude) of the downloaded area: moved onto the map once the preview is loaded
     TmcRunOptions mInit;              //!< command-line parameters (entrance chunks etc. that have no counterpart in the window)
-    bool mDebug = false;
     std::unique_ptr<Ui::MainWindow> ui;
     QFutureWatcher<TmcPreview>* mPrevWatcher = nullptr;
     QFutureWatcher<TmcRunResult>* mWatcher = nullptr;

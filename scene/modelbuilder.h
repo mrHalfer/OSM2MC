@@ -228,12 +228,6 @@ struct ModelSettings
         //! liftField is not chosen (then the lift is simply the constant liftAdd for the whole layer).
         double liftAdd = 0.0;
 
-        //! The "model field" of a point layer (an exporter mark, tMC): the name of the column with the object code
-        //! (for example "CODE"). The code is looked up in the "code -> model" table (point_models.csv next to the
-        //! program), and the exporter builds that model of structure on the point. Empty — the layer's objects are
-        //! not point structures.
-        QString modelField;
-
         //! The degree of radio signal absorption by the buildings of this layer when computing the radio coverage (see
         //! RadioModel) — used only if the layer is added as a building (a polygon with a height field)
         //! to the calculation area. By default — None ("None"): the layer does not go into the calculation at all (a safe

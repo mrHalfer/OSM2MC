@@ -4,7 +4,7 @@
 #include "core/steplog.h"
 #include "export/climate.h"
 #include "input/tmcproject.h"
-#include "input/t3dsettings.h"
+#include "osm/tmcrulesrepo.h"
 #include "scene/mcscene.h"
 #include <QFile>
 #include <QFileInfo>
@@ -22,26 +22,7 @@
 #include <algorithm>
 #include <memory>
 
-const char* const kTmcDefaultT3dName = "default.t3d";
-const char* const kTmcDefaultOsmRulesName = "osm_rules.json";
-
-//! Any .t3d in the shapefile folder (if there are several — the first alphabetically)
-static QString findT3dInFolder(const QString& dir)
-{
-    const QStringList l = QDir(dir).entryList(QStringList() << QStringLiteral("*.t3d"), QDir::Files, QDir::Name);
-    return l.isEmpty() ? QString() : QDir(dir).filePath(l.first());
-}
-
-//! Fallback default.t3d: next to the exe, then in the current folder
-static QString findDefaultT3d()
-{
-    for (const QString& d : { QCoreApplication::applicationDirPath(), QDir::currentPath() })
-    {
-        const QString p = QDir(d).filePath(QString::fromLatin1(kTmcDefaultT3dName));
-        if (QFileInfo::exists(p)) return p;
-    }
-    return QString();
-}
+const char* const kTmcDefaultOsmRulesName = "osmrules.json";
 
 //! The landmark STL models (a user request): landmarks.json next to the exe (or in assets/stl), with the real
 //! coordinates of every landmark. MCX_LANDMARKS=<path> overrides the JSON (for testing on any area).
@@ -112,15 +93,16 @@ static QVector<McWorldOptions::LandmarkSite> tmcLoadLandmarks(TmcProject& projec
     return out;
 }
 
-bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QString&)>& logFn, TmcProject& project, T3dSettings& settings, QString* err)
+bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QString&)>& logFn, TmcProject& project, TmcRulesRepo& repo, QString* err)
 {
     auto log = [&](const QString& s) { if (logFn) logFn(s); };
     auto fail = [&](const QString& e) { if (err) *err = e; log(QObject::tr("Error: %1").arg(e)); return false; };
 
     QString source = opt.source.isEmpty() ? QDir::currentPath() : opt.source;
     const QFileInfo srcInfo(source);
-    const bool isTqt = srcInfo.isFile() && srcInfo.suffix().compare(QLatin1String("tqt"), Qt::CaseInsensitive) == 0;
     if (!srcInfo.exists()) return fail(QObject::tr("Source not found: %1").arg(source));
+    if (srcInfo.isFile() && srcInfo.suffix().compare(QLatin1String("tqt"), Qt::CaseInsensitive) == 0)
+        return fail(QObject::tr("tqt projects are not supported since v2.0: pass an OpenStreetMap extract (.osm/.pbf) or a folder with shapefiles"));
 
     // OSM extract: an .osm/.pbf file or a folder without shapefiles but with such a file
     QString osmFile;
@@ -132,37 +114,23 @@ bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QSt
     }
     const QString sourceDir = srcInfo.isDir() ? srcInfo.absoluteFilePath() : srcInfo.absolutePath();
 
-    // --- 3D settings ---
-    QByteArray t3dJson;
-    QString t3dUsed;
-    QString t3dPath = opt.t3dPath;
-    if (t3dPath.isEmpty() && (srcInfo.isDir() || !osmFile.isEmpty())) t3dPath = findT3dInFolder(sourceDir);
-    if (t3dPath.isEmpty() && isTqt)
-    {   // settings stored in the tqt project itself (the Wdf3D= line)
-        t3dJson = TmcProject::peekEmbeddedT3d(srcInfo.absoluteFilePath());
-        if (!t3dJson.isEmpty()) t3dUsed = QObject::tr("(from the project)");
-    }
-    if (t3dPath.isEmpty() && t3dJson.isEmpty()) t3dPath = findDefaultT3d();
-    if (!t3dPath.isEmpty())
-    {
-        QFile f(t3dPath);
-        if (!f.open(QIODevice::ReadOnly)) return fail(QObject::tr("Could not open the 3D settings file: %1").arg(t3dPath));
-        t3dJson = f.readAll();
-        t3dUsed = t3dPath;
-    }
-    if (t3dJson.isEmpty())
-        return fail(QObject::tr("3D settings file not found: specify --t3d, put a .t3d into the shapefile folder or put %1 next to the program.")
-                        .arg(QString::fromLatin1(kTmcDefaultT3dName)));
+    // --- rules catalog (since v2.0 it replaces the .t3d settings, heights.csv and point_models.csv) ---
+    const QString rulesDir = TmcRulesRepo::discover(opt.rulesPath, sourceDir);
+    if (rulesDir.isEmpty())
+        return fail(QObject::tr("Rules catalog not found: specify --rules or put the rules folder next to the program"));
+    QString e;
+    QStringList repoWarnings;
+    if (!repo.load(rulesDir, &e, &repoWarnings)) return fail(e);
+    for (const QString& w : repoWarnings) log(w);
+    log(QObject::tr("Rules catalog: %1").arg(QDir::toNativeSeparators(repo.dir())));
 
     // --- project ---
     project.setLogger(log);
     project.setEnhancer(opt.enhancerPath, opt.noEnhancer);
     project.setGreeneryOff(opt.noGreenery);
-    QString e;
-    if (!parseT3dSettings(t3dJson, settings, &e)) return fail(e);
     {
         QSet<QString> want;
-        for (const T3dSource& s : settings.sources) want.insert(s.layer.toLower());
+        for (const QString& n : repo.order()) want.insert(n.toLower());
         project.setWantedSuffixes(want);
     }
     log(QObject::tr("Loading: %1").arg(QDir::toNativeSeparators(srcInfo.absoluteFilePath())));
@@ -170,15 +138,15 @@ bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QSt
     {
         QString rules = opt.osmRulesPath;
         if (rules.isEmpty())
-            for (const QString& d : { QFileInfo(osmFile).absolutePath(), QCoreApplication::applicationDirPath(), QDir::currentPath() })
+            for (const QString& d : { QFileInfo(osmFile).absolutePath(), repo.dir(), QCoreApplication::applicationDirPath(), QDir::currentPath() })
             {
                 const QString p = QDir(d).filePath(QString::fromLatin1(kTmcDefaultOsmRulesName));
                 if (QFileInfo::exists(p)) { rules = p; break; }
             }
-        if (rules.isEmpty()) return fail(QObject::tr("OSM rules file (%1) not found: specify --osm-rules or put it next to the program.").arg(QString::fromLatin1(kTmcDefaultOsmRulesName)));
+        if (rules.isEmpty()) return fail(QObject::tr("OSM rules file (%1) not found: specify --osm-rules or put it into the rules catalog.").arg(QString::fromLatin1(kTmcDefaultOsmRulesName)));
         if (!project.loadOsm(osmFile, rules, opt.osmIniPath, &e)) return fail(e);
     }
-    else if (isTqt ? !project.loadTqt(srcInfo.absoluteFilePath(), &e) : !project.loadFolder(srcInfo.absoluteFilePath(), &e))
+    else if (!project.loadFolder(srcInfo.absoluteFilePath(), &e))
         return fail(e);
     // terrain: the matrix named after the data file, then DTM.tif — from the working folder, then from the shapefile/project folder
     if (!opt.useDtm)
@@ -190,7 +158,6 @@ bool tmcLoadProject(const TmcRunOptions& opt, const std::function<void(const QSt
             if (!project.addDefaultDtm(sourceDir, srcName))
                 log(QObject::tr("Height matrix not found (neither %1.tif nor DTM.tif) — the terrain is flat.").arg(QFileInfo(opt.source).completeBaseName()));
     }
-    log(QObject::tr("3D settings: %1").arg(t3dUsed));
     QVector<QPointF> clip = opt.clipPolygon;
     if (clip.isEmpty())
         for (const QPointF& ll : opt.clipLonLat)
@@ -222,9 +189,9 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     QElapsedTimer tAll; tAll.start();                                      // the whole export: loading, scene building, world writing
     progress(0, 0, 0);
     TmcProject project;
-    T3dSettings settings;
+    TmcRulesRepo& repo = TmcRulesRepo::instance();      // the singleton: the data loader (tmcproject.cpp) reads heights through it too
     QString err;
-    if (!tmcLoadProject(opt, log, project, settings, &err)) { R.ok = false; R.error = err; return R; }
+    if (!tmcLoadProject(opt, log, project, repo, &err)) { R.ok = false; R.error = err; return R; }
     if (opt.dryRun)
     {
         R.ok = true;
@@ -259,7 +226,7 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     McSceneResult scene;
     tmcStepLog("run: data loaded");
     progress(1, 0, 0);
-    if (!buildMcScene(project, settings, sopt, scene, [&](int d, int t) { progress(1, d, t); }, cancel, &err)) return fail(err);
+    if (!buildMcScene(project, repo, sopt, scene, [&](int d, int t) { progress(1, d, t); }, cancel, &err)) return fail(err);
     for (const QString& w : scene.warnings) log(w);
     if (scene.cancelled) { R.cancelled = true; R.error = QObject::tr("Export cancelled."); return R; }
     log(QObject::tr("Objects to export: %1").arg(scene.objects.size()));

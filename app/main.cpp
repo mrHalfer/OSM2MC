@@ -85,12 +85,12 @@ int main(int argc, char* argv[])
     }
 
     QCommandLineParser p;
-    p.setApplicationDescription(QObject::tr("OSMC — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world."));
-    p.setSingleDashWordOptionMode(QCommandLineParser::ParseAsLongOptions);      // "-debug" as well as "--debug"
+    p.setApplicationDescription(QObject::tr("OSMC — exports OpenStreetMap data or the shapefiles of a folder to a Minecraft world."));
+    p.setSingleDashWordOptionMode(QCommandLineParser::ParseAsLongOptions);      // "-nogui" as well as "--nogui"
     p.addHelpOption();
     p.addVersionOption();
-    p.addPositionalArgument(QStringLiteral("source"), QObject::tr("a .tqt project file, an OSM extract (.osm/.pbf) or a folder with shapefiles (default — the current folder)"));
-    p.addOption({ QStringLiteral("t3d"), QObject::tr("3D settings file (.t3d); by default the .t3d from the shapefile folder, otherwise the settings of the .tqt project, otherwise default.t3d next to the program"), QStringLiteral("file") });
+    p.addPositionalArgument(QStringLiteral("source"), QObject::tr("an OSM extract (.osm/.pbf) or a folder with shapefiles (default — the current folder)"));
+    p.addOption({ QStringLiteral("rules"), QObject::tr("rules catalog folder (rules/<layer>.json); by default the rules folder next to the program, in the current folder or in the source folder"), QStringLiteral("folder") });
     p.addOption({ { QStringLiteral("o"), QStringLiteral("out") }, QObject::tr("world zip archive"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("format"), QObject::tr("world version: 26 (default) or 1.21"), QStringLiteral("26|1.21") });
     p.addOption({ QStringLiteral("flat"), QObject::tr("superflat outside the area (default — a normal seed-based world)") });
@@ -100,7 +100,7 @@ int main(int argc, char* argv[])
     p.addOption({ QStringLiteral("stronghold"), QObject::tr("church chunk for the stronghold, F3 format: \"x z\" or \"x y z\""), QStringLiteral("chunk") });
     p.addOption({ QStringLiteral("city"), QObject::tr("church chunk for the Ancient City"), QStringLiteral("chunk") });
     p.addOption({ QStringLiteral("pale"), QObject::tr("a chunk inside the forest that becomes the Pale Garden"), QStringLiteral("chunk") });
-    p.addOption({ QStringLiteral("osm-rules"), QObject::tr("JSON with the \"OSM tags -> layer and codes\" rules for an .osm/.pbf source (default: osm_rules.json next to the file/program)"), QStringLiteral("file") });
+    p.addOption({ QStringLiteral("osm-rules"), QObject::tr("JSON with the \"OSM tags -> layer and codes\" rules for an .osm/.pbf source (default: osmrules.json next to the file, in the rules catalog or next to the program)"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("osm-ini"), QObject::tr("a custom osmconf.ini for the OSM driver (by default generated from the tags used by the rules)"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("clip"), QObject::tr("export boundary — a polygon of WGS84 longitudes and latitudes: \"lon lat; lon lat; lon lat …\" (in the window — \"Boundary\")"), QStringLiteral("vertices") });
     p.addOption({ QStringLiteral("saves-dir"), QObject::tr("save the world UNPACKED into this saves folder (a launcher or an instance folder), no zip — the world folder <name> is created inside it (in the window — \"Export settings\")"), QStringLiteral("folder") });
@@ -115,7 +115,6 @@ int main(int argc, char* argv[])
     p.addOption({ QStringLiteral("no-greenery"), QObject::tr("do not top up vegetation for OSM data (yards, taiga, forests, parks)") });
     p.addOption({ QStringLiteral("dry-run"), QObject::tr("only load and classify the data (summary in the log), do not build the world") });
     p.addOption({ QStringLiteral("theme"), QObject::tr("window theme: auto (as in Windows, default), light or dark"), QStringLiteral("auto|light|dark") });
-    p.addOption({ QStringLiteral("debug"), QObject::tr("add the \"Project / folder\" row to the window: a .tqt project or a shapefile folder as the source (the service paths .t3d, OSM rules and enhancer and \"real meters\" are command-line options only)") });
     p.addOption({ QStringLiteral("gui-online"), QObject::tr("(for testing, with --gui-screenshot) online mode: \"lon lat zoom; lon lat; lon lat; …\" — map view and boundary vertices"), QStringLiteral("view") });
     p.addOption({ QStringLiteral("download-osm"), QObject::tr("download OSM data for the polygon \"lon lat; lon lat; …\" (up to 25 km²) into the --out file and exit; the result goes to the --log file"), QStringLiteral("vertices") });
     p.addOption({ QStringLiteral("climate"), QObject::tr("climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid"), QStringLiteral("zone") });
@@ -128,7 +127,7 @@ int main(int argc, char* argv[])
 
     TmcRunOptions o;
     if (!p.positionalArguments().isEmpty()) o.source = p.positionalArguments().first();
-    o.t3dPath = p.value(QStringLiteral("t3d"));
+    o.rulesPath = p.value(QStringLiteral("rules"));
     o.outPath = p.value(QStringLiteral("out"));
     o.savesDir = p.value(QStringLiteral("saves-dir"));
     o.osmRulesPath = p.value(QStringLiteral("osm-rules"));
@@ -251,7 +250,7 @@ int main(int argc, char* argv[])
 
     const QString theme = p.value(QStringLiteral("theme")).toLower();
     TmcTheme::apply(app, theme == QLatin1String("dark") ? TmcTheme::Mode::Dark : theme == QLatin1String("light") ? TmcTheme::Mode::Light : TmcTheme::Mode::Auto);
-    MainWindow w(o, p.isSet(QStringLiteral("debug")));
+    MainWindow w(o);
     w.show();
     // a test of the project file: "open:file.tmc" is read before the screenshot, "save:file.tmc" is written after it
     const QString projArg = p.isSet(QStringLiteral("gui-project")) ? p.value(QStringLiteral("gui-project")) : QString();

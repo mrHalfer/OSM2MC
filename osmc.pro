@@ -1,13 +1,14 @@
-# OSMC — a standalone Minecraft exporter: reads a tqt project (.tqt), shapefiles from a folder or an OpenStreetMap extract, builds a model from the .t3d settings and writes a Minecraft world (zip).
+# OSMC — a standalone Minecraft exporter: reads an OpenStreetMap extract or shapefiles from a folder, interprets them with the rules catalog (rules/*.json) and writes a Minecraft world (zip).
 #
 # Layout:
 #   app/        window, command line, the full export cycle
-#   input/      data loading (tqt, shapefile folder, OSM) and 3D settings (.t3d)
-#   osm/        "OSM tags -> layer/code" rules, building enhancer, heights, vegetation top-up
+#   input/      data loading (shapefile folder, OSM)
+#   osm/        "OSM tags -> layer/code" rules, the rules catalog reader, building enhancer, heights, vegetation top-up
 #   scene/      export object assembly and the mesh builder
 #   export/     Minecraft world exporter (voxels, chunks, NBT, zip)
 #   core/       base classes: object, layer, height matrix
-#   resources/  icon, default settings, OSM rules, height table, enhancer, *.bin templates
+#   resources/  icon, structure enhancer, *.bin templates
+#   rules/      the v2.0 rules catalog: <layer>.json per layer + osmrules.json
 TEMPLATE = app
 TARGET = osmc
 
@@ -87,7 +88,6 @@ HEADERS += \
     app/terrainfetch.h \
     app/polygoneditor.h \
     input/tmcproject.h \
-    input/t3dsettings.h \
     osm/tmcosmrules.h \
     osm/tmcrulesrepo.h \
     osm/tmcrel.h \
@@ -158,7 +158,6 @@ SOURCES += \
     app/osmtilemap.cpp \
     app/terrainfetch.cpp \
     input/tmcproject.cpp \
-    input/t3dsettings.cpp \
     osm/tmcosmrules.cpp \
     osm/tmcrulesrepo.cpp \
     osm/tmcrel.cpp \
@@ -194,14 +193,14 @@ SOURCES += \
 win32: SOURCES += app/httpclient.cpp
 unix:  SOURCES += app/httpclient_unix.cpp
 
-# Copy the resources next to osmc.exe after every build: default settings, OSM rules, height table, enhancer; the
+# Copy the resources next to osmc.exe after every build: the building enhancer; the
 # *.bin structure templates go into the "assets" subfolder (the pile of templates next to the exe looked untidy).
 # The program looks for them next to the exe, so nothing has to be copied by hand. Missing files (for example the enhancer) are skipped.
 # MSVC puts the executable in a debug/release subfolder, the Unix make — straight into OUT_PWD, so the copy target differs.
 CONFIG(debug, debug|release): TMC_OUTDIR = $$OUT_PWD/debug
 else: TMC_OUTDIR = $$OUT_PWD/release
 unix: TMC_OUTDIR = $$OUT_PWD
-TMC_RES = default.t3d osm_rules.json heights.csv tmc_buildings.dat point_models.csv
+TMC_RES = tmc_buildings.dat
 for(f, TMC_RES) {
     exists($$PWD/resources/$$f) {
         win32: QMAKE_POST_LINK += xcopy /Y /D /Q /I \"$$shell_path($$PWD/resources/$$f)\" \"$$shell_path($$TMC_OUTDIR)\" >nul

@@ -64,9 +64,12 @@ rm -rf "$APP"
 mkdir -p "$APP/usr/lib" "$APP/usr/plugins" "$APP/usr/fonts" "$APP/usr/gdal-data" "$APP/usr/projlib"
 # the executable and the user-visible files (the same list as make_release.bat; README images are the Windows zip's habit, the AppImage ships none)
 cp -u "$OSMC_BIN" "$APP/usr/osmc"
-for f in default.t3d osm_rules.json heights.csv point_models.csv tmc_buildings.dat; do
+for f in tmc_buildings.dat; do
   [ -f "$ROOT/resources/$f" ] && cp -u "$ROOT/resources/$f" "$APP/usr/"
 done
+# the v2.0 rules catalog (rules/<layer>.json + osmrules.json) ships as a real folder next to the executable
+mkdir -p "$APP/usr/rules"
+cp -u "$ROOT"/rules/*.json "$APP/usr/rules/"
 mkdir -p "$APP/usr/assets"
 cp -u "$ROOT"/resources/templates/*.bin "$APP/usr/assets/"
 # the landmark STL models and landmarks.json (the same assets/stl as the Windows zip; the wikidata list is not shipped)

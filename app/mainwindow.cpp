@@ -32,7 +32,7 @@ const char* kStageNames[] = { QT_TRANSLATE_NOOP("MainWindow", "Loading the proje
 constexpr int kStageCount = int(sizeof(kStageNames) / sizeof(kStageNames[0]));
 }
 
-MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent) : QMainWindow(parent), mInit(initial), mDebug(debug), ui(new Ui::MainWindow)
+MainWindow::MainWindow(const TmcRunOptions& initial, QWidget* parent) : QMainWindow(parent), mInit(initial), ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
     {   // the rows of the local preview are put into containers: a hidden container takes no room (a hidden layout with spacers and margins would still shift the online map)
@@ -48,12 +48,6 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
         wrap(ui->rowSpawn, 4);          // the order in the .ui: rowPreviewTop, rowTools, preview, spawnInfoLabel, rowSpawn
         wrap(ui->rowTools, 1);
         wrap(ui->rowPreviewTop, 0);
-    }
-    if (!debug)
-    {   // the "Project / folder" row belongs to the -debug window only: an ordinary user always works with an OSM file
-        ui->subtitleLabel->setText(tr("Export an OpenStreetMap area to a Minecraft world"));
-        for (QWidget* w : std::initializer_list<QWidget*>{ ui->labelProject, ui->projectEdit, ui->btnProject, ui->btnFolder })
-            w->hide();
     }
     {   // the interface language selector in the header: the choice is saved and takes effect after a restart
         ui->leftLayout->removeWidget(ui->titleLabel);
@@ -133,8 +127,6 @@ MainWindow::MainWindow(const TmcRunOptions& initial, bool debug, QWidget* parent
     ui->progressBar->setRange(0, 100);
 
     connect(ui->btnOsm, &QPushButton::clicked, this, &MainWindow::browseOsm);
-    connect(ui->btnProject, &QPushButton::clicked, this, &MainWindow::browseProject);
-    connect(ui->btnFolder, &QPushButton::clicked, this, &MainWindow::browseFolder);
     connect(ui->genSeedButton, &QPushButton::clicked, this, &MainWindow::generateSeed);
     connect(ui->goButton, &QPushButton::clicked, this, &MainWindow::startExport);
     connect(ui->exportDirButton, &QPushButton::clicked, this, &MainWindow::openExportSettings);
@@ -196,11 +188,6 @@ void MainWindow::onSourceChanged()
     updateSpawnInfo();
     const QString t = ui->sourceEdit->text().trimmed();
     setOnlineMode(t.isEmpty());
-    if (mDebug)
-    {   // the service row only mirrors a non-OSM source: the .tqt project or the shapefile folder (an .osm/.pbf stays in the row above)
-        const bool projectSource = t.endsWith(QStringLiteral(".tqt"), Qt::CaseInsensitive) || QFileInfo(t).isDir();
-        ui->projectEdit->setText(projectSource ? t : QString());
-    }
     if (!t.isEmpty() && mAutoLoad && QFileInfo::exists(t)) QTimer::singleShot(0, this, [this]() { if (!mPrevWatcher->isRunning()) loadPreview(); });
 }
 
@@ -212,7 +199,7 @@ void MainWindow::loadSettings(const TmcRunOptions& init)
     mAutoLoad = false;                                     // at startup a file from the command line loads the preview separately, below
     ui->sourceEdit->setText(init.source);                  // the previously used file is not restored: the window always opens with the online map
     mAutoLoad = true;
-    // the service paths (.t3d, OSM rules, enhancer) and the output zip have had no window fields since 1.7 — they are set on the command line only
+    // the service paths (rules catalog, OSM rules, enhancer) and the output zip have had no window fields since 1.7 — they are set on the command line only
     mOutPath = init.outPath;
     const bool legacy = init.format == McWorldExporter::Format::Legacy121x
                         || (init.format == McWorldExporter::Format::Native26x && s.value(QStringLiteral("format"), 0).toInt() == 1 && init.source.isEmpty());
@@ -338,7 +325,7 @@ TmcRunOptions MainWindow::collect() const
 {
     TmcRunOptions o;
     o.source = ui->sourceEdit->text().trimmed();
-    o.t3dPath = mInit.t3dPath;                              // the service paths: no window fields since 1.7, command line only
+    o.rulesPath = mInit.rulesPath;                            // the service paths: no window fields since 1.7, command line only
     o.osmRulesPath = mInit.osmRulesPath;
     o.enhancerPath = mInit.enhancerPath;
     o.outPath = mOutPath;                                   // -o / the project file
@@ -400,19 +387,6 @@ void MainWindow::browseOsm()
     if (!f.isEmpty()) ui->sourceEdit->setText(QDir::toNativeSeparators(f));
 }
 
-void MainWindow::browseProject()
-{   // the -debug row: a .tqt project becomes the source (the "OSM file" row shows it too, it is the single source of truth)
-    const QString f = QFileDialog::getOpenFileName(this, tr("tqt project file"), ui->sourceEdit->text(),
-                                                   tr("tqt project (*.tqt);;All files (*)"));
-    if (!f.isEmpty()) ui->sourceEdit->setText(QDir::toNativeSeparators(f));
-}
-
-void MainWindow::browseFolder()
-{
-    const QString d = QFileDialog::getExistingDirectory(this, tr("Folder with shapefiles"), ui->sourceEdit->text());
-    if (!d.isEmpty()) ui->sourceEdit->setText(QDir::toNativeSeparators(d));
-}
-
 void MainWindow::generateSeed()
 {
     ui->seedEdit->setText(QString::number(qint64(QRandomGenerator::global()->generate64() >> 2) + 1));
@@ -441,6 +415,11 @@ void MainWindow::onProgress(int stage, int done, int total)
 void MainWindow::startExport()
 {
     if (mBusy) return;
+    if (mPrevWatcher->isRunning())
+    {   // the preview loader is reloading the rules catalog on its thread — the export uses the same catalog
+        appendLog(tr("The map preview is still loading — wait a few seconds and press again."));
+        return;
+    }
     saveSettings();
     ui->logEdit->clear();
     mStageIdx = -1; mFinalState = 0;
@@ -849,7 +828,6 @@ void MainWindow::updateStageLabel()
 void MainWindow::retranslate()
 {
     ui->retranslateUi(this);
-    if (!mDebug) ui->subtitleLabel->setText(tr("Export an OpenStreetMap area to a Minecraft world"));
     mLangLabel->setText(tr("Language:"));
     mOpenProjBtn->setText(tr("Open project…"));
     mSaveProjBtn->setText(tr("Save project…"));

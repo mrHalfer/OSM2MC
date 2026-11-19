@@ -8,7 +8,8 @@ import json, os, shutil
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 TESTS = os.path.dirname(TOOLS)
 ROOT = os.path.dirname(TESTS)                       # the project root
-RESOURCES = os.path.join(ROOT, 'resources')         # OSM rules, the height table, the enhancer, templates, default.t3d
+RESOURCES = os.path.join(ROOT, 'resources')         # the enhancer, templates
+RULES = os.path.join(ROOT, 'rules')                 # the v2.0 rules catalog: <layer>.json + osmrules.json
 WORLDS = os.path.join(TESTS, 'worlds')            # generated worlds (zip) and unpacked copies for the servers
 DATA = os.path.join(TESTS, 'data')
 BUILD = os.path.join(TESTS, 'build')                # harness artifacts (exe, obj)

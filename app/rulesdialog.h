@@ -1,9 +1,8 @@
 #pragma once
-// The "Export rules" dialog (GUI only): visual editing of the four reference files the exporter reads at run time —
-// osm_rules.json (OSM tags -> tqt layers), default.t3d (the 3D visualisation sources), point_models.csv (an object
-// code -> a point structure model) and heights.csv (typical building heights by code). The dialog edits the copies
-// it found next to the program (or in the current folder — the same order as the loaders), "Save as..." writes
-// anywhere. The next export picks the saved files up on its own, no restart needed.
+// The "Export rules" dialog (GUI only): visual editing of the OSM rules of the rules catalog — rules/osmrules.json
+// ("OSM tags -> layer and code"). The dialog edits the copy it found in the catalog next to the program (or in the
+// current folder — the same order as the loaders), "Save as..." writes anywhere. The next export picks the saved
+// file up on its own, no restart needed.
 #include <QDialog>
 #include <QVector>
 

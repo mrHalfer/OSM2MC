@@ -1,16 +1,16 @@
 {
  "_help": [
-  "Rules that turn OpenStreetMap tags into tqt layers (the working file of tMC). Edited by hand; the program does not read the \"examples\" array.",
+  "Rules that turn OpenStreetMap tags into the OSMC layers of the rules catalog (rules/<layer>.json). Edited by hand; the program does not read the \"examples\" array.",
   "The rules are checked from top to bottom; an object goes into the layer of the FIRST matching rule (unless \"continue\": true is set).",
   "from  : the OSM driver layer — multipolygons (buildings, plots, sites), lines (roads, rails), points (points).",
-  "layer : the tqt layer suffix: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin, csrlin (linear cultural objects, by CODE: 82200000 — a fence), csrpnt (point cultural/industrial objects), hdtpnt (point hydrography objects), mrspol (wetlands and salt flats), lcapol (ground surfaces, by CODE: 22410000 — bare rock, 72251100 — forced sand), pripol (prison refuge contours, CODE 53230000), milpol (military base contours, CODE 53220000); \"-\" — drop the object (no further rules are checked).",
+  "layer : the rules catalog layer: bldpol, vegpol, vgbpol, rdslin, rrslin, csrpol, rdcpol, blkpol, hdrpol, hdrlin, csrlin (linear cultural objects, by CODE: 82200000 — a fence), csrpnt (point cultural/industrial objects), hdtpnt (point hydrography objects), mrspol (wetlands and salt flats), lcapol (ground surfaces, by CODE: 22410000 — bare rock, 72251100 — forced sand), terpol (guarded territory contours, by CODE: 53230000 — prison refuge, 53220000 — military base); \"-\" — drop the object (no further rules are checked).",
   "as    : polygon (a closed line -> a polygon), line (a polygon boundary -> a line), square:N (a point -> a square with a side of N meters), crosswalk:N (a crossing node -> a line of N meters across the nearest motor road).",
   "pass  : 1 (default) — by tags; 2 — a \"guess\" for buildings not recognized on the 1st pass: they see the nb:* tags about the neighbors.",
   "when  : conditions on tags (all at once). \"v\" — equals; \"*\" — the tag exists; \"-\" or null — no tag; \"!v\" — the tag exists and is not equal to v;",
   "        [\"a\",\"b\"] — one of; [\"!a\",\"!b\"] — the tag exists and is not from the list; \"~regex\"; numbers \">=4\", \"<250\" (the first number from the tag value).",
   "        Service tags: poi:<tag> — tags of the points inside the building outline; area:<tag> — tags of the enclosing plots (without building);",
   "        _area — the outline area, m2; _perim — the perimeter, m; nb:code / nb:share / nb:n / nb:rel / nb:dist — neighbors (pass 2 only).",
-  "fields: the tqt layer fields (CODE, REL, MAT ...). The value: text with substitutions {tag}, {tag1,tag2} (the first non-empty),",
+  "fields: the catalog layer fields (CODE, REL, MAT ...). The value: text with substitutions {tag}, {tag1,tag2} (the first non-empty),",
   "        {tag|num}, {tag|int}, {tag|num*3}, {osm_id}; alternatives through || (the first non-empty). REL=\"auto\": height -> building:levels by the",
   "        floor recalculation formulas (by CODE and the outline shape) -> heights.csv by CODE -> 6 m. Elevation: the rdslin rules also carry BRG/TUN/LVL (the OSM bridge/tunnel/level tags): bridge=yes raises the roadway on a viaduct, tunnel=yes sinks it into a tunnel, level gives the height/depth in 8-block levels (bridge wins, 0 level - one level), layer multiplies the BRIDGE lift (multi-level interchanges).",
   "Address: the fields TYSTR (street type), STREET (name) and NUMBR (house number) for bldpol and the street name for rdslin are filled IN BY THEMSELVES from addr:street/addr:place/addr:full/addr:housenumber and name",
@@ -711,9 +711,9 @@
    }
   },
   {
-   "note": "A prison (amenity=prison) → pripol 53230000: a bandit refuge — buildings inside the contour become raider lairs whatever they are, iron golem spawners roam the ground, bandit banners on the border. The rule continues: the prison's own building (if it is one) is classified by the bldpol rules below",
+   "note": "A prison (amenity=prison) → terpol 53230000: a bandit refuge — buildings inside the contour become raider lairs whatever they are, iron golem spawners roam the ground, bandit banners on the border. The rule continues: the prison's own building (if it is one) is classified by the bldpol rules below",
    "from": "multipolygons",
-   "layer": "pripol",
+   "layer": "terpol",
    "when": {
     "amenity": "prison"
    },
@@ -1156,7 +1156,7 @@
    }
   },
   {
-   "note": "A pedestrian crossing (a footway=crossing line) — a zebra on the roadway, code 45262000 (an internal tMC code)",
+   "note": "A pedestrian crossing (a footway=crossing line) — a zebra on the roadway, code 45262000 (an internal exporter code)",
    "from": "lines",
    "layer": "rdslin",
    "when": {
@@ -1801,9 +1801,9 @@
    }
   },
   {
-   "note": "Military grounds (landuse=military) → milpol 53220000: a strictly guarded territory — a four-block stone wall along the contour (roads stay gates), a piglin garrison inside, no ordinary residents, piglin loot in the buildings",
+   "note": "Military grounds (landuse=military) → terpol 53220000: a strictly guarded territory — a four-block stone wall along the contour (roads stay gates), a piglin garrison inside, no ordinary residents, piglin loot in the buildings",
    "from": "multipolygons",
-   "layer": "milpol",
+   "layer": "terpol",
    "when": {
     "landuse": "military"
    },

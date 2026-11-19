@@ -1,5 +1,5 @@
 #pragma once
-// Loading data for export: a tqt project file (.tqt) or all shapefiles of a folder. Pure GDAL/OGR and Qt Core only — no windows and no modal dialogs.
+// Loading data for export: all shapefiles of a folder or an OpenStreetMap extract. Pure GDAL/OGR and Qt Core only — no windows and no modal dialogs.
 #include <QString>
 #include <QStringList>
 #include <QSet>
@@ -28,8 +28,6 @@ public:
     //! Loading progress messages (optional)
     void setLogger(const std::function<void(const QString&)>& fn) { mLog = fn; }
 
-    //! A tqt project file: Wkt, SpatialFilter, Layers (Shape/Rastr), Wdf3D. false + err — the file did not open / no layers.
-    bool loadTqt(const QString& file, QString* err);
     //! A folder: all *.shp in the folder itself (terrain — addDefaultDtm). false + err — no shapefiles.
     bool loadFolder(const QString& dir, QString* err);
 
@@ -49,14 +47,10 @@ public:
     //! Turn off the vegetation top-up for OSM data (on by default through the rules, the "greenery" block)
     void setGreeneryOff(bool off) { mGreeneryOff = off; }
 
-    //! 3D settings from the Wdf3D= line of the project file without loading the layers (empty — none)
-    static QByteArray peekEmbeddedT3d(const QString& tqtFile);
-
     QString wkt() const { return mWkt; }
     const OGRSpatialReference* srs() const { return mSrs.get(); }
     const QVector<MapLayer*>& layers() const { return mLayers; }
     const QVector<HeightRaster*>& rasters() const { return mRasters; }
-    QByteArray embeddedT3d() const { return mEmbeddedT3d; }          //!< 3D settings from the Wdf3D= line (JSON), empty — none
     QString projectBaseName() const { return mBaseName; }
     QStringList warnings() const { return mWarnings; }
 
@@ -83,11 +77,8 @@ private:
     std::function<void(const QString&)> mLog;
     QString mWkt;
     std::unique_ptr<OGRSpatialReference> mSrs;
-    OGRGeometry* mFilter = nullptr;               //!< the project spatial filter (in the project CRS), owned
     QVector<MapLayer*> mLayers;
     QVector<HeightRaster*> mRasters;
-    QByteArray mEmbeddedT3d;
     QString mBaseName;
     QStringList mWarnings;
-    bool mCrsFromProject = false;
 };

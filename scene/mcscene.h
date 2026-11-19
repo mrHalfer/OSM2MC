@@ -1,6 +1,6 @@
 #pragma once
-// Assembling the exporter object list (McObject) from the loaded project and the 3D settings.
-// A port of the object collection from the tqt 3D window, exportMinecraftSave() (tqt, tqt): the object kind by layer suffix, MAT/CODE/LIFT/address,
+// Assembling the exporter object list (McObject) from the loaded project and the rules catalog.
+// A port of the object collection from the tqt 3D window, exportMinecraftSave() (tqt, tqt): the object kind by layer family/name, MAT/CODE/LIFT/address,
 // merging of elevator shafts, rebuilding each object's mesh with the same ModelBuilder::BuildSingleObjectMesh, the average over vertices as the color.
 #include <QString>
 #include <QStringList>
@@ -8,7 +8,7 @@
 #include <functional>
 #include <atomic>
 #include "export/mcworldexporter.h"
-#include "input/t3dsettings.h"
+#include "osm/tmcrulesrepo.h"
 #include "input/tmcproject.h"
 
 struct McSceneOptions
@@ -27,8 +27,8 @@ struct McSceneResult
 };
 
 //! Collect the objects. progress(done, total) — as the meshes are rebuilt; cancel — the cancellation flag (may be nullptr).
-//! false + err — nothing to export (no layer from the settings was found in the project, etc.).
-bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const McSceneOptions& opt, McSceneResult& out,
+//! false + err — nothing to export (no layer from the rules catalog was found in the project, etc.).
+bool buildMcScene(const TmcProject& project, const TmcRulesRepo& repo, const McSceneOptions& opt, McSceneResult& out,
                   const std::function<void(int, int)>& progress, const std::atomic_bool* cancel, QString* err);
 
 //! How many meters there are in a map coordinate unit along X and Y at the point (x, y) of the projection given by WKT (as in the tqt 3D window).

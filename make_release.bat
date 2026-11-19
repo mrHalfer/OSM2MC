@@ -36,7 +36,8 @@ mkdir "%DST%"
 
 echo === 2/5 collecting the files ===
 copy /y "%OSMC_BUILD%\release\osmc.exe" "%DST%\" >nul
-for %%f in (default.t3d osm_rules.json heights.csv point_models.csv tmc_buildings.dat) do if exist "%ROOT%resources\%%f" copy /y "%ROOT%resources\%%f" "%DST%\" >nul
+for %%f in (tmc_buildings.dat) do if exist "%ROOT%resources\%%f" copy /y "%ROOT%resources\%%f" "%DST%\" >nul
+xcopy /E /Y /Q /I "%ROOT%rules" "%DST%\rules" >nul
 if not exist "%DST%\assets" mkdir "%DST%\assets"
 copy /y "%ROOT%resources\templates\*.bin" "%DST%\assets\" >nul
 if exist "%ROOT%resources\stl" (mkdir "%DST%\assets\stl" & copy /y "%ROOT%resources\stl\*.stl" "%DST%\assets\stl\" >nul & copy /y "%ROOT%resources\stl\landmarks.json" "%DST%\assets\stl\" >nul & copy /y "%ROOT%resources\stl\ATTRIBUTION.txt" "%DST%\assets\stl\" >nul)

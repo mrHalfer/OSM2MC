@@ -7,7 +7,7 @@ import re, sys, os
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 CPP = os.path.join(ROOT, 'scene', 'modelbuilder.cpp')
 H = os.path.join(ROOT, 'scene', 'modelbuilder.h')
-OTHERS = ['scene/mcscene.cpp', 'scene/mcscene.h', 'input/tmcproject.cpp', 'app/tmcrun.cpp', 'input/t3dsettings.cpp', 'app/mainwindow.cpp', 'app/main.cpp']
+OTHERS = ['scene/mcscene.cpp', 'scene/mcscene.h', 'input/tmcproject.cpp', 'app/tmcrun.cpp', 'app/mainwindow.cpp', 'app/main.cpp']
 
 
 def strip_code(s):

@@ -14,7 +14,7 @@ from tmc_run import run_tmc
 
 import tmcb as be                                   # the file format helpers (writing and reading the .dat)
 
-RULES = os.path.join(tcfg.RESOURCES, 'osm_rules.json')
+RULES = os.path.join(tcfg.RULES, 'osmrules.json')
 lat0, lon0 = 51.66, 39.20
 mx = 111320.0 * math.cos(math.radians(lat0)); my = 111320.0
 

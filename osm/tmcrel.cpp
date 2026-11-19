@@ -1,41 +1,7 @@
 #include "osm/tmcrel.h"
-#include <QCoreApplication>
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QTextStream>
 #include <QRegularExpression>
 #include <algorithm>
 #include <cmath>
-
-bool TmcHeightTable::load(const QString& csvPath)
-{
-    mHigh.clear();
-    QFile f(csvPath);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
-    QTextStream in(&f);
-    in.setCodec("UTF-8");                                                  // the BOM is recognized automatically
-    in.readLine();                                                         // the header: CODE;HIGH;OBJNAME50
-    while (!in.atEnd())
-    {
-        const QStringList p = in.readLine().split(QLatin1Char(';'));
-        bool okC = false, okH = false;
-        const int code = p.value(0).trimmed().toInt(&okC);
-        const double h = p.value(1).trimmed().replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&okH);
-        if (okC && okH && code > 0) mHigh.insert(code, h);                 // and zero heights (lawns, meadows) too: the code is in the table, the height is 0
-    }
-    return !mHigh.isEmpty();
-}
-
-QString TmcHeightTable::findDefault()
-{
-    for (const QString& d : { QCoreApplication::applicationDirPath(), QDir::currentPath() })
-    {
-        const QString p = QDir(d).filePath(QStringLiteral("heights.csv"));
-        if (QFileInfo::exists(p)) return p;
-    }
-    return QString();
-}
 
 static bool inList(int code, std::initializer_list<int> l) { for (int c : l) if (c == code) return true; return false; }
 
@@ -92,7 +58,7 @@ static bool firstNumber(const QString& s, double& out)
     return true;
 }
 
-QString tmcAutoRel(const QHash<QString, QString>& tags, int code, const TmcHeightTable& clutters, double defaultH)
+QString tmcAutoRel(const QHash<QString, QString>& tags, int code, double defaultH)
 {
     double v = 0;
     if (firstNumber(tags.value(QStringLiteral("height")), v) && v > 0) return QString::number(v, 'f', 1);     // as REL_HAND: set manually
@@ -116,6 +82,5 @@ QString tmcAutoRel(const QHash<QString, QString>& tags, int code, const TmcHeigh
         const double r = tmcRelFromFloors(code, int(dv + 0.5), area, perim);
         if (r > 0) return QString::number(r, 'f', 1);
     }
-    const double h = clutters.high(code);                                          // -1 — the code is not in the table
-    return QString::number(h >= 0 ? h : defaultH, 'f', 1);
+    return QString::number(defaultH, 'f', 1);                                      // the catalog typical height (a zero is a height too)
 }

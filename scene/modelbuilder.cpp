@@ -217,7 +217,7 @@ static void AppendGroundQuad(double x0, double y0, double x1, double y1, const Q
 // closed here on every call, concurrent writing from two threads to a diagnostic text
 // log is acceptable (at worst — a rare interleaved line, not critical). Remove it together with
 // MainWindow::logBuildDiag() when the cause of the hang is found and fixed.
-extern bool g_debugLog;   // main.cpp — only when started with -debug/--debug
+extern bool g_debugLog;   // main.cpp — always off in OSMC
 
 static void LogBuildPhase(QElapsedTimer& t, const QString& msg)
 {

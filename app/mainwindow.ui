@@ -50,7 +50,7 @@
         <item>
          <widget class="QLabel" name="subtitleLabel">
           <property name="text">
-           <string>Export a map to a Minecraft world: a tqt project, shapefiles or OpenStreetMap</string>
+           <string>Export an OpenStreetMap area to a Minecraft world</string>
           </property>
          </widget>
         </item>
@@ -80,41 +80,6 @@
               <widget class="QPushButton" name="btnOsm">
                <property name="text">
                 <string>Browse…</string>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="1" column="0">
-            <widget class="QLabel" name="labelProject">
-             <property name="text">
-              <string>Project / folder:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="1">
-            <layout class="QHBoxLayout" name="rowProject">
-             <item>
-              <widget class="QLineEdit" name="projectEdit">
-               <property name="readOnly">
-                <bool>true</bool>
-               </property>
-               <property name="placeholderText">
-                <string>a .tqt project or a folder with shapefiles</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QPushButton" name="btnProject">
-               <property name="text">
-                <string>Project…</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QPushButton" name="btnFolder">
-               <property name="text">
-                <string>Folder…</string>
                </property>
               </widget>
              </item>
@@ -536,9 +501,6 @@
  <tabstops>
   <tabstop>sourceEdit</tabstop>
   <tabstop>btnOsm</tabstop>
-  <tabstop>projectEdit</tabstop>
-  <tabstop>btnProject</tabstop>
-  <tabstop>btnFolder</tabstop>
   <tabstop>fmt26Radio</tabstop>
   <tabstop>fmt121Radio</tabstop>
   <tabstop>noiseRadio</tabstop>

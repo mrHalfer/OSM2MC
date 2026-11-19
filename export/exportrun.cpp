@@ -900,11 +900,11 @@ bool ExportRun::writeZip()
 
 void ExportRun::buildPointObjects()
 {
-    // 3.575 Objects from points on the map (sources with a modelField, step 3.575): memorials and monuments,
+    // 3.575 Objects from points on the map (catalog layers with a Model, step 3.575): memorials and monuments,
     // fountains, communication towers, waste bins, lighting masts, benches, sculptures and bus-stop shelters
     // stand on the READY ground (after the street furniture; the
     // trees were not planted around them — their columns were reserved in noTreePadCols). Which structure to build
-    // is decided by the model number from point_models.csv (the object's code from the modelField column);
+    // is decided by the Model number of the object's code in the rules catalog (rules/<layer>.json);
     // "atop a building" is the communication tower only (from its roof), the rest are skipped if a
     // structure/water/roadway lies under the point. The variant of every object is a hash of its column.
     {
@@ -11484,7 +11484,7 @@ bool ExportRun::buildObjects()
     // loose — the "small" vegetation of OSM data (tMC adds it itself): a yard between houses (code 71126190, trees like vgbpol but denser) and
     // forced taiga in the private sector (code 71111111, spruces at any area). Such patches are small and narrow, so the forest's own terrain
     // (fading out at the boundary over 28 blocks) would be almost flat — they are given the terrain of empty lands and are not counted as "occupied" for it.
-    // Objects from points on the map (sources with a modelField, e.g. csrpnt/hdtpnt/rdcpnt): a memorial, a monument,
+    // Objects from points on the map (catalog point layers with a Model, e.g. csrpnt/hdtpnt/rdcpnt): a memorial, a monument,
     // a fountain, a communication tower, a waste bin, a lighting mast, a bench, a sculpture, a bus stop. The anchor is the center of the point's square; the structure
     // is built in 3.575 on the ready ground; the model number comes from point_models.csv (the code -> model table).
     // 1 — a memorial statue, 2 — a monument stele, 3 — a fountain, 4 — a communication tower, 5 — a composter.
@@ -12067,9 +12067,9 @@ bool ExportRun::buildObjects()
             continue;
         }
         if (o.kind == McObject::Spot)
-        {   // a point object (a source with a modelField): the rasterized square of the point gives the ANCHOR only
+        {   // a point object (a catalog point layer with a Model): the rasterized square of the point gives the ANCHOR only
             // (the rule's "as: square:N" centers it on the point). The model was resolved in mcscene by the code
-            // from the modelField column (point_models.csv). The structure is built in 3.575 on the ready ground;
+            // (the Model of the object's catalog descriptor). The structure is built in 3.575 on the ready ground;
             // the neighborhood is reserved against trees already here.
             if (o.model < kStatue || o.model > kBusStop) { ++res.skippedCount; continue; }
             QList<qint64> cols = std::move(pre[objDone - 1]);
@@ -12425,7 +12425,7 @@ bool ExportRun::buildObjects()
                     cid = quint16(IdCarpetBase + markIdx);      // (woolForCarpetId -> light_gray_wool)
                 else if (!ped && grayIdx >= 0) cid = quint16(IdCarpetBase + grayIdx);
                 // ELEVATED / UNDERGROUND WAY (the OSM bridge/tunnel tags, level gives the number of levels,
-                // 8 blocks each; the BRG/TUN/LVL/LYR columns, see osm_rules.json). Both kinds are marked along ALL
+                // 8 blocks each; the BRG/TUN/LVL/LYR columns, see rules/osmrules.json). Both kinds are marked along ALL
                 // their length (off = +/-elevH everywhere) and their geometry belongs to the VIADUCTS AND
                 // TUNNELS pass of buildGround: the viaduct gets a FLAT deck plane and 1-in-8 ramps with air
                 // junctions where bridge lines continue each other; the tunnel gets a FLAT floor under the

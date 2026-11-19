@@ -6,6 +6,7 @@
 #include "osm/tmcrel.h"
 #include "osm/tmcaddress.h"
 #include "osm/tmcenhancer.h"
+#include "osm/tmcrulesrepo.h"
 #include <QFile>
 #include <QMap>
 #include <QTemporaryDir>
@@ -27,11 +28,11 @@ QString suffixOf(const QString& layerName)
     return layerName.section(QLatin1Char('.'), -1).toLower();
 }
 
-//! Default projection for WGS84 data: the DefaultCrs= line from osmc.ini next to the exe (tqt's TQT.ini works too), otherwise World Mercator
+//! Default projection for WGS84 data: the DefaultCrs= line from osmc.ini next to the exe, otherwise World Mercator
 QString defaultCrsText()
 {
     QString value;
-    for (const char* name : { "/osmc.ini", "/tMC.ini", "/TQT.ini" })
+    for (const char* name : { "/osmc.ini", "/tMC.ini" })
     {
         QFile f(QCoreApplication::applicationDirPath() + QLatin1String(name));
         if (!f.open(QIODevice::ReadOnly)) continue;
@@ -54,37 +55,14 @@ int epsgOf(const OGRSpatialReference& s)
     return 0;
 }
 
-//! Read the text of a project file: UTF-8, and if it is not valid UTF-8 — the system code page
-QString readText(const QString& file)
-{
-    QFile f(file);
-    if (!f.open(QIODevice::ReadOnly)) return QString();
-    const QByteArray raw = f.readAll();
-    QString s = QString::fromUtf8(raw);
-    if (s.contains(QChar(0xFFFD))) s = QString::fromLocal8Bit(raw);
-    return s;
-}
-
 }   // namespace
 
 TmcProject::TmcProject() = default;
-
-QByteArray TmcProject::peekEmbeddedT3d(const QString& tqtFile)
-{
-    const QString text = readText(tqtFile);
-    for (const QString& ln : text.split(QLatin1Char('\n')))
-    {
-        const QString t = ln.trimmed();
-        if (t.startsWith(QLatin1String("Wdf3D="))) return QByteArray::fromBase64(t.mid(6).toLatin1());
-    }
-    return QByteArray();
-}
 
 TmcProject::~TmcProject()
 {
     qDeleteAll(mLayers);
     qDeleteAll(mRasters);
-    delete mFilter;
 }
 
 MapLayer* TmcProject::layerBySuffix(const QString& suffix) const
@@ -218,14 +196,6 @@ MapLayer* TmcProject::readLayer(const QString& dsPath, const QString& layerName)
         p->Release();
     }
     if (layerSrs) layerSrs->Release();
-
-    if (mFilter)
-    {
-        OGRGeometry* f = mFilter->clone();
-        if (toLayer) f->transform(toLayer.get());
-        lyr->SetSpatialFilter(f);
-        delete f;
-    }
 
     std::unique_ptr<MapLayer> L(new MapLayer);
     L->name = layerName.isEmpty() ? QString::fromUtf8(lyr->GetName()) : layerName;
@@ -594,13 +564,13 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
     const QString unmatchedFile = qEnvironmentVariable("TMC_OSM_UNMATCHED");      // file for the report of uncovered objects (optional)
     QMap<QString, int> unmatchedStat;
 
-    // table of typical heights by code (heights.csv) — a fallback source of REL when a building has neither height nor building:levels
-    TmcHeightTable clutters;
+    // typical building height fallback for the REL chain: the rules catalog Rel/Default of the code
+    // (an explicit zero is a height too — lawns, meadows; a code absent from the catalog — the 6 m default)
+    auto catalogDefaultH = [](const QString& layer, int code) -> double
     {
-        const QString cp = TmcHeightTable::findDefault();
-        if (!cp.isEmpty() && clutters.load(cp)) log(QObject::tr("Height table: %1 (%2 codes)").arg(QDir::toNativeSeparators(cp)).arg(clutters.size()));
-        else mWarnings << QObject::tr("The height table heights.csv was not found: heights of buildings without height and building:levels — the default");
-    }
+        const TmcRulesRepo::Object* d = TmcRulesRepo::instance().object(layer, code);
+        return (d && d->relHasDefault) ? d->relDefault : 6.0;
+    };
 
     // enhancer: building points (type, height, floors) from a ready .dat; the rules and the height calculation get them as db:* tags
     TmcEnhancer enhancer;
@@ -685,7 +655,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
         for (const OsmClassified& c0 : cl)
         {
             OsmClassified c = c0;
-            // REL: "auto" — height from tags (height -> building:levels by the floor conversion formulas -> heights.csv by CODE)
+            // REL: "auto" — height from tags (height -> building:levels by the floor conversion formulas -> the rules catalog height by CODE)
             QString codeStr;
             bool relAuto = false;
             for (const auto& fv : c.fields) if (fv.first == QLatin1String("CODE")) codeStr = fv.second;
@@ -693,7 +663,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                 if (fv.first == QLatin1String("REL") && fv.second.trimmed().toLower() == QLatin1String("auto"))
                 {
                     relAuto = true;
-                    fv.second = tmcAutoRel(objTags, codeStr.toInt(), clutters);
+                    fv.second = tmcAutoRel(objTags, codeStr.toInt(), catalogDefaultH(c.layer, codeStr.toInt()));
                     if (debugOsm) log(QStringLiteral("  [rel %1] CODE=%2 REL=%3").arg(objTags.value(QStringLiteral("osm_id")), codeStr, fv.second));
                 }
             // a building taller than two floors cannot be a shed (44000000): by floors from the tags/enhancer, otherwise by height — turn it into 44310000
@@ -719,7 +689,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
                     for (auto& fv : c.fields) if (fv.first == QLatin1String("CODE")) fv.second = QStringLiteral("44310000");
                     codeStr = QStringLiteral("44310000");
                     if (relAuto)                                    // height by the formulas of the new code
-                        for (auto& fv : c.fields) if (fv.first == QLatin1String("REL")) fv.second = tmcAutoRel(objTags, 44310000, clutters);
+                        for (auto& fv : c.fields) if (fv.first == QLatin1String("REL")) fv.second = tmcAutoRel(objTags, 44310000, catalogDefaultH(c.layer, 44310000));
                 }
             }
             // address plate (buildings) and street sign (roads): type, name and number from addr:* / name; explicit fields of the rule take priority
@@ -890,7 +860,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
 
     // SUBWAY ENTRANCES (`railway=subway_entrance` nodes): collected here first, so that the loop below can
     // promote a `building=transportation` outline that stands on such a node or within ~10 m of it to a
-    // station hall (CODE 44330000; the tag case `subway=yes` is an osm_rules.json rule, the geometry is not).
+    // station hall (CODE 44330000; the tag case `subway=yes` is an osmrules.json rule, the geometry is not).
     QVector<QPointF> subwayEnvs;
     if (OGRLayer* el = ds->GetLayerByName("points"))
     {
@@ -1238,7 +1208,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
     }
 
     // Raised parts (MINH, meters): REL holds the height of the TOP above the ground (as in OSM), the object itself is built from its base up, so REL becomes
-    // the thickness of the part (the base is lifted by the layer's lift field MINH, see default.t3d). A part is not thinner than 3 m.
+    // the thickness of the part (the base is lifted by the layer's lift field MINH, see the layer styles in scene/mcscene.cpp). A part is not thinner than 3 m.
     {
         MapLayer* bl = out.value(QStringLiteral("bldpol"));
         const int mi = bl ? bl->fieldIndex(QStringLiteral("MINH")) : -1, ri = bl ? bl->fieldIndex(QStringLiteral("REL")) : -1;
@@ -1320,135 +1290,5 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
         log(QObject::tr("The OSM rules found no objects — the terrain only will be exported (a height matrix is required)."));
     }
     { GreeneryOptions go = rules.greenery(); if (mGreeneryOff) go.enabled = false; synthesizeGreenery(go); }          // OSM gives noticeably less greenery than our data: top it up (see tmcgreen.cpp)
-    return true;
-}
-
-bool TmcProject::loadTqt(const QString& file, QString* err)
-{
-    const QString text = readText(file);
-    if (text.isEmpty()) { if (err) *err = QObject::tr("Could not read the project file: %1").arg(file); return false; }
-    const QFileInfo fi(file);
-    mBaseName = fi.completeBaseName();
-    const QDir base = fi.absoluteDir();
-    const QStringList lines = text.split(QLatin1Char('\n'));
-
-    struct Entry { bool raster; QString path, name; bool visible; };
-    QVector<Entry> entries;
-    QString wktText, filterText, filterGrText;
-    int layersToRead = 0;
-    static const QRegularExpression layerRe(QStringLiteral("^(Shape|Rastr)=\\{\"([^\"]*)\",\"([^\"]*)\"\\}"));
-    static const QRegularExpression visRe(QStringLiteral(";Visible=(\\d)"));
-    auto braceText = [](const QString& s) -> QString
-    {
-        const int a = s.indexOf(QLatin1Char('{')), b = s.lastIndexOf(QLatin1Char('}'));
-        return (a >= 0 && b > a) ? s.mid(a + 1, b - a - 1) : QString();
-    };
-    for (QString ln : lines)
-    {
-        ln = ln.trimmed();
-        if (layersToRead > 0)
-        {
-            const QRegularExpressionMatch m = layerRe.match(ln);
-            if (m.hasMatch())
-            {
-                Entry e;
-                e.raster = m.captured(1) == QLatin1String("Rastr");
-                e.path = m.captured(2);
-                e.name = m.captured(3);
-                const QRegularExpressionMatch v = visRe.match(ln);
-                e.visible = !v.hasMatch() || v.captured(1) != QLatin1String("0");
-                entries << e;
-            }
-            --layersToRead;
-            continue;
-        }
-        if (ln.startsWith(QLatin1String("Layers="))) layersToRead = ln.mid(7).toInt();
-        else if (ln.startsWith(QLatin1String("SpatialFilterGR="))) filterGrText = braceText(ln);
-        else if (ln.startsWith(QLatin1String("SpatialFilter="))) filterText = braceText(ln);
-        else if (ln.startsWith(QLatin1String("Wkt"))) { const QString t = braceText(ln); if (!t.isEmpty()) wktText = t; }
-        else if (ln.startsWith(QLatin1String("Wdf3D="))) mEmbeddedT3d = QByteArray::fromBase64(ln.mid(6).toLatin1());
-    }
-    if (entries.isEmpty()) { if (err) *err = QObject::tr("The project has no layers (the Layers= line)"); return false; }
-
-    auto resolve = [&](const QString& p) -> QString
-    {
-        if (QFileInfo(p).isAbsolute() || p.contains(QStringLiteral("PG:"))) return p;
-        return base.filePath(p);
-    };
-
-    // project coordinate system
-    if (!wktText.isEmpty())
-    {
-        std::unique_ptr<OGRSpatialReference> s(new OGRSpatialReference);
-        const QByteArray b = wktText.toUtf8();
-        const char* pw = b.constData();
-        if (s->importFromWkt(&pw) == OGRERR_NONE)
-        {
-            s->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-            mSrs = std::move(s);
-            mCrsFromProject = true;
-        }
-    }
-    if (!mSrs)
-    {   // from the first vector layer (.prj), as when a project is created in tqt
-        GDALAllRegister();
-        for (const Entry& e : entries)
-        {
-            if (e.raster) continue;
-            GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(resolve(e.path).toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
-            if (ds && ds->GetLayer(0) && ds->GetLayer(0)->GetSpatialRef())
-            {
-                mSrs.reset(ds->GetLayer(0)->GetSpatialRef()->Clone());
-                mSrs->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-                if (mSrs->IsGeographic() && epsgOf(*mSrs) == 4326)
-                {
-                    std::unique_ptr<OGRSpatialReference> def(new OGRSpatialReference);
-                    if (def->SetFromUserInput(defaultCrsText().toUtf8().constData()) == OGRERR_NONE)
-                    {
-                        def->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-                        mSrs = std::move(def);
-                    }
-                }
-            }
-            if (ds) GDALClose(ds);
-            if (mSrs) break;
-        }
-    }
-    if (!mSrs) { if (err) *err = QObject::tr("Could not determine the project coordinate system"); return false; }
-    { char* w = nullptr; mSrs->exportToWkt(&w); mWkt = QString::fromUtf8(w); CPLFree(w); }
-
-    // spatial filter (in the project CRS; SpatialFilterGR is in WGS84 degrees)
-    auto importFilter = [&](const QString& wkt, bool geographic)
-    {
-        if (wkt.isEmpty() || mFilter) return;
-        const QByteArray b = wkt.toUtf8();
-        const char* pw = b.constData();
-        OGRGeometry* g = nullptr;
-        if (OGRGeometryFactory::createFromWkt(&pw, nullptr, &g) != OGRERR_NONE || !g) { delete g; return; }
-        if (geographic)
-        {
-            OGRSpatialReference wgs;
-            wgs.importFromEPSG(4326);
-            wgs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-            std::unique_ptr<OGRCoordinateTransformation> ct(OGRCreateCoordinateTransformation(&wgs, mSrs.get()));
-            if (!ct || g->transform(ct.get()) != OGRERR_NONE) { delete g; return; }
-        }
-        mFilter = g;
-    };
-    importFilter(filterText, false);
-    importFilter(filterGrText, true);
-    if (mFilter) log(QObject::tr("The project spatial filter was applied"));
-
-    for (const Entry& e : entries)
-    {
-        const QString path = resolve(e.path);
-        if (e.raster) { addRaster(path); continue; }
-        const QString ln = e.name.isEmpty() ? QFileInfo(path).completeBaseName() : e.name;
-        if (!mWanted.isEmpty() && !mWanted.contains(suffixOf(ln))) continue;
-        if (!e.visible) { log(QObject::tr("Layer %1 is switched off in the project — skipped (as in the tqt 3D window)").arg(ln)); continue; }
-        MapLayer* l = readLayer(path, e.name);
-        if (l) mLayers << l;
-    }
-    if (mLayers.isEmpty()) { if (err) *err = QObject::tr("No needed project layer was read"); return false; }
     return true;
 }

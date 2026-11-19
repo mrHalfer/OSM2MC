@@ -138,17 +138,17 @@ public:
         //!  Water      (hdrpol/hdrlin)   — hydrography: a pit with water over the polygon/ribbon patch,
         //!                               the depth is proportional to the area (1/6), but 3..15 blocks;
         //!                               for ribbons (hdrlin, linear) — three times shallower (1/18, 1..15);
-        //!  Spot       (a source with a modelField) — an object from a point on the map (a memorial, a monument,
+        //!  Spot       (a catalog point layer with a Model) — an object from a point on the map (a memorial, a monument,
         //!                               a fountain, a communication tower, a waste bin): the square polygon of the
         //!                               point is only the anchor, the structure is built in step 3.575 by the model
-        //!                               number from point_models.csv (the code from the modelField column);
+        //!                               number of the object's code in the rules catalog (rules/<layer>.json);
         //!  Biome      (a source with the "swamp" effect) — a biome overlay: the rasterized columns are collected
         //!                               into the swamp map (vegetation step), nothing is built from the polygon;
         //!  Generic    (other layers)    — as before: a solid for closed ones, otherwise a surface.
         enum Kind { Generic = 0, Building = 1, Vegetation = 2, Road = 3, Railway = 4, Plate = 5, Water = 6,
                     ParkingLot = 7,
                     BlockCover = 8,   //!< BlockCover (blkpol, only CODE 62231000 asphalt without markings and 45300000 square): a surface instead of turf — gray concrete / stone bricks
-                    Spot = 9,         //!< Spot (a source with a modelField) — see above
+                    Spot = 9,         //!< Spot (a catalog point layer with a Model) — see above
                     Biome = 10,       //!< Biome (a source with ModelEffect::Swamp) — a wetland overlay, see above
                     CSRLine = 11,     //!< CSRLine (csrlin) — a linear cultural object by CODE (82200000 — a fence), see above
                     Surface = 12,     //!< Surface (lcapol, only CODE 22410000 bare rock and 72251100 forced sand): a ground
@@ -184,7 +184,7 @@ public:
         //! For Building — the numeric value of the CODE column from the attribute (0 — no column/not a number).
         //! Some codes (44400002/44400100/44400110) ask for a GABLED roof made of stairs.
         int code = 0;
-        //! For Spot — the model number from point_models.csv (1 statue, 2 stele, 3 fountain, 4 tower, 5 composter).
+        //! For Spot — the model number of the code in the rules catalog (1 statue, 2 stele, 3 fountain, 4 tower, 5 composter).
         int model = 0;
         //! For Building — the LIFT column == 1: walls 1 block thick instead of 2 (a request
         //! of the user; NOT the roof and NOT the foundation — only the walls, see the lining pass).
@@ -214,11 +214,11 @@ public:
         //! rail line along them with correct shapes (straight, turns, slopes) and connections; for 61111000 — two
         //! parallel lines. Empty — the axis line is derived from the mesh ribbon (a straight line along the long axis).
         QVector<QVector<QPointF>> paths;
-        //! For Railway — the ELEC column of osm_rules.json (the OSM tag "electrified" other than "no"): the surface
+        //! For Railway — the ELEC column of rules/osmrules.json (the OSM tag "electrified" other than "no"): the surface
         //! rails are electrified like in the metro (every 20th on a straight run), and the ground under the track is
         //! replaced by stone (stone bricks for trams); trams (61124000) are electrified even without the tag.
         bool railElec = false;
-        //! For Road — the BRG/TUN/LVL columns of osm_rules.json (the OSM tags "bridge", "tunnel" and "level"):
+        //! For Road — the BRG/TUN/LVL columns of rules/osmrules.json (the OSM tags "bridge", "tunnel" and "level"):
         //! the roadway rises above the terrain and the other roads on a viaduct (bridge) or sinks into a tunnel
         //! (tunnel); roadBridge wins when both tags are set. |roadLevel| (1..4) — how many 8-block levels up/down
         //! to lift the way; 0 — the owner's default of one level. The VIADUCTS AND TUNNELS pass of exportrun.cpp

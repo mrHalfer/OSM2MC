@@ -1,4 +1,5 @@
 #include "scene/mcscene.h"
+#include "scene/modelbuilder.h"            // ModelSettings::VectorSource, ModelEffect (the kLayerStyles below)
 #include <QCoreApplication>
 #include "core/steplog.h"
 #include "ogrsf_frmts.h"
@@ -10,8 +11,6 @@
 #include <QSharedPointer>
 #include <QThreadPool>
 #include <QHash>
-#include <QFile>
-#include <QDir>
 #include <cmath>
 #include <algorithm>
 #include <memory>
@@ -26,7 +25,6 @@ struct ExportItem
     MapFeature* obj = nullptr;
     ModelSettings::VectorSource vs;
     int colorIndex = 0;
-    double relMin = 0, relMax = 0;
     bool polygon = false;
     Kind kind = Kind::Generic;
     QString material;
@@ -46,7 +44,7 @@ struct ExportItem
     QString roofColour, roofMaterial;
     QString streetType, street, number;
     bool intraBlock = false;
-    int model = 0;                                    // point structures (kind Spot): the model number from point_models.csv
+    int model = 0;                                    // point structures (kind Spot): the figure number from the rules catalog
 };
 
 MapFeature* cloneObject(const MapFeature* src)
@@ -58,31 +56,57 @@ MapFeature* cloneObject(const MapFeature* src)
     return c;
 }
 
-// The "code -> model" table for point sources with a modelField — point_models.csv next to the program
-// ("code;model" lines, comments with '#'), by the same pattern as the height table (heights.csv).
-QHash<qlonglong, int> loadSpotModels(QString* err)
+// The mesh style of every catalog layer — the visual part of the old default.t3d vector sources,
+// hardcoded since v2.0 (the rules catalog carries the per-code semantics: the Rel heights, the
+// effects, the model numbers; how a layer is put into the mesh — the extrusion, the width, the
+// decorative geometry bits — is the exporter's own code and does not vary with the data).
+struct LayerStyle
 {
-    for (const QString& d : { QCoreApplication::applicationDirPath(), QDir::currentPath() })
-    {
-        QFile f(QDir(d).filePath(QStringLiteral("point_models.csv")));
-        if (!f.open(QIODevice::ReadOnly)) continue;
-        QHash<qlonglong, int> map;
-        const QList<QByteArray> lines = f.readAll().split('\n');
-        for (const QByteArray& raw : lines)
-        {
-            const QByteArray ln = raw.trimmed();
-            if (ln.isEmpty() || ln.startsWith('#')) continue;
-            const QList<QByteArray> kv = ln.split(';');
-            if (kv.size() < 2) continue;
-            bool ok1 = false, ok2 = false;
-            const qlonglong code = kv[0].trimmed().toLongLong(&ok1);
-            const int model = kv[1].trimmed().toInt(&ok2);
-            if (ok1 && ok2 && model > 0) map.insert(code, model);
-        }
-        if (!map.isEmpty()) return map;
-    }
-    if (err) *err = QObject::tr("point_models.csv not found next to the program — point objects with a modelField will not be built");
-    return QHash<qlonglong, int>();
+    const char* layer;
+    bool noExtrusion;                 // "on the ground": the Rel column of the catalog is not read — a flat cover
+    const char* heightField;          // "REL" on the extruding layers
+    int effect;                       // visual ModelEffect bits (the semantic swamp/prison/military are per code in the catalog)
+    double lineWidth;                 // linear layers: the ribbon width, tuned "in blocks" (widened back to meters in buildOne)
+    const char* liftField;
+    double liftMultiplier;
+};
+
+const LayerStyle kLayerStyles[] = {
+    { "hdrlin",  true,  "",     int(ModelEffect::None),                                                             3.5, "",     1.0 },
+    { "rdslin",  true,  "",     int(ModelEffect::Shadow) | int(ModelEffect::RadialGlow)
+                              | int(ModelEffect::OutlineDark) | int(ModelEffect::Supports),                          4.5, "",     4.5 },
+    { "rrslin",  true,  "",     int(ModelEffect::Glow) | int(ModelEffect::RadialGlow)
+                              | int(ModelEffect::OutlineLight) | int(ModelEffect::Supports),                         8.0, "",     8.0 },
+    { "bldpol",  false, "REL",  int(ModelEffect::Shadow) | int(ModelEffect::Glow),                                   3.0, "MINH", 1.0 },  // MINH lifts a building:part off the ground
+    { "blkpol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
+    { "csrpol",  false, "REL",  int(ModelEffect::Shadow),                                                            3.0, "",     1.0 },
+    { "csrpnt",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
+    { "csrlin",  true,  "",     int(ModelEffect::None),                                                              2.0, "",     1.0 },
+    { "hdtpnt",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
+    { "rdcpnt",  true,  "",      int(ModelEffect::None),                                                             3.0, "",     1.0 },
+    { "rdcpol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
+    { "hdrpol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
+    { "vegpol",  false, "REL",  int(ModelEffect::Shadow) | int(ModelEffect::Rounded),                                3.0, "",     1.0 },
+    { "mrspol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
+    { "lcapol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
+    { "terpol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
+    { "vgbpol",  false, "REL",  int(ModelEffect::Shadow) | int(ModelEffect::Rounded),                                3.0, "",     1.0 },
+};
+
+const LayerStyle* layerStyleFor(const QString& name)
+{
+    for (const LayerStyle& st : kLayerStyles)
+        if (name == QLatin1String(st.layer))
+            return &st;
+    return nullptr;
+}
+
+//! The outline mode encoded in the effect mask (as the old .t3d parser derived it)
+ModelOutlineMode outlineFromMask(int mask)
+{
+    if (mask & int(ModelEffect::OutlineDark)) return ModelOutlineMode::Dark;
+    if (mask & int(ModelEffect::OutlineLight)) return ModelOutlineMode::Light;
+    return ModelOutlineMode::None;
 }
 
 }   // namespace
@@ -160,57 +184,68 @@ QString formatMcExportInfo(const QString& info)
     return out.join(QStringLiteral("\n\n"));
 }
 
-bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const McSceneOptions& opt, McSceneResult& out,
+bool buildMcScene(const TmcProject& project, const TmcRulesRepo& repo, const McSceneOptions& opt, McSceneResult& out,
                   const std::function<void(int, int)>& progress, const std::atomic_bool* cancel, QString* err)
 {
     out = McSceneResult();
     tmcStepLog("scene: start");
 
-    // --- binding the sources from the settings to the project layers (by name suffix, case-insensitive) ---
-    struct Bound { T3dSource src; MapLayer* layer; int colorIndex; double relMin, relMax; };
+    // --- binding the catalog layers to the project layers (by name suffix, case-insensitive) ---
+    // The catalog order (repo.order(), the old .t3d source order) is the iteration order: colorIndex and
+    // the object order (which feeds the seeded decisions of the export) must follow exactly it.
+    struct Bound { const TmcRulesRepo::Layer* desc; MapLayer* layer; int colorIndex; };
     QVector<Bound> bound;
     int colorIndex = 0;
-    for (const T3dSource& s : settings.sources)
+    for (const QString& name : repo.order())
     {
-        MapLayer* layer = project.layerBySuffix(s.layer);
+        const TmcRulesRepo::Layer* ld = repo.layer(name);
+        if (!ld)                                      // cannot happen: order() only names the loaded layers
+            continue;
+        MapLayer* layer = project.layerBySuffix(name);
         if (!layer)
         {
-            out.warnings << QObject::tr("The layer '%1' from the 3D settings was not found in the project — skipped").arg(s.layer);
+            out.warnings << QObject::tr("The layer '%1' from the rules catalog was not found in the project — skipped").arg(name);
             continue;
         }
-        Bound b{ s, layer, colorIndex, 0.0, 0.0 };
-        b.src.vs.layer = layer;
+        Bound b{ ld, layer, colorIndex };
         ++colorIndex;                                 // as in the tqt 3D window, setModel(): over all sources with a found layer
-        bound << b;                                    // the colors from the settings take no part (see mo.color below)
+        bound << b;
     }
     if (bound.isEmpty())
     {
         if (project.rasters().isEmpty())
         {
-            if (err) *err = QObject::tr("None of the layers from the 3D settings was found among the project layers");
+            if (err) *err = QObject::tr("None of the layers from the rules catalog was found among the project layers");
             return false;
         }
         // no objects at all (the rules found nothing): the terrain matrix itself is the content — the scene is empty
         out.warnings << QObject::tr("No objects in the data: the terrain is exported without them.");
     }
 
-    // --- collecting objects (order: layers as in the settings, objects as in the layer) ---
+    // --- collecting objects (order: layers as in the catalog, objects as in the layer) ---
     QVector<ExportItem> items;
-    QHash<qlonglong, int> spotModels;                 // the "code -> model" table for point sources (loaded on demand)
-    bool spotModelsLoaded = false;
     for (const Bound& b : bound)
     {
         MapLayer* layer = b.layer;
-        const QString sfx = layer->name.section(QLatin1Char('.'), -1).toLower();
-        // The role of the layer is set by the SOURCE, not by its name suffix: a source with the "swamp" effect
-        // is a wetland biome overlay, a source with a modelField is a point-structure source (the model is
-        // looked up per object by the code from that column). An old .t3d without such marks simply has no
-        // new objects — the usual dependence on the 3D settings.
+        const QString sfx = b.desc->name;
+        const LayerStyle* st = layerStyleFor(sfx);    // every catalog layer has a style (the layer list is hardcoded)
+        ModelSettings::VectorSource vs;               // the mesh style of the layer (the old .t3d source row)
+        vs.layer = layer;
+        if (st)
+        {
+            vs.noExtrusion = st->noExtrusion;
+            vs.heightField = QString::fromLatin1(st->heightField);
+            vs.effect = ModelEffects(st->effect);
+            vs.outline = outlineFromMask(st->effect);
+            vs.lineWidth = st->lineWidth;
+            vs.liftField = QString::fromLatin1(st->liftField);
+            vs.liftMultiplier = st->liftMultiplier;
+        }
+        // The base role of the layer: its family (a point layer builds a model figure per object, the old
+        // modelField source mark) and its name (the exporter's per-layer pipeline). The semantic effect of
+        // the object code (swamp/prison/military, the old per-source effect bits) overrides it per object below.
         Kind kind = Kind::Generic;
-        if (b.src.vs.effect.testFlag(ModelEffect::Swamp)) kind = Kind::Biome;
-        else if (b.src.vs.effect.testFlag(ModelEffect::Prison)) kind = Kind::Prison;        // the "prison" layer (pripol): a bandit refuge overlay
-        else if (b.src.vs.effect.testFlag(ModelEffect::Military)) kind = Kind::Military;    // the "military base" layer (milpol): a guarded territory overlay
-        else if (!b.src.vs.modelField.isEmpty()) kind = Kind::Spot;
+        if (b.desc->family == TmcRulesRepo::FamilyPoint) kind = Kind::Spot;
         else if (sfx == QLatin1String("bldpol")) kind = Kind::Building;
         else if (sfx == QLatin1String("vegpol") || sfx == QLatin1String("vgbpol")) kind = Kind::Vegetation;
         else if (sfx == QLatin1String("rdslin")) kind = Kind::Road;
@@ -222,38 +257,32 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
         else if (sfx == QLatin1String("lcapol")) kind = Kind::Surface;
         else if (sfx == QLatin1String("hdrpol") || sfx == QLatin1String("hdrlin")) kind = Kind::Water;
         const bool polygonLayer = layer->geom == GeomKind::Polygon;
-        if (kind == Kind::Spot && !spotModelsLoaded)
-        {
-            spotModelsLoaded = true;
-            QString me;
-            spotModels = loadSpotModels(&me);
-            if (!me.isEmpty()) out.warnings << me;
-        }
-        int modelsMissing = 0;                        // objects with a code that has no model in the table
+        int modelsMissing = 0;                        // point objects with a code the catalog gives no model for
+        int unlisted = 0;                             // non-point objects with a code absent from the catalog (the generic behavior)
 
         for (MapFeature* obj : qAsConst(layer->features))
         {
             if (!obj || !obj->g) continue;
             ExportItem e;
             e.obj = obj;
-            e.vs = b.src.vs;
+            e.vs = vs;
             e.colorIndex = b.colorIndex;
-            e.relMin = b.relMin; e.relMax = b.relMax;
             e.polygon = polygonLayer;
             e.kind = kind;
             e.linear = (sfx == QLatin1String("hdrlin"));
             e.intraBlock = (sfx == QLatin1String("vgbpol"));
 
-            // building material: the column of the "Material from a column" mode, otherwise the standard MAT
-            if (kind == Kind::Building && b.src.vs.absorptionMode == ModelAbsorptionMode::MaterialColumn && !b.src.vs.absorptionColumn.isEmpty())
+            // building material: the layer's material column from the catalog (bldpol: MAT), the standard MAT otherwise
+            if (kind == Kind::Building)
             {
-                const int fno = layer->fieldIndex(b.src.vs.absorptionColumn);
+                const QString mcol = b.desc->materialColumn.isEmpty() ? QStringLiteral("MAT") : b.desc->materialColumn;
+                const int fno = layer->fieldIndex(mcol);
                 if (fno >= 0) e.material = obj->fields.value(fno).trimmed();
-            }
-            if (kind == Kind::Building && e.material.isEmpty())
-            {
-                const int mno = layer->fieldIndex(QStringLiteral("MAT"));
-                if (mno >= 0) e.material = obj->fields.value(mno).trimmed();
+                if (e.material.isEmpty() && mcol != QLatin1String("MAT"))
+                {
+                    const int mno = layer->fieldIndex(QStringLiteral("MAT"));
+                    if (mno >= 0) e.material = obj->fields.value(mno).trimmed();
+                }
             }
             // CODE
             const int cno = layer->fieldIndex(QStringLiteral("CODE"));
@@ -265,24 +294,22 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                 if (!num) c = qRound64(cv.toDouble(&num));
                 if (num) e.code = int(c);
             }
-            if (kind == Kind::Spot)
-            {   // a point structure: its model is looked up by the object code from the source's modelField column
-                const int fno = layer->fieldIndex(b.src.vs.modelField);
-                bool num = false;
-                qlonglong cv = 0;
-                if (fno >= 0)
-                {
-                    const QString fv = obj->fields.value(fno).trimmed();
-                    cv = fv.toLongLong(&num);
-                    if (!num) cv = qRound64(fv.toDouble(&num));
-                }
-                e.model = num ? spotModels.value(cv, 0) : 0;
+            // the catalog descriptor of the code: the semantic effect (a wetland/prison/military overlay)
+            // and the model number of a point figure (the old point_models.csv lookup)
+            const TmcRulesRepo::Object* desc = e.code ? repo.object(sfx, e.code) : nullptr;
+            if (desc)
+            {
+                if (desc->effect == QLatin1String("swamp")) e.kind = Kind::Biome;
+                else if (desc->effect == QLatin1String("prison")) e.kind = Kind::Prison;
+                else if (desc->effect == QLatin1String("military")) e.kind = Kind::Military;
+            }
+            else if (e.code && kind != Kind::Spot)
+                ++unlisted;                           // a code absent from the catalog: the generic behavior of its layer (v2.0 — a warning, not a drop)
+            if (e.kind == Kind::Spot)
+            {   // a point structure: its figure number comes from the object descriptor
+                e.model = desc ? desc->model : 0;
                 if (e.model <= 0) { ++modelsMissing; continue; }    // no model for the code — not an object
             }
-            // blkpol: only asphalt without markings (62231000) and squares (45300000)
-            if (kind == Kind::BlockCover && e.code != 62231000 && e.code != 45300000) continue;
-            // lcapol: only bare rock (22410000) and forced sand (72251100)
-            if (kind == Kind::Surface && e.code != 22410000 && e.code != 72251100) continue;
             // LIFT: the walls of elevator shafts are 1 block thick
             if (kind == Kind::Building)
             {
@@ -367,8 +394,11 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             items << e;
         }
         if (modelsMissing > 0)
-            out.warnings << QObject::tr("%1 objects on layer '%2' were skipped: no model for their codes in point_models.csv")
+            out.warnings << QObject::tr("%1 objects on layer '%2' were skipped: no model for their codes in the rules catalog")
                             .arg(modelsMissing).arg(layer->name);
+        if (unlisted > 0)
+            out.warnings << QObject::tr("%1 objects on layer '%2' have a code absent from the rules catalog — built with the generic layer behavior")
+                            .arg(unlisted).arg(layer->name);
     }
     tmcStepLog("scene: objects collected");
     if (items.isEmpty() && project.rasters().isEmpty())
@@ -499,12 +529,11 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
     out.centerX = 0.5 * (bx0 + bx1);
     out.centerY = 0.5 * (by0 + by1);
     const QVector3D origin(float(std::round(out.centerX)), float(std::round(out.centerY)), 0.0f);
-    const double zExag = settings.zExaggeration > 1e-9 ? settings.zExaggeration : 1.0;
     const ModelTerrain terrain(project.rasters());
     const bool haveTerrain = !terrain.isEmpty();
 
     // --- rebuilding the meshes and transfer into McObject (in parallel, the result goes by index, the order is deterministic) ---
-    const double invZ = 1.0 / zExag;
+    // The z exaggeration went away with the .t3d settings (it was always 1): heights stay real meters.
     const int total = int(items.size());
     QVector<McWorldExporter::McObject> built(total);
     QVector<char> okFlag(total, 0);
@@ -531,15 +560,15 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             if (!(e.kind == Kind::Road && !markedRoad))
                 vs.lineWidth /= opt.unitsToMetersX;
         }
-        if (ModelBuilder::BuildSingleObjectMesh(e.obj, vs, haveTerrain ? &terrain : nullptr, zExag, origin, e.colorIndex,
-                                                     e.relMin, e.relMax, false, QRectF(), mesh, &rel)
+        if (ModelBuilder::BuildSingleObjectMesh(e.obj, vs, haveTerrain ? &terrain : nullptr, 1.0, origin, e.colorIndex,
+                                                     0.0, 0.0, false, QRectF(), mesh, &rel)
             && mesh.indices.size() >= 3)
         {
             McWorldExporter::McObject mo;
             mo.vertices.reserve(mesh.vertices.size());
             for (const QVector3D& v : mesh.vertices)
-                mo.vertices << QVector3D(v.x() + origin.x(), v.y() + origin.y(), (v.z() + origin.z()) * float(invZ));
-            // The colors of the 3D settings belong to tqt (input/t3dsettings.cpp does not read them): OSMC paints
+                mo.vertices << QVector3D(v.x() + origin.x(), v.y() + origin.y(), v.z() + origin.z());
+            // The 3D window colors are not read anywhere (the old t3d parser skipped them deliberately): OSMC paints
             // the objects itself. Only two colors ever reach the world (export/exportrun.cpp, export/voxelize.cpp):
             // the wall concrete of buildings (and the glass/panels material tinted by it) and the white carpet of
             // the pedestrian roads — the other kinds decide by their CODE, the object color means nothing to them.
@@ -550,7 +579,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
             mo.intraBlock = e.intraBlock;
             mo.linear = e.linear;
             mo.material = e.material;
-            mo.extrudeH = std::abs(rel) * invZ;
+            mo.extrudeH = std::abs(rel);
             mo.code = e.code;
             mo.model = e.model;
             mo.railElec = e.elec;
@@ -596,7 +625,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                 ModelBuilder::ExtractLinePaths(e.obj, mo.paths);
             mo.lift = e.lift;
             mo.onionRoof = e.onion;
-            mo.roofH = e.roofH * invZ;
+            mo.roofH = e.roofH;
             mo.skillionRoof = e.skillion && e.roofH > 0.0;
             mo.roofDir = e.roofDir;
             mo.part = e.part;
@@ -609,7 +638,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
                     const int fno = vs.layer->fieldIndex(vs.liftField);
                     if (fno >= 0) lf += e.obj->fields.value(fno).toDouble() * vs.liftMultiplier;
                 }
-                if (e.kind == Kind::Building && mo.closed && lf >= 1.0) mo.raised = lf * invZ;
+                if (e.kind == Kind::Building && mo.closed && lf >= 1.0) mo.raised = lf;
             }
             mo.streetType = e.streetType; mo.street = e.street; mo.number = e.number;
             built[i] = std::move(mo);
@@ -648,7 +677,7 @@ bool buildMcScene(const TmcProject& project, const T3dSettings& settings, const 
     {
         if (project.rasters().isEmpty())
         {
-            if (err) *err = QObject::tr("No object gave any geometry (check the height field in the 3D settings)");
+            if (err) *err = QObject::tr("No object gave any geometry (check the Rel heights in the rules catalog)");
             return false;
         }
         // no objects at all: the terrain matrix itself is the content (the export goes on without objects)
