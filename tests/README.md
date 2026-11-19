@@ -23,8 +23,8 @@ The tests run `osmc.exe` with `--lang en`, so the log messages they match are th
 
 | stage | what it does | time |
 |---|---|---|
-| `osm` | a synthetic OSM (`data/gen_osm_test.py`: 28 buildings with expected codes, roads, rails, parking lots, sites, a square) is built through `osmc.exe` by the working rules `osm_rules.json`; it checks the code of every building (pass 1: tags, POI, plots; pass 2: neighbors and area), the object count and codes in the other layers, no extra "buildings", the fallback Pale Garden; then the same data in 1.21.x and in a superflat world | ~15 s |
-| `shp` | the "folder with shapefiles" mode (the directory is set by `TMC_TEST_SHP`), `default.t3d`, the result by categories. No data — SKIP | ~10 s |
+| `osm` | a synthetic OSM (`data/gen_osm_test.py`: 28 buildings with expected codes, roads, rails, parking lots, sites, a square) is built through `osmc.exe` by the working rules `rules/osmrules.json`; it checks the code of every building (pass 1: tags, POI, plots; pass 2: neighbors and area), the object count and codes in the other layers, no extra "buildings", the fallback Pale Garden; then the same data in 1.21.x and in a superflat world | ~15 s |
+| `shp` | the "folder with shapefiles" mode (the directory is set by `TMC_TEST_SHP`), the rules catalog, the result by categories. No data — SKIP | ~10 s |
 | `harness` | building the harness from `mcworldexporter.cpp` of the tMC root, 6 worlds `mc_test*.zip`, the full `verify_mc_export.py` (we expect `RESULT PASS`) | ~10-20 min |
 | `servers` | real servers 26.3 and 1.21.11 open the tMC worlds (`server_check.py`) and the harness noise worlds (`smoke_mc.py`) | ~10 min |
 

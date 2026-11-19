@@ -259,20 +259,19 @@
     </message>
     <message>
         <location filename="../app/mainwindow.ui" line="46"/>
-        <location filename="../app/mainwindow.cpp" line="183"/>
-        <location filename="../app/mainwindow.cpp" line="476"/>
-        <location filename="../app/mainwindow.cpp" line="477"/>
-        <location filename="../app/mainwindow.cpp" line="478"/>
-        <location filename="../app/mainwindow.cpp" line="784"/>
-        <location filename="../app/mainwindow.cpp" line="794"/>
-        <location filename="../app/mainwindow.cpp" line="1052"/>
+        <location filename="../app/mainwindow.cpp" line="175"/>
+        <location filename="../app/mainwindow.cpp" line="455"/>
+        <location filename="../app/mainwindow.cpp" line="456"/>
+        <location filename="../app/mainwindow.cpp" line="457"/>
+        <location filename="../app/mainwindow.cpp" line="763"/>
+        <location filename="../app/mainwindow.cpp" line="773"/>
+        <location filename="../app/mainwindow.cpp" line="1030"/>
         <source>OSMC</source>
         <translation>OSMC</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="53"/>
         <source>Export a map to a Minecraft world: a tqt project, shapefiles or OpenStreetMap</source>
-        <translation>将地图导出为 Minecraft 世界：tqt 工程、shapefile 或 OpenStreetMap 数据</translation>
+        <translation type="vanished">将地图导出为 Minecraft 世界：tqt 工程、shapefile 或 OpenStreetMap 数据</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.ui" line="60"/>
@@ -280,19 +279,16 @@
         <translation>数据</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="91"/>
         <source>Project / folder:</source>
-        <translation>工程 / 文件夹：</translation>
+        <translation type="vanished">工程 / 文件夹：</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="110"/>
         <source>Project…</source>
-        <translation>工程…</translation>
+        <translation type="vanished">工程…</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="117"/>
         <source>Folder…</source>
-        <translation>文件夹…</translation>
+        <translation type="vanished">文件夹…</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.ui" line="82"/>
@@ -300,198 +296,197 @@
         <translation>浏览…</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="129"/>
+        <location filename="../app/mainwindow.ui" line="94"/>
         <source>World</source>
         <translation>世界</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="135"/>
+        <location filename="../app/mainwindow.ui" line="100"/>
         <source>World version:</source>
         <translation>世界版本：</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="145"/>
+        <location filename="../app/mainwindow.ui" line="110"/>
         <source>26.x (current versions)</source>
         <translation>26.x（当前版本）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="158"/>
+        <location filename="../app/mainwindow.ui" line="123"/>
         <source>1.21.x (before the new version system)</source>
         <translation>1.21.x（新版本体系之前）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="165"/>
+        <location filename="../app/mainwindow.ui" line="130"/>
         <source>Outside the export area:</source>
         <translation>导出区域之外：</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="175"/>
+        <location filename="../app/mainwindow.ui" line="140"/>
         <source>A normal seed-based world outside the area</source>
         <translation>区域外为按种子正常生成的世界</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="188"/>
+        <location filename="../app/mainwindow.ui" line="153"/>
         <source>Superflat</source>
         <translation>超平坦</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="202"/>
+        <location filename="../app/mainwindow.ui" line="167"/>
         <source>World seed:</source>
         <translation>世界种子：</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="212"/>
+        <location filename="../app/mainwindow.ui" line="177"/>
         <source>empty — random</source>
         <translation>留空 — 随机</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="219"/>
+        <location filename="../app/mainwindow.ui" line="184"/>
         <source>Generate</source>
         <translation>生成</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="281"/>
+        <location filename="../app/mainwindow.ui" line="246"/>
         <source>Edit the reference files the exporter reads: OSM rules, OSMC rules, point models, typical heights</source>
         <translation>编辑导出器读取的参考文件：OSM 规则、OSMC 规则、点模型、典型高度</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="304"/>
-        <location filename="../app/mainwindow.cpp" line="290"/>
+        <location filename="../app/mainwindow.ui" line="269"/>
+        <location filename="../app/mainwindow.cpp" line="277"/>
         <source>Export: local zip</source>
         <translation>导出：本地 zip</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="311"/>
+        <location filename="../app/mainwindow.ui" line="276"/>
         <source>Where to save the exported world: zip, launcher or an instance</source>
         <translation>导出的世界保存到哪里：zip、启动器或实例</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="314"/>
+        <location filename="../app/mainwindow.ui" line="279"/>
         <source>Export settings</source>
         <translation>导出设置</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="321"/>
+        <location filename="../app/mainwindow.ui" line="286"/>
         <source>Export</source>
         <translation>导出</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="331"/>
+        <location filename="../app/mainwindow.ui" line="296"/>
         <source>Cancel</source>
         <translation>取消</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="103"/>
         <source>a .tqt project or a folder with shapefiles</source>
-        <translation>.tqt 项目或包含 shapefile 的文件夹</translation>
+        <translation type="vanished">.tqt 项目或包含 shapefile 的文件夹</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="195"/>
+        <location filename="../app/mainwindow.ui" line="160"/>
         <source>Caves underground</source>
         <translation>地下洞穴</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="226"/>
+        <location filename="../app/mainwindow.ui" line="191"/>
         <source>When it is off, the downloaded height matrix is ignored and the world keeps the terrain generated by the game.</source>
         <translation>关闭时，已下载的高度矩阵将被忽略，世界保留游戏自行生成的地形。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="229"/>
+        <location filename="../app/mainwindow.ui" line="194"/>
         <source>Surface terrain</source>
         <translation>地表地形</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="239"/>
+        <location filename="../app/mainwindow.ui" line="204"/>
         <source>Use of experimental features will be required.</source>
         <translation>需要使用实验性功能</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="242"/>
+        <location filename="../app/mainwindow.ui" line="207"/>
         <source>World datapack (for correct generation)</source>
         <translation>世界数据包（用于正确生成）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="284"/>
+        <location filename="../app/mainwindow.ui" line="249"/>
         <source>Export rules</source>
         <translation>导出规则</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="363"/>
+        <location filename="../app/mainwindow.ui" line="328"/>
         <source>Draw a polygon: only what is inside it is exported</source>
         <translation>绘制多边形：只导出其内部的内容</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="366"/>
+        <location filename="../app/mainwindow.ui" line="331"/>
         <source>Boundary</source>
         <translation>边界</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="379"/>
+        <location filename="../app/mainwindow.ui" line="344"/>
         <source>A click on the map — the point where the player appears</source>
         <translation>在地图上点击 — 玩家出生的位置</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="382"/>
+        <location filename="../app/mainwindow.ui" line="347"/>
         <source>Spawn</source>
         <translation>出生点</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="392"/>
+        <location filename="../app/mainwindow.ui" line="357"/>
         <source>A click on the map — the church with the stronghold entrance is chosen nearby (without a choice — the largest one)</source>
         <translation>在地图上点击 — 就近选择内有要塞入口的教堂（不选择 — 自动选最大的）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="395"/>
+        <location filename="../app/mainwindow.ui" line="360"/>
         <source>Stronghold</source>
         <translation>要塞</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="405"/>
+        <location filename="../app/mainwindow.ui" line="370"/>
         <source>A click on the map — the church with the Ancient City entrance is chosen nearby (without a choice — the next by size)</source>
         <translation>在地图上点击 — 就近选择内有远古城市入口的教堂（不选择 — 自动选次大的）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="408"/>
+        <location filename="../app/mainwindow.ui" line="373"/>
         <source>Ancient City</source>
         <translation>远古城市</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="418"/>
+        <location filename="../app/mainwindow.ui" line="383"/>
         <source>A click on the map — the forest near this point becomes the Pale Garden (without a choice — the largest suitable one)</source>
         <translation>在地图上点击 — 该点附近的森林将变为苍白之园（不选择 — 自动选最大的合适森林）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="421"/>
+        <location filename="../app/mainwindow.ui" line="386"/>
         <source>Pale Garden</source>
         <translation>苍白之园</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="431"/>
+        <location filename="../app/mainwindow.ui" line="396"/>
         <source>Choose a 3D model, click on the map where it stands, then set its material, rotation and size; a click on the mark opens its settings</source>
         <translation>选择 3D 模型，在地图上点击它所在的位置，然后设置其材质、旋转和大小；点击标记可打开其设置</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="434"/>
+        <location filename="../app/mainwindow.ui" line="399"/>
         <source>3D figures</source>
         <translation>3D 图形</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="481"/>
+        <location filename="../app/mainwindow.ui" line="446"/>
         <source>Spawn at the data center</source>
         <translation>在数据中心出生</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="488"/>
+        <location filename="../app/mainwindow.ui" line="453"/>
         <source>Copy /tp</source>
         <translation>复制 /tp</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="495"/>
+        <location filename="../app/mainwindow.ui" line="460"/>
         <source>Remove the boundary</source>
         <translation>移除边界</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.ui" line="502"/>
+        <location filename="../app/mainwindow.ui" line="467"/>
         <source>Reset the entrances</source>
         <translation>重置入口</translation>
     </message>
@@ -562,177 +557,179 @@
         <translation>导出：村庄、室内与结构</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="65"/>
-        <location filename="../app/mainwindow.cpp" line="854"/>
+        <location filename="../app/mainwindow.cpp" line="59"/>
+        <location filename="../app/mainwindow.cpp" line="832"/>
         <source>Open project…</source>
         <translation>打开工程…</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="66"/>
-        <location filename="../app/mainwindow.cpp" line="855"/>
+        <location filename="../app/mainwindow.cpp" line="60"/>
+        <location filename="../app/mainwindow.cpp" line="833"/>
         <source>Save project…</source>
         <translation>保存工程…</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="67"/>
-        <location filename="../app/mainwindow.cpp" line="856"/>
+        <location filename="../app/mainwindow.cpp" line="61"/>
+        <location filename="../app/mainwindow.cpp" line="834"/>
         <source>Open a project file: the map view, the boundary, the marks and the world options</source>
         <translation>打开工程文件：地图视图、边界、标记点与世界选项</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="68"/>
-        <location filename="../app/mainwindow.cpp" line="857"/>
+        <location filename="../app/mainwindow.cpp" line="62"/>
+        <location filename="../app/mainwindow.cpp" line="835"/>
         <source>Save the map view, the boundary, the marks and the world options into a project file</source>
         <translation>将地图视图、边界、标记点与世界选项保存到工程文件</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="74"/>
-        <location filename="../app/mainwindow.cpp" line="853"/>
+        <location filename="../app/mainwindow.cpp" line="68"/>
+        <location filename="../app/mainwindow.cpp" line="831"/>
         <source>Language:</source>
         <translation>语言：</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="77"/>
-        <location filename="../app/mainwindow.cpp" line="858"/>
+        <location filename="../app/mainwindow.cpp" line="71"/>
+        <location filename="../app/mainwindow.cpp" line="836"/>
         <source>Auto (system language)</source>
         <translation>自动（系统语言）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="119"/>
-        <location filename="../app/mainwindow.cpp" line="859"/>
+        <location filename="../app/mainwindow.cpp" line="113"/>
+        <location filename="../app/mainwindow.cpp" line="837"/>
         <source>Climate:</source>
         <translation>气候带：</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="123"/>
-        <location filename="../app/mainwindow.cpp" line="832"/>
+        <location filename="../app/mainwindow.cpp" line="117"/>
+        <location filename="../app/mainwindow.cpp" line="811"/>
         <source>Auto (by data coordinates)</source>
         <translation>自动（按数据坐标）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="125"/>
-        <location filename="../app/mainwindow.cpp" line="860"/>
+        <location filename="../app/mainwindow.cpp" line="119"/>
+        <location filename="../app/mainwindow.cpp" line="838"/>
         <source>Tree species, surface and biome inside the export area; the world around the area is not changed by this.</source>
         <translation>影响导出区域内的树种、地表与生物群系；区域外的世界不受影响。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="292"/>
+        <location filename="../app/mainwindow.cpp" line="279"/>
         <source>Export: Modrinth - %1</source>
         <translation>导出：Modrinth - %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="293"/>
+        <location filename="../app/mainwindow.cpp" line="280"/>
         <source>Export: CurseForge - %1</source>
         <translation>导出：CurseForge - %1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="295"/>
+        <location filename="../app/mainwindow.cpp" line="282"/>
         <source>A zip file next to the source data</source>
         <translation>源数据旁的 zip 文件</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="291"/>
+        <location filename="../app/mainwindow.cpp" line="278"/>
         <source>Export: launcher</source>
         <translation>导出：启动器</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="297"/>
+        <location filename="../app/mainwindow.cpp" line="284"/>
         <source>Click to open the folder.</source>
         <translation>点击打开文件夹。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="398"/>
+        <location filename="../app/mainwindow.cpp" line="385"/>
         <source>OpenStreetMap extract</source>
         <translation>OpenStreetMap 提取数据</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="399"/>
+        <location filename="../app/mainwindow.cpp" line="386"/>
         <source>OSM extract (*.osm *.pbf);;All files (*)</source>
         <translation>OSM 提取数据 (*.osm *.pbf);;所有文件 (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="405"/>
         <source>tqt project file</source>
-        <translation>tqt 项目文件</translation>
+        <translation type="vanished">tqt 项目文件</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="406"/>
         <source>tqt project (*.tqt);;All files (*)</source>
-        <translation>tqt 项目 (*.tqt);;所有文件 (*)</translation>
+        <translation type="vanished">tqt 项目 (*.tqt);;所有文件 (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="412"/>
         <source>Folder with shapefiles</source>
-        <translation>包含 shapefile 的文件夹</translation>
+        <translation type="vanished">包含 shapefile 的文件夹</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="465"/>
+        <location filename="../app/mainwindow.cpp" line="444"/>
         <source>Cancelling…</source>
         <translation>正在取消…</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="477"/>
+        <location filename="../app/mainwindow.cpp" line="456"/>
         <source>Export cancelled.</source>
         <translation>导出已取消。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="494"/>
+        <location filename="../app/mainwindow.cpp" line="473"/>
         <source>Show the file in the folder</source>
         <translation>在文件夹中显示文件</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="531"/>
+        <location filename="../app/mainwindow.cpp" line="510"/>
         <source>Loading the map…</source>
         <translation>正在加载地图…</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="544"/>
+        <location filename="../app/mainwindow.cpp" line="523"/>
         <source>Could not load: %1</source>
         <translation>无法加载：%1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="699"/>
+        <location filename="../app/mainwindow.cpp" line="678"/>
         <source>Could not open the file: %1</source>
         <translation>无法打开文件：%1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="702"/>
+        <location filename="../app/mainwindow.cpp" line="681"/>
         <source>This is not an OSMC project file: %1</source>
         <translation>这不是 OSMC 工程文件：%1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="735"/>
+        <location filename="../app/mainwindow.cpp" line="714"/>
         <source>The model file of a 3D figure was not found: %1</source>
         <translation>未找到 3D 图形的模型文件：%1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="781"/>
-        <location filename="../app/mainwindow.cpp" line="790"/>
+        <location filename="../app/mainwindow.cpp" line="760"/>
+        <location filename="../app/mainwindow.cpp" line="769"/>
         <source>OSMC project (*.tmc);;All files (*)</source>
         <translation>OSMC 工程 (*.tmc);;所有文件 (*)</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="1016"/>
+        <location filename="../app/mainwindow.cpp" line="994"/>
         <source>Spawn point: the data center. To choose another, click on the map.</source>
         <translation>出生点：数据中心。要另选位置，请单击地图。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="768"/>
+        <location filename="../app/mainwindow.cpp" line="747"/>
         <source>The data file of the project was not found: %1</source>
         <translation>未找到工程的数据文件：%1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="781"/>
+        <location filename="../app/mainwindow.cpp" line="420"/>
+        <source>The map preview is still loading — wait a few seconds and press again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/mainwindow.cpp" line="760"/>
         <source>Save the project</source>
         <translation>保存工程</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="784"/>
+        <location filename="../app/mainwindow.cpp" line="763"/>
         <source>Could not write the file: %1</source>
         <translation>无法写入文件：%1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="790"/>
+        <location filename="../app/mainwindow.cpp" line="769"/>
         <source>Open a project</source>
         <translation>打开工程</translation>
     </message>
@@ -742,8 +739,7 @@
         <translation>OSM 文件：</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="54"/>
-        <location filename="../app/mainwindow.cpp" line="852"/>
+        <location filename="../app/mainwindow.ui" line="53"/>
         <source>Export an OpenStreetMap area to a Minecraft world</source>
         <translation>将 OpenStreetMap 区域导出为 Minecraft 世界</translation>
     </message>
@@ -753,107 +749,107 @@
         <translation>OpenStreetMap 提取数据（.osm / .pbf）</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="832"/>
+        <location filename="../app/mainwindow.cpp" line="811"/>
         <source>Auto: %1</source>
         <translation>自动：%1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="840"/>
+        <location filename="../app/mainwindow.cpp" line="819"/>
         <source>Done</source>
         <translation>完成</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="840"/>
+        <location filename="../app/mainwindow.cpp" line="819"/>
         <source>Cancelled</source>
         <translation>已取消</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="840"/>
+        <location filename="../app/mainwindow.cpp" line="819"/>
         <source>Error</source>
         <translation>错误</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="845"/>
+        <location filename="../app/mainwindow.cpp" line="824"/>
         <source>%1 — %2%</source>
         <translation>%1 — %2%</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="919"/>
+        <location filename="../app/mainwindow.cpp" line="897"/>
         <source>Spawn: click on the map — the player will appear here.</source>
         <translation>出生点：在地图上点击 — 玩家将从这里出生。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="920"/>
+        <location filename="../app/mainwindow.cpp" line="898"/>
         <source>Boundary: clicks add vertices, a click on the first (large) one closes it. Vertices can be dragged, a click on an edge adds a vertex, the right button deletes.</source>
         <translation>边界：单击添加顶点，点击第一个（大）顶点即可闭合。顶点可拖动，点击边可添加顶点，右键删除。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="921"/>
+        <location filename="../app/mainwindow.cpp" line="899"/>
         <source>Stronghold: click — the entrance will be in the church nearest to this place. The right button removes the mark.</source>
         <translation>要塞：单击 — 入口将设在离该位置最近的教堂里。右键移除标记。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="922"/>
+        <location filename="../app/mainwindow.cpp" line="900"/>
         <source>Ancient City: click — the entrance will be in the church nearest to this place. The right button removes the mark.</source>
         <translation>远古城市：单击 — 入口将设在离该位置最近的教堂里。右键移除标记。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="923"/>
+        <location filename="../app/mainwindow.cpp" line="901"/>
         <source>Pale Garden: click — the forest nearest to this place becomes the Pale Garden. The right button removes the mark.</source>
         <translation>苍白之园：单击 — 离该位置最近的森林将变为苍白之园。右键移除标记。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="924"/>
+        <location filename="../app/mainwindow.cpp" line="902"/>
         <source>3D figure: click on the map — the figure will stand here; the chosen tool button returns without placing.</source>
         <translation>3D 图形：在地图上点击——图形将放置在此处；再次点击所选工具按钮则返回而不放置。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="925"/>
+        <location filename="../app/mainwindow.cpp" line="903"/>
         <source>3D figure: a click on its mark opens the settings, the right button removes the figure.</source>
         <translation>3D 图形：点击其标记打开设置，右键单击可删除图形。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="927"/>
+        <location filename="../app/mainwindow.cpp" line="905"/>
         <source> The export covers only the inside of the boundary; the world origin is the center of the clipped data.</source>
         <translation> 导出仅覆盖边界内部；世界原点位于裁剪后数据的中心。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="928"/>
+        <location filename="../app/mainwindow.cpp" line="906"/>
         <source>Figures on the map: %1. </source>
         <translation>地图上的图形：%1。 </translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="929"/>
+        <location filename="../app/mainwindow.cpp" line="907"/>
         <source>Objects on the map: %1. </source>
         <translation>地图上的对象：%1。 </translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="1028"/>
+        <location filename="../app/mainwindow.cpp" line="1006"/>
         <source>Spawn point chosen: </source>
         <translation>已选择出生点：</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="1028"/>
+        <location filename="../app/mainwindow.cpp" line="1006"/>
         <source>Spawn point: the data center. </source>
         <translation>出生点：数据中心。 </translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="1029"/>
+        <location filename="../app/mainwindow.cpp" line="1007"/>
         <source>latitude %1, longitude %2; </source>
         <translation>纬度 %1，经度 %2； </translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="1030"/>
+        <location filename="../app/mainwindow.cpp" line="1008"/>
         <source>in the world roughly block X=%1, Z=%2 (the data center is 0, 0).</source>
         <translation> 在世界中大约位于方块 X=%1、Z=%2（数据中心为 0, 0）。</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="1045"/>
+        <location filename="../app/mainwindow.cpp" line="1023"/>
         <source>Copied: %1</source>
         <translation>已复制：%1</translation>
     </message>
     <message>
-        <location filename="../app/mainwindow.cpp" line="1052"/>
+        <location filename="../app/mainwindow.cpp" line="1030"/>
         <source>An export is running. Cancel it and quit?</source>
         <translation>导出正在进行。要取消导出并退出吗？</translation>
     </message>
@@ -886,37 +882,37 @@ It loads automatically when the data is ready.</source>
 <context>
     <name>McScene</name>
     <message>
-        <location filename="../scene/mcscene.cpp" line="134"/>
+        <location filename="../scene/mcscene.cpp" line="139"/>
         <source>Pale Garden</source>
         <translation>苍白之园</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="135"/>
+        <location filename="../scene/mcscene.cpp" line="140"/>
         <source>Dungeon entrances</source>
         <translation>地宫入口</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="136"/>
+        <location filename="../scene/mcscene.cpp" line="141"/>
         <source>Outposts and camps</source>
         <translation>哨站与营地</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="137"/>
+        <location filename="../scene/mcscene.cpp" line="142"/>
         <source>Portals</source>
         <translation>传送门</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="138"/>
+        <location filename="../scene/mcscene.cpp" line="143"/>
         <source>Roads</source>
         <translation>道路</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="139"/>
+        <location filename="../scene/mcscene.cpp" line="144"/>
         <source>Forests, fields, terrain</source>
         <translation>森林、田野、地形</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="140"/>
+        <location filename="../scene/mcscene.cpp" line="145"/>
         <source>Other</source>
         <translation>其他</translation>
     </message>
@@ -1147,19 +1143,16 @@ It loads automatically when the data is ready.</source>
 <context>
     <name>QObject</name>
     <message>
-        <location filename="../app/main.cpp" line="88"/>
         <source>OSMC — exports tqt data (a .tqt project or the shapefiles of a folder) or OpenStreetMap data to a Minecraft world.</source>
-        <translation>OSMC — 将 tqt 数据（.tqt 工程或文件夹中的 shapefile）或 OpenStreetMap 数据导出为 Minecraft 世界。</translation>
+        <translation type="vanished">OSMC — 将 tqt 数据（.tqt 工程或文件夹中的 shapefile）或 OpenStreetMap 数据导出为 Minecraft 世界。</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="92"/>
         <source>a .tqt project file, an OSM extract (.osm/.pbf) or a folder with shapefiles (default — the current folder)</source>
-        <translation>.tqt 工程文件、OSM 提取数据（.osm/.pbf）或包含 shapefile 的文件夹（默认 — 当前文件夹）</translation>
+        <translation type="vanished">.tqt 工程文件、OSM 提取数据（.osm/.pbf）或包含 shapefile 的文件夹（默认 — 当前文件夹）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="93"/>
         <source>3D settings file (.t3d); by default the .t3d from the shapefile folder, otherwise the settings of the .tqt project, otherwise default.t3d next to the program</source>
-        <translation>3D 设置文件（.t3d）；默认优先使用 shapefile 文件夹中的 .t3d，其次 .tqt 工程的设置，最后程序旁的 default.t3d</translation>
+        <translation type="vanished">3D 设置文件（.t3d）；默认优先使用 shapefile 文件夹中的 .t3d，其次 .tqt 工程的设置，最后程序旁的 default.t3d</translation>
     </message>
     <message>
         <location filename="../app/main.cpp" line="94"/>
@@ -1207,9 +1200,28 @@ It loads automatically when the data is ready.</source>
         <translation>将变为苍白之园的森林内部的区块坐标</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="103"/>
         <source>JSON with the &quot;OSM tags -&gt; layer and codes&quot; rules for an .osm/.pbf source (default: osm_rules.json next to the file/program)</source>
-        <translation>定义「OSM 标签 -&gt; 图层与代码」规则的 JSON 文件，用于 .osm/.pbf 数据源（默认：数据文件/程序旁边的 osm_rules.json）</translation>
+        <translation type="vanished">定义「OSM 标签 -&gt; 图层与代码」规则的 JSON 文件，用于 .osm/.pbf 数据源（默认：数据文件/程序旁边的 osm_rules.json）</translation>
+    </message>
+    <message>
+        <location filename="../app/main.cpp" line="88"/>
+        <source>OSMC — exports OpenStreetMap data or the shapefiles of a folder to a Minecraft world.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/main.cpp" line="92"/>
+        <source>an OSM extract (.osm/.pbf) or a folder with shapefiles (default — the current folder)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/main.cpp" line="93"/>
+        <source>rules catalog folder (rules/&lt;layer&gt;.json); by default the rules folder next to the program, in the current folder or in the source folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/main.cpp" line="103"/>
+        <source>JSON with the &quot;OSM tags -&gt; layer and codes&quot; rules for an .osm/.pbf source (default: osmrules.json next to the file, in the rules catalog or next to the program)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../app/main.cpp" line="104"/>
@@ -1282,59 +1294,58 @@ It loads automatically when the data is ready.</source>
         <translation>窗口主题：auto（跟随 Windows，默认）、light 或 dark</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="118"/>
         <source>add the &quot;Project / folder&quot; row to the window: a .tqt project or a shapefile folder as the source (the service paths .t3d, OSM rules and enhancer and &quot;real meters&quot; are command-line options only)</source>
-        <translation>在窗口中添加“项目 / 文件夹”行：以 .tqt 项目或 shapefile 文件夹作为源（.t3d、OSM 规则和增强器等服务路径以及“真实米制”仅在命令行中设置）</translation>
+        <translation type="vanished">在窗口中添加“项目 / 文件夹”行：以 .tqt 项目或 shapefile 文件夹作为源（.t3d、OSM 规则和增强器等服务路径以及“真实米制”仅在命令行中设置）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="119"/>
+        <location filename="../app/main.cpp" line="118"/>
         <source>(for testing, with --gui-screenshot) online mode: &quot;lon lat zoom; lon lat; lon lat; …&quot; — map view and boundary vertices</source>
         <translation>（测试用，配合 --gui-screenshot）在线模式：「经度 纬度 缩放; 经度 纬度; 经度 纬度; …」— 地图视图与边界顶点</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="120"/>
+        <location filename="../app/main.cpp" line="119"/>
         <source>download OSM data for the polygon &quot;lon lat; lon lat; …&quot; (up to 25 km²) into the --out file and exit; the result goes to the --log file</source>
         <translation>下载多边形「经度 纬度; 经度 纬度; …」（最大 25 km²）的 OSM 数据到 --out 文件后退出；结果写入 --log 文件</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="121"/>
+        <location filename="../app/main.cpp" line="120"/>
         <source>climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid</source>
         <translation>气候带：auto（按坐标，默认）、temperate、boreal、tundra、steppe、mediterranean、desert、savanna、tropical、monsoon、semi-arid</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="122"/>
+        <location filename="../app/main.cpp" line="121"/>
         <source>(for testing) download a test OSM tile and a Nominatim reply, write the response codes to a file and exit</source>
         <translation>（测试用）下载一张测试 OSM 瓦片和 Nominatim 应答，将响应码写入文件后退出</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="123"/>
+        <location filename="../app/main.cpp" line="122"/>
         <source>(for testing, with --gui-screenshot) switch the interface language at run time (en, ru or zh) before the screenshot; the saved choice is not changed</source>
         <translation>（测试用，配合 --gui-screenshot）截图前在运行时切换界面语言（en、ru 或 zh）；不更改已保存的选择</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="124"/>
+        <location filename="../app/main.cpp" line="123"/>
         <source>(for testing, with --gui-screenshot) &quot;open:file&quot; or &quot;save:file&quot; — open or save a project file around the screenshot</source>
         <translation>（测试用，配合 --gui-screenshot）「open:文件」或「save:文件」— 截图前后打开或保存工程文件</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="125"/>
+        <location filename="../app/main.cpp" line="124"/>
         <source>interface language: auto (the system one, default), en, ru or zh; not saved</source>
         <translation>界面语言：auto（系统语言，默认）、en、ru 或 zh；不保存</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="126"/>
+        <location filename="../app/main.cpp" line="125"/>
         <source>no window: run the export and exit (code 0 — success)</source>
         <translation>无窗口：直接运行导出并退出（返回码 0 — 成功）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="248"/>
-        <location filename="../app/tmcrun.cpp" line="118"/>
-        <location filename="../app/tmcrun.cpp" line="218"/>
+        <location filename="../app/main.cpp" line="247"/>
+        <location filename="../app/tmcrun.cpp" line="99"/>
+        <location filename="../app/tmcrun.cpp" line="185"/>
         <source>Error: %1</source>
         <translation>错误：%1</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="280"/>
+        <location filename="../app/main.cpp" line="279"/>
         <source>Online</source>
         <translation>在线</translation>
     </message>
@@ -1460,150 +1471,165 @@ It loads automatically when the data is ready.</source>
         <translation>搜索服务器返回代码 %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="123"/>
+        <location filename="../app/tmcrun.cpp" line="103"/>
         <source>Source not found: %1</source>
         <translation>未找到数据源：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="143"/>
         <source>(from the project)</source>
-        <translation>（来自工程）</translation>
+        <translation type="vanished">（来自工程）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="149"/>
         <source>Could not open the 3D settings file: %1</source>
-        <translation>无法打开 3D 设置文件：%1</translation>
+        <translation type="vanished">无法打开 3D 设置文件：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="154"/>
         <source>3D settings file not found: specify --t3d, put a .t3d into the shapefile folder or put %1 next to the program.</source>
-        <translation>未找到 3D 设置文件：请指定 --t3d、把 .t3d 放入 shapefile 文件夹，或把 %1 放到程序旁边。</translation>
+        <translation type="vanished">未找到 3D 设置文件：请指定 --t3d、把 .t3d 放入 shapefile 文件夹，或把 %1 放到程序旁边。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="168"/>
+        <location filename="../app/tmcrun.cpp" line="136"/>
         <source>Loading: %1</source>
         <translation>正在加载：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="178"/>
         <source>OSM rules file (%1) not found: specify --osm-rules or put it next to the program.</source>
-        <translation>未找到 OSM 规则文件（%1）：请指定 --osm-rules 或把它放到程序旁边。</translation>
+        <translation type="vanished">未找到 OSM 规则文件（%1）：请指定 --osm-rules 或把它放到程序旁边。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="193"/>
         <source>3D settings: %1</source>
-        <translation>3D 设置：%1</translation>
+        <translation type="vanished">3D 设置：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="204"/>
+        <location filename="../app/tmcrun.cpp" line="171"/>
         <source>Polygon boundary (%1 vertices): objects discarded outside it: %2</source>
         <translation>多边形边界（%1 个顶点）：边界外舍弃的对象：%2</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="185"/>
+        <location filename="../app/tmcrun.cpp" line="153"/>
         <source>Surface terrain is switched off — the height matrix is ignored.</source>
         <translation>地表地形已关闭——忽略高度矩阵。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="191"/>
+        <location filename="../app/tmcrun.cpp" line="105"/>
+        <source>tqt projects are not supported since v2.0: pass an OpenStreetMap extract (.osm/.pbf) or a folder with shapefiles</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/tmcrun.cpp" line="120"/>
+        <source>Rules catalog not found: specify --rules or put the rules folder next to the program</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/tmcrun.cpp" line="125"/>
+        <source>Rules catalog: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/tmcrun.cpp" line="146"/>
+        <source>OSM rules file (%1) not found: specify --osm-rules or put it into the rules catalog.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/tmcrun.cpp" line="159"/>
         <source>Height matrix not found (neither %1.tif nor DTM.tif) — the terrain is flat.</source>
         <translation>未找到高度矩阵（既无 %1.tif 也无 DTM.tif）——地形为平地。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="207"/>
+        <location filename="../app/tmcrun.cpp" line="174"/>
         <source>There are no objects inside the boundary and no height matrix — nothing to export.</source>
         <translation>边界内没有对象，也没有高度矩阵——没有可导出的内容。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="231"/>
+        <location filename="../app/tmcrun.cpp" line="198"/>
         <source>Dry run (--dry-run): the data was loaded, the world was not built.</source>
         <translation>试运行（--dry-run）：数据已加载，世界未构建。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="254"/>
+        <location filename="../app/tmcrun.cpp" line="221"/>
         <source>Real meters: x%1 along X, x%2 along Y</source>
         <translation>真实米制：X 方向 ×%1，Y 方向 ×%2</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="264"/>
-        <location filename="../app/tmcrun.cpp" line="422"/>
-        <location filename="../export/exportrun.cpp" line="462"/>
-        <location filename="../export/exportrun.cpp" line="623"/>
-        <location filename="../export/exportrun.cpp" line="701"/>
-        <location filename="../export/exportrun.cpp" line="822"/>
-        <location filename="../export/exportrun.cpp" line="1503"/>
-        <location filename="../export/exportrun.cpp" line="5277"/>
-        <location filename="../export/exportrun.cpp" line="6557"/>
-        <location filename="../export/exportrun.cpp" line="8910"/>
-        <location filename="../export/exportrun.cpp" line="11721"/>
-        <location filename="../export/exportrun.cpp" line="11962"/>
-        <location filename="../export/exportrun.cpp" line="12992"/>
-        <location filename="../export/exportrun.cpp" line="13260"/>
+        <location filename="../app/tmcrun.cpp" line="231"/>
+        <location filename="../app/tmcrun.cpp" line="389"/>
+        <location filename="../export/exportrun.cpp" line="464"/>
+        <location filename="../export/exportrun.cpp" line="625"/>
+        <location filename="../export/exportrun.cpp" line="703"/>
+        <location filename="../export/exportrun.cpp" line="824"/>
+        <location filename="../export/exportrun.cpp" line="1505"/>
+        <location filename="../export/exportrun.cpp" line="5281"/>
+        <location filename="../export/exportrun.cpp" line="6561"/>
+        <location filename="../export/exportrun.cpp" line="8925"/>
+        <location filename="../export/exportrun.cpp" line="11736"/>
+        <location filename="../export/exportrun.cpp" line="11978"/>
+        <location filename="../export/exportrun.cpp" line="13008"/>
+        <location filename="../export/exportrun.cpp" line="13276"/>
         <source>Export cancelled.</source>
         <translation>导出已取消。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="265"/>
+        <location filename="../app/tmcrun.cpp" line="232"/>
         <source>Objects to export: %1</source>
         <translation>待导出对象：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="266"/>
+        <location filename="../app/tmcrun.cpp" line="233"/>
         <source>Scene center (project projection): x=%1 y=%2 — this is block (0, 0) of the world; scale x%3 along X, x%4 along Y</source>
         <translation>场景中心（工程投影）：x=%1 y=%2 — 即世界的方块 (0, 0)；X 方向缩放 ×%3，Y 方向缩放 ×%4</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="300"/>
+        <location filename="../app/tmcrun.cpp" line="267"/>
         <source>Landmark 3D models: %1</source>
         <translation>3D 图形模型：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="311"/>
+        <location filename="../app/tmcrun.cpp" line="278"/>
         <source>Climate zone: %1 (chosen manually)</source>
         <translation>气候带：%1（手动选择）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="330"/>
+        <location filename="../app/tmcrun.cpp" line="297"/>
         <source>Climate zone: %1 (automatic: longitude %2, latitude %3)</source>
         <translation>气候带：%1（自动：经度 %2，纬度 %3）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="354"/>
+        <location filename="../app/tmcrun.cpp" line="321"/>
         <source>The spawn longitude/latitude could not be converted to the project projection — spawn at the data center.</source>
         <translation>出生点的经纬度无法转换为工程投影 — 改为在数据中心出生。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="358"/>
+        <location filename="../app/tmcrun.cpp" line="325"/>
         <source>Spawn point: x=%1 y=%2 (project coordinates)</source>
         <translation>出生点：x=%1 y=%2（工程坐标）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="413"/>
+        <location filename="../app/tmcrun.cpp" line="380"/>
         <source>Writing the world: %1</source>
         <translation>正在写入世界：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="423"/>
+        <location filename="../app/tmcrun.cpp" line="390"/>
         <source>Export failed: %1</source>
         <translation>导出失败：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="427"/>
+        <location filename="../app/tmcrun.cpp" line="394"/>
         <source>%1 h %2 min</source>
         <translation>%1 小时 %2 分</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="428"/>
+        <location filename="../app/tmcrun.cpp" line="395"/>
         <source>%1 min %2 s</source>
         <translation>%1 分 %2 秒</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="429"/>
+        <location filename="../app/tmcrun.cpp" line="396"/>
         <source>%1 s</source>
         <translation>%1 秒</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="432"/>
+        <location filename="../app/tmcrun.cpp" line="399"/>
         <source>The Minecraft world was saved unpacked:
 %1
 
@@ -1620,13 +1646,13 @@ Open the world &quot;%7&quot; in Minecraft %8%9 from your saves.
 %10</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="436"/>
-        <location filename="../app/tmcrun.cpp" line="442"/>
+        <location filename="../app/tmcrun.cpp" line="403"/>
+        <location filename="../app/tmcrun.cpp" line="409"/>
         <source> (seed %1)</source>
         <translation>（种子 %1）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="439"/>
+        <location filename="../app/tmcrun.cpp" line="406"/>
         <source>The Minecraft save was created:
 %1
 
@@ -1653,552 +1679,542 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>洞穴模板：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11323"/>
+        <location filename="../export/exportrun.cpp" line="11338"/>
         <source>lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)</source>
         <translation>未找到 lair_structures.bin（请把它放到 cave_templates.bin 旁边；查找位置：%1）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11327"/>
+        <location filename="../export/exportrun.cpp" line="11342"/>
         <source>lair_structures.bin is damaged</source>
         <translation>lair_structures.bin 已损坏</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11331"/>
+        <location filename="../export/exportrun.cpp" line="11346"/>
         <source>caves must be enabled together with the normal surroundings (a noise world)</source>
         <translation>洞穴必须与正常周边环境（噪声世界）一起启用</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11407"/>
+        <location filename="../export/exportrun.cpp" line="11422"/>
         <source>Nothing to export: all meshes are empty.</source>
         <translation>无可导出内容：所有网格均为空。</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13557"/>
+        <location filename="../export/exportrun.cpp" line="13573"/>
         <source>; zebra on the roads: crossings %1 of %2 (cells %3)</source>
         <translation>；道路斑马线：人行横道 %1/%2（单元格 %3）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13634"/>
+        <location filename="../export/exportrun.cpp" line="13650"/>
         <source>Could not voxelize a single object (empty or too huge meshes).</source>
         <translation>没有任何对象能完成体素化（网格为空或过大）。</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7174"/>
+        <location filename="../export/exportrun.cpp" line="7185"/>
         <source>%1Pale Garden: there is no suitable vegetation in the data — an empty site of %2×%2 chunks was allocated (chunks %3…%4 along X, %5…%6 along Z, gap to the data %7 chunks)</source>
         <translation>%1苍白之园：数据中没有合适的植被 — 已划出 %2×%2 区块的空地（X 方向区块 %3…%4，Z 方向区块 %5…%6，距数据 %7 个区块）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3624"/>
-        <location filename="../export/exportrun.cpp" line="3630"/>
+        <location filename="../export/exportrun.cpp" line="3627"/>
+        <location filename="../export/exportrun.cpp" line="3633"/>
         <source>; landmark %1 skipped: %2</source>
         <translation>；图形 %1 已跳过：%2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3685"/>
+        <location filename="../export/exportrun.cpp" line="3688"/>
         <source>; landmark models: %1 (buildings razed: %2)</source>
         <translation>；图形模型：%1（拆除建筑：%2）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3686"/>
+        <location filename="../export/exportrun.cpp" line="3689"/>
         <source>; landmark models: %1</source>
         <translation>；图形模型：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6152"/>
+        <location filename="../export/exportrun.cpp" line="6156"/>
         <source>; single trees on the empty lands: %1 (greenery zones: %2)</source>
         <translation>；空地上的零星树木：%1（绿化区：%2）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6366"/>
+        <location filename="../export/exportrun.cpp" line="6370"/>
         <source>; household pets: %1</source>
         <translation>；家养宠物：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7353"/>
+        <location filename="../export/exportrun.cpp" line="7364"/>
         <source>; fields and grass extended to the chunk edge on the export border: %1 chunks</source>
         <translation>；导出边界处的田野和草地已延伸至区块边缘：%1 个区块</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7355"/>
+        <location filename="../export/exportrun.cpp" line="7366"/>
         <source>; forest extended to the chunk edge on the export border: %1 chunks</source>
         <translation>；导出边界处的森林已延伸至区块边缘：%1 个区块</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7560"/>
+        <location filename="../export/exportrun.cpp" line="7571"/>
         <source>%1Pale Garden: there is no forest near the given chunk</source>
         <translation>%1苍白之园：指定区块附近没有森林</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7587"/>
+        <location filename="../export/exportrun.cpp" line="7598"/>
         <source>%1Pale Garden: meadow vegetation was chosen (%2 m², more than twice the best forest with height — %3 m²)</source>
         <translation>%1苍白之园：选择了草甸植被（%2 m²，超过最佳带高森林面积的两倍 — %3 m²）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7606"/>
+        <location filename="../export/exportrun.cpp" line="7617"/>
         <source>%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10</source>
         <translation>%1苍白之园：%2 m²，中心 x=%3 z=%4（区块 %5 %6），范围 x %7…%8，z %9…%10</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7614"/>
+        <location filename="../export/exportrun.cpp" line="7625"/>
         <source>%1Pale Garden: no suitable forest</source>
         <translation>%1苍白之园：没有合适的森林</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7795"/>
+        <location filename="../export/exportrun.cpp" line="7810"/>
         <source>; forest mansion: 1 of %1 kept</source>
         <translation>；林地府邸：%1 座中保留 1 座</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7844"/>
+        <location filename="../export/exportrun.cpp" line="7859"/>
         <source>; Pale Garden: pale_garden.bin was not found next to cave_templates.bin — a procedural forest without the donor terrain</source>
         <translation>；苍白之园：cave_templates.bin 旁未找到 pale_garden.bin — 生成不含原型地形的程序化森林</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7916"/>
+        <location filename="../export/exportrun.cpp" line="7931"/>
         <source>; terrain in forests: %1 columns</source>
         <translation>；森林内地形：%1 柱</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8089"/>
+        <location filename="../export/exportrun.cpp" line="8104"/>
         <source>; forest mansion (cut out of the game world) placed: center x=%1 z=%2 (chunk %3 %4)</source>
         <translation>；林地府邸（从游戏世界裁切）已放置：中心 x=%1 z=%2（区块 %3 %4）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8092"/>
+        <location filename="../export/exportrun.cpp" line="8107"/>
         <source>; forest mansion: no place was found in the Pale Garden</source>
         <translation>；林地府邸：在苍白之园中未找到合适位置</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8128"/>
+        <location filename="../export/exportrun.cpp" line="8143"/>
         <source>; bandit outposts: %1, abandoned camps: %2, small ruins: %3</source>
         <translation>；土匪哨站：%1，废弃营地：%2，小废墟：%3</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8321"/>
+        <location filename="../export/exportrun.cpp" line="8336"/>
         <source>; terrain of the empty lands: %1 cells</source>
         <translation>；空地地形：%1 个网格</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8322"/>
+        <location filename="../export/exportrun.cpp" line="8337"/>
         <source>; dunes of the forced sand: %1 cells</source>
         <translation>；强制沙地的沙丘：%1 格</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11934"/>
+        <location filename="../export/exportrun.cpp" line="11950"/>
         <source>; houses straightened to the axes: %1 (kept off other buildings: %2)</source>
         <translation>；已对齐到轴线的房屋：%1（为避开其他建筑保留：%2）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13010"/>
+        <location filename="../export/exportrun.cpp" line="13026"/>
         <source>; private houses: %1 brick (%2 with a mansard floor), %3 log</source>
         <translation>；私人住宅：%1 砖砌（%2 带阁楼层），%3 原木</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13421"/>
+        <location filename="../export/exportrun.cpp" line="13437"/>
         <source>; road width trimmed near buildings and fences: %1 sections, cells under buildings removed: %2</source>
         <translation>；建筑与围栏附近收窄路面：%1 段，建筑下移除的网格：%2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8201"/>
+        <location filename="../export/exportrun.cpp" line="8216"/>
         <source>; quarries: %1 columns of the stepped excavation</source>
         <translation>；采石场：阶梯式开挖 %1 柱</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8202"/>
+        <location filename="../export/exportrun.cpp" line="8217"/>
         <source>; spoil heaps: %1 columns of the mound</source>
         <translation>；废石堆：堆体 %1 柱</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8352"/>
+        <location filename="../export/exportrun.cpp" line="8367"/>
         <source>; climate zone: %1</source>
         <translation>；气候带：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8544"/>
+        <location filename="../export/exportrun.cpp" line="8559"/>
         <source>; road columns moved onto the relief: %1</source>
         <translation>；已贴合到地形的道路柱：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="9983"/>
+        <location filename="../export/exportrun.cpp" line="9998"/>
         <source>; elevated roads: %1 deck cells, %2 tunnel cells, %3 portal cells, %4 piers, %5 tunnel lamps, %6 parapets, %7 lifted approach cells, %8 straight bore cells</source>
         <translation>；高架道路：%1 个桥面网格，%2 个隧道网格，%3 个洞口网格，%4 个桥墩，%5 个隧道灯，%6 个护栏，%7 个抬升引道网格，%8 个直线掘进网格</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10017"/>
+        <location filename="../export/exportrun.cpp" line="10032"/>
         <source>; bridge columns over water (roads and railways): %1</source>
         <translation>；跨水桥梁柱（公路与铁路）：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10090"/>
+        <location filename="../export/exportrun.cpp" line="10105"/>
         <source>; mansion inhabitants: %1</source>
         <translation>；府邸居民：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10105"/>
+        <location filename="../export/exportrun.cpp" line="10120"/>
         <source>; outpost and camp blocks: %1</source>
         <translation>；哨站与营地方块：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10197"/>
+        <location filename="../export/exportrun.cpp" line="10212"/>
         <source>; shipwrecks in big water bodies: %1 (on the bottom %2, on the water %3)</source>
         <translation>；大型水体中的沉船：%1（水底 %2，水面 %3）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10226"/>
+        <location filename="../export/exportrun.cpp" line="10241"/>
         <source>; seaweed: kelp %1, seagrass %2 columns</source>
         <translation>；海藻：海带 %1，海草 %2 柱</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10294"/>
+        <location filename="../export/exportrun.cpp" line="10309"/>
         <source>; terrain and trees of the real Pale Garden: %1 blocks</source>
         <translation>；真实苍白之园的地形与树木：%1 个方块</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11103"/>
+        <location filename="../export/exportrun.cpp" line="11118"/>
         <source>; subway: %1 tunnels, %2 rails (%3 electrified), %4 lamps</source>
         <translation>；地铁：隧道 %1 条，铁轨 %2 根（电气化 %3），灯 %4 盏</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11228"/>
+        <location filename="../export/exportrun.cpp" line="11243"/>
         <source>; secret rooms in the metro: %1</source>
         <translation>；地铁密室 %1 间</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11265"/>
+        <location filename="../export/exportrun.cpp" line="11280"/>
         <source>; station halls: %1</source>
         <translation>；车站大厅 %1 座</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5492"/>
+        <location filename="../export/exportrun.cpp" line="5496"/>
         <source>; creaking hearts: %1 (extra removed %2, added %3)</source>
         <translation>；嘎枝之心：%1（额外移除 %2，添加 %3）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6313"/>
+        <location filename="../export/exportrun.cpp" line="6317"/>
         <source>; animals in forests: %1</source>
         <translation>；森林中的动物：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6456"/>
+        <location filename="../export/exportrun.cpp" line="6460"/>
         <source>; aquatic fauna: %1</source>
         <translation>；水生动物：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3019"/>
+        <location filename="../export/exportrun.cpp" line="3021"/>
         <source>; equipment on sports grounds: %1 items</source>
         <translation>；运动场地器材：%1 件</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4837"/>
+        <location filename="../export/exportrun.cpp" line="4841"/>
         <source>churches: %1, with a maze: %2</source>
         <translation>教堂：%1，带迷宫的：%2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4913"/>
+        <location filename="../export/exportrun.cpp" line="4917"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)</source>
         <translation>；%1 — 箱子下方的活板门 x=%2 z=%3（离地图上标记点最近的建筑）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4915"/>
+        <location filename="../export/exportrun.cpp" line="4919"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)</source>
         <translation>；%1 — 箱子下方的活板门 x=%2 z=%3（科研楼或学校下的实验室，备用入口）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4917"/>
+        <location filename="../export/exportrun.cpp" line="4921"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)</source>
         <translation>；%1 — 箱子下方的活板门 x=%2 z=%3（按面积第 %4/%5 大的教堂）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4953"/>
+        <location filename="../export/exportrun.cpp" line="4957"/>
         <source>; no church with a maze in chunk (%1, %2)</source>
         <translation>；区块 (%1, %2) 中没有带迷宫的教堂</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4980"/>
+        <location filename="../export/exportrun.cpp" line="4984"/>
         <source>; %1: no church with a maze in chunk (%2, %3)</source>
         <translation>；%1：区块 (%2, %3) 中没有带迷宫的教堂</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5007"/>
+        <location filename="../export/exportrun.cpp" line="5011"/>
         <source>; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other&apos;s way</source>
         <translation>；ancient_city — 地图标记点离要塞太近：两个入口会互相妨碍</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5026"/>
+        <location filename="../export/exportrun.cpp" line="5030"/>
         <source>; the entrances cannot be placed in the given buildings — choosing automatically</source>
         <translation>；入口无法放入指定建筑 — 改为自动选择</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5034"/>
+        <location filename="../export/exportrun.cpp" line="5038"/>
         <source>; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically</source>
         <translation>；两个入口无法同时放入指定教堂（周边区块太少或竖井互相冲突）— 改为自动选择</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5052"/>
+        <location filename="../export/exportrun.cpp" line="5056"/>
         <source>; stronghold — no suitable church was found</source>
         <translation>；要塞 — 未找到合适的教堂</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5082"/>
+        <location filename="../export/exportrun.cpp" line="5086"/>
         <source>; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)</source>
         <translation>；ancient_city — 未找到合适的教堂、科研楼或带实验室的学校（导出边缘限制或竖井互相冲突）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="522"/>
+        <location filename="../export/exportrun.cpp" line="524"/>
         <source>chunks added so that the buildings and lakes on the boundary stay whole: %1</source>
         <translation>为保持边界处的建筑和湖泊完整而增加的区块：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="525"/>
+        <location filename="../export/exportrun.cpp" line="527"/>
         <source>polygon boundary: %1 of %2 chunks written</source>
         <translation>多边形边界：%2 个区块中已写入 %1 个</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="854"/>
-        <location filename="../export/exportrun.cpp" line="883"/>
+        <location filename="../export/exportrun.cpp" line="856"/>
+        <location filename="../export/exportrun.cpp" line="885"/>
         <source>Could not write the file %1: %2</source>
         <translation>无法写入文件 %1：%2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="869"/>
+        <location filename="../export/exportrun.cpp" line="871"/>
         <source>The scene is too big for a save zip archive (%1 region files, ~%2 MB). Export a smaller area.</source>
         <translation>场景太大，无法生成 zip 存档（%1 个区域文件，约 %2 MB）。请导出更小的区域。</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="888"/>
+        <location filename="../export/exportrun.cpp" line="890"/>
         <source>The file %1 was not written completely (quota/disk?).</source>
         <translation>文件 %1 未完全写入（配额/磁盘空间？）。</translation>
     </message>
     <message>
-        <location filename="../input/t3dsettings.cpp" line="25"/>
         <source>The 3D settings file is not JSON: %1</source>
-        <translation>3D 设置文件不是 JSON：%1</translation>
+        <translation type="vanished">3D 设置文件不是 JSON：%1</translation>
     </message>
     <message>
-        <location filename="../input/t3dsettings.cpp" line="71"/>
         <source>The 3D settings have no vector source (vectorSources)</source>
-        <translation>3D 设置中没有矢量源（vectorSources）</translation>
+        <translation type="vanished">3D 设置中没有矢量源（vectorSources）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="144"/>
+        <location filename="../input/tmcproject.cpp" line="122"/>
         <source>Raster skipped: %1</source>
         <translation>跳过栅格：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="147"/>
+        <location filename="../input/tmcproject.cpp" line="125"/>
         <source>Height matrix: %1 (%2×%3)</source>
         <translation>高程矩阵：%1（%2×%3）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="192"/>
+        <location filename="../input/tmcproject.cpp" line="170"/>
         <source>Could not open the vector dataset: %1</source>
         <translation>无法打开矢量数据集：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="199"/>
+        <location filename="../input/tmcproject.cpp" line="177"/>
         <source>%1 has no layers</source>
         <translation>%1 中没有图层</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="216"/>
+        <location filename="../input/tmcproject.cpp" line="194"/>
         <source>Layer %1: no coordinate transformation to the project system — using it as is</source>
         <translation>图层 %1：到工程坐标系无可用变换 — 原样使用</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="271"/>
-        <location filename="../input/tmcproject.cpp" line="1302"/>
+        <location filename="../input/tmcproject.cpp" line="241"/>
+        <location filename="../input/tmcproject.cpp" line="1272"/>
         <source>Layer %1: %2 objects</source>
         <translation>图层 %1：%2 个对象</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="283"/>
+        <location filename="../input/tmcproject.cpp" line="253"/>
         <source>Folder not found: %1</source>
         <translation>未找到文件夹：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="286"/>
+        <location filename="../input/tmcproject.cpp" line="256"/>
         <source>There are no shapefiles in the folder %1</source>
         <translation>文件夹 %1 中没有 shapefile</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="295"/>
+        <location filename="../input/tmcproject.cpp" line="265"/>
         <source>The folder has no shapefiles with the needed layers</source>
         <translation>文件夹中没有包含所需图层的 shapefile</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="310"/>
+        <location filename="../input/tmcproject.cpp" line="280"/>
         <source>The data is in WGS84 — the default projection %1</source>
         <translation>数据为 WGS84 — 使用默认投影 %1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="316"/>
+        <location filename="../input/tmcproject.cpp" line="286"/>
         <source>Could not determine the coordinate system (no .prj for %1)</source>
         <translation>无法确定坐标系（%1 缺少 .prj）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="327"/>
+        <location filename="../input/tmcproject.cpp" line="297"/>
         <source>No layer was read</source>
         <translation>没有读取到任何图层</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="344"/>
+        <location filename="../input/tmcproject.cpp" line="314"/>
         <source>The OSM rules file %1 has no rules — fill in the &quot;rules&quot; list (which tags correspond to which layer and code).</source>
         <translation>OSM 规则文件 %1 中没有规则 — 请填写「rules」列表（哪些标签对应哪些图层和代码）。</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="347"/>
+        <location filename="../input/tmcproject.cpp" line="317"/>
         <source>OSM rules: %1 (%2 pcs.)</source>
         <translation>OSM 规则：%1（%2 条）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="350"/>
+        <location filename="../input/tmcproject.cpp" line="320"/>
         <source>OSM file not found: %1</source>
         <translation>未找到 OSM 文件：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="359"/>
+        <location filename="../input/tmcproject.cpp" line="329"/>
         <source>Invalid default projection: %1</source>
         <translation>默认投影无效：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="360"/>
+        <location filename="../input/tmcproject.cpp" line="330"/>
         <source> (the PROJ data is not found: the folder projlib with proj.db must lie next to the program; PROJ_LIB = %1)</source>
         <translation>（未找到 PROJ 数据：包含 proj.db 的 projlib 文件夹必须放在程序旁边；PROJ_LIB = %1）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="367"/>
+        <location filename="../input/tmcproject.cpp" line="337"/>
         <source>OSM data (WGS84) — projection %1</source>
         <translation>OSM 数据（WGS84）— 投影 %1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="373"/>
+        <location filename="../input/tmcproject.cpp" line="343"/>
         <source>No WGS84 -&gt; project projection transformation</source>
         <translation>没有 WGS84 -&gt; 工程投影的变换</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="380"/>
+        <location filename="../input/tmcproject.cpp" line="350"/>
         <source>Could not create a temporary folder for osmconf.ini</source>
         <translation>无法为 osmconf.ini 创建临时文件夹</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="383"/>
+        <location filename="../input/tmcproject.cpp" line="353"/>
         <source>Could not write %1</source>
         <translation>无法写入 %1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="398"/>
+        <location filename="../input/tmcproject.cpp" line="368"/>
         <source>osmconf.ini: %1</source>
         <translation>osmconf.ini：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="407"/>
+        <location filename="../input/tmcproject.cpp" line="377"/>
         <source>The OSM driver did not open the file %1 (%2)</source>
         <translation>OSM 驱动未能打开文件 %1（%2）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="466"/>
+        <location filename="../input/tmcproject.cpp" line="436"/>
         <source>POI points for intersections: %1</source>
         <translation>用于路口的兴趣点（POI）：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="495"/>
+        <location filename="../input/tmcproject.cpp" line="465"/>
         <source>Areas for intersections: %1</source>
         <translation>用于路口的面：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="601"/>
         <source>Height table: %1 (%2 codes)</source>
-        <translation>高度表：%1（%2 个代码）</translation>
+        <translation type="vanished">高度表：%1（%2 个代码）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="602"/>
         <source>The height table heights.csv was not found: heights of buildings without height and building:levels — the default</source>
-        <translation>未找到高度表 heights.csv：没有 height 和 building:levels 的建筑将使用默认高度</translation>
+        <translation type="vanished">未找到高度表 heights.csv：没有 height 和 building:levels 的建筑将使用默认高度</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="616"/>
+        <location filename="../input/tmcproject.cpp" line="586"/>
         <source>Enhancer: %1 (%2 buildings)</source>
         <translation>增强器：%1（%2 座建筑）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="913"/>
+        <location filename="../input/tmcproject.cpp" line="883"/>
         <source>The OSM file has no layer %1</source>
         <translation>OSM 文件中没有图层 %1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="916"/>
+        <location filename="../input/tmcproject.cpp" line="886"/>
         <source>Reading OSM layer %1 …</source>
         <translation>正在读取 OSM 图层 %1 …</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1114"/>
+        <location filename="../input/tmcproject.cpp" line="1084"/>
         <source>Buildings without signs: %1, of which recognized by neighbors and area: %2 (recognized neighbors: %3)</source>
         <translation>无标识的建筑：%1，其中按邻近建筑与面积识别出：%2（识别出的邻近建筑：%3）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1121"/>
+        <location filename="../input/tmcproject.cpp" line="1091"/>
         <source>Enhancer: OSM buildings %1, matched with points %2 (used only when the type or height could not be determined from OSM)</source>
         <translation>增强器：OSM 建筑 %1，匹配到点 %2（仅在无法从 OSM 判定类型或高度时使用）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1235"/>
+        <location filename="../input/tmcproject.cpp" line="1205"/>
         <source>Building parts (building:part): %1 parts attached to %2 buildings (the outline was replaced by parts for %3), standalone parts without a building: %4</source>
         <translation>建筑部件（building:part）：%1 个部件挂接到 %2 座建筑（%3 座的轮廓被部件取代），无所属建筑的独立部件：%4</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1262"/>
+        <location filename="../input/tmcproject.cpp" line="1232"/>
         <source>Building parts raised above the ground (min_height): %1</source>
         <translation>悬空于地面之上的建筑部件（min_height）：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1296"/>
+        <location filename="../input/tmcproject.cpp" line="1266"/>
         <source>Addresses: the street was taken from the nearest road for %1 buildings (in OSM they have a house number but no street)</source>
         <translation>地址：%1 座建筑的街道取自最近的道路（OSM 中它们有门牌号但没有街道）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1310"/>
+        <location filename="../input/tmcproject.cpp" line="1280"/>
         <source>  codes: %1</source>
         <translation>  代码：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1313"/>
+        <location filename="../input/tmcproject.cpp" line="1283"/>
         <source>Layer %1: %2 objects skipped — the geometry type did not match the first rule of the layer (use &quot;as&quot;)</source>
         <translation>图层 %1：跳过 %2 个对象 — 几何类型与该图层第一条规则不匹配（请使用「as」）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1320"/>
+        <location filename="../input/tmcproject.cpp" line="1290"/>
         <source>The OSM rules found no objects — the terrain only will be exported (a height matrix is required).</source>
         <translation>OSM 规则未找到对象——仅导出地形（需要高度矩阵）。</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1329"/>
         <source>Could not read the project file: %1</source>
-        <translation>无法读取工程文件：%1</translation>
+        <translation type="vanished">无法读取工程文件：%1</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1371"/>
         <source>The project has no layers (the Layers= line)</source>
-        <translation>工程没有图层（Layers= 行）</translation>
+        <translation type="vanished">工程没有图层（Layers= 行）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1417"/>
         <source>Could not determine the project coordinate system</source>
-        <translation>无法确定工程坐标系</translation>
+        <translation type="vanished">无法确定工程坐标系</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1440"/>
         <source>The project spatial filter was applied</source>
-        <translation>已应用工程的空间过滤器</translation>
+        <translation type="vanished">已应用工程的空间过滤器</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1448"/>
         <source>Layer %1 is switched off in the project — skipped (as in the tqt 3D window)</source>
-        <translation>图层 %1 在工程中被关闭 — 跳过（与 tqt 3D 窗口行为一致）</translation>
+        <translation type="vanished">图层 %1 在工程中被关闭 — 跳过（与 tqt 3D 窗口行为一致）</translation>
     </message>
     <message>
-        <location filename="../input/tmcproject.cpp" line="1452"/>
         <source>No needed project layer was read</source>
-        <translation>没有读取到所需的工程图层</translation>
+        <translation type="vanished">没有读取到所需的工程图层</translation>
     </message>
     <message>
         <location filename="../osm/tmcenhancer.cpp" line="26"/>
@@ -2216,7 +2232,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>%1：索引已损坏</translation>
     </message>
     <message>
-        <location filename="../osm/tmcgreen.cpp" line="443"/>
+        <location filename="../osm/tmcgreen.cpp" line="435"/>
         <source>Vegetation topped up for OSM (grid %1 m): parks %2 (lawns turned into parks %3; there were %4 parks, %5 needed for %14 km² of built-up area), yards %6 (%7 m²), taiga in the private sector %8 (%9 m²), forests %10 (%11 m²; there were %12 m² of forests out of the needed %13 m²), wild forests for camps %15 (%16 m²)</source>
         <translation>为 OSM 补充植被（网格 %1 米）：公园 %2（草坪升级为公园 %3；原有 %4 个，%14 km² 建成区需要 %5 个），庭院 %6（%7 m²），私人住宅区的针叶林 %8（%9 m²），森林 %10（%11 m²；原有森林 %12 m²，需要 %13 m²），为营地准备的野生森林 %15（%16 m²）</translation>
     </message>
@@ -2271,50 +2287,70 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>规则 %1：%2</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="84"/>
         <source>point_models.csv not found next to the program — point objects with a modelField will not be built</source>
-        <translation>程序旁未找到 point_models.csv — 带 modelField 的点对象将不会建造</translation>
+        <translation type="vanished">程序旁未找到 point_models.csv — 带 modelField 的点对象将不会建造</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="131"/>
+        <location filename="../scene/mcscene.cpp" line="136"/>
         <source>Special places: —</source>
         <translation>特殊地点：—</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="178"/>
         <source>The layer &apos;%1&apos; from the 3D settings was not found in the project — skipped</source>
-        <translation>工程的图层中没有找到 3D 设置里的图层「%1」— 跳过</translation>
+        <translation type="vanished">工程的图层中没有找到 3D 设置里的图层「%1」— 跳过</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="190"/>
         <source>None of the layers from the 3D settings was found among the project layers</source>
-        <translation>工程图层中找不到任何 3D 设置里的图层</translation>
+        <translation type="vanished">工程图层中找不到任何 3D 设置里的图层</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="194"/>
-        <location filename="../scene/mcscene.cpp" line="497"/>
+        <location filename="../scene/mcscene.cpp" line="203"/>
+        <location filename="../scene/mcscene.cpp" line="501"/>
         <source>No objects in the data: the terrain is exported without them.</source>
         <translation>数据中没有对象：仅导出地形。</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="370"/>
         <source>%1 objects on layer &apos;%2&apos; were skipped: no model for their codes in point_models.csv</source>
-        <translation>图层「%2」上跳过 %1 个对象：point_models.csv 中没有其代码对应的模型</translation>
+        <translation type="vanished">图层「%2」上跳过 %1 个对象：point_models.csv 中没有其代码对应的模型</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="376"/>
+        <location filename="../scene/mcscene.cpp" line="188"/>
+        <source>The layer &apos;%1&apos; from the rules catalog was not found in the project — skipped</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../scene/mcscene.cpp" line="199"/>
+        <source>None of the layers from the rules catalog was found among the project layers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../scene/mcscene.cpp" line="371"/>
+        <source>%1 objects on layer &apos;%2&apos; were skipped: no model for their codes in the rules catalog</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../scene/mcscene.cpp" line="374"/>
+        <source>%1 objects on layer &apos;%2&apos; have a code absent from the rules catalog — built with the generic layer behavior</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../scene/mcscene.cpp" line="380"/>
         <source>There are no objects to export</source>
         <translation>没有可导出的对象</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="490"/>
+        <location filename="../scene/mcscene.cpp" line="494"/>
         <source>There are no objects with geometry</source>
         <translation>没有带几何数据的对象</translation>
     </message>
     <message>
-        <location filename="../scene/mcscene.cpp" line="651"/>
+        <location filename="../scene/mcscene.cpp" line="654"/>
+        <source>No object gave any geometry (check the Rel heights in the rules catalog)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>No object gave any geometry (check the height field in the 3D settings)</source>
-        <translation>没有任何对象生成几何数据（请检查 3D 设置中的高度字段）</translation>
+        <translation type="vanished">没有任何对象生成几何数据（请检查 3D 设置中的高度字段）</translation>
     </message>
     <message>
         <location filename="../scene/modelbuilder.cpp" line="1505"/>
@@ -2362,6 +2398,56 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <source>Terrain: the tiles are ready — building the height matrix…</source>
         <translation>地形：瓦片已就绪——正在构建高度矩阵…</translation>
     </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="84"/>
+        <source>rules folder not found: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="98"/>
+        <source>rules catalog is incomplete: %1 is missing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="104"/>
+        <source>cannot read %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="111"/>
+        <source>%1: JSON parse error: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="120"/>
+        <source>%1: the Layer key says &apos;%2&apos;, the file name wins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="124"/>
+        <source>%1: unknown Family, treating as Poly</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="143"/>
+        <source>%1: an object without a Code is skipped</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="172"/>
+        <source>%1: code %2 is described twice, the first one wins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="177"/>
+        <source>%1: code %2 also lives on another layer, layer lookup wins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../osm/tmcrulesrepo.cpp" line="195"/>
+        <source>%1: unknown layer file ignored (the layer list is fixed)</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>RulesDialog</name>
@@ -2393,31 +2479,26 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="195"/>
-        <location filename="../app/rulesdialog.cpp" line="730"/>
         <source>Add</source>
         <translation>添加</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="196"/>
-        <location filename="../app/rulesdialog.cpp" line="731"/>
         <source>Duplicate</source>
         <translation>复制</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="197"/>
-        <location filename="../app/rulesdialog.cpp" line="732"/>
         <source>Delete</source>
         <translation>删除</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="198"/>
-        <location filename="../app/rulesdialog.cpp" line="733"/>
         <source>Up</source>
         <translation>上移</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="199"/>
-        <location filename="../app/rulesdialog.cpp" line="734"/>
         <source>Down</source>
         <translation>下移</translation>
     </message>
@@ -2428,481 +2509,518 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="216"/>
-        <location filename="../app/rulesdialog.cpp" line="720"/>
         <source>Layer</source>
         <translation>图层</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="225"/>
+        <location filename="../app/rulesdialog.cpp" line="226"/>
         <source>As</source>
         <translation>作为</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="231"/>
+        <location filename="../app/rulesdialog.cpp" line="232"/>
         <source>as is</source>
         <translation>保持原样</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="233"/>
+        <location filename="../app/rulesdialog.cpp" line="234"/>
         <source>Pass</source>
         <translation>轮次</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="236"/>
+        <location filename="../app/rulesdialog.cpp" line="237"/>
         <source>2 — a guess for objects not recognized on pass 1 (they see the nb:* tags about neighbors)</source>
         <translation>2 — 对第 1 轮未识别对象的猜测（可见关于邻居的 nb:* 标签）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="238"/>
+        <location filename="../app/rulesdialog.cpp" line="239"/>
         <source>Continue (the object may also match the rules below)</source>
         <translation>继续（对象也可匹配下方规则）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="242"/>
+        <location filename="../app/rulesdialog.cpp" line="243"/>
         <source>Conditions — every tag must match; an empty condition means &quot;the tag exists&quot;</source>
         <translation>条件 — 每个标签都必须匹配；空条件表示&quot;标签存在&quot;</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="243"/>
+        <location filename="../app/rulesdialog.cpp" line="244"/>
         <source>Tag</source>
         <translation>标签</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="243"/>
+        <location filename="../app/rulesdialog.cpp" line="244"/>
         <source>Condition (JSON: &quot;yes&quot;, [&quot;a&quot;,&quot;b&quot;], &quot;!a&quot;, &quot;&gt;=3&quot;, &quot;~regex&quot;, &quot;*&quot;, &quot;-&quot;)</source>
         <translation>条件 (JSON: &quot;yes&quot;, [&quot;a&quot;,&quot;b&quot;], &quot;!a&quot;, &quot;&gt;=3&quot;, &quot;~regex&quot;, &quot;*&quot;, &quot;-&quot;)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="245"/>
-        <location filename="../app/rulesdialog.cpp" line="257"/>
-        <location filename="../app/rulesdialog.cpp" line="1314"/>
-        <location filename="../app/rulesdialog.cpp" line="1457"/>
+        <location filename="../app/rulesdialog.cpp" line="246"/>
+        <location filename="../app/rulesdialog.cpp" line="258"/>
         <source>Add row</source>
         <translation>添加行</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="246"/>
-        <location filename="../app/rulesdialog.cpp" line="258"/>
-        <location filename="../app/rulesdialog.cpp" line="1315"/>
-        <location filename="../app/rulesdialog.cpp" line="1458"/>
+        <location filename="../app/rulesdialog.cpp" line="247"/>
+        <location filename="../app/rulesdialog.cpp" line="259"/>
         <source>Remove row</source>
         <translation>删除行</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="249"/>
+        <location filename="../app/rulesdialog.cpp" line="250"/>
         <source>Fields of the layer — a value or a {tag} template</source>
         <translation>图层字段 — 值或 {tag} 模板</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="250"/>
+        <location filename="../app/rulesdialog.cpp" line="251"/>
         <source>Field</source>
         <translation>字段</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="250"/>
+        <location filename="../app/rulesdialog.cpp" line="251"/>
         <source>Value or template</source>
         <translation>值或模板</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="259"/>
+        <location filename="../app/rulesdialog.cpp" line="260"/>
         <source>REL = &quot;auto&quot;</source>
         <translation>REL = &quot;auto&quot;</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="260"/>
-        <source>auto - the height is taken from the OSM tags (height, building:levels, min_height), then from the typical heights table heights.csv by the code; a fixed floor count can be written instead</source>
-        <translation>auto — 高度先取 OSM 标签（height、building:levels、min_height），再按代码查典型高度表 heights.csv；也可改写固定层数</translation>
+        <location filename="../app/rulesdialog.cpp" line="261"/>
+        <source>auto - the height is taken from the OSM tags (height, building:levels, min_height), then from the typical height of the code in the rules catalog; a fixed floor count can be written instead</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="317"/>
+        <location filename="../app/rulesdialog.cpp" line="270"/>
+        <source>Resolution in the rules catalog</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="353"/>
+        <source>the building height in floors; &quot;auto&quot; - from the OSM tags, then from the typical height of the code in the rules catalog</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="684"/>
+        <source>Select a rule - what its code builds on the layer shows here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="686"/>
+        <source>The rule has no layer - it matches nothing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="688"/>
+        <source>The object is dropped by this rule (the rules below are not checked)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="690"/>
+        <source>The rules catalog was not found next to the program</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="701"/>
+        <source>The rule sets no CODE - the exporter falls back to the generic behavior of the layer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="703"/>
+        <source>The code comes from the tags - it resolves per object, not per rule</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="710"/>
+        <source>&quot;%1&quot; is not a code number</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="712"/>
+        <source>Layer &quot;%1&quot; is not in the catalog - the exporter warns and falls back to the generic behavior</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="716"/>
+        <source>This code is cataloged as &quot;%1&quot; on another layer - here it is unknown (generic behavior + a warning)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="718"/>
+        <source>Unknown code - the exporter warns and the object keeps the generic behavior of &quot;%1&quot;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="738"/>
+        <source>unknown figure %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../app/rulesdialog.cpp" line="757"/>
+        <source>flat - the height is not read</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="766"/>
+        <source>road markings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="768"/>
+        <source>internal code - the exporter synthesizes such objects, the OSM data never carries it</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>auto - the height is taken from the OSM tags (height, building:levels, min_height), then from the typical heights table heights.csv by the code; a fixed floor count can be written instead</source>
+        <translation type="vanished">auto — 高度先取 OSM 标签（height、building:levels、min_height），再按代码查典型高度表 heights.csv；也可改写固定层数</translation>
+    </message>
+    <message>
+        <location filename="../app/rulesdialog.cpp" line="329"/>
         <source>JSON error (%1, position %2)</source>
         <translation>JSON 错误（%1，位置 %2）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="330"/>
-        <location filename="../app/rulesdialog.cpp" line="769"/>
-        <location filename="../app/rulesdialog.cpp" line="1364"/>
-        <location filename="../app/rulesdialog.cpp" line="1503"/>
+        <location filename="../app/rulesdialog.cpp" line="342"/>
         <source>the file was not loaded — nothing to save</source>
         <translation>文件未加载 — 没有可保存的内容</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="340"/>
+        <location filename="../app/rulesdialog.cpp" line="352"/>
         <source>the classifier code: what the object is (drives blocks, roads, vegetation)</source>
         <translation>分类代码：对象是什么（决定方块、道路、植被）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="341"/>
         <source>the building height in floors; &quot;auto&quot; - from the OSM tags, then from the heights.csv table</source>
-        <translation>建筑高度（层数）；&quot;auto&quot; — 先取 OSM 标签，再查 heights.csv 表</translation>
+        <translation type="vanished">建筑高度（层数）；&quot;auto&quot; — 先取 OSM 标签，再查 heights.csv 表</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="342"/>
+        <location filename="../app/rulesdialog.cpp" line="354"/>
         <source>the building facade material</source>
         <translation>建筑外墙材料</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="343"/>
+        <location filename="../app/rulesdialog.cpp" line="355"/>
         <source>the building:part marker (the outline is a fragment of a building)</source>
         <translation>building:part 标记（轮廓是建筑的一部分）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="344"/>
+        <location filename="../app/rulesdialog.cpp" line="356"/>
         <source>helper: the part&apos;s own height ({height}||{building:levels}); an empty PH lets the part inherit the host building height</source>
         <translation>辅助字段:部件自身高度 ({height}||{building:levels}); PH 为空时部件继承主建筑高度</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="345"/>
+        <location filename="../app/rulesdialog.cpp" line="357"/>
         <source>the lowest height of a building part, meters (min_height)</source>
         <translation>建筑部件的最低高度（米，min_height）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="346"/>
+        <location filename="../app/rulesdialog.cpp" line="358"/>
         <source>the lowest floor of a building part (min_level)</source>
         <translation>建筑部件的最低层（min_level）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="347"/>
+        <location filename="../app/rulesdialog.cpp" line="359"/>
         <source>the roof kind: &quot;onion&quot; (a church dome) or &quot;skillion&quot; (one-slope)</source>
         <translation>屋顶类型：&quot;onion&quot;（教堂穹顶）或 &quot;skillion&quot;（单坡）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="348"/>
+        <location filename="../app/rulesdialog.cpp" line="360"/>
         <source>the onion/skillion roof height, meters</source>
         <translation>洋葱头/单坡屋顶高度（米）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="349"/>
+        <location filename="../app/rulesdialog.cpp" line="361"/>
         <source>the skillion roof direction, degrees</source>
         <translation>单坡屋顶朝向（度数）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="350"/>
+        <location filename="../app/rulesdialog.cpp" line="362"/>
         <source>the church dome color (a name known to the exporter)</source>
         <translation>教堂穹顶颜色（导出器认识的颜色名）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="351"/>
+        <location filename="../app/rulesdialog.cpp" line="363"/>
         <source>the church dome material</source>
         <translation>教堂穹顶材料</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="352"/>
+        <location filename="../app/rulesdialog.cpp" line="364"/>
         <source>1 - the building has an elevator shaft (1-block inner walls)</source>
         <translation>1 — 建筑有电梯井（1 方块宽的内墙）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="353"/>
+        <location filename="../app/rulesdialog.cpp" line="365"/>
         <source>the OSM bridge: not empty and not &quot;no&quot; - an elevated roadway</source>
         <translation>OSM 桥梁：非空且非 &quot;no&quot; — 高架道路</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="354"/>
+        <location filename="../app/rulesdialog.cpp" line="366"/>
         <source>the OSM tunnel: not empty and not &quot;no&quot; - an underground roadway</source>
         <translation>OSM 隧道：非空且非 &quot;no&quot; — 地下道路</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="355"/>
+        <location filename="../app/rulesdialog.cpp" line="367"/>
         <source>the OSM level - a junction height level</source>
         <translation>OSM level — 交叉路口的层级</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="356"/>
+        <location filename="../app/rulesdialog.cpp" line="368"/>
         <source>the OSM layer - which of the overlapping lines stands on top</source>
         <translation>OSM layer — 重叠线中哪条在上</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="357"/>
+        <location filename="../app/rulesdialog.cpp" line="369"/>
         <source>not empty and not &quot;no&quot; - the railway has a contact wire</source>
         <translation>非空且非 &quot;no&quot; — 铁路有接触网</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="358"/>
+        <location filename="../app/rulesdialog.cpp" line="370"/>
         <source>the street name of the address plate (usually filled automatically from addr:*)</source>
         <translation>地址牌街名（通常由 addr:* 自动填写）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="359"/>
+        <location filename="../app/rulesdialog.cpp" line="371"/>
         <source>the street type word of the address (&quot;street&quot;, &quot;avenue&quot;, ...)</source>
         <translation>地址的街道类型词（&quot;street&quot;、&quot;avenue&quot; 等）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="360"/>
+        <location filename="../app/rulesdialog.cpp" line="372"/>
         <source>the house number of the address plate (usually filled automatically from addr:*)</source>
         <translation>地址牌门牌号（通常由 addr:* 自动填写）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="361"/>
+        <location filename="../app/rulesdialog.cpp" line="373"/>
         <source>the second half of the house number (the plate shows NUMBR+ADDNUM)</source>
         <translation>门牌号的后半部分（牌上显示 NUMBR+ADDNUM）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="362"/>
+        <location filename="../app/rulesdialog.cpp" line="374"/>
         <source>a custom column - it can be read by the 3D settings (their Field/Lift field/Absorption columns)</source>
         <translation>自定义列 — 3D 设置可读取它（其 Field/Lift field/Absorption 列）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="504"/>
+        <location filename="../app/rulesdialog.cpp" line="517"/>
         <source>Click a field row - what the field does shows here</source>
         <translation>点击字段行 — 此处显示其用途</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="712"/>
         <source>OSMC rules</source>
-        <translation>OSMC 规则</translation>
+        <translation type="vanished">OSMC 规则</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="719"/>
         <source>The layer sources</source>
-        <translation>图层源</translation>
+        <translation type="vanished">图层源</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="720"/>
         <source>Description</source>
-        <translation>描述</translation>
+        <translation type="vanished">描述</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="721"/>
         <source>Model field</source>
-        <translation>模型列</translation>
+        <translation type="vanished">模型列</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="721"/>
         <source>Geometry</source>
-        <translation>几何</translation>
+        <translation type="vanished">几何</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="722"/>
         <source>Material column</source>
-        <translation>材质列</translation>
+        <translation type="vanished">材质列</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="898"/>
         <source>Prison refuge</source>
-        <translation>匪徒巢穴</translation>
+        <translation type="vanished">匪徒巢穴</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="899"/>
         <source>Military base</source>
-        <translation>军事基地</translation>
+        <translation type="vanished">军事基地</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1142"/>
         <source>No preview for model number %1</source>
-        <translation>模型编号 %1 没有预览</translation>
+        <translation type="vanished">模型编号 %1 没有预览</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1143"/>
         <source>Select a row - the model that the exporter builds on such a point shows here</source>
-        <translation>选择一行 — 这里将显示导出器在此类点上建造的模型</translation>
+        <translation type="vanished">选择一行 — 这里将显示导出器在此类点上建造的模型</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="722"/>
         <source>Effect</source>
-        <translation>效果</translation>
+        <translation type="vanished">效果</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="823"/>
         <source>Used for visualizing point objects</source>
-        <translation>用于可视化点对象</translation>
+        <translation type="vanished">用于可视化点对象</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="828"/>
         <source>Used for the wall material display and the radio wave modeling system</source>
-        <translation>用于显示墙体材质与无线电波建模系统</translation>
+        <translation type="vanished">用于显示墙体材质与无线电波建模系统</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="836"/>
         <source>Points</source>
-        <translation>点</translation>
+        <translation type="vanished">点</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="837"/>
         <source>Lines</source>
-        <translation>线</translation>
+        <translation type="vanished">线</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="838"/>
         <source>Polygons</source>
-        <translation>多边形</translation>
+        <translation type="vanished">多边形</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="895"/>
-        <location filename="../app/rulesdialog.cpp" line="902"/>
         <source>Not game (%1)</source>
-        <translation>非游戏 (%1)</translation>
+        <translation type="vanished">非游戏 (%1)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="897"/>
         <source>Swamp</source>
-        <translation>沼泽</translation>
+        <translation type="vanished">沼泽</translation>
     </message>
     <message>
         <source>Swamp, not game (%1)</source>
         <translation type="vanished">沼泽，非游戏 (%1)</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1305"/>
         <source>Point models</source>
-        <translation>点模型</translation>
+        <translation type="vanished">点模型</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1311"/>
         <source>An object code -&gt; the model the exporter builds on such points</source>
-        <translation>对象代码 -&gt; 导出器在这些点上建造的模型</translation>
+        <translation type="vanished">对象代码 -&gt; 导出器在这些点上建造的模型</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1312"/>
-        <location filename="../app/rulesdialog.cpp" line="1455"/>
         <source>Code</source>
-        <translation>代码</translation>
+        <translation type="vanished">代码</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1312"/>
         <source>Model</source>
-        <translation>模型</translation>
+        <translation type="vanished">模型</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1375"/>
         <source>memorial statue</source>
-        <translation>纪念雕像</translation>
+        <translation type="vanished">纪念雕像</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1376"/>
         <source>monument stele</source>
-        <translation>纪念碑碑石</translation>
+        <translation type="vanished">纪念碑碑石</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1377"/>
         <source>fountain</source>
-        <translation>喷泉</translation>
+        <translation type="vanished">喷泉</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1378"/>
         <source>communication tower</source>
-        <translation>通信塔</translation>
+        <translation type="vanished">通信塔</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1379"/>
         <source>composter</source>
-        <translation>垃圾箱</translation>
+        <translation type="vanished">垃圾箱</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1380"/>
         <source>lighting mast</source>
-        <translation>照明灯杆</translation>
+        <translation type="vanished">照明灯杆</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1381"/>
         <source>street bench</source>
-        <translation>长椅</translation>
+        <translation type="vanished">长椅</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1382"/>
         <source>small sculpture</source>
-        <translation>小型雕塑</translation>
+        <translation type="vanished">小型雕塑</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1383"/>
         <source>bus stop shelter</source>
-        <translation>公交车站候车亭</translation>
+        <translation type="vanished">公交车站候车亭</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1447"/>
         <source>Typical heights</source>
-        <translation>典型高度</translation>
+        <translation type="vanished">典型高度</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1452"/>
         <source>Filter (a code or a word of the name)</source>
-        <translation>筛选（代码或名称中的文字）</translation>
+        <translation type="vanished">筛选（代码或名称中的文字）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1455"/>
         <source>Height, blocks</source>
-        <translation>高度（方块）</translation>
+        <translation type="vanished">高度（方块）</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1455"/>
         <source>Name</source>
-        <translation>名称</translation>
+        <translation type="vanished">名称</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1548"/>
-        <location filename="../app/rulesdialog.cpp" line="1588"/>
-        <location filename="../app/rulesdialog.cpp" line="1612"/>
-        <location filename="../app/rulesdialog.cpp" line="1629"/>
-        <location filename="../app/rulesdialog.cpp" line="1637"/>
-        <location filename="../app/rulesdialog.cpp" line="1643"/>
-        <location filename="../app/rulesdialog.cpp" line="1653"/>
+        <location filename="../app/rulesdialog.cpp" line="794"/>
+        <location filename="../app/rulesdialog.cpp" line="834"/>
+        <location filename="../app/rulesdialog.cpp" line="858"/>
+        <location filename="../app/rulesdialog.cpp" line="875"/>
+        <location filename="../app/rulesdialog.cpp" line="883"/>
+        <location filename="../app/rulesdialog.cpp" line="889"/>
+        <location filename="../app/rulesdialog.cpp" line="899"/>
         <source>Export rules</source>
         <translation>导出规则</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1559"/>
+        <location filename="../app/rulesdialog.cpp" line="805"/>
         <source>Save</source>
         <translation>保存</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1560"/>
+        <location filename="../app/rulesdialog.cpp" line="806"/>
         <source>Save as...</source>
         <translation>另存为...</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1561"/>
+        <location filename="../app/rulesdialog.cpp" line="807"/>
         <source>Reload</source>
         <translation>重新读取</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1562"/>
+        <location filename="../app/rulesdialog.cpp" line="808"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1588"/>
+        <location filename="../app/rulesdialog.cpp" line="834"/>
         <source>Could not read the settings files:
 %1</source>
         <translation>无法读取设置文件：
 %1</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1598"/>
+        <location filename="../app/rulesdialog.cpp" line="844"/>
         <source>not found</source>
         <translation>未找到</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1599"/>
+        <location filename="../app/rulesdialog.cpp" line="845"/>
         <source>not saved</source>
         <translation>未保存</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1612"/>
-        <location filename="../app/rulesdialog.cpp" line="1629"/>
+        <location filename="../app/rulesdialog.cpp" line="858"/>
+        <location filename="../app/rulesdialog.cpp" line="875"/>
         <source>Could not save %1:
 %2</source>
         <translation>无法保存 %1：
 %2</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1619"/>
+        <location filename="../app/rulesdialog.cpp" line="865"/>
         <source>Save %1 as</source>
         <translation>将 %1 另存为</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1637"/>
+        <location filename="../app/rulesdialog.cpp" line="883"/>
         <source>Discard the unsaved changes in %1?</source>
         <translation>放弃 %1 中未保存的更改？</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1643"/>
+        <location filename="../app/rulesdialog.cpp" line="889"/>
         <source>Could not read %1:
 %2</source>
         <translation>无法读取 %1：
 %2</translation>
     </message>
     <message>
-        <location filename="../app/rulesdialog.cpp" line="1654"/>
+        <location filename="../app/rulesdialog.cpp" line="900"/>
         <source>The files %1 were changed but not saved. Close without saving?</source>
         <translation>文件 %1 已更改但未保存。不保存直接关闭？</translation>
     </message>

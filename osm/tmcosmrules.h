@@ -1,5 +1,5 @@
 #pragma once
-// The rules that turn OpenStreetMap tags into "virtual tqt layers" (bldpol, vegpol, rdslin ... with the CODE, REL, MAT ... fields).
+// The rules that turn OpenStreetMap tags into the rules catalog layers (bldpol, vegpol, rdslin ... with the CODE, REL, MAT ... fields).
 // The rules live in an external JSON file (rules/osmrules.json) so that the tag/code mapping can be changed without a rebuild.
 #include <QString>
 #include <QStringList>
@@ -25,7 +25,7 @@ struct OsmRule
 {
     QString note;                                   //!< a comment (for the log/people only)
     QString from;                                   //!< the OSM driver layer: multipolygons | lines | points
-    QString layer;                                  //!< the tqt layer suffix: bldpol, vegpol, rdslin ...
+    QString layer;                                  //!< the catalog layer suffix: bldpol, vegpol, rdslin ...
     QString as;                                     //!< "" — the geometry as is; "polygon" — a closed line -> a polygon; "line" — a polygon boundary -> a line
     QVector<OsmCondition> conds;
     QVector<QPair<QString, QString>> fields;        //!< field name -> value template
@@ -78,7 +78,7 @@ public:
     static QString baseKey(const QString& key);         //!< a key without the poi: / area: prefix
     //! The OSM layers that need to be read
     QStringList sourceLayers() const;
-    //! Names of the tqt layer fields (the union over all rules)
+    //! Names of the catalog layer fields (the union over all rules)
     QStringList fieldNames(const QString& layer) const;
     //! Apply the rules. There may be several results (if the rules have cont=true).
     //! matched (optional) is set to true if any rule fired, including a dropping one (layer "-")

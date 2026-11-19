@@ -1,5 +1,5 @@
 #pragma once
-// Address plates and street names for OSM data: from the addr:* and name tags we get the same three strings that the tqt layer fields hold —
+// Address plates and street names for OSM data: from the addr:* and name tags we get the same three strings that the catalog layer fields hold —
 // the street type (TYSTR: "улица"), the name (STREET: "Ялагина") and the house number (NUMBR: "26А", "9К.6").
 #include <QHash>
 #include <QString>

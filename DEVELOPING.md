@@ -9,11 +9,9 @@ OSMC is a standalone Windows program (Qt 5.15.2 / MSVC, qmake, GDAL 3.4). Source
 
 Besides OpenStreetMap extracts (`.osm`, `.pbf`, `.osm.pbf`) and the area drawn on the online map, the core reads:
 
-- a **`.tqt` project** (layers `Shape=`, `Rastr=`, `Wkt`, `SpatialFilter`, 3D settings `Wdf3D=`);
-- a **folder with shapefiles** (all `*.shp` and height matrices `*.tif/*.tiff` in the folder; every shapefile needs a `.prj`).
+- a **folder with shapefiles** (all `*.shp` and height matrices `*.tif/*.tiff` in the folder; every shapefile needs a `.prj`) - a command-line input, the window loads OSM extracts and the online map.
 
-The project CRS is the `Wkt` line of the `.tqt`, otherwise the `.prj` of the first layer; for WGS84 data — EPSG:3395 (or `DefaultCrs=` from `osmc.ini`/`TQT.ini` next to the exe).
-The `.tqt`/folder input is shown in the window only with `--debug`.
+The project CRS is the `.prj` of the first layer; for WGS84 data — EPSG:3395 (or `DefaultCrs=` from `osmc.ini` next to the exe).
 
 ## Building
 
@@ -23,7 +21,7 @@ You need Qt 5.15.2 (MSVC) and Visual Studio with the MSVC x64 toolset. The GDAL 
 
 `build.bat` makes a shadow build (`qmake` + `nmake release`) in `%OSMC_BUILD%` (by default `Builds\tMC` next to the `Projects` folder); the result is `%OSMC_BUILD%\release\osmc.exe`, the log is `build_nmake.log`.
 The paths are set with the environment variables `VCVARS` (vcvarsall.bat), `QTDIR` (default `C:\Qt\5.15.2\msvc2019_64`), `GDAL_DIR` (optional: another GDAL; by default the headers and `gdal_i.lib` from `third_party/gdal` are used), `OSMC_BUILD`.
-After linking, `osmc.pro` copies everything from `resources/` next to the exe (the `templates/*.bin` structure templates go into the `assets/` subfolder). If the exe is running, linking fails (LNK1104) — close the program. Add new files to `osmc.pro`.
+After linking, `osmc.pro` copies everything from `resources/` next to the exe (the `templates/*.bin` structure templates go into the `assets/` subfolder) and the `rules/` catalog into the `rules/` subfolder. If the exe is running, linking fails (LNK1104) — close the program. Add new files to `osmc.pro`.
 
 The Russian translation of the interface is `translations/osmc_ru.ts` (embedded into the exe by `lrelease`); to refresh it after changing strings run `lupdate osmc.pro -ts translations/osmc_ru.ts`. When you add a user-visible string, keep it English in the code and add its Russian text to the translation.
 
@@ -52,7 +50,7 @@ A release is made for BOTH platforms: the Windows zip AND the Linux AppImage (pl
 1. Windows: `make_release.bat` → `Builds/tMC/package/OSMC-<version>-win64.zip`.
 2. Linux: `make_release_linux.bat` → `Builds/tMC/package/OSMC-<version>-x86_64.AppImage` and `OSMC-<version>-linux64.tar.gz`.
 
-`make_release.bat` makes a ready-to-run package in one step: it builds the program, runs `windeployqt` (the Qt DLLs and plugins), adds the Visual C++ runtime (app-local), the GDAL runtime from `third_party/gdal/bin`, the structure templates `*.bin`, `default.t3d`, `osm_rules.json`, `heights.csv`, `tmc_buildings.dat`, the README files with their `images/`, `THIRD_PARTY_NOTICES.md` and `LICENSE`,
+`make_release.bat` makes a ready-to-run package in one step: it builds the program, runs `windeployqt` (the Qt DLLs and plugins), adds the Visual C++ runtime (app-local), the GDAL runtime from `third_party/gdal/bin`, the structure templates `*.bin`, the `rules/` catalog (`osmrules.json` + the layer files), `tmc_buildings.dat`, the README files with their `images/`, `THIRD_PARTY_NOTICES.md` and `LICENSE`,
 then **starts the result with a clean `PATH`** (no Qt, no GDAL) to be sure it works by itself, and packs it into `Builds/tMC/package/OSMC-<version>-win64.zip` (the version is the `VERSION` line of `osmc.pro`).
 `make_release_linux.bat` runs the whole Linux release inside the pinned **Debian 11** WSL distro (that glibc is the compatibility floor: the AppImage runs on Debian 11/12/13, Ubuntu 20.04+, Fedora 34+): it syncs the sources (`git ls-files` list) into the distro, builds the slim GDAL 3.4.3 from source (only OSM/PBF/Shapefile/GPKG/MEM, pinned url+sha256, cached), builds `osmc` against it, then collects the bundle — Qt 5.15.2 runtime and the plugins (xcb, wayland, offscreen, imageformats, svg icons), GDAL/PROJ with their data folders (`gdal-data`, `projlib`, which the program itself prefers over the environment), libcurl + OpenSSL + a CA bundle (`ca-certificates.crt`), DejaVu fonts with a shipped `fonts.conf`, the resources — verifies with `ldd` that nothing outside the bundle is needed except glibc and the video drivers, dry-run exports the test scene from the bundle, and packs `OSMC-<version>-x86_64.AppImage` (runs without FUSE) plus `OSMC-<version>-linux64.tar.gz` (for servers: the same shape as the Windows zip — an `OSMC/` folder, run `OSMC/osmc` after unpacking). It needs the WSL distro `Debian-11` once prepared: import the Debian 11 cloud rootfs (`wsl --import`) and run the apt setup documented in `docs/porting-linux.md`; the script prints where its artifacts land (`E:\Builds\tMC\package` by default, variables `OSMC_WSL`, `OSMC_BUILD`, `OSMC_OUT`).
 `third_party/gdal/make_runtime_zip.bat` makes `gdal-runtime-3.4.zip` (the contents of `third_party/gdal/bin`) for the releases page: it is what `setup.bat` downloads (set its address in `setup.bat` or in the variable `GDAL_RUNTIME_URL`).
@@ -82,29 +80,29 @@ OSMC [source] [-o|--out world.zip] [--format 26|1.21] [--flat] [--seed N] [--cav
     [--clip "lon lat; lon lat; ..."] [--spawn-lonlat "lon lat"]
     [--stronghold "x z"] [--city "x z"] [--pale "x z"] [--no-locate-datapack]
     [--osm-rules rules.json] [--osm-ini osmconf.ini] [--no-greenery] [--enhancer file.dat | --no-enhancer]
-    [--t3d file.t3d] [--real-meters 0|1] [--dry-run] [--download-osm "lon lat; ..."]
-    [--lang auto|en|ru] [--theme auto|light|dark] [--debug] [--log log.txt] [--nogui]
+    [--rules folder] [--real-meters 0|1] [--dry-run] [--download-osm "lon lat; ..."]
+    [--lang auto|en|ru] [--theme auto|light|dark] [--log log.txt] [--nogui]
 ```
 
 `OSMC --help` lists everything (including the `--gui-*` options for tests). Notes:
 
-- `source` is a `.tqt` file, an OSM extract or a folder (default — the current folder). Without arguments the window opens.
+- `source` is an OSM extract, a `.tmc` project or a folder with shapefiles (the folder is command-line only; default — the current folder). Without arguments the window opens.
 - `--nogui` runs the export without a window; the exit code is 0 on success. The program is a GUI application, so redirected console output may be empty — use `--log`.
 - `--clip` limits the export to a polygon (WGS84): only what is inside is exported and chunks outside are not written.
 - `--download-osm "lon lat; …" -o area.osm` downloads an area (up to 25 km²) and exits.
 - `--dry-run` only loads and classifies the data (a summary "code × count" goes to the log) — handy for tuning the OSM rules.
-- 3D settings are chosen in this order: `--t3d`, any `.t3d` in the shapefile folder, `Wdf3D=` of the `.tqt` project, `default.t3d` next to the exe.
+- The rules catalog is looked for in this order: `--rules <folder>` (its own `rules/` subfolder included), `rules/` next to the exe, `rules/` in the current folder, `rules/` next to the source data (or that folder itself).
 - The **datapack for finding structures** (on by default; `--no-locate-datapack` turns it off) adds structure sets so that `/locate` and the Eye of Ender find the stronghold, the Ancient City, trial chambers and ruined portals. The structures themselves are written into the chunks and do not depend on it. The price: the game warns about experimental features when opening such a world.
-- Example: `OSMC city.osm.pbf --osm-rules osm_rules.json --nogui --log run.log`.
+- Example: `OSMC city.osm.pbf --osm-rules rules/osmrules.json --nogui --log run.log`.
 
 ## OpenStreetMap rules
 
-Objects are read by the GDAL OSM driver; then the rules of **`osm_rules.json`** sort them into virtual "tqt layers" (`osm.bldpol`, `osm.vegpol`, `osm.rdslin` …) and set the fields `CODE` (the object type), `REL` (height), `MAT` (material) and so on. From there everything works as for shapefiles with the 3D settings (`default.t3d`). The format of the rules is described in the `_help` section of the file itself; the file is edited by hand, without rebuilding.
+Objects are read by the GDAL OSM driver; then the rules of **`rules/osmrules.json`** sort them into the catalog layers (`bldpol`, `vegpol`, `rdslin` …) and set the fields `CODE` (the object type), `REL` (height), `MAT` (material) and so on. From there every code is resolved in the rules catalog (`rules/<layer>.json`) - the same table the window preview and the shapefile path use. The format of the rules is described in the `_help` section of the file itself; the file is edited by hand, without rebuilding.
 
-- The rules file is looked for in this order: `--osm-rules`, next to the OSM file, next to the exe, the current folder.
+- The rules file is looked for in this order: `--osm-rules`, next to the source data, inside the found rules catalog, next to the exe, the current folder.
 - Conditions: a value, `"*"` (the tag exists), `"-"` (no tag), `"!v"` (the tag exists and differs), lists, regular expressions `"~re"`, numbers `">=4"`; the service tags `poi:<tag>` (points inside a building outline), `area:<tag>` (enclosing plots), `_area`, `_perim`. Templates: `{tag}`, `{tag1,tag2}`, `{tag|num}`, `{tag|num*3}`, alternatives through `||`.
 - **Two passes.** Rules with `"pass": 2` only see buildings the first pass did not recognize and use the tags about the nearest recognized buildings (`nb:code`, `nb:share`, `nb:n`, `nb:rel`, `nb:dist`).
-- **Height** (`"REL": "auto"`): the `height` tag → `building:levels` by the floor formulas → the typical height by code from `heights.csv` → 6 m. **Material** (`MAT`) is taken from `building:material` / `building:facade:material` (brick, stone, wood, glass, metal, concrete, panels …).
+- **Height** (`"REL": "auto"`): the `height` tag → `building:levels` by the floor formulas → the typical height of the code in the rules catalog → 6 m. **Material** (`MAT`) is taken from `building:material` / `building:facade:material` (brick, stone, wood, glass, metal, concrete, panels …).
 - **Addresses** (`osm/tmcaddress.cpp`): the street type, name and house number for the signs on houses and the signposts at intersections are parsed from `addr:*` and `name` automatically (Russian street types are recognized; for other languages the whole name is used as is).
 - **Greenery**: yards between houses, taiga in the private sector, forests up to a share of the area, parks, "wild" forests with bandit camps on big empty plots; tuned by the `greenery` block of the rules, `--no-greenery` turns it off.
 - **Climate**: the biomes, the surface and the tree species of the export area depend on the climate zone — detected from the coordinates or set manually (`--climate`, the *Climate* list).
@@ -129,12 +127,13 @@ The online mode follows the OpenStreetMap policies: map tiles are cached on disk
 | Folder | Purpose |
 |---|---|
 | `app/` | `main.cpp` (the command line), `mainwindow.*` and `mainwindow.ui` (the window; edit the layout in Qt Designer), `mappreview.*` (the preview of loaded data), `osmtilemap.*` and `osmonlinepanel.*` (the online map, search, boundary, download), `httpclient.*` (WinHTTP client), `osmdownload.*` (OSM download), `i18n.*` (interface language), `theme.*` + `resources/osmc.qss` (light/dark theme), `tmcrun.*` (the whole export cycle shared by the window and the command line) |
-| `input/` | `tmcproject.*` — loading a `.tqt`, a shapefile folder or an OSM extract through OGR, reprojection; `t3dsettings.*` — parsing `.t3d` |
-| `osm/` | `tmcosmrules.*` — the "OSM tags → layer/code" rules; `tmcenhancer.*` — the building enhancer; `tmcrel.*` — building heights; `tmcaddress.*` — addresses; `tmcgreen.cpp` — vegetation top-up |
+| `input/` | `tmcproject.*` — loading a shapefile folder or an OSM extract through OGR, reprojection |
+| `osm/` | `tmcosmrules.*` — the "OSM tags → layer/code" rules; `tmcrulesrepo.*` — the rules catalog reader (the only reader, a singleton); `tmcenhancer.*` — the building enhancer; `tmcrel.*` — building heights; `tmcaddress.*` — addresses; `tmcgreen.cpp` — vegetation top-up |
 | `scene/` | `mcscene.*` — collecting the export objects by layers; `modelbuilder.*` — the mesh builder of objects |
 | `export/` | the Minecraft world exporter (voxels, chunks, NBT, zip), the climate zones (`climate.h`) |
 | `core/` | base classes: `MapFeature`, `MapLayer`, `HeightRaster`, geodesy helpers |
-| `resources/` | the icon, `default.t3d`, `osm_rules.json`, `heights.csv`, `tmc_buildings.dat`, the templates `templates/*.bin` |
+| `resources/` | the icon, `tmc_buildings.dat`, the templates `templates/*.bin` |
+| `rules/` | the rules catalog: `osmrules.json` plus one JSON per layer (the object codes with heights/effects/models, the layer mesh style); generated by `devtools/make_rules.py` (a one-time migration tool), read only by `TmcRulesRepo` |
 | `translations/` | the Qt translation files |
 | `images/` | the screenshots for the README files |
 | `tests/` | tests and developer scripts |

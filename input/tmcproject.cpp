@@ -558,7 +558,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
         }
     };
 
-    QMap<QString, MapLayer*> out;                 // tqt layer suffix -> layer
+    QMap<QString, MapLayer*> out;                 // catalog layer suffix -> layer
     QMap<QString, int> stat, skippedGeom;
     const bool debugOsm = qEnvironmentVariableIsSet("TMC_OSM_DEBUG");
     const QString unmatchedFile = qEnvironmentVariable("TMC_OSM_UNMATCHED");      // file for the report of uncovered objects (optional)
@@ -649,7 +649,7 @@ bool TmcProject::loadOsm(const QString& file, const QString& rulesFile, const QS
         return res;
     };
 
-    // create the tqt layer objects from the classification results (geometry g0 is in WGS84)
+    // create the catalog layer objects from the classification results (geometry g0 is in WGS84)
     auto addObjects =[&](const QVector<OsmClassified>& cl, const OGRGeometry* g0, const QHash<QString, QString>& objTags)
     {
         for (const OsmClassified& c0 : cl)

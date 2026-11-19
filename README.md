@@ -86,11 +86,10 @@ A `.tmc` project file passed as the argument opens in the window.
 
 ## Tuning (for true gurus)
 
-These files lie next to `osmc.exe` and can be edited with any text editor - or visually, in the **Export rules** dialog of the main window (the first four of them):
+These files lie next to `osmc.exe` (the rules live in the `rules/` folder) and can be edited with any text editor - the **Export rules** dialog of the main window edits `rules/osmrules.json` visually:
 
-- **`osm_rules.json`** - which OpenStreetMap tags make which kind of object; the format is described inside the file (the `_help` section).
-- **`default.t3d`** - the 3D settings: materials, heights, the look of object types.
-- **`heights.csv`** - typical building heights by type, used when the map has none.
+- **`rules/osmrules.json`** - which OpenStreetMap tags make which kind of object; the format is described inside the file (the `_help` section).
+- **`rules/<layer>.json`** - the rules catalog: one file per export layer, one entry per object code - the typical height used when the map gives none, which structure to build at a point, the game effects (swamp, prison refuge, military base), the road widths and markings, the material column.
 - **`tmc_buildings.dat`** - building points (type, height, floors) used only when OpenStreetMap does not give them; the values in it are deliberately rough.
 - **`stl/landmarks.json`** - landmark 3D models: the file, the real coordinates, the height in blocks, the material, the rotation and the placement (on a building's roof or instead of it); the fields are described inside the file (the `help` section).
 

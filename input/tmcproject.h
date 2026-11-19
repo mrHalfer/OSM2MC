@@ -37,7 +37,7 @@ public:
     //! WGS84 longitude/latitude -> project coordinates. false — the project CRS is unknown or there is no transformation.
     bool lonLatToProject(double lon, double lat, double& x, double& y) const;
 
-    //! An OpenStreetMap extract (.osm / .pbf / .osm.pbf): objects are sorted by the rules of rulesFile (JSON) into virtual tqt layers (osm.bldpol …) with the CODE and other fields.
+    //! An OpenStreetMap extract (.osm / .pbf / .osm.pbf): objects are sorted by the rules of rulesFile (JSON) into the rules catalog layers (bldpol …) with the CODE and other fields.
     //! iniFile — a custom osmconf.ini; empty — a temporary ini generated from the tags of the rules.
     bool loadOsm(const QString& file, const QString& rulesFile, const QString& iniFile, QString* err);
     static bool isOsmFile(const QString& path);

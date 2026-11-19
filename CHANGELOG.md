@@ -5,6 +5,34 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+### Added
+
+- A rules catalog for the export: every export layer is described by its own `rules/<layer>.json` - all its
+  object codes (the typical height used when the map gives none, which structure to build at a point, the
+  game effects: swamp, prison refuge, military base) and the mesh style of the layer itself (shadows,
+  outlines, line widths, road markings, the material and lift columns). Releases ship the `rules/` folder
+  next to the program
+- The "Export rules" dialog shows a live "Resolution in the rules catalog" pane: what the code of the
+  selected rule builds on its layer (family, effect, point figure, height mode and typical value, material
+  column, road width and markings), refreshed while the rule is being edited
+
+### Changed
+
+- **Breaking**: the reference files merged into the catalog - `default.t3d`, `heights.csv` and
+  `point_models.csv` are gone and `osm_rules.json` moved to `rules/osmrules.json`; old setups are migrated
+  by hand (v2.0 keeps no backward compatibility)
+- **Breaking**: `.tqt` projects are not opened anymore (the program says so plainly); a folder with
+  shapefiles stayed a command-line-only input (`OSMC <folder> -o world.zip ...`)
+- `--t3d <file>` became `--rules <folder>`; the catalog is looked for next to the program, in the current
+  folder and next to the source data; `--osm-rules` also resolves inside the found catalog
+- The window keeps a single data row (the OSM file, next to the online map): the hidden project/folder row
+  and the `--debug` option are removed; the "Export rules" dialog kept only the OSM rules tab - the
+  3D-settings, point-models and heights tabs went with the files they edited
+- The prison refuge and the military base overlays live on one "Territories" layer (`terpol`) now, the
+  object code decides (53230000 prison, 53220000 military base)
+- An object code the catalog does not describe is no longer dropped: the object keeps the generic behavior
+  of its layer and the export log warns about the code
+
 ## [1.8.26.11181] — 2026-11-18
 
 ### Added
