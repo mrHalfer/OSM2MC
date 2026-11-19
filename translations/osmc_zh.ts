@@ -716,7 +716,7 @@
     <message>
         <location filename="../app/mainwindow.cpp" line="420"/>
         <source>The map preview is still loading — wait a few seconds and press again.</source>
-        <translation type="unfinished"></translation>
+        <translation>地图预览仍在加载——请稍候几秒后再按。</translation>
     </message>
     <message>
         <location filename="../app/mainwindow.cpp" line="760"/>
@@ -1206,22 +1206,22 @@ It loads automatically when the data is ready.</source>
     <message>
         <location filename="../app/main.cpp" line="88"/>
         <source>OSMC — exports OpenStreetMap data or the shapefiles of a folder to a Minecraft world.</source>
-        <translation type="unfinished"></translation>
+        <translation>OSMC——将 OpenStreetMap 数据或文件夹中的 shapefile 导出为 Minecraft 世界。</translation>
     </message>
     <message>
         <location filename="../app/main.cpp" line="92"/>
         <source>an OSM extract (.osm/.pbf) or a folder with shapefiles (default — the current folder)</source>
-        <translation type="unfinished"></translation>
+        <translation>OSM 提取文件（.osm/.pbf）或包含 shapefile 的文件夹（默认——当前文件夹）</translation>
     </message>
     <message>
         <location filename="../app/main.cpp" line="93"/>
         <source>rules catalog folder (rules/&lt;layer&gt;.json); by default the rules folder next to the program, in the current folder or in the source folder</source>
-        <translation type="unfinished"></translation>
+        <translation>规则目录文件夹（rules/&lt;图层&gt;.json）；默认为程序旁的 rules 文件夹、当前文件夹或源数据文件夹</translation>
     </message>
     <message>
         <location filename="../app/main.cpp" line="103"/>
         <source>JSON with the &quot;OSM tags -&gt; layer and codes&quot; rules for an .osm/.pbf source (default: osmrules.json next to the file, in the rules catalog or next to the program)</source>
-        <translation type="unfinished"></translation>
+        <translation>包含「OSM 标签 -&gt; 图层与代码」规则的 JSON，用于 .osm/.pbf 源（默认：文件旁边的 osmrules.json、规则目录中或程序旁边）</translation>
     </message>
     <message>
         <location filename="../app/main.cpp" line="104"/>
@@ -1513,22 +1513,22 @@ It loads automatically when the data is ready.</source>
     <message>
         <location filename="../app/tmcrun.cpp" line="105"/>
         <source>tqt projects are not supported since v2.0: pass an OpenStreetMap extract (.osm/.pbf) or a folder with shapefiles</source>
-        <translation type="unfinished"></translation>
+        <translation>自 v2.0 起不再支持 tqt 项目：请传入 OpenStreetMap 提取文件（.osm/.pbf）或包含 shapefile 的文件夹</translation>
     </message>
     <message>
         <location filename="../app/tmcrun.cpp" line="120"/>
         <source>Rules catalog not found: specify --rules or put the rules folder next to the program</source>
-        <translation type="unfinished"></translation>
+        <translation>未找到规则目录：请指定 --rules 或将 rules 文件夹放在程序旁边</translation>
     </message>
     <message>
         <location filename="../app/tmcrun.cpp" line="125"/>
         <source>Rules catalog: %1</source>
-        <translation type="unfinished"></translation>
+        <translation>规则目录：%1</translation>
     </message>
     <message>
         <location filename="../app/tmcrun.cpp" line="146"/>
         <source>OSM rules file (%1) not found: specify --osm-rules or put it into the rules catalog.</source>
-        <translation type="unfinished"></translation>
+        <translation>未找到 OSM 规则文件（%1）：请指定 --osm-rules 或将其放入规则目录。</translation>
     </message>
     <message>
         <location filename="../app/tmcrun.cpp" line="159"/>
@@ -2316,22 +2316,22 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../scene/mcscene.cpp" line="188"/>
         <source>The layer &apos;%1&apos; from the rules catalog was not found in the project — skipped</source>
-        <translation type="unfinished"></translation>
+        <translation>项目图层中未找到规则目录中的「%1」图层——已跳过</translation>
     </message>
     <message>
         <location filename="../scene/mcscene.cpp" line="199"/>
         <source>None of the layers from the rules catalog was found among the project layers</source>
-        <translation type="unfinished"></translation>
+        <translation>在项目图层中未找到规则目录中的任何图层</translation>
     </message>
     <message>
         <location filename="../scene/mcscene.cpp" line="371"/>
         <source>%1 objects on layer &apos;%2&apos; were skipped: no model for their codes in the rules catalog</source>
-        <translation type="unfinished"></translation>
+        <translation>图层「%2」上有 %1 个对象被跳过：规则目录中没有其代码的模型</translation>
     </message>
     <message>
         <location filename="../scene/mcscene.cpp" line="374"/>
         <source>%1 objects on layer &apos;%2&apos; have a code absent from the rules catalog — built with the generic layer behavior</source>
-        <translation type="unfinished"></translation>
+        <translation>图层「%2」上有 %1 个对象的代码不在规则目录中——按图层通用行为构建</translation>
     </message>
     <message>
         <location filename="../scene/mcscene.cpp" line="380"/>
@@ -2346,7 +2346,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../scene/mcscene.cpp" line="654"/>
         <source>No object gave any geometry (check the Rel heights in the rules catalog)</source>
-        <translation type="unfinished"></translation>
+        <translation>没有任何对象产生几何体（请检查规则目录中的 Rel 高度）</translation>
     </message>
     <message>
         <source>No object gave any geometry (check the height field in the 3D settings)</source>
@@ -2401,52 +2401,52 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="84"/>
         <source>rules folder not found: %1</source>
-        <translation type="unfinished"></translation>
+        <translation>未找到 rules 文件夹：%1</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="98"/>
         <source>rules catalog is incomplete: %1 is missing</source>
-        <translation type="unfinished"></translation>
+        <translation>规则目录不完整：缺少 %1</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="104"/>
         <source>cannot read %1</source>
-        <translation type="unfinished"></translation>
+        <translation>无法读取 %1</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="111"/>
         <source>%1: JSON parse error: %2</source>
-        <translation type="unfinished"></translation>
+        <translation>%1：JSON 解析错误：%2</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="120"/>
         <source>%1: the Layer key says &apos;%2&apos;, the file name wins</source>
-        <translation type="unfinished"></translation>
+        <translation>%1：Layer 键写着「%2」，以文件名为准</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="124"/>
         <source>%1: unknown Family, treating as Poly</source>
-        <translation type="unfinished"></translation>
+        <translation>%1：未知 Family，按 Poly 处理</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="143"/>
         <source>%1: an object without a Code is skipped</source>
-        <translation type="unfinished"></translation>
+        <translation>%1：没有 Code 的对象已跳过</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="172"/>
         <source>%1: code %2 is described twice, the first one wins</source>
-        <translation type="unfinished"></translation>
+        <translation>%1：代码 %2 被描述了两遍，以第一个为准</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="177"/>
         <source>%1: code %2 also lives on another layer, layer lookup wins</source>
-        <translation type="unfinished"></translation>
+        <translation>%1：代码 %2 也存在于另一个图层，以按图层查找为准</translation>
     </message>
     <message>
         <location filename="../osm/tmcrulesrepo.cpp" line="195"/>
         <source>%1: unknown layer file ignored (the layer list is fixed)</source>
-        <translation type="unfinished"></translation>
+        <translation>%1：忽略未知的图层文件（图层列表是固定的）</translation>
     </message>
 </context>
 <context>
@@ -2524,12 +2524,12 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../app/rulesdialog.cpp" line="334"/>
         <source>What the exporter builds from the matched object; the numbers are meters</source>
-        <translation type="unfinished"></translation>
+        <translation>导出器从匹配的对象构建什么；数字均为米</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="342"/>
         <source>no footprint</source>
-        <translation type="unfinished"></translation>
+        <translation>无占地</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="352"/>
@@ -2549,12 +2549,12 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../app/rulesdialog.cpp" line="337"/>
         <source>Choose a catalog spot structure for this point rule - the CODE is set (and the layer too when the structure lives on another one)</source>
-        <translation type="unfinished"></translation>
+        <translation>为此点规则从规则目录中选择点状建筑——将写入 CODE（若该建筑位于其他图层，也会一并切换图层）</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="344"/>
         <source>Size in meters: the side of the area square, the length of the crosswalk</source>
-        <translation type="unfinished"></translation>
+        <translation>尺寸（米）：区域正方形的边长、斑马线的长度</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="361"/>
@@ -2606,122 +2606,122 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../app/rulesdialog.cpp" line="379"/>
         <source>auto - the height is taken from the OSM tags (height, building:levels, min_height), then from the typical height of the code in the rules catalog; a fixed floor count can be written instead</source>
-        <translation type="unfinished"></translation>
+        <translation>auto——高度先取 OSM 标签（height、building:levels、min_height），再取规则目录中该代码的典型高度；也可以直接填写固定层数</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="388"/>
         <source>Resolution in the rules catalog</source>
-        <translation type="unfinished"></translation>
+        <translation>规则目录中的解析结果</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="496"/>
         <source>the building height in floors; &quot;auto&quot; - from the OSM tags, then from the typical height of the code in the rules catalog</source>
-        <translation type="unfinished"></translation>
+        <translation>建筑高度（层）；「auto」——先取 OSM 标签，再取规则目录中该代码的典型高度</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="836"/>
         <source>Structure</source>
-        <translation type="unfinished"></translation>
+        <translation>建筑</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="837"/>
         <source>Area (a square footprint)</source>
-        <translation type="unfinished"></translation>
+        <translation>区域（正方形占地）</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="838"/>
         <source>Crosswalk</source>
-        <translation type="unfinished"></translation>
+        <translation>人行横道</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="842"/>
         <source>Line (as is)</source>
-        <translation type="unfinished"></translation>
+        <translation>线（原样）</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="843"/>
         <source>Polygon (a closed line)</source>
-        <translation type="unfinished"></translation>
+        <translation>多边形（闭合线）</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="847"/>
         <source>Polygon (as is)</source>
-        <translation type="unfinished"></translation>
+        <translation>多边形（原样）</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="848"/>
         <source>Line (a polygon boundary)</source>
-        <translation type="unfinished"></translation>
+        <translation>线（多边形边界）</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="958"/>
         <source>Select a rule - what its code builds on the layer shows here</source>
-        <translation type="unfinished"></translation>
+        <translation>选择一条规则——这里会显示其代码在该图层上构建的内容</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="960"/>
         <source>The rule has no layer - it matches nothing</source>
-        <translation type="unfinished"></translation>
+        <translation>规则没有图层——不会匹配任何对象</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="962"/>
         <source>The object is dropped by this rule (the rules below are not checked)</source>
-        <translation type="unfinished"></translation>
+        <translation>该规则丢弃对象（不再检查其下的规则）</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="964"/>
         <source>The rules catalog was not found next to the program</source>
-        <translation type="unfinished"></translation>
+        <translation>未在程序旁边找到规则目录</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="975"/>
         <source>The rule sets no CODE - the exporter falls back to the generic behavior of the layer</source>
-        <translation type="unfinished"></translation>
+        <translation>规则未设置 CODE——导出器将采用图层的通用行为</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="977"/>
         <source>The code comes from the tags - it resolves per object, not per rule</source>
-        <translation type="unfinished"></translation>
+        <translation>代码取自标签——按对象解析，而非按规则</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="984"/>
         <source>&quot;%1&quot; is not a code number</source>
-        <translation type="unfinished"></translation>
+        <translation>「%1」不是代码编号</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="986"/>
         <source>Layer &quot;%1&quot; is not in the catalog - the exporter warns and falls back to the generic behavior</source>
-        <translation type="unfinished"></translation>
+        <translation>图层「%1」不在规则目录中——导出器将发出警告并采用通用行为</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="997"/>
         <source>This code is cataloged as &quot;%1&quot; on another layer - here it is unknown (generic behavior + a warning)</source>
-        <translation type="unfinished"></translation>
+        <translation>此代码在另一图层中登记为「%1」——在此处未知（通用行为＋警告）</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="999"/>
         <source>Unknown code - the exporter warns and the object keeps the generic behavior of &quot;%1&quot;</source>
-        <translation type="unfinished"></translation>
+        <translation>未知代码——导出器将发出警告，对象采用「%1」的通用行为</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="1023"/>
         <source>unknown figure %1</source>
-        <translation type="unfinished"></translation>
+        <translation>未知图形 %1</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="1043"/>
         <source>flat - the height is not read</source>
-        <translation type="unfinished"></translation>
+        <translation>平面——不读取高度</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="1052"/>
         <source>road markings</source>
-        <translation type="unfinished"></translation>
+        <translation>道路标线</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="1054"/>
         <source>internal code - the exporter synthesizes such objects, the OSM data never carries it</source>
-        <translation type="unfinished"></translation>
+        <translation>内部代码——此类对象由导出器自行生成，OSM 数据中不会出现</translation>
     </message>
     <message>
         <source>auto - the height is taken from the OSM tags (height, building:levels, min_height), then from the typical heights table heights.csv by the code; a fixed floor count can be written instead</source>
@@ -2749,7 +2749,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../app/rulesdialog.cpp" line="336"/>
         <source>Model...</source>
-        <translation type="unfinished"></translation>
+        <translation>模型…</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="497"/>
@@ -3100,17 +3100,17 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
     <message>
         <location filename="../app/rulesdialog.cpp" line="179"/>
         <source>Spot structures</source>
-        <translation type="unfinished"></translation>
+        <translation>点状建筑</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="190"/>
         <source>Choose</source>
-        <translation type="unfinished"></translation>
+        <translation>选择</translation>
     </message>
     <message>
         <location filename="../app/rulesdialog.cpp" line="191"/>
         <source>Cancel</source>
-        <translation type="unfinished">取消</translation>
+        <translation>取消</translation>
     </message>
 </context>
 </TS>
