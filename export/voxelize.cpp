@@ -85,8 +85,8 @@ private:
     bool office = false, resid = false, hospital = false;
     bool priv = false, shedThin = false, lowF = false, thinW = false, wide2 = false;
     bool lair = false;                                          // the bandit lair roll outcome
-    bool prisonRaid = false;                                    // the building stands on the "prison" (pripol) contour: a forced lair with bandit loot
-    bool milPost = false;                                       // the building stands on the "military base" (milpol) contour: piglin loot
+    bool prisonRaid = false;                                    // the building stands on the terpol "prison" contour: a forced lair with bandit loot
+    bool milPost = false;                                       // the building stands on the terpol "military base" contour: piglin loot
 
     // Counters and marks of the building passes.
     int added = 0;                                              // the written blocks (the return value)
@@ -587,9 +587,9 @@ void ObjectVoxelizer::calcFloors()
     lair = false;
     // The overlay contours (pre-scanned in buildObjects): the building center decides whose territory it is.
     prisonRaid = out.prison && !out.prison->isEmpty() &&
-                 out.prison->contains(pairKey(minx + sx / 2, minz + sz / 2));       // a building on the "prison" (pripol) contour
+                 out.prison->contains(pairKey(minx + sx / 2, minz + sz / 2));       // a building on the terpol "prison" contour
     milPost = out.military && !out.military->isEmpty() &&
-              out.military->contains(pairKey(minx + sx / 2, minz + sz / 2));        // a building on the "military base" (milpol) contour
+              out.military->contains(pairKey(minx + sx / 2, minz + sz / 2));        // a building on the terpol "military base" contour
     if (floors && obj.closed && storyP > 0 && !obj.lift && obj.kind == McWorldExporter::McObject::Building)
     {
         const quint32 hl = lineHash(pairKey(minx, minz) ^ 0x1A1E5ull) % 100u;

@@ -214,8 +214,8 @@ private:
         QList<qint64> cols;                             // all the columns of the contour (the garrison and the spawners are scattered over them)
         QVector<qint64> border;                         // the edge columns of the contour (the bandit flags and the military wall stand on them)
     };
-    QSet<ColKey> prisonCols;                            // all the columns under the "prison" (pripol) contours: forced lairs there
-    QSet<ColKey> milCols;                               // ... under the "military base" (milpol) contours: piglin loot, no residents
+    QSet<ColKey> prisonCols;                            // all the columns under the terpol "prison" (53230000) contours: forced lairs there
+    QSet<ColKey> milCols;                               // ... under the terpol "military base" (53220000) contours: piglin loot, no residents
     QVector<OverlayPoly> prisonPolys, milPolys;
     QSet<ColKey> cemeteryCols;              // csrpol 53510000 (landuse=cemetery): dark oaks, crosses, jack o'lanterns,
     QVector<PortalForest> portalForests;
@@ -402,7 +402,7 @@ private:
     void buildStreetFurniture();
     // Villages (beginStep 10): squares with bells, address plates, signposts, basements.
     void buildVillages();
-    // The "prison" (pripol) and "military base" (milpol) grounds: after the villages, so that residents inside
+    // The terpol "prison" and "military base" grounds: after the villages, so that residents inside
     // a military contour are removed there; laid over the ready ground (surfaceTop works since 3.5).
     void buildOverlayGround();
 
@@ -11486,7 +11486,7 @@ bool ExportRun::buildObjects()
     // (fading out at the boundary over 28 blocks) would be almost flat — they are given the terrain of empty lands and are not counted as "occupied" for it.
     // Objects from points on the map (catalog point layers with a Model, e.g. csrpnt/hdtpnt/rdcpnt): a memorial, a monument,
     // a fountain, a communication tower, a waste bin, a lighting mast, a bench, a sculpture, a bus stop. The anchor is the center of the point's square; the structure
-    // is built in 3.575 on the ready ground; the model number comes from point_models.csv (the code -> model table).
+    // is built in 3.575 on the ready ground; the model number is the Model of the code in the rules catalog.
     // 1 — a memorial statue, 2 — a monument stele, 3 — a fountain, 4 — a communication tower, 5 — a composter.
     // The swamp biome (sources with ModelEffect::Swamp, e.g. mrspol): every column under the layer's polygons.
     // An OVERLAY, not an object: the vegetation step turns the trees of any forest under the contour into swamp
@@ -11734,7 +11734,7 @@ bool ExportRun::buildObjects()
         for (QFuture<void>& f : fs) f.waitForFinished();
         if (cancel && cancel->load()) { res.cancelled = true; res.error = QObject::tr("Export cancelled."); return false; }
     }
-    // The game-effect overlays ("prison" pripol and "military base" milpol) are collected BEFORE the main loop:
+    // The terpol game-effect overlays ("prison" 53230000, "military base" 53220000) are collected BEFORE the main loop:
     // buildings are voxelized in parallel batches, and by that moment the contours must already be known (a forced
     // lair on a bandit refuge, piglin loot in a guarded territory) — the order of objects in the loop does not help here.
     prisonCols.clear(); milCols.clear(); prisonPolys.clear(); milPolys.clear();
@@ -12051,7 +12051,7 @@ bool ExportRun::buildObjects()
             continue;
         }
         if (o.kind == McObject::Prison)
-        {   // the "prison" contour (pripol): the columns were collected in the pre-scan before the loop (the building
+        {   // the terpol "prison" contour (53230000): the columns were collected in the pre-scan before the loop (the building
             // voxelization needs them); the branch only keeps the polygon out of the ordinary path.
             QList<qint64> cols = std::move(pre[objDone - 1]);
             if (cols.isEmpty()) { ++res.skippedCount; continue; }
@@ -12059,7 +12059,7 @@ bool ExportRun::buildObjects()
             continue;
         }
         if (o.kind == McObject::Military)
-        {   // the "military base" contour (milpol): likewise — the columns are in the pre-scan, the wall and the
+        {   // the terpol "military base" contour (53220000): likewise — the columns are in the pre-scan, the wall and the
             // piglin garrison are laid by buildOverlayGround() over the ready ground.
             QList<qint64> cols = std::move(pre[objDone - 1]);
             if (cols.isEmpty()) { ++res.skippedCount; continue; }
@@ -13653,7 +13653,7 @@ bool ExportRun::buildObjects()
     return true;
 }
 
-// THE "PRISON" AND "MILITARY BASE" GROUNDS (pripol/milpol overlays). Runs AFTER the villages: the ground and its
+// THE "PRISON" AND "MILITARY BASE" GROUNDS (the terpol overlays). Runs AFTER the villages: the ground and its
 // heights are ready by then (surfaceTop), the residents are already settled - and those who got inside a guarded
 // territory are removed there. The bandit refuge gets iron golem spawners (the golems and the raiders keep fighting
 // forever) and bandit banners on the border; the military base gets a four-block stone wall along the contour (a

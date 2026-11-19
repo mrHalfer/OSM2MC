@@ -5,7 +5,7 @@
 2) priorities when exporting OSM (the TMC_OSM_DEBUG log):
    - a building=yes building without signs gets the TYPE from the enhancer (and without it — by neighbors/area);
    - a building with a type tag (building=apartments) keeps the OSM type, even if there is a point of another type nearby;
-   - height: the height tag > building:levels (formulas) > the enhancer data > the heights.csv table;
+   - height: the height tag > building:levels (formulas) > the enhancer data > the typical height in the rules catalog;
    - private sector codes from the database are reduced to 44400002.
 """
 import importlib.util, json, math, os, re, sys

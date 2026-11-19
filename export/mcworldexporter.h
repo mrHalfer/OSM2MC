@@ -154,10 +154,10 @@ public:
                     Surface = 12,     //!< Surface (lcapol, only CODE 22410000 bare rock and 72251100 forced sand): a ground
                                       //!< overlay — the turf under the contour turns to stone with terracotta (rare magma
                                       //!< outcrops) or to sand with dunes; nothing is built from the polygon itself
-                    Prison = 13,      //!< Prison (a source with ModelEffect::Prison, e.g. pripol) — a bandit refuge
+                    Prison = 13,      //!< Prison (a source with the terpol code 53230000, the "prison" effect) — a bandit refuge
                                       //!< overlay: every building under the contour becomes a lair (raider interiors, bandit
                                       //!< loot, banners), iron golem spawners dot the open ground; the polygon builds nothing itself
-                    Military = 14 };  //!< Military base (a source with ModelEffect::Military, e.g. milpol) — a guarded
+                    Military = 14 };  //!< Military base (a source with the terpol code 53220000, the "military" effect) — a guarded
                                       //!< territory overlay: a 4-block stone wall along the contour, piglins inside instead
                                       //!< of residents, piglin loot in the buildings; the polygon builds nothing itself
         //! ParkingLot (rdcpol) — a surface: dark gray concrete instead of turf + parking place markings; the outlines are in paths

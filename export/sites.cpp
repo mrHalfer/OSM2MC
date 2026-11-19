@@ -7,7 +7,7 @@
 
 
 const char* const kSpawnerTypes[] = { "minecraft:zombie", "minecraft:skeleton",
-                                             "minecraft:spider", "minecraft:witch", "minecraft:iron_golem" };   // the witch — only the basement nests; the iron golem — the "prison" (pripol) refuge, so that the raiders keep fighting
+                                             "minecraft:spider", "minecraft:witch", "minecraft:iron_golem" };   // the witch — only the basement nests; the iron golem — the terpol "prison" refuge, so that the raiders keep fighting
 const BookText kBooks[] = {
     { "От Иоанна, 1", "В начале было Слово, и Слово было у Бога, и Слово было Бог. Оно было в начале у Бога. Всё чрез Него начало быть, и без Него ничто не начало быть, что начало быть.",
                       "В Нём была жизнь, и жизнь была свет человеков. И свет во тьме светит, и тьма не объяла его." },

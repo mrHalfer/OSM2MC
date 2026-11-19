@@ -12,7 +12,7 @@
   "        _area — the outline area, m2; _perim — the perimeter, m; nb:code / nb:share / nb:n / nb:rel / nb:dist — neighbors (pass 2 only).",
   "fields: the catalog layer fields (CODE, REL, MAT ...). The value: text with substitutions {tag}, {tag1,tag2} (the first non-empty),",
   "        {tag|num}, {tag|int}, {tag|num*3}, {osm_id}; alternatives through || (the first non-empty). REL=\"auto\": height -> building:levels by the",
-  "        floor recalculation formulas (by CODE and the outline shape) -> heights.csv by CODE -> 6 m. Elevation: the rdslin rules also carry BRG/TUN/LVL (the OSM bridge/tunnel/level tags): bridge=yes raises the roadway on a viaduct, tunnel=yes sinks it into a tunnel, level gives the height/depth in 8-block levels (bridge wins, 0 level - one level), layer multiplies the BRIDGE lift (multi-level interchanges).",
+  "        floor recalculation formulas (by CODE and the outline shape) -> the typical height of the CODE in the rules catalog -> 6 m. Elevation: the rdslin rules also carry BRG/TUN/LVL (the OSM bridge/tunnel/level tags): bridge=yes raises the roadway on a viaduct, tunnel=yes sinks it into a tunnel, level gives the height/depth in 8-block levels (bridge wins, 0 level - one level), layer multiplies the BRIDGE lift (multi-level interchanges).",
   "Address: the fields TYSTR (street type), STREET (name) and NUMBR (house number) for bldpol and the street name for rdslin are filled IN BY THEMSELVES from addr:street/addr:place/addr:full/addr:housenumber and name",
   "        (osm/tmcaddress.cpp): \"улица Ленина\" -> TYSTR=улица, STREET=Ленина; \"12к1\" -> 12К.1. If a rule sets these fields explicitly, its value is taken.",
   "The tags from the conditions and templates automatically become columns of the temporary osmconf.ini, the others are read from other_tags.",
@@ -1546,7 +1546,7 @@
    }
   },
   {
-   "note": "PRELIMINARY: forest (natural=wood, landuse=forest): dense tall forests, the height from heights.csv",
+   "note": "PRELIMINARY: forest (natural=wood, landuse=forest): dense tall forests, the height from the rules catalog",
    "from": "multipolygons",
    "layer": "vegpol",
    "when": {

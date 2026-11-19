@@ -1,6 +1,6 @@
 # Counts and Y extents of marker blocks of the POINT structures (step 3.575) in an exported zip.
 # Usage: python scan_points.py <world.zip> [marker ...]
-# The default markers cover the structures of point_models.csv (fountain water, tower, composter...).
+# The default markers cover the catalog point models (fountain water, tower, composter...).
 # Prints per marker: block count (with block properties in the key) and the min/max Y.
 import os, sys, zipfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
