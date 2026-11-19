@@ -1,5 +1,6 @@
 // Running the Minecraft exporter on a scene from shp_to_scene.py (real data of a .tqt project). Usage: mc_scene_run.exe scene.bin output.zip [native|legacy] [apron]
 #include "mcworldexporter.h"
+#include "osm/tmcrulesrepo.h"
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFile>
@@ -11,6 +12,12 @@ static QString rdStr(QDataStream& in) { quint16 n; in >> n; QByteArray b(n, 0); 
 int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
+    {   // v2.0: the exporter resolves the road "Marking" through the rules catalog — point the harness at the repo's rules/
+        const QString dir = TmcRulesRepo::discover(QCoreApplication::applicationDirPath() + QStringLiteral("/../../rules"));
+        QString err;
+        if (dir.isEmpty() || !TmcRulesRepo::instance().load(dir, &err))
+            fprintf(stderr, "rules catalog not loaded: %s\n", err.isEmpty() ? "not found" : err.toUtf8().constData());
+    }
     if (argc < 3) { fprintf(stderr, "usage: mc_scene_run scene.bin out.zip [native|legacy] [apronChunks]\n"); return 2; }
     QFile f(QString::fromLocal8Bit(argv[1]));
     if (!f.open(QIODevice::ReadOnly)) { fprintf(stderr, "no scene\n"); return 2; }

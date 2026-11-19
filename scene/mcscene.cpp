@@ -1,5 +1,5 @@
 #include "scene/mcscene.h"
-#include "scene/modelbuilder.h"            // ModelSettings::VectorSource, ModelEffect (the kLayerStyles below)
+#include "scene/modelbuilder.h"            // ModelSettings::VectorSource, ModelEffect (the effect names below)
 #include <QCoreApplication>
 #include "core/steplog.h"
 #include "ogrsf_frmts.h"
@@ -56,49 +56,30 @@ MapFeature* cloneObject(const MapFeature* src)
     return c;
 }
 
-// The mesh style of every catalog layer — the visual part of the old default.t3d vector sources,
-// hardcoded since v2.0 (the rules catalog carries the per-code semantics: the Rel heights, the
-// effects, the model numbers; how a layer is put into the mesh — the extrusion, the width, the
-// decorative geometry bits — is the exporter's own code and does not vary with the data).
-struct LayerStyle
-{
-    const char* layer;
-    bool noExtrusion;                 // "on the ground": the Rel column of the catalog is not read — a flat cover
-    const char* heightField;          // "REL" on the extruding layers
-    int effect;                       // visual ModelEffect bits (the semantic swamp/prison/military are per code in the catalog)
-    double lineWidth;                 // linear layers: the ribbon width, tuned "in blocks" (widened back to meters in buildOne)
-    const char* liftField;
-    double liftMultiplier;
+// The mesh style of a layer comes from the rules catalog itself (v2.0): the layer meta names its
+// visual effects and carries the base line width and the lift column; extrusion is derived — a
+// layer whose codes read the height from a column (the loader's heightColumn) extrudes, the rest
+// are flat ground covers. What an effect name means for the geometry — the ModelEffect bit behind
+// it — is the exporter's own code (the semantic swamp/prison/military never come here, they are
+// per code in the catalog).
+struct EffectName { const char* name; ModelEffect bit; };
+const EffectName kEffectNames[] = {
+    { "Shadow",       ModelEffect::Shadow },
+    { "Glow",         ModelEffect::Glow },
+    { "RadialGlow",   ModelEffect::RadialGlow },
+    { "Rounded",      ModelEffect::Rounded },
+    { "OutlineLight", ModelEffect::OutlineLight },
+    { "OutlineDark",  ModelEffect::OutlineDark },
+    { "Supports",     ModelEffect::Supports },
 };
 
-const LayerStyle kLayerStyles[] = {
-    { "hdrlin",  true,  "",     int(ModelEffect::None),                                                             3.5, "",     1.0 },
-    { "rdslin",  true,  "",     int(ModelEffect::Shadow) | int(ModelEffect::RadialGlow)
-                              | int(ModelEffect::OutlineDark) | int(ModelEffect::Supports),                          4.5, "",     4.5 },
-    { "rrslin",  true,  "",     int(ModelEffect::Glow) | int(ModelEffect::RadialGlow)
-                              | int(ModelEffect::OutlineLight) | int(ModelEffect::Supports),                         8.0, "",     8.0 },
-    { "bldpol",  false, "REL",  int(ModelEffect::Shadow) | int(ModelEffect::Glow),                                   3.0, "MINH", 1.0 },  // MINH lifts a building:part off the ground
-    { "blkpol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
-    { "csrpol",  false, "REL",  int(ModelEffect::Shadow),                                                            3.0, "",     1.0 },
-    { "csrpnt",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
-    { "csrlin",  true,  "",     int(ModelEffect::None),                                                              2.0, "",     1.0 },
-    { "hdtpnt",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
-    { "rdcpnt",  true,  "",      int(ModelEffect::None),                                                             3.0, "",     1.0 },
-    { "rdcpol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
-    { "hdrpol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
-    { "vegpol",  false, "REL",  int(ModelEffect::Shadow) | int(ModelEffect::Rounded),                                3.0, "",     1.0 },
-    { "mrspol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
-    { "lcapol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
-    { "terpol",  true,  "",     int(ModelEffect::None),                                                              3.0, "",     1.0 },
-    { "vgbpol",  false, "REL",  int(ModelEffect::Shadow) | int(ModelEffect::Rounded),                                3.0, "",     1.0 },
-};
-
-const LayerStyle* layerStyleFor(const QString& name)
+int effectsFromNames(const QStringList& names)    // unknown names are ignored (the loader tolerates unknown keys too)
 {
-    for (const LayerStyle& st : kLayerStyles)
-        if (name == QLatin1String(st.layer))
-            return &st;
-    return nullptr;
+    int mask = 0;
+    for (const QString& n : names)
+        for (const EffectName& e : kEffectNames)
+            if (n == QLatin1String(e.name)) { mask |= int(e.bit); break; }
+    return mask;
 }
 
 //! The outline mode encoded in the effect mask (as the old .t3d parser derived it)
@@ -228,19 +209,17 @@ bool buildMcScene(const TmcProject& project, const TmcRulesRepo& repo, const McS
     {
         MapLayer* layer = b.layer;
         const QString sfx = b.desc->name;
-        const LayerStyle* st = layerStyleFor(sfx);    // every catalog layer has a style (the layer list is hardcoded)
-        ModelSettings::VectorSource vs;               // the mesh style of the layer (the old .t3d source row)
+        const TmcRulesRepo::Layer& ld = *b.desc;      // the mesh style of the layer: the catalog meta (the old .t3d source row)
+        ModelSettings::VectorSource vs;
         vs.layer = layer;
-        if (st)
-        {
-            vs.noExtrusion = st->noExtrusion;
-            vs.heightField = QString::fromLatin1(st->heightField);
-            vs.effect = ModelEffects(st->effect);
-            vs.outline = outlineFromMask(st->effect);
-            vs.lineWidth = st->lineWidth;
-            vs.liftField = QString::fromLatin1(st->liftField);
-            vs.liftMultiplier = st->liftMultiplier;
-        }
+        vs.noExtrusion = !ld.heightColumn;            // flat cover: no code of the layer reads a height column
+        vs.heightField = ld.heightColumn ? QStringLiteral("REL") : QString();
+        const int fx = effectsFromNames(ld.visualEffects);
+        vs.effect = ModelEffects(fx);
+        vs.outline = outlineFromMask(fx);
+        vs.lineWidth = ld.widthBase > 0.0 ? ld.widthBase : 3.0;   // pol/point layers carry no base width — the old default
+        vs.liftField = ld.liftColumn;
+        vs.liftMultiplier = ld.liftScale;
         // The base role of the layer: its family (a point layer builds a model figure per object, the old
         // modelField source mark) and its name (the exporter's per-layer pipeline). The semantic effect of
         // the object code (swamp/prison/military, the old per-source effect bits) overrides it per object below.
@@ -334,15 +313,10 @@ bool buildMcScene(const TmcProject& project, const TmcRulesRepo& repo, const McS
                     if (mno2 >= 0) e.roofMaterial = obj->fields.value(mno2).trimmed();
                 }
             }
-            // road width by the CODE class
             if (kind == Kind::Road)
             {
-                switch (e.code)
-                {
-                case 45220000: case 45230000: case 45240000: case 61231000: case 61232000: e.roadScale = 2.0; break;
-                case 45210000: case 61210000: case 61220000: case 61230000: e.roadScale = 2.5; break;
-                default: break;
-                }
+                // road width: the WidthScale prop of the code in the catalog (the old roadScale switch)
+                e.roadScale = desc ? TmcRulesRepo::widthScale(*desc) : 1.0;
                 // elevated / underground roadway: the BRG/TUN/LVL/LYR columns (OSM "bridge"/"tunnel"/"level"/"layer");
                 // the value "no" (and an empty column) — an ordinary surface road
                 const int brn = layer->fieldIndex(QStringLiteral("BRG"));

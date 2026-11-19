@@ -111,6 +111,18 @@ ROAD_PROPS = {
     45240000: (2.0, False), 61231000: (2.0, False), 61232000: (2.0, False),
 }
 
+# the layer mesh visual effects (the default.t3d source effect bits — Shadow|Glow|... masks; the
+# semantic swamp/prison/military stay per code in CODE_EFFECT); omitted when none
+LAYER_EFFECTS = {
+    "bldpol": ["Shadow", "Glow"],
+    "csrpol": ["Shadow"],
+    "rdslin": ["Shadow", "RadialGlow", "OutlineDark", "Supports"],
+    "rrslin": ["Glow", "RadialGlow", "OutlineLight", "Supports"],
+    "vegpol": ["Shadow", "Rounded"],
+    "vgbpol": ["Shadow", "Rounded"],
+}
+LIFT_COLUMN = {"bldpol": "MINH"}      # MINH lifts a building:part off the ground
+
 # codes the exporter itself creates (tmcgreen.cpp): never appear in the input data
 INTERNAL_CODES = {
     ("vgbpol", 71126190): ("Courtyard tree plantings", 15),
@@ -218,12 +230,16 @@ def main():
     for layer in T3D_ORDER:
         fam = LAYERS[layer]
         meta = {}
+        if layer in LAYER_EFFECTS:
+            meta["Effects"] = LAYER_EFFECTS[layer]
         if fam == "Line" and layer in t3d:
             meta["WidthBase"] = num(t3d[layer]["lineWidth"])
         if t3d.get(layer, {}).get("absorptionColumn") == "MAT":
             meta["MaterialColumn"] = "MAT"
         if layer in DB_CODE_LAYERS:
             meta["DbCodes"] = True
+        if layer in LIFT_COLUMN:
+            meta["LiftColumn"] = LIFT_COLUMN[layer]
         col = "REL" if t3d.get(layer, {}).get("field") or layer == "vgbpol" else None
 
         objects = []

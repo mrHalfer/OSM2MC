@@ -1,6 +1,10 @@
 {
  "Layer": "vgbpol",
  "Family": "Poly",
+ "Effects": [
+  "Shadow",
+  "Rounded"
+ ],
  "Objects": [
   {
    "Uid": "29052a69-305f-59dc-9b00-d98816a7b845",

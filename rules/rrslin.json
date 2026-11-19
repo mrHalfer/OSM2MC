@@ -1,6 +1,12 @@
 {
  "Layer": "rrslin",
  "Family": "Line",
+ "Effects": [
+  "Glow",
+  "RadialGlow",
+  "OutlineLight",
+  "Supports"
+ ],
  "WidthBase": 8,
  "Objects": [
   {

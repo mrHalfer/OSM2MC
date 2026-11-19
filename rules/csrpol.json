@@ -1,6 +1,9 @@
 {
  "Layer": "csrpol",
  "Family": "Poly",
+ "Effects": [
+  "Shadow"
+ ],
  "Objects": [
   {
    "Uid": "bfac24a5-5fb8-5b63-905c-ad1dc50aa795",

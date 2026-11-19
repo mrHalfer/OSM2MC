@@ -1,6 +1,10 @@
 {
  "Layer": "vegpol",
  "Family": "Poly",
+ "Effects": [
+  "Shadow",
+  "Rounded"
+ ],
  "Objects": [
   {
    "Uid": "1ed71730-a840-5101-b6dc-2d21eb6cd514",

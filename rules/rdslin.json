@@ -1,6 +1,12 @@
 {
  "Layer": "rdslin",
  "Family": "Line",
+ "Effects": [
+  "Shadow",
+  "RadialGlow",
+  "OutlineDark",
+  "Supports"
+ ],
  "WidthBase": 4.5,
  "Objects": [
   {

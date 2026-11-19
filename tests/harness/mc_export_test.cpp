@@ -4,6 +4,7 @@
 // and with height (a brick structure). The zip contents are checked by verify_mc_export.py.
 #include "mcworldexporter.h"
 #include "core/dtmgrid.h"
+#include "osm/tmcrulesrepo.h"
 #include <QCoreApplication>
 #include <cmath>
 #include <limits>
@@ -161,6 +162,12 @@ int main(int argc, char** argv)
 {
     fprintf(stderr, "[dbg] start\n");
     QCoreApplication app(argc, argv);
+    {   // v2.0: the exporter resolves the road "Marking" through the rules catalog — point the harness at the repo's rules/
+        const QString dir = TmcRulesRepo::discover(QCoreApplication::applicationDirPath() + QStringLiteral("/../../rules"));
+        QString err;
+        if (dir.isEmpty() || !TmcRulesRepo::instance().load(dir, &err))
+            fprintf(stderr, "rules catalog not loaded: %s\n", err.isEmpty() ? "not found" : err.toUtf8().constData());
+    }
     fprintf(stderr, "[dbg] app ok\n");
     if (dtmSelfTest()) return 2;
 

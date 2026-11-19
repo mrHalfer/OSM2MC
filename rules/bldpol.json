@@ -1,8 +1,13 @@
 {
  "Layer": "bldpol",
  "Family": "Poly",
+ "Effects": [
+  "Shadow",
+  "Glow"
+ ],
  "MaterialColumn": "MAT",
  "DbCodes": true,
+ "LiftColumn": "MINH",
  "Objects": [
   {
    "Uid": "92c43250-3656-5142-bc2a-cef586bc2751",

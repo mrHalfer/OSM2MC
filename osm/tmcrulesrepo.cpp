@@ -125,6 +125,11 @@ bool TmcRulesRepo::load(const QString& rulesDir, QString* err, QStringList* warn
         lay.widthBase = root.value(QStringLiteral("WidthBase")).toDouble();
         lay.materialColumn = root.value(QStringLiteral("MaterialColumn")).toString();
         lay.dbCodes = root.value(QStringLiteral("DbCodes")).toBool();
+        const QJsonArray fx = root.value(QStringLiteral("Effects")).toArray();
+        for (const QJsonValue& v : fx)
+            lay.visualEffects << v.toString();
+        lay.liftColumn = root.value(QStringLiteral("LiftColumn")).toString();
+        lay.liftScale = root.value(QStringLiteral("LiftScale")).toDouble(1.0);
 
         const QJsonArray objs = root.value(QStringLiteral("Objects")).toArray();
         for (const QJsonValue& v : objs)

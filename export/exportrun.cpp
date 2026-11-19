@@ -12,6 +12,7 @@
 #include "export/paledonor.h"
 #include "export/carset.h"
 #include "export/playgroundset.h"
+#include "osm/tmcrulesrepo.h"
 #include "core/stlmodel.h"
 #include "export/sites.h"
 #include "export/geom.h"
@@ -12404,13 +12405,13 @@ bool ExportRun::buildObjects()
                 // pedestrian 45260000/45250000/61420000 — as is (carpet by color); LIGHT GRAY
                 // 61310000/61320000/61330000 — forced lighter (like 45260000, request), the color
                 // of the source object does not matter; the other codes — 2 blocks wider on each side
-                // and dark gray; the main roads 45210000/45220000/45230000/61210000/61220000/61230000
-                // — in addition gray marking lines in the middle and along the edges of the roadway.
+                // and dark gray; the roads whose catalog code carries the "Marking" prop —
+                // in addition gray marking lines in the middle and along the edges of the roadway.
                 const bool bike = (o.code == 45261000);
                 const bool ped  = (o.code == 45260000 || o.code == 45250000 || o.code == 61420000);
                 const bool lgray = (o.code == 61310000 || o.code == 61320000 || o.code == 61330000);
-                const bool mark = (o.code == 45210000 || o.code == 45220000 || o.code == 45230000
-                                || o.code == 61210000 || o.code == 61220000 || o.code == 61230000);
+                const TmcRulesRepo::Object* rd = TmcRulesRepo::instance().object(QStringLiteral("rdslin"), o.code);
+                const bool mark = rd && TmcRulesRepo::marking(*rd);
                 int bikeIdx = -1, grayIdx = -1, markIdx = -1, whiteIdx = -1;
                 for (int i = 0; i < kCarpetsCount; ++i)
                 {
