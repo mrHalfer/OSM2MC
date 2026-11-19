@@ -5,6 +5,8 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [2.0.26.11191] — 2026-11-19
+
 ### Added
 
 - A rules catalog for the export: every export layer is described by its own `rules/<layer>.json` - all its
