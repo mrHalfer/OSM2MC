@@ -195,21 +195,27 @@ public:
         lay->addLayout(col);
 
         TmcRulesRepo& repo = TmcRulesRepo::instance();
+        struct Pick { int model; const TmcRulesRepo::Layer* lay; const TmcRulesRepo::Object* ob; };
+        QVector<Pick> picks;
         for (const QString& name : repo.order())
         {
             const TmcRulesRepo::Layer* la = repo.layer(name);
             if (!la || la->family != TmcRulesRepo::FamilyPoint) continue;
             for (const TmcRulesRepo::Object& ob : la->objects)
-            {
-                if (ob.internal || ob.model < 1 || ob.model > 9) continue;
-                QListWidgetItem* it = new QListWidgetItem(QStringLiteral("%1  (%2)").arg(ob.name).arg(ob.code));
-                it->setData(Qt::UserRole, la->name);
-                it->setData(Qt::UserRole + 1, ob.model);
-                it->setData(Qt::UserRole + 2, ob.name);
-                it->setData(Qt::UserRole + 3, ob.code);
-                it->setToolTip(QStringLiteral("%1 - %2").arg(spotFigureName(ob.model), la->name));
-                mList->addItem(it);
-            }
+                if (!ob.internal && ob.model >= 1 && ob.model <= 9)
+                    picks.append({ ob.model, la, &ob });
+        }
+        std::stable_sort(picks.begin(), picks.end(), [](const Pick& a, const Pick& b) { return a.model < b.model; });
+        for (const Pick& p : picks)
+        {
+            const TmcRulesRepo::Object& ob = *p.ob;
+            QListWidgetItem* it = new QListWidgetItem(QStringLiteral("%1. %2  (%3)").arg(ob.model).arg(ob.name).arg(ob.code));
+            it->setData(Qt::UserRole, p.lay->name);
+            it->setData(Qt::UserRole + 1, ob.model);
+            it->setData(Qt::UserRole + 2, ob.name);
+            it->setData(Qt::UserRole + 3, ob.code);
+            it->setToolTip(QStringLiteral("%1 - %2").arg(spotFigureName(ob.model), p.lay->name));
+            mList->addItem(it);
         }
         connect(ok, &QPushButton::clicked, this, [this] { accept(); });
         connect(cancel, &QPushButton::clicked, this, [this] { reject(); });
