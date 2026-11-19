@@ -1,3 +1,5 @@
 # Windows batch files must keep CRLF line endings (labels and call/goto do not work with LF only)
 *.bat text eol=crlf
 *.cmd text eol=crlf
+# shell scripts run under WSL/Linux - a checked-out CRLF breaks them ("set: pipefail: invalid option name")
+*.sh text eol=lf
