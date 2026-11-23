@@ -16,6 +16,27 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   checkable row; choosing a row opens its description behind a frosted blur that a click clears.
   Switched-off events are not written. On the command line: `--encounters-off <id>,<id>`.
   The event logic grows release by release - the pipeline, the dispatcher and a demo event ship now
+- The first real event logic in the pack; the window marks every event that is not implemented yet with
+  "[IN PROGRESS]": a street lamp blinking through the night, a rain cloud pouring over one street while
+  the sky stays clear, a chalk arrow on the asphalt erased and redrawn overnight in a new color, a
+  playground swing riding with an invisible rider, jack o'lantern faces in a graveyard turning toward a
+  far witness, and a sitting cat council at a bus stop that scatters when you come too close (and goes
+  home at dawn). The exporter bakes the exact coordinates of every lamp, bus stop, playground, flat road
+  patch and graveyard jack into the generated functions at export time; without `--encounters` the world
+  stays byte-identical to the one built before this feature.
+- Six more events with real logic: a mast lamp at a crossroad blinking until someone comes to look,
+  the windows of one house lighting up row by row bottom to top and going dark all at once, her
+  cabinet appearing by a school door while a silhouette walks to it, a yard scarecrow that looks away
+  from the house by day and watches it by night with a board's warning, a fresh grave mound whose soil
+  gives itself back when dug, and a graveyard bell striking 03:07 seven times even after someone broke
+  it. The exporter now also bakes crossroads, tall glass facades, private yards, school facades and
+  flat graveyard ground into the pack.
+- In progress, not active in exported worlds yet: three pursuers and one more scene - the night rider
+  whose ignition is a pressure plate lying by a parked car's door, the tall shadow that circles one
+  street lamp trading places while you look at his light, route 13 arriving at a bus stop that never
+  had it, and the windows of the matron's own office catching light in her night rounds. Their logic
+  is written but does not find its places in real cities yet, so the window keeps them marked as
+  "[IN PROGRESS]".
 
 ## [2.0.26.11191] — 2026-11-19
 

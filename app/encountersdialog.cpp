@@ -453,7 +453,10 @@ EncountersDialog::EncountersDialog(QWidget* parent, const QStringList& disabled)
             head->setFont(0, f);
             tree->addTopLevelItem(head);
         }
-        auto* item = new QTreeWidgetItem(tree, { QCoreApplication::translate("EncountersDialog", kRows[i].title) });
+        QString title = QCoreApplication::translate("EncountersDialog", kRows[i].title);
+        if (!encImplemented(kRows[i].id))
+            title += QStringLiteral(" [IN PROGRESS]");     // the logic of this event is still coming (export/encounters.cpp)
+        auto* item = new QTreeWidgetItem(tree, { title });
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(0, disabled.contains(id) ? Qt::Unchecked : Qt::Checked);
         item->setData(0, kIdRole, id);
