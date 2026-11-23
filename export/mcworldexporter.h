@@ -7,6 +7,7 @@
 #include <QPointF>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QVector3D>
 
@@ -69,6 +70,11 @@ struct McWorldOptions
     //! the trial chambers and the ruined portals that the exporter wrote into the chunks. The structures themselves do not depend on it. Needed only for searching, but with
     //! custom structure sets the game shows an experimental features warning — hence it is optional.
     bool locateDatapack = true;
+    //! Random city events (docs/city-encounters.md): the "osmc_enc" datapack (dispatcher + one function
+    //! per enabled event + runtime on/off), the site registry "sites.json" and marker entities tagged by
+    //! the site codes. OFF — the world is exactly as before (no registry, no markers, no pack).
+    bool encounters = false;
+    QStringList encountersOff;            //!< ids of kEncIds switched off in the "City events" window (all on otherwise)
     //! Meters per one map coordinate unit along the X and Y axes (at the scene center). 1.0 — the units are meters
     //! (local CRSs, UTM). For Mercator EPSG:3395 at 56° N it is ≈0.565: without the correction the horizontal
     //! sizes are inflated 1.77 times (areas — 3.1 times), while the heights stay real meters. The 3D window computes
@@ -184,6 +190,10 @@ public:
         //! For Building — the numeric value of the CODE column from the attribute (0 — no column/not a number).
         //! Some codes (44400002/44400100/44400110) ask for a GABLED roof made of stairs.
         int code = 0;
+        //! The source layer name (bldpol, vegpol, …) and the catalog name of the code ("" — no entry): inert
+        //! metadata, only the random-encounter site registry (docs/city-encounters.md) reads them.
+        QString layer;
+        QString siteName;
         //! For Spot — the model number of the code in the rules catalog (1 statue, 2 stele, 3 fountain, 4 tower, 5 composter).
         int model = 0;
         //! For Building — the LIFT column == 1: walls 1 block thick instead of 2 (a request

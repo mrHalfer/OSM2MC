@@ -2,6 +2,7 @@
 // The full export cycle: load the rules catalog + data -> objects -> a Minecraft world (zip). Shared by the window and the command line.
 #include <QImage>
 #include <QString>
+#include <QStringList>
 #include <functional>
 #include <atomic>
 #include "export/mcworldexporter.h"
@@ -23,6 +24,8 @@ struct TmcRunOptions
     bool caves = true;
     quint64 seed = 0;                     //!< 0 — random
     bool locateDatapack = true;           //!< datapack for /locate and the eye of ender (stronghold, Ancient City, trial chambers, ruined portals); without it the game does not ask for experimental features
+    bool encounters = false;              //!< random city events (docs/city-encounters.md): the "osmc_enc" datapack + sites.json + site markers in the world
+    QStringList encountersOff;            //!< ids of kEncIds switched off in the "City events" window (empty — all on)
     bool realMeters = true;               //!< convert map units to meters by the projection
     bool useDtm = true;                   //!< "Surface terrain" in the window: false — the height matrix is ignored even when it lies next to the data
     QString strongholdChunk, cityChunk, paleForestChunk;   //!< F3 format "x y z" / "x z"; empty — automatic

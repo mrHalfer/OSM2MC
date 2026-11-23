@@ -15,7 +15,7 @@ CXXFLAGS=(-O2 -std=c++17 -fPIC -DNDEBUG
 LIBS=($(pkg-config --libs Qt5Gui Qt5Concurrent))
 LIBS=("-Wl,--no-as-needed" "${LIBS[@]}")
 
-UNITS=(format/bytes blocks anvil buildingmerge carset ground caveset facade geom sites lairset paledonor playgroundset rails mcworldexporter voxelize exportrun)
+UNITS=(format/bytes blocks anvil buildingmerge carset ground caveset facade geom sites encounters lairset paledonor playgroundset rails mcworldexporter voxelize exportrun)
 OBJS=()
 for u in "${UNITS[@]}"; do
   o="${u##*/}.o"

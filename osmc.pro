@@ -73,6 +73,7 @@ win32:{
 
 HEADERS += \
     app/mainwindow.h \
+    app/encountersdialog.h \
     app/exportmeta.h \
     app/exportsettingsdialog.h \
     app/landmarkdialog.h \
@@ -98,6 +99,7 @@ HEADERS += \
     scene/modelbuilder.h \
     scene/modeldata.h \
     export/climate.h \
+    export/encounters.h \
     export/anvil.h \
     export/highworld.h \
     export/worldy.h \
@@ -146,6 +148,7 @@ RESOURCES += \
 SOURCES += \
     app/main.cpp \
     app/mainwindow.cpp \
+    app/encountersdialog.cpp \
     app/exportmeta.cpp \
     app/exportsettingsdialog.cpp \
     app/landmarkdialog.cpp \
@@ -168,6 +171,7 @@ SOURCES += \
     scene/mcscene.cpp \
     scene/modelbuilder.cpp \
     export/mcworldexporter.cpp \
+    export/encounters.cpp \
     export/anvil.cpp \
     export/blocks.cpp \
     export/highworld.cpp \

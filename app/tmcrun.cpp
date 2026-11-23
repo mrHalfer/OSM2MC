@@ -239,6 +239,8 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     w.apronChunks = 0;
     w.caves = opt.caves;
     w.locateDatapack = opt.locateDatapack;
+    w.encounters = opt.encounters;
+    w.encountersOff = opt.encountersOff;
     if (TmcProject::isOsmFile(opt.source))
         w.attribution = QStringLiteral("Map data (c) OpenStreetMap contributors, Open Database License (ODbL) 1.0: https://www.openstreetmap.org/copyright\n"
                                        "This world was made from OpenStreetMap data with OSMC. If you publish it, keep this attribution and follow the ODbL.\n");

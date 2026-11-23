@@ -36,6 +36,7 @@ protected:
 private slots:
     void browseOsm();                                 //!< "OSM file" row: an .osm/.pbf extract
     void openExportSettings();                        //!< "Export settings": the destination of the exported world (zip / launcher / instance)
+    void openEncountersDialog();                      //!< "Events...": the random city events switched on for the export
     void generateSeed();
     void startExport();
     void cancelExport();
@@ -92,6 +93,7 @@ private:
     QLabel* mClimateLabel = nullptr;
     int mExportDest = 0;              //!< export destination setting: 0 — zip, 1 — launcher saves, 2 — Modrinth, 3 — CurseForge
     QString mSavesLauncher, mSavesModrinth, mSavesCurse;   //!< saved choices of the "Export settings" dialog
+    QStringList mEncountersOff;       //!< the event ids switched off in the "City events" window (QSettings)
     QString mOutPath;                 //!< the world zip path (command line -o / the project file): the window has no field for it since 1.7
     int mClimateAutoZone = -1;          //!< the climate zone detected for the data (-1 — not known yet)
     int mPreviewObjects = -1;           //!< the object count of the loaded preview (-1 — no preview)

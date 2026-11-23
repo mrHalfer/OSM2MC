@@ -3,6 +3,7 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFile>
+#include <QLabel>
 #include <QMutex>
 #include <QFileInfo>
 #include <QTextStream>
@@ -11,7 +12,9 @@
 #include <QElapsedTimer>
 #include <QMouseEvent>
 #include <QThread>
+#include <QTreeWidget>
 #include <ogr_srs_api.h>
+#include "app/encountersdialog.h"
 #include "app/exportmeta.h"
 #include "app/httpclient.h"
 #include "app/i18n.h"
@@ -111,8 +114,11 @@ int main(int argc, char* argv[])
     p.addOption({ QStringLiteral("preview-png"), QObject::tr("save the map preview to a PNG and exit (no window)"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("gui-screenshot"), QObject::tr("(for testing) open the window, load the map, save a window screenshot to a PNG and exit"), QStringLiteral("file") });
     p.addOption({ QStringLiteral("gui-click"), QObject::tr("(for testing, with --gui-screenshot) \"click\" on the map: fractions of width and height, for example \"0.4 0.6\""), QStringLiteral("x y") });
+    p.addOption({ QStringLiteral("gui-encounters"), QObject::tr("(for testing) open the \"City events\" window and save two screenshots: \"file1;file2;<id>\" — the blurred description and the revealed one for that event"), QStringLiteral("files") });
     p.addOption({ QStringLiteral("no-locate-datapack"), QObject::tr("do not put the /locate and eye-of-ender datapack in the world (stronghold, Ancient City …): the game will not ask for experimental features, but these structures cannot be found with a command") });
     p.addOption({ QStringLiteral("no-greenery"), QObject::tr("do not top up vegetation for OSM data (yards, taiga, forests, parks)") });
+    p.addOption({ QStringLiteral("encounters"), QObject::tr("random city events (docs/city-encounters.md): the \"osmc_enc\" datapack, the \"sites.json\" registry and site markers in the world") });
+    p.addOption({ QStringLiteral("encounters-off"), QObject::tr("with --encounters: event ids to switch off, comma separated (the same list as the \"City events\" window)"), QStringLiteral("ids") });
     p.addOption({ QStringLiteral("dry-run"), QObject::tr("only load and classify the data (summary in the log), do not build the world") });
     p.addOption({ QStringLiteral("theme"), QObject::tr("window theme: auto (as in Windows, default), light or dark"), QStringLiteral("auto|light|dark") });
     p.addOption({ QStringLiteral("gui-online"), QObject::tr("(for testing, with --gui-screenshot) online mode: \"lon lat zoom; lon lat; lon lat; …\" — map view and boundary vertices"), QStringLiteral("view") });
@@ -136,6 +142,10 @@ int main(int argc, char* argv[])
     o.noEnhancer = p.isSet(QStringLiteral("no-enhancer"));
     o.noGreenery = p.isSet(QStringLiteral("no-greenery"));
     o.locateDatapack = !p.isSet(QStringLiteral("no-locate-datapack"));
+    o.encounters = p.isSet(QStringLiteral("encounters"));
+    if (p.isSet(QStringLiteral("encounters-off")))
+        for (const QString& id : p.value(QStringLiteral("encounters-off")).split(QLatin1Char(','), Qt::SkipEmptyParts))
+            o.encountersOff << id.trimmed();
     if (p.isSet(QStringLiteral("spawn-lonlat")))
     {
         const QStringList ll = p.value(QStringLiteral("spawn-lonlat")).split(QRegularExpression(QStringLiteral("[ ,;]+")), Qt::SkipEmptyParts);
@@ -322,6 +332,36 @@ int main(int argc, char* argv[])
         switchLangForTest();
         if (projArg.startsWith(QLatin1String("save:"))) w.saveProjectTo(projArg.mid(5));
         return w.grab().save(p.value(QStringLiteral("gui-screenshot"))) ? 0 : 1;
+    }
+    if (p.isSet(QStringLiteral("gui-encounters")))
+    {   // the "City events" window without a human: shot 1 — the description under the frost,
+        // shot 2 — after the synthetic click revealed it ("file1;file2;<event id>")
+        const QStringList a = p.value(QStringLiteral("gui-encounters")).split(QLatin1Char(';'), Qt::SkipEmptyParts);
+        const QString id = a.size() > 2 ? a[2].trimmed() : QStringLiteral("carousel");
+        EncountersDialog dlg(&w, QStringList());
+        dlg.setAttribute(Qt::WA_MacShowFocusRect, false);
+        QTreeWidget* tree = dlg.findChild<QTreeWidget*>();
+        for (int i = 0; tree && i < tree->topLevelItemCount(); ++i)
+            if (tree->topLevelItem(i)->data(0, Qt::UserRole).toString() == id)
+            {
+                tree->setCurrentItem(tree->topLevelItem(i));
+                break;
+            }
+        dlg.show();                                             // the real path: geometry and paints as in use
+        QElapsedTimer te;
+        te.start();
+        while (te.elapsed() < 600) { QCoreApplication::processEvents(QEventLoop::AllEvents, 20); QThread::msleep(10); }
+        if (a.size() > 0 && !dlg.grab().save(a[0])) return 1;
+        if (QLabel* plate = dlg.findChild<QLabel*>(QStringLiteral("encFrost")))   // a synthetic click clears the frost
+        {
+            QMouseEvent press(QEvent::MouseButtonPress, QPoint(3, 3), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(plate, &press);
+            QMouseEvent release(QEvent::MouseButtonRelease, QPoint(3, 3), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(plate, &release);
+        }
+        te.restart();
+        while (te.elapsed() < 300) { QCoreApplication::processEvents(QEventLoop::AllEvents, 20); QThread::msleep(10); }
+        return a.size() > 1 && dlg.grab().save(a[1]) ? 0 : 1;
     }
     return app.exec();
 }

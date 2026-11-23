@@ -5,6 +5,18 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+### Added
+
+- Random city events (off by default): the "City events (random encounters)" checkbox in the window and
+  `--encounters` on the command line put an "osmc_enc" datapack into the world, write a `sites.json`
+  registry of the exported places (parks, schools, graveyards, metro, tower living - the code, layer and
+  catalog name of every site with its blocks) and drop an invisible marker entity at the center of each
+  site, so the datapack finds places with tags from inside the world. The "Events..." window lists every
+  event (pursuers, park and yard scenes, graveyard and metro scenes, street legends, bonus legends) as a
+  checkable row; choosing a row opens its description behind a frosted blur that a click clears.
+  Switched-off events are not written. On the command line: `--encounters-off <id>,<id>`.
+  The event logic grows release by release - the pipeline, the dispatcher and a demo event ship now
+
 ## [2.0.26.11191] — 2026-11-19
 
 ### Added

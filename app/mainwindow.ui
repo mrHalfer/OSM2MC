@@ -211,6 +211,43 @@
              </property>
             </widget>
            </item>
+           <item row="5" column="1" colspan="2">
+            <layout class="QHBoxLayout" name="rowEncounters">
+             <item>
+              <widget class="QCheckBox" name="encountersCheck">
+               <property name="toolTip">
+                <string>Writes the &quot;osmc_enc&quot; datapack, the sites.json registry and invisible site markers into the world; which events come is chosen in the &quot;Events...&quot; window.</string>
+               </property>
+               <property name="text">
+                <string>City events (random encounters)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="eventsButton">
+               <property name="toolTip">
+                <string>Switch the individual events on and off before the export</string>
+               </property>
+               <property name="text">
+                <string>Events...</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="spacerEncounters">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+            </layout>
+           </item>
           </layout>
          </widget>
         </item>

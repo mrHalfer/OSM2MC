@@ -157,6 +157,22 @@ struct NpcSite
     QString petVariant;                   // kind=5: the cat coat (minecraft:tabby, black...) — written into the variant field
 };
 
+//! A random-encounter site (docs/city-encounters.md): a noteworthy piece of the city written into
+//! the registry "sites.json" and marked in the world by an invisible "minecraft:marker" entity
+//! (Tags osmc.site + osmc.site_<code>), so the datapack finds places with @e[tag=...] without
+//! reading any file. The event semantics are NOT decoded by the exporter: code/layer/catalog name
+//! travel verbatim, the datapack and the Java side pick their sites by them.
+struct SiteRec
+{
+    int x = 0, z = 0;                     //!< the center block column of the site
+    int y = 0;                            //!< the marker's y (set in writeZip: the ground top under the center)
+    int w = 0, d = 0;                     //!< the bounding box of the site in blocks
+    int code = 0;                         //!< the 8-digit code from the rules catalog (0 — the layer gave none)
+    const char* kind = "";                //!< the role in the world (building/vegetation/water/…)
+    QString layer;                        //!< source layer name (bldpol, vegpol, …)
+    QString name;                         //!< the code's catalog name (empty — the catalog is silent)
+};
+
 struct WaterBodyRec                       // a water body for the aquatic fauna (recorded by the Water branch of the dispatcher)
 {
     int code = 0;                         // the layer code (lakes 31120000/31131000/31132000, rivers 31410000)

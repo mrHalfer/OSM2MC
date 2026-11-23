@@ -944,13 +944,15 @@ QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
                                       const QVector<MannequinSite>& mannequinsHere, bool legacy,
                                       const QVector<NpcSite>& npcsHere,
                                       const QVector<PaintingSite>& paintsHere,
-                                      const QVector<FrameSite>& framesHere)
+                                      const QVector<FrameSite>& framesHere,
+                                      const QVector<SiteRec>& sitesHere)
 {
     NbtWriter w;
     w.beginCompound("");                        // the root is a named compound
     w.writeIntArray("Position", { chunkX, chunkZ });
     w.writeInt("DataVersion", legacy ? 4671 : 5023);
-    w.beginList("Entities", Nbt::Compound, mannequinsHere.size() + npcsHere.size() + paintsHere.size() + framesHere.size());
+    w.beginList("Entities", Nbt::Compound, mannequinsHere.size() + npcsHere.size() + paintsHere.size()
+                                          + framesHere.size() + sitesHere.size());
     {
         auto pos3 = [&w](double x, double y, double z)
         {
@@ -1205,6 +1207,19 @@ QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
                 }
                 w.endCompound();
             }
+            w.endCompound();                                  // a list element
+        }
+        for (const SiteRec& s : sitesHere)
+        {   // a site marker of the random encounters (docs/city-encounters.md): the invisible vanilla
+            // "minecraft:marker" — no hitbox, no renderer, no tick cost. The datapack picks places by the
+            // tags (@e[tag=osmc.site,nbt={osmc_code:71126000}]); layer/name are only in sites.json.
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:marker"));
+            pos3(s.x + 0.5, double(s.y), s.z + 0.5);
+            w.beginList("Tags", Nbt::String, 2);
+            w.writeStringElem(QStringLiteral("osmc.site"));
+            w.writeStringElem(QStringLiteral("osmc.site_%1").arg(s.code));
+            w.writeInt("osmc_code", s.code);
             w.endCompound();                                  // a list element
         }
     }

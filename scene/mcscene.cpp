@@ -45,6 +45,7 @@ struct ExportItem
     QString streetType, street, number;
     bool intraBlock = false;
     int model = 0;                                    // point structures (kind Spot): the figure number from the rules catalog
+    QString layer, siteName;                          //!< inert registry metadata (random encounters): the layer name, the code's catalog name
 };
 
 MapFeature* cloneObject(const MapFeature* src)
@@ -248,6 +249,7 @@ bool buildMcScene(const TmcProject& project, const TmcRulesRepo& repo, const McS
             e.colorIndex = b.colorIndex;
             e.polygon = polygonLayer;
             e.kind = kind;
+            e.layer = sfx;                                        // inert registry metadata (random encounters)
             e.linear = (sfx == QLatin1String("hdrlin"));
             e.intraBlock = (sfx == QLatin1String("vgbpol"));
 
@@ -276,6 +278,7 @@ bool buildMcScene(const TmcProject& project, const TmcRulesRepo& repo, const McS
             // the catalog descriptor of the code: the semantic effect (a wetland/prison/military overlay)
             // and the model number of a point figure (the old point_models.csv lookup)
             const TmcRulesRepo::Object* desc = e.code ? repo.object(sfx, e.code) : nullptr;
+            e.siteName = desc ? desc->name : QString();       // inert registry metadata (random encounters)
             if (desc)
             {
                 if (desc->effect == QLatin1String("swamp")) e.kind = Kind::Biome;
@@ -555,6 +558,8 @@ bool buildMcScene(const TmcProject& project, const TmcRulesRepo& repo, const McS
             mo.material = e.material;
             mo.extrudeH = std::abs(rel);
             mo.code = e.code;
+            mo.layer = e.layer;                                   // inert registry metadata (random encounters)
+            mo.siteName = e.siteName;
             mo.model = e.model;
             mo.railElec = e.elec;
             mo.roadBridge = e.bridge;

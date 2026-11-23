@@ -1,6 +1,7 @@
 ﻿#include "app/mainwindow.h"
 #include "ui_mainwindow.h"
 #include "app/exportsettingsdialog.h"
+#include "app/encountersdialog.h"
 #include "app/exportmeta.h"                             // the "export" section of the .tmc project file
 #include "app/landmarkdialog.h"
 #include "app/mappreview.h"
@@ -130,6 +131,7 @@ MainWindow::MainWindow(const TmcRunOptions& initial, QWidget* parent) : QMainWin
     connect(ui->genSeedButton, &QPushButton::clicked, this, &MainWindow::generateSeed);
     connect(ui->goButton, &QPushButton::clicked, this, &MainWindow::startExport);
     connect(ui->exportDirButton, &QPushButton::clicked, this, &MainWindow::openExportSettings);
+    connect(ui->eventsButton, &QPushButton::clicked, this, &MainWindow::openEncountersDialog);
     connect(ui->rulesButton, &QPushButton::clicked, this, [this]
     {
         RulesDialog dlg(this);                                   // the reference files are re-read by the next export
@@ -216,6 +218,8 @@ void MainWindow::loadSettings(const TmcRunOptions& init)
     ui->labelExportDest->setCursor(Qt::PointingHandCursor);   // the label is clickable: a click opens the saves folder
     ui->labelExportDest->installEventFilter(this);
     ui->datapackCheck->setChecked(s.value(QStringLiteral("locateDatapack"), init.locateDatapack).toBool() && init.locateDatapack);
+    mEncountersOff = s.value(QStringLiteral("encountersOff")).toStringList();
+    ui->encountersCheck->setChecked(init.encounters || s.value(QStringLiteral("encounters"), false).toBool());
     ui->seedEdit->setText(init.seed ? QString::number(init.seed) : QString());
     ui->cavesCheck->setEnabled(noise); ui->seedEdit->setEnabled(noise); ui->genSeedButton->setEnabled(noise);
 }
@@ -225,6 +229,8 @@ void MainWindow::saveSettings() const
     QSettings s;
     s.setValue(QStringLiteral("source"), ui->sourceEdit->text());
     s.setValue(QStringLiteral("locateDatapack"), ui->datapackCheck->isChecked());
+    s.setValue(QStringLiteral("encounters"), ui->encountersCheck->isChecked());
+    s.setValue(QStringLiteral("encountersOff"), mEncountersOff);
     s.setValue(QStringLiteral("surfaceTerrain"), ui->surfaceCheck->isChecked());
     s.setValue(QStringLiteral("format"), ui->fmt121Radio->isChecked() ? 1 : 0);
 }
@@ -267,6 +273,17 @@ void MainWindow::openExportSettings()
     s.setValue(QStringLiteral("savesModrinth"), mSavesModrinth);
     s.setValue(QStringLiteral("savesCurse"), mSavesCurse);
     updateExportDestUi();
+}
+
+void MainWindow::openEncountersDialog()
+{
+    EncountersDialog dlg(this, mEncountersOff);
+    if (dlg.exec() != QDialog::Accepted) return;
+    mEncountersOff = dlg.disabled();
+    // the window was opened to tune the events — a natural moment to turn the feature on;
+    // the checkbox stays the master: off — the world carries no event files at all
+    if (!ui->encountersCheck->isChecked()) ui->encountersCheck->setChecked(true);
+    saveSettings();
 }
 
 void MainWindow::updateExportDestUi()
@@ -341,6 +358,8 @@ TmcRunOptions MainWindow::collect() const
     o.realMeters = mInit.realMeters;                        // the checkbox is gone with the service fields: "real meters" is a command-line option
     o.climate = mClimate->currentData().toInt();
     o.locateDatapack = ui->datapackCheck->isChecked();
+    o.encounters = ui->encountersCheck->isChecked();
+    o.encountersOff = mEncountersOff;
     o.strongholdChunk = mInit.strongholdChunk;                                  // chunks from the command line; otherwise — the marks on the map
     o.cityChunk = mInit.cityChunk;
     o.paleForestChunk = mInit.paleForestChunk;
