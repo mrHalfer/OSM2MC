@@ -98,6 +98,10 @@ private:
     enum SpotModel : int { kStatue = 1, kStele = 2, kFountain = 3, kTower = 4, kComposter = 5,
                            kLightPole = 6, kBench = 7, kSculpture = 8, kBusStop = 9 };
     struct SpotSite { int x, z, model; };
+    struct LampRec { int x, y, z;            // the lamp post's base cell (its plinth)
+                     int lx, ly, lz;         // the cell the light itself hangs in / stands on
+                     int style; };           // EncPack::kLightMast / kLightHanging / kLightStanding
+    QVector<LampRec> lampSites;               // the street and park lamp posts of buildStreetFurniture
     struct PortalForest { QVector<ColSpan> spans; double areaM2; quint32 h; };
     struct ParkCand { int cx, cz; double areaM2; quint32 h; };
     struct RoadJob
@@ -154,6 +158,7 @@ private:
         QVector<BannerSite> banners;
         QVector<LairZone> zones;
         QVector<IslandSite> islands;
+        QVector<HalfDoorSite> halfDoors;
         int privMats[3] = { 0, 0, 0 };       // private sector material split: [0] brick, [1] log, [2] brick with a real mansard floor
     };
     struct LiftJob { const McObject* o; quint16 id; int sink, extra; quint16 structId; bool woodSingle; int privMode; quint16 roofId = 0; };
@@ -230,6 +235,11 @@ private:
                                       //  an elevated road crossing the line on another level must not be cut by them
     QSet<ColKey> fenceLineCols;       // csrlin 82200000 (OSM barrier=fence): the cells of the fence axes, laid in 3.577
     QVector<QVector<QPoint>> subwayTunnels;   // the underground metro (code 61123100): cell chains in block coords,
+    QVector<QPair<QPoint, int>> metroHalls;   // station halls at the lines: center + floor row (last_train's platform)
+    QVector<HalfDoorSite> halfDoors;          // the 9 1/2 floor: stairwell lining cells the houses reported (floor_half)
+    QVector<QPair<QPoint, int>> metroSecrets; // secret loot rooms: center + floor row (last_train's "catch")
+    QVector<QVector<QPoint>> metroRunChains;  // the tunnel chains and their floor rows, as the dig took them
+    QVector<QVector<int>> metroRunFy;         // (docs/city-encounters.md, the last_train route)
     QHash<ColKey, quint16> railBedCols;       // electrified surface rails and trams: the ground block under the
     QHash<ColKey, int> colWater;      // a column -> the depth of the water pit (hydrography), blocks
     QSet<ColKey> colWaterArt;         // the columns of artificial reservoirs (all outline corners are right): without a smooth descent, sandy shores and sandy bottom
@@ -305,6 +315,7 @@ private:
     QHash<ColKey, QVector<PortalStartSite>> portalsByChunk;        // the same by chunks touched by the frame
     int carTntCores = 0;                                           // TNT cores inside parked cars (the punch trap, see writeZip)
     QVector<int> carCores;                                         // the same cores' world cells, x,y,z triples (the trap anchors on them)
+    QVector<int> carDoors;                      // the same cars' plate-ready paving cells by a car door, x,y,z triples; x = -0x7FFFFFFF — no free cell by that car (the taxi bake)
     QHash<ColKey, PaleCol> paleCol;
     bool paleDonorUsed;
     int erX0, erZ0, erW, erH;
@@ -806,7 +817,7 @@ bool ExportRun::writeZip()
     {
         QSet<QString> off;
         for (const QString& id : world.encountersOff) off.insert(id.trimmed());
-        EncPack::build(addEntry, off, encProps);
+        EncPack::build(addEntry, off, encProps, legacy);
     }
     regionDir = legacy ? QStringLiteral("region/")
                                      : QStringLiteral("dimensions/minecraft/overworld/region/");
@@ -1134,6 +1145,29 @@ void ExportRun::buildPointObjects()
                         store.set(cx + d[0], gy + 2, cz + d[1], IdWaterFalling);
                     }
                     ++nPlaced;
+                    if (world.encounters)       // dry_fountain anchor: EVERY water cell — a half-full bowl
+                    {                           // would keep flowing into the world all night, so the event
+                        EncPack::Prop ep; ep.kind = EncPack::kEpFountain;   // has to take the whole bowl at once
+                        ep.x = cx; ep.y = gy; ep.z = cz;
+                        EncPack::Cell c;
+                        c.x = cx; c.y = gy + 1; c.z = cz - 1; c.id = IdWater;   // the mouth cell comes first
+                        ep.cells << c;
+                        for (int dx = -1; dx <= 1; ++dx)
+                            for (int dz = -1; dz <= 1; ++dz)
+                            {
+                                if (!dx && !dz) continue;
+                                if (dx == 0 && dz == -1) continue;          // the mouth is already in the list
+                                c.x = cx + dx; c.z = cz + dz; ep.cells << c;   // the pool bowl, water at gy+1
+                            }
+                        for (const auto& d : kD4)
+                        {   c.x = cx + d[0]; c.z = cz + d[1]; c.id = IdWaterFalling;
+                            c.y = gy + 3; ep.cells << c;                    // the streams off the post, high low
+                            c.y = gy + 2; ep.cells << c;
+                        }
+                        c.x = cx; c.z = cz; c.y = gy + 3; c.id = IdWater;
+                        ep.cells << c;                                      // the source atop the post
+                        encProps.append(ep);
+                    }
                     break;
                 }
                 case kTower:                                             // a COMMUNICATION TOWER: an iron base, a spire of stone fence, 3 quartz blocks on top
@@ -1157,7 +1191,11 @@ void ExportRun::buildPointObjects()
                     store.set(sp.x, gy + 6, sp.z, qGlow);
                     ++nPlaced;
                     if (world.encounters)       // blinking_lamp/local_rain anchor: the base cell (the lights are gy+3/gy+6)
-                    {   EncPack::Prop ep; ep.kind = EncPack::kEpLamp; ep.x = sp.x; ep.y = gy; ep.z = sp.z; encProps.append(ep); }
+                    {   EncPack::Prop ep; ep.kind = EncPack::kEpLamp; ep.x = sp.x; ep.y = gy; ep.z = sp.z;
+                        ep.dir = EncPack::kLightMast;
+                        for (int dy = 3; dy <= 6; dy += 3)      // the two glowstones the event switches off
+                        {   EncPack::Cell c; c.x = sp.x; c.y = gy + dy; c.z = sp.z; c.id = qGlow; ep.cells << c; }
+                        encProps.append(ep); }
                     break;
                 case kBench:                                             // a STREET BENCH — 2x1 oak stairs (a request)
                 {   // the bench axis is chosen by the column hash; the seat faces along it, the backrest on the side;
@@ -1177,6 +1215,20 @@ void ExportRun::buildPointObjects()
                     store.set(sp.x, gyB, sp.z, st);
                     store.set(x2, gyB, z2, st);
                     ++nPlaced;
+                    if (world.encounters)       // bench_otherworld's trigger: the standing cell before the seat
+                    {
+                        const int fk = (k + 1) & 3;
+                        const int fx = sp.x + kAx[fk][0], fz = sp.z + kAx[fk][1];
+                        if (!colWater.contains(pairKey(fx, fz)) && !colMin.contains(pairKey(fx, fz)))
+                        {
+                            EncPack::Prop ep; ep.kind = EncPack::kEpBench;
+                            ep.x = sp.x; ep.y = gyB; ep.z = sp.z; ep.dir = k;
+                            EncPack::Cell c; c.x = fx; c.z = fz;
+                            c.y = surfaceTop(pairKey(fx, fz)) + 1;
+                            ep.cells << c;
+                            encProps.append(ep);
+                        }
+                    }
                     break;
                 }
                 case kSculpture:                                         // a SMALL SCULPTURE (3 variants)
@@ -1321,6 +1373,8 @@ void ExportRun::buildPointObjects()
     // cells win in every run; the caps themselves live in EncPack::build.
     if (world.encounters)
     {
+        static const int kR8[8][2] = { { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
+                                       { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 } };   // N,NE,E,SE,S,SW,W,NW
         // the bare ground surface of a column: no water, a stateless surface block (the events redraw
         // with plain setblock), nothing standing in the two cells above it
         auto surfOf = [&](qint64 k, int& y, quint16& id) -> bool
@@ -1353,6 +1407,27 @@ void ExportRun::buildPointObjects()
             return !colWater.contains(k) && !colMin.contains(k);
         };
         static const int kAx4[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };      // the kDirNames order N/E/S/W
+        // the street lamp posts the furniture stage built along the roads and the park paths: the anchor
+        // of blinking_lamp/local_rain and the lamp the lurker circles. The rare OSM "lighting mast" node
+        // is not enough — a real city has dozens of our own posts and no masts at all, so both kinds are
+        // anchors. Ordered by the column hash: the cap of EncPack::build then keeps a few lamps spread
+        // over the city instead of the first forty of its south-west corner.
+        if (!lampSites.isEmpty())
+        {
+            QVector<const LampRec*> byHash;
+            byHash.reserve(lampSites.size());
+            for (const LampRec& lr : lampSites) byHash << &lr;
+            std::sort(byHash.begin(), byHash.end(), [](const LampRec* a, const LampRec* b)
+                      { return colHash(pairKey(a->x, a->z)) < colHash(pairKey(b->x, b->z)); });
+            for (const LampRec* lr : byHash)
+            {
+                EncPack::Prop ep; ep.kind = EncPack::kEpLamp;
+                ep.x = lr->x; ep.y = lr->y; ep.z = lr->z; ep.dir = lr->style;
+                EncPack::Cell c; c.x = lr->lx; c.y = lr->ly; c.z = lr->lz;
+                ep.cells << c;
+                encProps.append(ep);
+            }
+        }
         // chalk_art: a 5-cell chalk arrow on a flat run of a MOTOR road — every cell the same level,
         // its surface block baked so the event restores the road exactly
         QVector<qint64> cand;
@@ -1489,45 +1564,69 @@ void ExportRun::buildPointObjects()
                     break;
                 }
         }
-        // matron: the cabinet cell against a school facade with three walk cells out of it
+        // matron: the cabinet cell against a school facade with three walk cells out of it. The site's
+        // box is the polygon's own frame while the built footprint is rotated and can be L-shaped, so the
+        // wall is searched: every side is swept from its middle outwards and on each sweep line the
+        // outermost building column with a free dry cell behind it is taken as the facade.
         int nSchool = 0;
         for (const SiteRec& s : sites)
         {
             if (nSchool >= 6) break;
             if (s.code != 44312000 && s.code != 44313000 && s.code != 44315000)
                 continue;                                                 // school / children's / scientific institution
+            const int halfA[4] = { s.d / 2, s.w / 2, s.d / 2, s.w / 2 };   // the site's half across this side
+            const int span[4]  = { s.w / 2, s.d / 2, s.w / 2, s.d / 2 };   // how far this side runs
             for (int d = 0; d < 4 && nSchool < 6; ++d)
             {
-                const int ax = kAx4[d][0], az = kAx4[d][1];
-                const qint64 ck = pairKey(s.x + ax * (s.w / 2 + 1), s.z + az * (s.d / 2 + 1));
-                int yy = 0; quint16 id = 0;
-                if (!freeCell(ck) || !surfOf(ck, yy, id)) continue;
-                if (!colMin.contains(pairKey(s.x + ax * (s.w / 2), s.z + az * (s.d / 2)))) continue;  // a wall behind
-                EncPack::Prop ep; ep.kind = EncPack::kEpSchool;
-                ep.x = keyFirst(ck); ep.y = yy + 1; ep.z = keySecond(ck);
-                ep.dir = d;
-                bool ok = true;
-                for (int w = 0; w < 3 && ok; ++w)
-                {   // far first: the silhouette walks 5 -> 3 -> 1 blocks from the cabinet
-                    const qint64 wk = pairKey(ep.x + ax * (5 - 2 * w), ep.z + az * (5 - 2 * w));
-                    int wy = 0; quint16 wid = 0;
-                    if (!freeCell(wk) || !surfOf(wk, wy, wid)) { ok = false; break; }
-                    EncPack::Cell c; c.x = keyFirst(wk); c.y = wy + 1; c.z = keySecond(wk);
-                    ep.cells << c;
-                }
-                if (!ok) continue;
-                // "her office": the facade glass in the wall column behind the cabinet — two of
-                // its cells become the windows that light up at night until her cabinet is found
-                const int wx = ep.x - ax, wz = ep.z - az;
-                for (int oy = ep.y + 3; oy < ep.y + 16 && ep.cells.size() < 5; ++oy)
-                {
-                    const quint16 gb = store.get(wx, oy, wz);
-                    if (gb != IdGlass && gb != IdBlackGlass) continue;
-                    EncPack::Cell c; c.x = wx; c.y = oy; c.z = wz; c.id = gb;
-                    ep.cells << c;
-                }
-                encProps.append(ep);
-                ++nSchool;
+                const int ax = kAx4[d][0], az = kAx4[d][1];                // out of the facade
+                const int ex = -az, ez = ax;                               // and along it
+                bool taken = false;
+                for (int q = 0; q <= span[d] && !taken; ++q)               // the middle of the side first
+                    for (int sg = 0; sg < 2 && !taken; ++sg)               // ...then both of its wings
+                    {
+                        if (q == 0 && sg == 1) continue;
+                        const int off = q * (sg ? -1 : 1);
+                        for (int t = halfA[d] + 2; t >= 1 && !taken; --t)  // the outermost wall of the line
+                        {
+                            const int wx = s.x + ax * t + ex * off, wz = s.z + az * t + ez * off;
+                            if (!colMin.contains(pairKey(wx, wz))) continue;
+                            const qint64 ck = pairKey(wx + ax, wz + az);   // her cabinet: one cell out of the wall
+                            int yy = 0; quint16 id = 0;                    // (the chest stands there, the sign above)
+                            if (!freeCell(ck) || !surfOf(ck, yy, id) || !openCol(ck, yy + 1, 2))
+                                break;                                      // the ground here is not for a cabinet
+                            EncPack::Prop ep; ep.kind = EncPack::kEpSchool;
+                            ep.x = keyFirst(ck); ep.y = yy + 1; ep.z = keySecond(ck);
+                            ep.dir = d;
+                            bool ok = true;
+                            for (int w = 0; w < 3 && ok; ++w)
+                            {   // far first: the silhouette walks 5 -> 3 -> 1 blocks from the cabinet
+                                const qint64 wk = pairKey(ep.x + ax * (5 - 2 * w), ep.z + az * (5 - 2 * w));
+                                int wy = 0; quint16 wid = 0;
+                                if (!freeCell(wk) || !surfOf(wk, wy, wid)) { ok = false; break; }
+                                EncPack::Cell c; c.x = keyFirst(wk); c.y = wy + 1; c.z = keySecond(wk);
+                                ep.cells << c;
+                            }
+                            if (!ok) break;
+                            taken = true;
+                            // "her office": the facade glass above the cabinet — the wall column behind it and
+                            // its two neighbours along the facade (her windows are next to her door, and the
+                            // pier the cabinet stands against is not glazed). Two of those cells become the
+                            // windows that light up at night until her cabinet is found
+                            for (int oy = ep.y + 2; oy < ep.y + 18; ++oy)
+                                for (int wq = 0; wq < 3; ++wq)
+                                {
+                                    const int gx = wx + ex * (wq == 1 ? -1 : (wq == 2 ? 1 : 0));
+                                    const int gz = wz + ez * (wq == 1 ? -1 : (wq == 2 ? 1 : 0));
+                                    const quint16 gb = store.get(gx, oy, gz);
+                                    if (gb != IdGlass && gb != IdBlackGlass) continue;
+                                    if (ep.cells.size() >= 5) continue;         // two office windows suffice
+                                    EncPack::Cell c; c.x = gx; c.y = oy; c.z = gz; c.id = gb;
+                                    ep.cells << c;
+                                }
+                            encProps.append(ep);
+                            ++nSchool;
+                        }
+                    }
             }
         }
         // window_wave: the lit facade of a tall building — the glass of its busiest side, cell by
@@ -1585,127 +1684,131 @@ void ExportRun::buildPointObjects()
             encProps.append(ep);
             ++nWall;
         }
-        // taxi: the plate cell by a parked car's door plus his far "garage" — a flat, dark, road-free
-        // cell 40..90 blocks away from the car (the exporter has no industry lots, so this stands in
-        // for the promzona marker; docs/encounters-feasibility.md). The cars' core cells are final
-        // since the parking stage (buildStreetFurniture), which runs before this one.
+        // taxi: the plate cell is the paving cell by a car door that the parking stage recorded for
+        // him (carDoors, parallel to carCores — a core's own neighbour is the car's body, so the door
+        // cell must come from the parking stage); his far "garage" — a flat, dark, road-free cell
+        // 40..90 blocks away (the exporter has no industry lots, so this stands in for the promzona
+        // marker; docs/encounters-feasibility.md)
         int nCar = 0;
         for (int i = 0; i + 2 < carCores.size() && nCar < 6; i += 3)
         {
             const int cx = carCores[i], cy = carCores[i + 1], cz = carCores[i + 2];
-            const quint32 hx = colHash(pairKey(cx, cz) ^ 0x7A21ECull);
-            if (hx % 60u) continue;                                       // one car in sixty may be his
-            const int d0 = int((hx >> 4) & 3u);
-            for (int t = 0; t < 4 && nCar < 6; ++t)
-            {
-                const int d = (d0 + t) & 3;
-                const int ax = kAx4[d][0], az = kAx4[d][1];
-                const qint64 ck = pairKey(cx + ax, cz + az);
-                int yy = 0; quint16 id = 0;
-                if (!standCell(ck) || !surfOf(ck, yy, id)) continue;      // the plate lies on the lot's paving
-                if (store.get(cx + ax, cy, cz + az) != IdAir) continue;  // the car's own level stays free too
-                qint64 gk = 0; int gy = 0; quint16 gid = 0;
-                static const int kD8[8][2] = { { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
-                                               { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 } };
-                for (int r = 40; r <= 90 && !gk; ++r)
-                    for (int a = 0; a < 8 && !gk; ++a)
-                    {
-                        const qint64 k2 = pairKey(cx + kD8[a][0] * r, cz + kD8[a][1] * r);
-                        int y2 = 0; quint16 id2 = 0;
-                        if (!freeCell(k2) || !surfOf(k2, y2, id2)) continue;
-                        gk = k2; gy = y2; gid = id2;
-                    }
-                if (!gk) continue;
-                EncPack::Prop ep; ep.kind = EncPack::kEpCar;
-                ep.x = cx + ax; ep.y = yy + 1; ep.z = cz + az;
-                EncPack::Cell gc; gc.x = keyFirst(gk); gc.y = gy; gc.z = keySecond(gk); gc.id = gid;
-                ep.cells << gc;
-                EncPack::Cell cc; cc.x = cx; cc.y = cy; cc.z = cz;
-                ep.cells << cc;
-                encProps.append(ep);
-                ++nCar;
-                break;
-            }
+            const int px = carDoors.value(i, -0x7FFFFFFF), pz = carDoors.value(i + 2, -0x7FFFFFFF);
+            if (px == -0x7FFFFFFF) continue;                              // both sides of the car were busy
+            // every parked car may be his: the cap in EncPack::build (6 cars) and the nightly
+            // roll keep the night fleet small
+            const qint64 ck = pairKey(px, pz);
+            int yy = 0; quint16 id = 0;
+            if (!standCell(ck) || !surfOf(ck, yy, id)                   // the plate lies on the lot's paving
+                || store.get(px, cy, pz) != IdAir                       // the door's own level stayed free
+                || !openCol(ck, yy + 2, 2))                             // and there is room to step onto it
+                continue;
+            qint64 gk = 0; int gy = 0; quint16 gid = 0;
+            for (int r = 40; r <= 90 && !gk; ++r)
+                for (int a = 0; a < 8 && !gk; ++a)
+                {
+                    const qint64 k2 = pairKey(cx + kR8[a][0] * r, cz + kR8[a][1] * r);
+                    int y2 = 0; quint16 id2 = 0;
+                    if (!freeCell(k2) || !surfOf(k2, y2, id2)) continue;
+                    gk = k2; gy = y2; gid = id2;
+                }
+            if (!gk) continue;
+            EncPack::Prop ep; ep.kind = EncPack::kEpCar;
+            ep.x = px; ep.y = yy + 1; ep.z = pz;
+            EncPack::Cell gc; gc.x = keyFirst(gk); gc.y = gy; gc.z = keySecond(gk); gc.id = gid;
+            ep.cells << gc;
+            EncPack::Cell cc; cc.x = cx; cc.y = cy; cc.z = cz;
+            ep.cells << cc;
+            encProps.append(ep);
+            ++nCar;
         }
-        // lurker: a street lamp he can circle — one ring anchor in every direction, the first standing
-        // ground 20..40 blocks off the light (a lamp post belongs to the street, so the roadway and the
-        // paving suit him; only a wall or water stops him). Only some of the lamps get company.
+        // lurker: a street lamp he can circle — the first standing spot on each of eight rays 15..40
+        // blocks off the light (a lamp post belongs to the street, so the roadway and the paving suit
+        // him; only a wall or water stops him). Four spots make his ring; the rest of the rays only
+        // widen it. Only some of the lamps get company.
         int nLurk = 0;
         const int nProps0 = encProps.size();          // the lamps/stops collected above; the props we
         for (int iProp = 0; iProp < nProps0; ++iProp) // add here are appended past this mark
         {
             const EncPack::Prop lp = encProps[iProp];     // a copy: appends below may move the vector
-            if (nLurk >= 4) break;
             if (lp.kind != EncPack::kEpLamp) continue;
             const quint32 hl = colHash(pairKey(lp.x, lp.z) ^ 0xB3E711ull);
             if (hl % 7u) continue;
             EncPack::Prop ep; ep.kind = EncPack::kEpLurker;
             ep.x = lp.x; ep.y = lp.y; ep.z = lp.z;
-            for (int d = 0; d < 4; ++d)
+            for (int a = 0; a < 8 && ep.cells.size() < 4; ++a)
             {
-                for (int r = 20; r <= 40; ++r)
+                for (int r = 15; r <= 40; ++r)
                 {
-                    const qint64 ck = pairKey(lp.x + kAx4[d][0] * r, lp.z + kAx4[d][1] * r);
+                    const qint64 ck = pairKey(lp.x + kR8[a][0] * r, lp.z + kR8[a][1] * r);
                     int yy = 0; quint16 id = 0;
-                    if (!standCell(ck) || !surfOf(ck, yy, id) || !openCol(ck, yy + 1, 3)) continue;
+                    if (!standCell(ck) || !surfOf(ck, yy, id) || !openCol(ck, yy + 1, 2)) continue;
                     EncPack::Cell c; c.x = keyFirst(ck); c.y = yy + 1; c.z = keySecond(ck);
                     ep.cells << c;
                     break;
                 }
             }
             if (ep.cells.size() < 4) continue;
+            if (nLurk >= 4) continue;                     // the first four lamps win, as the old break did
             encProps.append(ep);
             ++nLurk;
         }
-        // bus13: a clear 12x3 strip near a bus stop — the ground the 13 parks on (the roadway and the
-        // paving of a stop fit: the 13 stops in the street, where the 13 belongs). Every one of its 36
-        // cells is flat and four blocks high of air; the photo point lies 2 cells off the doors.
-        int nBus = 0;
-        for (int iProp = 0; iProp < nProps0; ++iProp)
+        // last_train: the metro the exporter dug himself. Every line station gets a nightly train: the
+        // platform is its hall floor, the route is the 15 tunnel cells of the chain that visits the hall
+        // (the straightener bent the line through the station), and the "catch" behind the terminal is
+        // the farthest secret room: the open cell beside its chest row (docs/city-encounters.md)
+        for (int hi = 0; hi < metroHalls.size(); ++hi)
         {
-            const EncPack::Prop sp = encProps[iProp];     // a copy, same reason as in the lamp scan
-            if (nBus >= 3) break;
-            if (sp.kind != EncPack::kEpBusStop) continue;
-            if (colHash(pairKey(sp.x, sp.z) ^ 0x0D13ull) % 5u) continue;   // not every stop gets the 13
-            for (int d = 0; d < 4 && nBus < 3; ++d)
-            {
-                const int ax = kAx4[d][0], az = kAx4[d][1];
-                const int ex = -az, ez = ax;                               // the strip's width axis
-                bool ok = false; int sy = 0; int sw = 0;
-                for (int pd = -1; pd <= 1 && !ok; ++pd)
+            if (metroSecrets.isEmpty()) break;                  // no room to carry anyone to
+            const QPoint hc = metroHalls[hi].first;
+            const int fyH = metroHalls[hi].second;
+            int bTi = -1, bCi = -1, bD = 15;                    // the chain cell under the platform
+            for (int ti = 0; ti < metroRunChains.size(); ++ti)
+                for (int ci = 0; ci < metroRunChains[ti].size(); ++ci)
                 {
-                    bool good = true; int y0 = -1;
-                    for (int i = 0; i < 12 && good; ++i)
-                        for (int q = 0; q < 3 && good; ++q)
-                        {
-                            const qint64 ck = pairKey(sp.x + ax * (2 + i) + ex * (pd + q - 1),
-                                                      sp.z + az * (2 + i) + ez * (pd + q - 1));
-                            int yy = 0; quint16 id = 0;
-                            if (!standCell(ck) || !surfOf(ck, yy, id) || !openCol(ck, yy + 1, 4))
-                                { good = false; break; }
-                            if (y0 < 0) y0 = yy;
-                            else if (yy != y0) { good = false; break; }
-                        }
-                    if (good) { ok = true; sy = y0; sw = pd; }
+                    if (qAbs(metroRunFy[ti][ci] - fyH) > 3) continue;   // another deck - not this line
+                    const QPoint& c = metroRunChains[ti][ci];
+                    const int d = qMax(qAbs(c.x() - hc.x()), qAbs(c.y() - hc.y()));
+                    if (d < bD) { bD = d; bTi = ti; bCi = ci; }
                 }
-                if (!ok) continue;
-                // the corners of the strip, then the photo point off its door edge (the far width side)
-                const QPoint c1(sp.x + ax * 2 + ex * (sw - 1), sp.z + az * 2 + ez * (sw - 1));
-                const QPoint c2(sp.x + ax * 13 + ex * (sw + 1), sp.z + az * 13 + ez * (sw + 1));
-                QPoint sh(sp.x + ax * 7 + ex * (sw + 3), sp.z + az * 7 + ez * (sw + 3));
-                int shy = 0; quint16 shid = 0;
-                if (!standCell(pairKey(sh.x(), sh.y())) || !surfOf(pairKey(sh.x(), sh.y()), shy, shid))
-                    continue;
-                EncPack::Prop ep; ep.kind = EncPack::kEpBus;
-                ep.x = std::min(c1.x(), c2.x()); ep.y = sy; ep.z = std::min(c1.y(), c2.y());
-                ep.dir = az ? 1 : 0;
-                EncPack::Cell sc; sc.x = sh.x(); sc.y = shy; sc.z = sh.y();
-                ep.cells << sc;
-                encProps.append(ep);
-                ++nBus;
-                break;
+            if (bTi < 0) continue;                              // the hall stood off the line after all
+            const QVector<QPoint>& chain = metroRunChains[bTi];
+            const QVector<int>& fyv = metroRunFy[bTi];
+            const int rLo = qMax(0, bCi - 7), rHi = qMin(int(chain.size()) - 1, bCi + 7);
+            if (rHi - rLo + 1 < 11) continue;       // too short to run past the hall and leave the city
+            int sBest = 0, sDist = -1;                          // his catch: the farthest secret room
+            for (int s = 0; s < metroSecrets.size(); ++s)
+            {
+                const int d = qMax(qAbs(metroSecrets[s].first.x() - hc.x()),
+                                   qAbs(metroSecrets[s].first.y() - hc.y()));
+                if (d > sDist) { sDist = d; sBest = s; }
             }
+            EncPack::Prop ep; ep.kind = EncPack::kEpMetro;
+            ep.x = hc.x(); ep.y = fyH + 1; ep.z = hc.y();       // feet on the hall floor
+            EncPack::Cell c0; c0.x = metroSecrets[sBest].first.x() + 2;
+            c0.y = metroSecrets[sBest].second + 1;
+            c0.z = metroSecrets[sBest].first.y();
+            ep.cells << c0;
+            for (int ci = rLo; ci <= rHi; ++ci)                 // the cars ride above the rails
+            {
+                EncPack::Cell c; c.x = chain[ci].x(); c.y = fyv[ci] + 2; c.z = chain[ci].y();
+                ep.cells << c;
+            }
+            encProps.append(ep);
         }
+        // floor_half: the tall houses reported the lining cells of their stairwell themselves;
+        // the exporter only turns them into props (cells[0] is the door's lower cell, [1] the upper)
+        for (const HalfDoorSite& hd : halfDoors)
+        {
+            EncPack::Prop ep; ep.kind = EncPack::kEpHalf;
+            ep.x = hd.x; ep.y = hd.y; ep.z = hd.z; ep.dir = hd.face;
+            EncPack::Cell c0; c0.x = hd.x; c0.y = hd.y; c0.z = hd.z; c0.id = hd.idLow;
+            EncPack::Cell c1; c1.x = hd.x; c1.y = hd.y + 1; c1.z = hd.z; c1.id = hd.idHigh;
+            ep.cells << c0 << c1;
+            encProps.append(ep);
+        }
+        // bus13 needs no baked strip of its own: the 13 only flickers past the stop, so its places are
+        // the bus stop props themselves (the same list the cat council sits in).
     }
 
 }
@@ -3516,6 +3619,8 @@ void ExportRun::buildStreetFurniture()
                 for (int dy = 1; dy <= 6; ++dy) store.set(px, y0 + dy, pz, IdFence);
                 store.set(bx, y0 + 6, bz, IdFence);          // the wing: a post sideways, toward the road
                 store.set(bx, y0 + 5, bz, IdLanternHung);    // the lantern hangs under the wing
+                if (world.encounters)                        // an anchor for blinking_lamp / local_rain / lurker
+                    lampSites.append(LampRec{ px, y0, pz, bx, y0 + 5, bz, EncPack::kLightHanging });
                 poles.append(QPoint(px, pz));
                 break;
             }
@@ -3551,10 +3656,75 @@ void ExportRun::buildStreetFurniture()
                         store.set(px, y0, pz, IdCobbleWall);
                         for (int dy = 1; dy <= 3; ++dy) store.set(px, y0 + dy, pz, IdFence);
                         store.set(px, y0 + 4, pz, IdLanternStanding);
+                        if (world.encounters)                // a park path lamp blinks too (a standing light)
+                            lampSites.append(LampRec{ px, y0, pz, px, y0 + 4, pz, EncPack::kLightStanding });
                         poles.append(QPoint(px, pz));
                         break;
                     }
                 }
+                // — BENCHES ALONG PARK PATHS (a user request): a bench sits on the lawn opposite the path
+                //   cell and looks at it, about every 8th path cell; the seat is the same 2 oak stairs as
+                //   the street benches of the OSM points. Where there is no room (a lamp post, a tree,
+                //   furniture, a fence, water or an uneven ground under the seat) the cell stays free.
+                int nParkBench = 0;
+                static const int kAx[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N,E,S,W (kDirNames order)
+                for (qint64 ck : rc)
+                {
+                    const int bx = keyFirst(ck), bz = keySecond(ck);
+                    if (!spansContain(parkSpansAll, bx, bz)) continue;   // the path runs inside a park
+                    if (colHash(ck ^ 0xBEC4ull) % 8u != 0u) continue;    // the density along the path
+                    if (colWater.contains(ck)) continue;                 // nothing sits over water
+                    const quint32 hb = colHash(ck ^ 0x1B4E1ull);
+                    const int f0 = int((hb >> 8) & 3u);
+                    bool put = false;
+                    for (int t = 0; t < 8 && !put; ++t)
+                    {   // four ways to face the path, two directions of the seat along it; the first fitting wins
+                        const int f = (f0 + t) & 3;                             // the seat's facing (to the path)
+                        const int axIdx = (t >> 2 ? (f + 1) : (f + 3)) & 3;     // the second seat cell along the path
+                        const int sx = bx - kAx[f][0], sz = bz - kAx[f][1];     // the first seat cell (the lawn)
+                        const int s2x = sx + kAx[axIdx][0], s2z = sz + kAx[axIdx][1];
+                        const qint64 k1 = pairKey(sx, sz), k2 = pairKey(s2x, s2z);
+                        if (roadCols.contains(k1) || roadCols.contains(k2) || colWater.contains(k1) || colWater.contains(k2)
+                            || colMin.contains(k1) || colMin.contains(k2) || colWool.contains(k1) || colWool.contains(k2)
+                            || fenceLineCols.contains(k1) || fenceLineCols.contains(k2))
+                            continue;
+                        const int t1 = surfaceTop(k1), t2 = surfaceTop(k2);
+                        if (t1 != t2) continue;                                 // the seat is level on the one surface
+                        const int gyB = t1 + 1;
+                        if (gyB + 2 > 254) continue;
+                        bool free = true;
+                        for (int dy = 0; dy < 2 && free; ++dy)
+                            for (int ci = 0; ci < 2 && free; ++ci)
+                            {
+                                const quint16 bid = store.get(ci ? s2x : sx, gyB + dy, ci ? s2z : sz);
+                                if (bid != IdAir && !isVegBlockId(bid)) free = false;   // furniture, a trunk, anything standing
+                            }
+                        if (!free) continue;
+                        for (int dy = 0; dy < 2; ++dy)                          // the grass and the flowers under the seat are mown
+                            for (int ci = 0; ci < 2; ++ci)
+                            {
+                                const int cx2 = ci ? s2x : sx, cz2 = ci ? s2z : sz;
+                                if (store.get(cx2, gyB + dy, cz2) != IdAir) store.erase(cx2, gyB + dy, cz2);
+                            }
+                        const quint16 st = quint16(IdStairsN + f);
+                        store.set(sx, gyB, sz, st);
+                        store.set(s2x, gyB, s2z, st);
+                        noTreePadCols.insert(k1);
+                        noTreePadCols.insert(k2);                               // the late greenery does not sit on the seat either
+                        ++nParkBench;
+                        put = true;
+                        if (world.encounters)   // bench_otherworld sees the park benches too: the path cell is the trigger
+                        {
+                            EncPack::Prop ep; ep.kind = EncPack::kEpBench;
+                            ep.x = sx; ep.y = gyB; ep.z = sz; ep.dir = axIdx;
+                            EncPack::Cell c; c.x = bx; c.y = surfaceTop(ck) + 1; c.z = bz;
+                            ep.cells << c;
+                            encProps.append(ep);
+                        }
+                    }
+                }
+                if (nParkBench > 0)
+                    res.lairInfo += QObject::tr("; benches along park paths: %1").arg(nParkBench);
             }
         }
         // ——— PORTALS TO THE NETHER in forests (vegpol, CODE 71111110/71126000; request: the forest area is at least
@@ -3892,6 +4062,21 @@ void ExportRun::buildStreetFurniture()
                         // breaking into it punches into the dynamite (the trap file anchors its checks on these cells, writeZip).
                         carCores << x0 + rot.cx << y0 + rot.cy << z0 + rot.cz;
                         ++carTntCores;
+                        if (world.encounters)
+                        {   // the night rider's plate will lie on a free paving cell just outside a
+                            // long side of this car, at its door (docs/encounters-feasibility.md)
+                            int px = -0x7FFFFFFF, pz = 0;
+                            for (int s = 0; s < 2 && px == -0x7FFFFFFF; ++s)
+                            {
+                                if (bz >= bx) { px = s ? x0 + bx : x0 - 1; pz = z0 + (bz >> 1); }
+                                else          { px = x0 + (bx >> 1); pz = s ? z0 + bz : z0 - 1; }
+                                const qint64 dk = pairKey(px, pz);
+                                if (surfaceTop(dk) + 1 != y0 || takenCells.contains(dk) || owner.contains(dk)
+                                    || store.get(px, y0, pz) != IdAir || store.get(px, y0 + 1, pz) != IdAir)
+                                    px = -0x7FFFFFFF;                   // this side is blocked; try the other
+                            }
+                            carDoors << px << (px == -0x7FFFFFFF ? 0 : y0) << pz;
+                        }
                         ++nParkCars;
                         return true;
                     }
@@ -7951,6 +8136,7 @@ bool ExportRun::buildGround()
             for (LairZone& lz : lairZones) { lz.y0 += yShift; lz.y1 += yShift; }   // spawn zones — too
             for (IslandSite& is : islandSites) is.yTop += yShift;                  // islands — too
             for (SpawnerSite& sp : spawners) sp.y += yShift;          // spawners — their own BE
+            for (HalfDoorSite& hd : halfDoors) hd.y += yShift;        // the 9 1/2 floor doors — the same lift
         }
         genGroundTop = ref + yShift;              // the chamfer's target and the generator's mark: the seam level (with terrain — 68)
     }
@@ -11410,6 +11596,8 @@ bool ExportRun::buildGround()
             }
             tunChains << chain;
             tunFy << fy;
+            metroRunChains << chain;
+            metroRunFy << fy;
         }
         for (auto it = tWallLo.constBegin(); it != tWallLo.constEnd(); ++it)
         {   // the wall columns: a mixed-masonry lining from the floor to the ceiling row - store blocks
@@ -11550,6 +11738,7 @@ bool ExportRun::buildGround()
             if (!digStationHall(st.c, fy, hrgn, st.bb, track, openCols, true, st.canopy != 0)) continue;
             stationBuilt[si] = 1;
             ++nSt;
+            metroHalls << qMakePair(st.c, fy);            // last_train platform (docs/city-encounters.md)
             for (const int ti : hit)
             {   // rails and lamps inside the hall are laid again (the dig erased them), then the line electrifies
                 const QVector<QPoint>& chain = tunChains[ti];
@@ -11702,6 +11891,7 @@ bool ExportRun::buildGround()
                     npcs.append(ms);
                     ++nSecretMobs;
                 }
+                metroSecrets << qMakePair(QPoint(rcx, rcz), fy);   // the last_train catch (docs/city-encounters.md)
                 ++nSecret;
             }
         }
@@ -12063,6 +12253,7 @@ bool ExportRun::buildObjects()
                 if (j->building) vo.storyCounter = &j->storyCounter;
                 vo.npcs = &j->npcs; vo.frames = &j->frames; vo.basements = &j->basements;
                 vo.signs = &j->signs; vo.banners = &j->banners; vo.zones = &j->zones; vo.islands = &j->islands;
+                if (j->building && world.encounters) vo.halfDoors = &j->halfDoors;   // the door on no plan is an event
                 vo.privMats = j->privMats;
                 vo.prison = &prisonCols;                                  // the overlay contours: the voxelizer decides the forced lair and the special loot there
                 vo.military = &milCols;
@@ -12132,6 +12323,7 @@ bool ExportRun::buildObjects()
             chests += j->chests; paints += j->paints;
             mannequins += j->mannequins; spawners += j->spawners; npcs += j->npcs; frames += j->frames;
             basements += j->basements; signCands += j->signs; bannerSites += j->banners; lairZones += j->zones; islandSites += j->islands;
+            halfDoors += j->halfDoors;
             if (j->building) storyCounter += j->storyCounter - j->storyBase;
             nPrivBrick += j->privMats[0]; nPrivLog += j->privMats[1]; nPrivMans += j->privMats[2];
         }

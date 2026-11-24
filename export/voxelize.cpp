@@ -64,6 +64,7 @@ private:
     QVector<BannerSite>* banners;
     QVector<LairZone>* zones;
     QVector<IslandSite>* islands;
+    QVector<HalfDoorSite>* halfDoors;
     int* privMats;
 
 
@@ -232,12 +233,12 @@ ObjectVoxelizer::ObjectVoxelizer(const McWorldExporter::McObject& obj_, const Vx
       chests(out_.chests), paints(out_.paints), mannequins(out_.mannequins),
       spawners(out_.spawners), storyCounter(out_.storyCounter),
       npcs(out_.npcs), frames(out_.frames), basements(out_.basements),
-      signs(out_.signs), banners(out_.banners), zones(out_.zones), islands(out_.islands), privMats(out_.privMats)
+      signs(out_.signs), banners(out_.banners), zones(out_.zones), islands(out_.islands), halfDoors(out_.halfDoors), privMats(out_.privMats)
 {
     // A part raised above the ground (min_height): a floating body - no foundation into the ground,
     // the ground under it is not touched and not raised (colMin/colAnchor stay without it),
     // no basement and no dungeon below it.
-    if (raisedObj) { sink = 0; colAnchor = nullptr; basements = nullptr; deepRole = 0; }
+    if (raisedObj) { sink = 0; colAnchor = nullptr; basements = nullptr; deepRole = 0; halfDoors = nullptr; }
 }
 
 //! Voxelizes an object and writes the result into the store; returns the number of written blocks (0 — the object
@@ -1442,6 +1443,7 @@ void ObjectVoxelizer::buildStairs()
                 }
             return true;
         };
+        Slot f910{ -1, 0, 0, true };                            // the flight 9 -> 10 (the 9 1/2 floor's door)
         for (int k = 1; k < nStories; ++k)                      // the flight floor(k-1) -> floor k
         {
             const int lyS = lyLow + 1 + k * storyP;             // the slab plane — the same formula
@@ -1449,7 +1451,7 @@ void ObjectVoxelizer::buildStairs()
                                                                 // the slab INSTEAD of the ceiling — the row lyHigh-1 is allowed
             bool anyFit = false;
             for (const Slot& sl : slotList)
-                if (tryFlight(sl, lyS, true)) anyFit = true;
+                if (tryFlight(sl, lyS, true)) { anyFit = true; if (k == 10 && f910.s0 < 0) f910 = sl; }
             if (!anyFit)
             {   // A building of different heights (for example low wings at the edges and a higher middle): for the upper floors that exist only over part of the building there are no stairs
                 // of the first floor — we look for a NEW slot right at this level (the widest window, as far as possible from those already standing); the next floors use the same one.
@@ -1488,6 +1490,48 @@ void ObjectVoxelizer::buildStairs()
             }
             if (!anyFit)                                        // not a single flight fit — a vertical one
                 ladderFlight(lyS - R + 1, lyS);                 // the bottom ladder — in the walking cell of the floor
+        }
+        // The 9 1/2 floor (docs/city-encounters.md): a door that is on no plan can grow between the
+        // 9th and the 10th floors. Its cells - a pair of INNER lining cells ("4") beside a step of the
+        // 9 -> 10 flight where a person can really stand (the headroom window above the last steps),
+        // both cells standing as the full masonry of the house. The night sets an oak door into them,
+        // the morning puts the wall back. Only tall residential houses play, and a quarter of them.
+        if (halfDoors && resid && !priv && nStories >= 11)
+        {
+            const quint32 qtr = lineHash(pairKey(minx, minz) ^ 0x9ED1ull) % 4u;
+            if (f910.s0 >= 0 && qtr == 0)
+            {
+                static const int kD[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
+                const QVector<int> fl = slotRect(f910);         // the flight's plan - a door does not stand in it
+                const int lyS10 = lyLow + 1 + 10 * storyP;      // the slab plane the remembered flight lands on
+                const int jLo = std::max(2, R - 3), jHi = R - 2;   // standable steps, both door rows under the slab
+                bool got = false;
+                for (int j = jLo; j <= jHi && !got; ++j)
+                {
+                    for (int wI = 0; wI < f910.w && !got; ++wI)
+                    {
+                        const int lx = f910.runX ? (f910.s0 + R - j + 1) : (f910.t0 + wI);
+                        const int lz = f910.runX ? (f910.t0 + wI) : (f910.s0 + R - j + 1);
+                        const int lyW = lyS10 - R + j + 1;      // the door's lower row: feet on this step's top
+                        for (int d = 0; d < 4 && !got; ++d)
+                        {
+                            const int wx = lx + kD[d][0], wz = lz + kD[d][1];
+                            if (wx <= 0 || wx >= sx - 1 || wz <= 0 || wz >= sz - 1 || lyW + 1 >= sy) continue;
+                            if (wx >= fl[0] && wx <= fl[1] && wz >= fl[2] && wz <= fl[3]) continue;   // inside the flight
+                            const int g1 = grid[wz * sxy + lyW * sx + wx], g2 = grid[wz * sxy + (lyW + 1) * sx + wx];
+                            if (g1 != char(4) || g2 != char(4)) continue;         // not a pair of lining cells
+                            if (store.get(minx + wx, miny + lyW - sink, minz + wz) != id
+                                || store.get(minx + wx, miny + lyW + 1 - sink, minz + wz) != id) continue;
+                            HalfDoorSite hd;
+                            hd.x = minx + wx; hd.y = miny + lyW - sink; hd.z = minz + wz;
+                            hd.idLow = hd.idHigh = id;
+                            hd.face = (d + 2) & 3;              // the door looks at the flight it stands beside
+                            halfDoors->append(hd);
+                            got = true;                         // one door per house, as before
+                        }
+                    }
+                }
+            }
         }
     }
 }

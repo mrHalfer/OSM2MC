@@ -38,24 +38,28 @@ struct EncPack
     //! A place one of the baked events can happen at, collected by the build stages (ExportRun::encProps)
     struct Prop
     {
-        int x = 0, y = 0, z = 0;        // kind-specific base: a lamp — the base block below the lights
-                                        // (the glowstone sits at y+3 and y+6); a bus stop — the spawn
+        int x = 0, y = 0, z = 0;        // kind-specific base: a lamp — the cell its post stands on (a mast
+                                        // lights up at y+3 and y+6, a street post carries its lantern in one
+                                        // of the cells of cells); a bus stop — the spawn
                                         // cell of the node; a playground — the spawn cell of the pad
                                         // centre; chalk/jack — the block cell of the pattern/jack;
                                         // a cross — the mast cell off the roadway; a school — the
                                         // chest cell on the facade; a scarecrow/grave/bell — the
                                         // stand cell / the mound cell / the tower base cell; a window
                                         // wall — unused (all data lives in cells); a car — the plate
-                                        // cell by the car door; a bus — the low corner of the strip
-                                        // (y the flat ground under the bus); a lurker — the lamp
-                                        // base he circles
+                                        // cell by the car door; a lurker — the lamp base he circles;
+                                        // a fountain — the ground cell under its post; a metro
+                                        // station — the hall floor cell at its platform; a bench —
+                                        // the seat cell, dir is the axis of its two-cell row; a
+                                        // stairwell - the door's lower cell, dir is the facing
         int kind = 0;                   // one of the kEp* below
         int dir = 0;                    // 0..3, the kDirNames order (N/E/S/W): a chalk — the arrow
                                         // points this way; a jack — the facing the cemetery baked;
                                         // a scarecrow — the daytime facing (back to the house); a
                                         // school — the facing the chest (and its sign) show; a bell —
-                                        // the facing of the bell; a bus — 0 the strip runs east-west,
-                                        // 1 it runs north-south
+                                        // the facing of the bell; a bus stop — the way the shelter
+                                        // faces the street (bus13 runs its flickers along it);
+                                        // a lamp — the light's style, one of kLight* below
         quint16 blk[5] = { 0 };         // chalk only: the surface blocks of the five cells, so the
                                         // event restores the road exactly as it was
         QVector<Cell> cells;            // a window wall: every glass cell, rows bottom to top (the
@@ -65,14 +69,31 @@ struct EncPack
                                         // cabinet; a grave: the mound cell itself (its id = the
                                         // block to give back when the dig is found); a car: the
                                         // garage patch cell first (id = the block under it) and the
-                                        // car's core cell second; a bus: the photo point cell; a
-                                        // lurker: the four anchor foot cells in the N/E/S/W order
+                                        // car's core cell second; a lurker: four ring spots, the
+                                        // first standing cell of each of the rays N,NE,E,SE,S,SW,W,NW;
+                                        // a lamp: the light cells the blink switches, low to high;
+                                        // a fountain: every water cell of the bowl and the streams,
+                                        // the pool cell of the "mouth" first (dry_fountain drains
+                                        // them all at once and gives them back as they were);
+                                        // a metro station: cells[0] is the far secret room's open
+                                        // cell beside its chest (the catch), cells[1..] the tunnel
+                                        // route in train order (last_train); a bench: cells[0] is
+                                        // the standing cell before the seat (bench_otherworld);
+                                        // a stairwell: cells[0] and [1] are the door's lower
+                                        // and upper lining cells (floor_half)
     };
     enum { kEpLamp = 0, kEpBusStop = 1, kEpPlayground = 2, kEpChalk = 3, kEpJack = 4,
            kEpCross = 5, kEpWindows = 6, kEpScarecrow = 7, kEpGrave = 8, kEpBell = 9, kEpSchool = 10,
-           kEpCar = 11, kEpBus = 12, kEpLurker = 13 };
+           kEpCar = 11, kEpLurker = 12, kEpFountain = 13, kEpMetro = 14, kEpBench = 15, kEpHalf = 16 };
+    enum { kLightMast = 0,               // an OSM lighting mast: glowstone lights on a calcite stand
+           kLightHanging = 1,            // a street lamp post: a lantern hanging under the wing
+           kLightStanding = 2 };         // a park path post: a lantern on top of the stand
     using AddFn = std::function<void (const QString& path, const QByteArray& data)>;   // = writeZip's addEntry
-    static void build(const AddFn& add, const QSet<QString>& off, const QVector<Prop>& props);
+    //! legacy121: the world we write for is in the 1.21.x format (McWorldExporter::Format); 26.x
+    //! dropped the advancement trigger the grave's dig-undo runs on, so that event ships its
+    //! legacy variant only - every other function behaves identically in both formats
+    static void build(const AddFn& add, const QSet<QString>& off, const QVector<Prop>& props,
+                      bool legacy121);
 };
 
 //! The cells of the chalk arrow of a chalk prop in world (x;z) coordinates, the pattern rotated by

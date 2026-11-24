@@ -7,6 +7,14 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ### Added
 
+## [2.1.26.11241] — 2026-11-24
+
+> **Events are in test mode.** Every event of this release is playable and every world keeps its
+> night, but the set of events, their scenes and balance are still an experiment - a later release
+> may rework them. Without the checkbox (or `--encounters`) the events write nothing into the world.
+
+### Added
+
 - Random city events (off by default): the "City events (random encounters)" checkbox in the window and
   `--encounters` on the command line put an "osmc_enc" datapack into the world, write a `sites.json`
   registry of the exported places (parks, schools, graveyards, metro, tower living - the code, layer and
@@ -31,12 +39,54 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   gives itself back when dug, and a graveyard bell striking 03:07 seven times even after someone broke
   it. The exporter now also bakes crossroads, tall glass facades, private yards, school facades and
   flat graveyard ground into the pack.
-- In progress, not active in exported worlds yet: three pursuers and one more scene - the night rider
-  whose ignition is a pressure plate lying by a parked car's door, the tall shadow that circles one
-  street lamp trading places while you look at his light, route 13 arriving at a bus stop that never
-  had it, and the windows of the matron's own office catching light in her night rounds. Their logic
-  is written but does not find its places in real cities yet, so the window keeps them marked as
-  "[IN PROGRESS]".
+- Four more events with real logic, now finding their places in real cities: the night rider whose
+  ignition is a pressure plate lying by a parked car's door (step on it and the engine turns over in a
+  car nobody owns, and his "garage" - a fresh oil stain - appears on a dark lot across the quarter;
+  reach the lot and the car gets bored), the tall shadow who circles one street lamp and trades places
+  with himself while you look at his light, letting go only when the sun takes the street, route 13
+  flickering past a bus stop that never had the route - and whoever stands at that stop very still
+  with a clock in hand photographs it into a legend, so the stop stays quiet for good - and the windows
+  of the matron's own office catching light on her night rounds until somebody finds her cabinet. The
+  exporter now bakes its own street and park lamp posts (the OSM "lighting mast" node is almost absent
+  in real extracts), parked cars with their door cells, bus stops and swept school facades as anchors
+  for these events.
+- The night fountain in the yard: when somebody stands by it after dusk the bowl empties in a single
+  tick - the whole water column at once, so nothing keeps spilling through the quarter - leaving a dark
+  "mouth" in the pool that flickers with portal light for half a minute before the water climbs back
+  into the very same cells, colder. The exporter bakes every water cell of the fountains it builds,
+  which is also why a city without fountains simply never gets this event.
+- The last train: around 23:00 a train the exporter dug himself walks his tunnel one cell every two
+  seconds - the platform of one line station, three floating minecart-cars, the headlights sweeping
+  every hostile shadow off the platform - and just past the hall it carries whoever stood on the
+  platform to a secret room at the end of the line, beside somebody's chest. The morning hides the
+  cars again. The exporter bakes the station halls, the tunnel chains and the secret rooms of its own
+  metro as the route, so a city without a metro line honestly never gets this event.
+- The bench not for everyone: sit long enough on one of the evening's chosen street benches and the
+  city falls silent - you are sitting in a fog park that is on no map, in a small void dimension of the
+  pack's own, under a dusk that never ends, beside a pond and trees wrapped in pale fog-colored leaves.
+  Stand up from the park's bench and the traffic comes back, the seat here cold as it should be. The
+  park is rebuilt from scratch on every world load, so it was always there; only the benches the fog
+  picks are new each night.
+- The ninth-and-a-half floor: after midnight the stairwell wall of a tall residential tower grows a
+  door that is on none of its plans, and whoever opens it from the flight stands on the same landing
+  mirrored - windows into the void, doors onto nothing - till any opened there walks them back to
+  their own steps. The exporter picks the houses (every fourth of those eleven floors and taller) and
+  bakes the real cells of the landing the door appears in, so the door always stands in a wall that
+  really is there
+- Parks now sit their own benches along the lit paths: about every eighth path cell gets a seat of two
+  oak stairs on the lawn across, facing the path, wherever the two cells under it are really free -
+  no lamp, no tree, no furniture, no fence, no water, no lawn stepping under the seat. The benches
+  mapped as `amenity=bench` nodes stand where they stood, and the evening's fog now picks the park
+  benches into its park along with the street ones
+
+### Fixed
+
+- The events no longer freeze their night in Minecraft 26.x: the pack computes its day clock as the
+  remainder of `time query gametime` over 24000, because 26.x retired `time query daytime` with its
+  clock rework and the frozen score left every night event asleep. 1.21.x keeps the old query
+- The pack survives 26.x "Safe Mode" checks: the fog leaves, the flat dimensions and the dug soil of
+  the fresh grave are now written in the shape each game generation reads, where before 26.x silently
+  ignored the mismatched files (or took the whole pack down with them)
 
 ## [2.0.26.11191] — 2026-11-19
 

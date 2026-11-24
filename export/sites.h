@@ -99,6 +99,17 @@ struct IslandSite
     int cx = 0, cz = 0, rx = 0, rz = 0, yTop = 0;
     quint32 hash = 0;
 };
+//! The 9½ floor (docs/city-encounters.md): the two lining cells beside a middle step of
+//! the flight between the 9th and the 10th floors where the night can grow a door that is on
+//! no plan. The voxelizer only reports the cells - the wall behind them stays, the
+//! "floor_half" event does the rest.
+struct HalfDoorSite
+{
+    int x = 0, y = 0, z = 0;              // the door’s lower cell (store coordinates)
+    quint16 idLow = 0, idHigh = 0;        // the wall standing there now (the morning puts it back)
+    int face = 0;                         // 0..3 = north/east/south/west, the door faces the flight
+};
+
 //! An address plate of a house: the candidates (one per compass side, the cell OUTSIDE the wall, the sign faces outward) and two lines
 //! of text. The final side is chosen after the roads — the nearest to a road; SignSite is a ready plate (a block entity).
 struct SignCand

@@ -32,6 +32,7 @@ struct VoxelOut
     QVector<BannerSite>* banners = nullptr;
     QVector<LairZone>* zones = nullptr;
     QVector<IslandSite>* islands = nullptr;
+    QVector<HalfDoorSite>* halfDoors = nullptr;     // the 9½ floor: stairwell lining cells for a door on no plan (floor_half)
     int* privMats = nullptr;                        // the private sector material split: [0] brick houses, [1] log houses,
                                                     //  [2] brick houses with a WALKABLE 2nd story (wall >= 8 rows: slab + a 3-row room)
     const QSet<ColKey>* prison = nullptr;           // the columns of the terpol "prison" overlay: a building on them is a forced bandit lair (a request)
