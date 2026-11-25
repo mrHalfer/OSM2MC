@@ -15,6 +15,12 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 - The ground around every portal of a military base is scorched into an irregular stain of netherrack
   streaked with nether gold ore (a request): the mark of a big piglin exodus out of the Nether. The
   stain eats bushes and grass but never the fence, the roads, the water or a building.
+- The "City events" window carries a practical note under the legend - the window of hours, the
+  chance, how the event ends - on its own frosted plate: the same click that cleared the old plate
+  now clears the note, while the legend above stays open (the two texts stopped sharing one plate).
+- The events pack speaks the interface language: an export made under a Russian interface writes the
+  player-facing texts of `osmc_enc` (the night's chat lines, the sentences of the fear levels, the
+  rules book) in Russian; every other language keeps the English originals.
 
 ### Changed
 
@@ -31,12 +37,28 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 - Benches along park paths stand one block back from the paving (a free gap cell between the path and
   the seat) and look at the path: a stair block faces its BACK side, so seats whose back stood to the
   path turned around (the street benches of the OSM points got the same turn).
+- Dread calms down over deeds, not over sitting: a glassed flat and a slept night no longer pay
+  anything at all. Instead: a torch lit in the dark takes a point off (once in five minutes), a church
+  bell takes three, a finished trade one - the two together at most three times a Minecraft day per
+  player, midnight renews the count; a monster laid to rest takes one (once in five minutes), and a
+  tamed cat or dog takes three, as often as kindness goes. The fog park does not read the fear of
+  whoever enters - it sets it to twenty-five.
+- The bench not for everyone: now the fog itself walks the city, about every three minutes taking one
+  oak bench within fifty steps of a player - its seat turns dark. Standing three seconds before such
+  a bench sinks the sitter into the fog park; the way out waits at the park's middle bench, and dawn
+  lets go of the bench the fog held.
+- Floor nine and a half is fifty-fifty now: behind the door stands either a hall with a chest (nine
+  times of ten an ordinary one, once of ten a chest of the mansion) or a company of five to fifteen
+  monsters (and once of ten instead of the company there is only a warden). The lot is any mob but the bosses, the
+  creepers and the raiders - the Nether folk included. Whichever door behind carries back to your
+  flight; by morning nothing stays on the half floor.
 
 ### Fixed
 
-- Nether portals were invisible in 26.x worlds: the block was renamed to `minecraft:nether_portal`
-  there, and portal blocks baked under the old name rendered as air - so an "activated" forest ruin or
-  base portal never looked lit. 1.21.x worlds keep the old name.
+- Nether portals did not appear in the worlds at all: the block was baked as `minecraft:portal`,
+  which is not a block id in either target (the real name is `minecraft:nether_portal` in both
+  1.21.x and 26.x - the vanilla jar's blockstates say so), so the palette entry dropped on load and
+  an "activated" forest ruin or base portal never looked lit.
 - The butcher's barrels and the house stoves stocked the meat under its pre-26.x name (`raw_beef` and
   friends), and 26.x dropped those stacks as unknown items on load; the barrels and stoves now carry
   `beef`/`porkchop`/`chicken`/`mutton`, while 1.21.x worlds still get the `raw_` names.

@@ -1,6 +1,7 @@
 #include "app/tmcrun.h"
 #include "app/exportmeta.h"                           // the export_info.json written into the world archive
 #include "app/polygoneditor.h"                       // PolygonGeom::pointOnSurface for the default spawn
+#include "app/i18n.h"                                // the language the events pack will speak
 #include "core/steplog.h"
 #include "export/climate.h"
 #include "input/tmcproject.h"
@@ -241,6 +242,8 @@ TmcRunResult tmcRunExport(const TmcRunOptions& optIn, const std::function<void(c
     w.locateDatapack = opt.locateDatapack;
     w.encounters = opt.encounters;
     w.encountersOff = opt.encountersOff;
+    // the events pack speaks the language the player is reading the interface in (docs/city-encounters.md)
+    w.encountersRussian = tmcResolveLanguage(tmcLanguageInEffect()) == QLatin1String("ru");
     if (TmcProject::isOsmFile(opt.source))
         w.attribution = QStringLiteral("Map data (c) OpenStreetMap contributors, Open Database License (ODbL) 1.0: https://www.openstreetmap.org/copyright\n"
                                        "This world was made from OpenStreetMap data with OSMC. If you publish it, keep this attribution and follow the ODbL.\n");

@@ -522,7 +522,9 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
                     QString nm = blockName(id);
                     if (nm.contains(QLatin1String("poplar_leaves"))) nm = QStringLiteral("minecraft:oak_leaves");        // 1.21.x: no poplar
                     else if (nm == QLatin1String("minecraft:poplar_log")) nm = QStringLiteral("minecraft:oak_log");
-                    else if (nm == QLatin1String("minecraft:nether_portal")) nm = QStringLiteral("minecraft:portal");  // 1.21.x: the block was renamed in 26.x
+                    // (the nether_portal rewrite that stood here was wrong: BOTH 1.21.x and 26.x know
+                    // the block as 'minecraft:nether_portal' - checked in the vanilla blockstates of
+                    // both jars; 'minecraft:portal' is not a block at all)
                     w.writeString("Name", nm);
                 }
                 if (!props.isEmpty())

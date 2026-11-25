@@ -159,6 +159,7 @@ private:
         QVector<LairZone> zones;
         QVector<IslandSite> islands;
         QVector<HalfDoorSite> halfDoors;
+        QVector<DoorStepSite> doorSteps;
         int privMats[3] = { 0, 0, 0 };       // private sector material split: [0] brick, [1] log, [2] brick with a real mansard floor
     };
     struct LiftJob { const McObject* o; quint16 id; int sink, extra; quint16 structId; bool woodSingle; int privMode; quint16 roofId = 0; };
@@ -237,6 +238,7 @@ private:
     QVector<QVector<QPoint>> subwayTunnels;   // the underground metro (code 61123100): cell chains in block coords,
     QVector<QPair<QPoint, int>> metroHalls;   // station halls at the lines: center + floor row (last_train's platform)
     QVector<HalfDoorSite> halfDoors;          // the 9 1/2 floor: stairwell lining cells the houses reported (floor_half)
+    QVector<DoorStepSite> doorSteps;          // entrances whose sill stands over the outer ground (built up after the ground, see buildDoorSteps)
     QVector<QPair<QPoint, int>> metroSecrets; // secret loot rooms: center + floor row (last_train's "catch")
     QVector<QVector<QPoint>> metroRunChains;  // the tunnel chains and their floor rows, as the dig took them
     QVector<QVector<int>> metroRunFy;         // (docs/city-encounters.md, the last_train route)
@@ -420,6 +422,9 @@ private:
 
     // 3.57 Street furniture: fences, benches, lamps, parking markings, portals.
     void buildStreetFurniture();
+    // The step-ups to the entrance doors whose sill stands over the outer ground (a user request):
+    // solid-block stairs, no higher than 2 blocks, 3 cells wide along the wall (4 for a double door).
+    void buildDoorSteps();
     // Villages (beginStep 10): squares with bells, address plates, signposts, basements.
     void buildVillages();
     // The terpol "prison" and "military base" grounds: after the villages, so that residents inside
@@ -846,7 +851,7 @@ bool ExportRun::writeZip()
     {
         QSet<QString> off;
         for (const QString& id : world.encountersOff) off.insert(id.trimmed());
-        EncPack::build(addEntry, off, encProps, encGlass, encBook, legacy);
+        EncPack::build(addEntry, off, encProps, encGlass, encBook, legacy, world.encountersRussian);
     }
     regionDir = legacy ? QStringLiteral("region/")
                                      : QStringLiteral("dimensions/minecraft/overworld/region/");
@@ -4490,6 +4495,46 @@ void ExportRun::buildStreetFurniture()
 
 }
 
+// The step-up to an entrance whose sill stands over the outer ground (a user request): solid rows of the
+// wall material in front of the door — one row per block of the height, never higher than 2 blocks, 3 cells
+// wide along the wall (4 for a double door). Roadway and water columns are left alone: the exporter never
+// paves a road over or dams a stream; the step simply narrows around them.
+void ExportRun::buildDoorSteps()
+{
+    if (doorSteps.isEmpty()) return;
+    static const int ddx[4] = { 0, 1, 0, -1 }, ddz[4] = { -1, 0, 1, 0 };   // N, E, S, W (as in buildEntrances)
+    const auto latX = [](int d) { return ddz[d] != 0 ? 1 : 0; };
+    const auto latZ = [](int d) { return ddx[d] != 0 ? 1 : 0; };
+    for (const DoorStepSite& ds : doorSteps)
+    {
+        const int ox = ds.x + ddx[ds.dir], oz = ds.z + ddz[ds.dir];        // the cell right outside the door
+        int gy = 0;
+        bool found = false;
+        for (int y = ds.y - 1; y >= ds.y - 6; --y)
+            if (store.get(ox, y, oz) != IdAir) { gy = y; found = true; break; }
+        if (!found) continue;                                             // a pit under the door — nothing to lean on
+        const int gap = ds.y - (gy + 1);                                  // the sill stands `gap` rows over the walking row
+        if (gap < 2) continue;                                            // flush (or 1 block): the player just walks in
+        const int w1 = ds.dbl ? 2 : 1;                                    // along the wall: -1..+1, a pair -1..+2
+        for (int d = 1; d <= 2; ++d)
+        {   // the step line d cells out of the wall: its top row sits one block below the sill per cell of the setback
+            const int top = std::min(ds.y - d, gy + 2);                   // capped: no step taller than 2 blocks
+            const int hx = ox + d * ddx[ds.dir], hz = oz + d * ddz[ds.dir];
+            for (int t = -1; t <= w1; ++t)
+            {
+                const int bx = hx + t * latX(ds.dir), bz = hz + t * latZ(ds.dir);
+                const qint64 ck = pairKey(bx, bz);
+                if (roadCols.contains(ck) || colWater.contains(ck)) continue;
+                for (int y = gy + 1; y <= top; ++y)
+                {
+                    if (store.get(bx, y, bz) != IdAir) break;             // something already stands in the way
+                    store.set(bx, y, bz, ds.mat);
+                }
+            }
+        }
+    }
+}
+
 void ExportRun::buildVillages()
 {
     if (!privCenters.isEmpty())
@@ -6089,6 +6134,7 @@ bool ExportRun::buildVegetation()
             const qint64 ck = pairKey(tx, tz);
             if (colWater.contains(ck)) continue;               // we do not grow on water
             if (noTreePadCols.contains(ck)) continue;          // the reserved spots (apiaries, farms, objects from points)
+            if (colWool.contains(ck)) continue;                // a roadway or a paved square (a request: no trees on the plaza paving)
             if (colMin.contains(ck)) continue;                 // a structure column — the forest does not climb into the house
                                                                // (after the floor was sunk by 1 block the slab
                                                                // stopped being an obstacle for y0)
@@ -6541,6 +6587,7 @@ bool ExportRun::buildVegetation()
             const ColKey ck = pairKey(tx, tz);
             if (!swampCols.contains(ck)) continue;                             // the tree spot fell outside the contour
             if (colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck) || noTreePadCols.contains(ck)) continue;
+            if (colWool.contains(ck)) continue;                             // paving under a swamp contour — no tree on a square (a request)
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(tx, y0, tz) != IdAir) continue;                      // something already stands here
             const int h = 5 + int(hs % 4u);
@@ -8284,6 +8331,7 @@ bool ExportRun::buildGround()
             for (IslandSite& is : islandSites) is.yTop += yShift;                  // islands — too
             for (SpawnerSite& sp : spawners) sp.y += yShift;          // spawners — their own BE
             for (HalfDoorSite& hd : halfDoors) hd.y += yShift;        // the 9 1/2 floor doors — the same lift
+            for (DoorStepSite& ds : doorSteps) ds.y += yShift;        // entrance step-ups — the same lift
         }
         genGroundTop = ref + yShift;              // the chamfer's target and the generator's mark: the seam level (with terrain — 68)
     }
@@ -12401,6 +12449,7 @@ bool ExportRun::buildObjects()
                 vo.npcs = &j->npcs; vo.frames = &j->frames; vo.basements = &j->basements;
                 vo.signs = &j->signs; vo.banners = &j->banners; vo.zones = &j->zones; vo.islands = &j->islands;
                 if (j->building && world.encounters) vo.halfDoors = &j->halfDoors;   // the door on no plan is an event
+                if (j->building) vo.doorSteps = &j->doorSteps;                       // entrances get their step-up after the ground
                 vo.privMats = j->privMats;
                 vo.prison = &prisonCols;                                  // the overlay contours: the voxelizer decides the forced lair and the special loot there
                 vo.military = &milCols;
@@ -12471,6 +12520,7 @@ bool ExportRun::buildObjects()
             mannequins += j->mannequins; spawners += j->spawners; npcs += j->npcs; frames += j->frames;
             basements += j->basements; signCands += j->signs; bannerSites += j->banners; lairZones += j->zones; islandSites += j->islands;
             halfDoors += j->halfDoors;
+            doorSteps += j->doorSteps;
             if (j->building) storyCounter += j->storyCounter - j->storyBase;
             nPrivBrick += j->privMats[0]; nPrivLog += j->privMats[1]; nPrivMans += j->privMats[2];
         }
@@ -14889,6 +14939,7 @@ McWorldExporter::Result ExportRun::run()
     // The start of the step of stage st (the stage name — in the window caption, see the tqt 3D window, updateLoadStatus): without a counter
     // (total=0) the caption just shows WHAT is being done now, not the "hanging" percent of the previous step.
     if (!buildGround()) return res;
+    buildDoorSteps();                                   // step-ups to entrance sills over the new ground (see buildEntrances)
     lap("before 3.5");
     beginStep(4, vegCells);
     if (!buildVegetation()) return res;

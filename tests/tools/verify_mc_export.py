@@ -1431,8 +1431,8 @@ def check(path, legacy, env='flat', full=True):
         if _bb[1] == 5 and sorted((_bb[0], _bb[2])) == [1, 4]:
             obN += sum(1 for q in _comp if obsP[q] == 'minecraft:obsidian')
             crN += sum(1 for q in _comp if obsP[q] == 'minecraft:crying_obsidian')
-    poN = counts.get('minecraft:nether_portal', 0) + counts.get('minecraft:portal', 0)   # 26.x renamed the block
-    poAx = {v for nm, tp in props_seen if nm in ('minecraft:nether_portal', 'minecraft:portal')
+    poN = counts.get('minecraft:nether_portal', 0)   # the real id in both 1.21.x and 26.x (a bare 'portal' is not a block)
+    poAx = {v for nm, tp in props_seen if nm == 'minecraft:nether_portal'
             for k, v in (tp or ()) if k == 'axis'}
     # Portals are now in FORESTS (vegpol 71111110/71126000, >= 5000 real m², one per 1000 blocks):
     # the test scene gives exactly one suitable winner forest (A) -> one frame of 14 obsidian blocks

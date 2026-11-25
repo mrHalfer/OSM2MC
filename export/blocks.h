@@ -130,8 +130,8 @@ enum : quint16
                                           //  a request: 10% of csrpol objects get a portal)
     IdCryingObsidian,                     // 'minecraft:crying_obsidian' — "ruined" portals
                                           //  (vanilla ruins mix in crying obsidian)
-    IdPortalX,                            // 'minecraft:nether_portal' axis=x — an active portal (26.x
-                                          //  renamed it from 'portal'): axis
+    IdPortalX,                            // 'minecraft:nether_portal' axis=x — an active portal (the same
+                                          //  name in 1.21.x and 26.x alike; 'portal' was never its id): axis
     IdPortalZ,                            //  = the direction of the frame's EXTENT (wiki): along X →
                                           //  axis=x, along Z → axis=z
     IdTintedGlass,                        // 'minecraft:tinted_glass' — windows of buildings on military bases

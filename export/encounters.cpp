@@ -1,4 +1,5 @@
 #include "export/encounters.h"
+#include "export/encounters_ru.h"
 #include "export/blocks.h"
 #include <algorithm>
 #include <cstdlib>
@@ -112,9 +113,16 @@ QString rollLines(int chance, int n, const QString& fnPrefix)
 // into literal mcfunction lines here — the runtime pack carries no macros and reads no data files,
 // so the same functions behave identically in 1.21.x and 26.x (the formats min_format 82 covers) -
 // except where 26.x retired the mechanic an event is built on, see the legacy121 branches below.
-void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Prop>& props,
-                    const QVector<int>& glassCensus, const QVector<int>& bookCell, bool legacy121)
+void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<Prop>& props,
+                    const QVector<int>& glassCensus, const QVector<int>& bookCell, bool legacy121,
+                    bool russian)
 {
+    // the Russian voice of the pack (a user's request): the generator below keeps writing English,
+    // one post-pass over every finished entry swaps the player-visible lines (export/encounters_ru.h)
+    const AddFn add = russian
+        ? AddFn([addIn](const QString& path, const QByteArray& data)
+                { addIn(path, encRu::translate(data)); })
+        : addIn;
     // The place lists per kind with caps: an event spread over the whole city stops being LOCAL, and
     // the caps bound the size of the generated pack. The vector arrives in the stable order of the
     // build stages (the chalk candidates are pre-sorted by coordinates), so the pack is reproducible.
@@ -180,6 +188,7 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                                   "scoreboard players set #enc_hit osmc_enc_t 0\n"
                                   "scoreboard players set #k100 osmc_enc_t 100\n");
     QString cycle = QStringLiteral("# one cycle every 200 ticks; each enabled event decides inside whether it comes now\n");
+    QString tickFob;                        // the per-tick hooks an event adds to tick.mcfunction
     if (legacy121)
     {
         cycle += QStringLiteral("execute store result score #day osmc_enc_t run time query daytime\n");
@@ -199,8 +208,8 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
     // of sampled window cells (glassCensus); every cycle the census reads them — a watched cell whose
     // glass is GONE while its chunk is loaded raises #dread once (each cell's own score re-arms, so an
     // unloaded chunk is never a broken window and a long-standing hole counts once), glass standing
-    // there again only re-arms the cell. Putting glass back pays through the placement advancement
-    // ("placed_block" lives in both formats, one JSON for them). Tiers of dread speak once per climb
+    // there again only re-arms the cell by looking at the pane: the glass placement advancement is
+    // gone (a user's rework) - setting a window back no longer calms the city at all. Tiers speak once per climb
     // in the chat (re-armed when the tier falls again), multiply the event rolls (an event function
     // re-rolls its own dice, so an extra call is an extra place tonight), and at the top tier open
     // every baked ninth-and-a-half floor door of the city at once (see the hf section).
@@ -227,12 +236,6 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
             "scoreboard players add #dread osmc_enc_t 1\n"
             "scoreboard players set #enc_hit osmc_enc_t 1\n"
             "execute if score #dread osmc_enc_t matches 101.. run scoreboard players operation #dread osmc_enc_t = #k100 osmc_enc_t\n"));
-        add(fn + QStringLiteral("dread/placed.mcfunction"), QByteArray(
-            "# the reward of the glass placement advancement: a pane back calms the city by one\n"
-            "scoreboard players remove #dread osmc_enc_t 1\n"
-            "execute if score #dread osmc_enc_t matches ..0 run scoreboard players set #dread osmc_enc_t 0\n"
-            "advancement revoke @s only osmc_enc:glass_place\n"
-            "playsound minecraft:block.glass.place master @s ~ ~ ~ 0.2 1.7\n"));
         // the console knob (a request): function macros died in 26.x, so the levels the night reads
         // get their own one-line functions - "/function osmc_enc:dread/s95" beats a whole scoreboard
         // command; any other value still goes through /scoreboard players set #dread osmc_enc_t N
@@ -240,10 +243,6 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
             add(fn + QStringLiteral("dread/s%1.mcfunction").arg(lvl), QStringLiteral(
                 "# the console knob: /function osmc_enc:dread/s%1 sets the dread of the city to %1\n"
                 "scoreboard players set #dread osmc_enc_t %1\n").arg(lvl).toUtf8());
-        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/glass_place.json"), QByteArray(
-            "{\"criteria\":{\"glass\":{\"trigger\":\"minecraft:placed_block\",\"conditions\":{\"location\":"
-            "{\"type\":\"minecraft:match_block\",\"blocks\":[\"minecraft:glass\"]}}}},"
-            "\"rewards\":{\"function\":\"osmc_enc:dread/placed\"}}"));
         // the four tier voices (the legacy text JSON is the chat shape both formats read)
         struct Tier { const char* color; const char* text; const char* sound; };
         static const Tier kTiers[4] = {
@@ -277,67 +276,87 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
     }
 
     // ---- calming the dread (docs/city-encounters.md): glass frightens the city, ordinary kindness
-    // soothes it, so every deed below pays #dread back. The advancements reward the way glass_place
-    // does - the reward revokes its own advancement, the revoke goes FIRST so that a guarded return
-    // still re-arms the deed. Sleep, taming and bells pay once per day (the #*_d latches re-arm in
-    // the morning), lights at most once per cycle per player (#cyc counts the cycles), the trade
-    // trade advancement pays at most one point per cycle, the fog park
-    // calms every cycle it keeps a still body near a seat, and the dawn takes one point back on its
-    // own. The tier ladder above needs no bookkeeping: #dread_sent chases #lv down by itself.
+    // soothes it, so every deed below pays #dread back - the calm side of the rework of a user:
+    // glass put back and a night slept through pay NOTHING now. The advancements reward the way the
+    // old glass_place did - the reward revokes its own advancement, the revoke goes FIRST so that a
+    // guarded return still re-arms the deed. A light and a monster kill pay one point at most once
+    // per five minutes per player (osmc_lc/osmc_kc keep a gametime deadline); the bell pays three
+    // points and a finished trade one, and the two together come at most three times per player
+    // per Minecraft day - osmc_tn counts the day's deeds and midnight (daytime 18000) zeroes it;
+    // taming a cat or a dog pays three points without limits; the fog park flattens the dread to
+    // twenty-five on the ride in. The dawn takes one point back on its own. The tier ladder above
+    // needs no bookkeeping: #dread_sent chases #lv down by itself.
     {
         load += QStringLiteral(
             "scoreboard objectives add osmc_lc dummy\n"
-            "scoreboard objectives add osmc_td dummy\n"
-            "execute unless score #cyc osmc_enc_t matches -2147483648.. run scoreboard players set #cyc osmc_enc_t 0\n");
+            "scoreboard objectives add osmc_tn dummy\n"
+            "scoreboard objectives add osmc_kc dummy\n");
         cycle += QStringLiteral(
-            "scoreboard players add #cyc osmc_enc_t 1\n"
-            "execute if score #day osmc_enc_t matches 0..11999 run scoreboard players set #slept_d osmc_enc_t 0\n"
-            "execute if score #day osmc_enc_t matches 0..11999 run scoreboard players set #tame_d osmc_enc_t 0\n"
-            "execute if score #day osmc_enc_t matches 0..11999 run scoreboard players set #rang_d osmc_enc_t 0\n"
+            "execute if score #day osmc_enc_t matches 18000..18199 run scoreboard players set @a osmc_tn 0\n"
             "execute if score #day osmc_enc_t matches 0..499 unless score #dec_d osmc_enc_t matches 1 unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 1\n"
             "execute if score #day osmc_enc_t matches 0..499 run scoreboard players set #dec_d osmc_enc_t 1\n"
             "execute unless score #day osmc_enc_t matches 0..499 run scoreboard players set #dec_d osmc_enc_t 0\n");
         add(fn + QStringLiteral("dread/light.mcfunction"), QByteArray(
-            "# a light stands where it was dark - the city breathes easier by one (one light a cycle)\n"
+            "# a light stands where it was dark - the city breathes easier by one (five minutes apart)\n"
             "advancement revoke @s only osmc_enc:calm_light\n"
-            "execute if score @s osmc_lc = #cyc osmc_enc_t run return 0\n"
-            "scoreboard players operation @s osmc_lc = #cyc osmc_enc_t\n"
+            "execute store result score #deed_t osmc_enc_t run time query gametime\n"
+            "execute unless score #deed_t osmc_enc_t >= @s osmc_lc run return 0\n"
+            "scoreboard players operation @s osmc_lc = #deed_t osmc_enc_t\n"
+            "scoreboard players add @s osmc_lc 6000\n"
             "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 1\n"
             "playsound minecraft:block.lantern.place master @s ~ ~ ~ 0.3 1.5\n"));
-        add(fn + QStringLiteral("dread/slept.mcfunction"), QByteArray(
-            "# the night passed honestly: three points wash off with the dreams, once a day\n"
-            "advancement revoke @s only osmc_enc:calm_slept\n"
-            "execute if score #slept_d osmc_enc_t matches 1 run return 0\n"
-            "scoreboard players set #slept_d osmc_enc_t 1\n"
-            "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 3\n"
-            "tellraw @s {\"text\":\"for a while, the city slept too\",\"color\":\"gray\",\"italic\":true}\n"));
         add(fn + QStringLiteral("dread/tame.mcfunction"), QByteArray(
-            "# a wild one chose a hand: the city trusts people again, by two, once a day\n"
+            "# a cat or a dog chose a hand: the city trusts people again, by three, as often as once\n"
             "advancement revoke @s only osmc_enc:calm_tame\n"
-            "execute if score #tame_d osmc_enc_t matches 1 run return 0\n"
-            "scoreboard players set #tame_d osmc_enc_t 1\n"
-            "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 2\n"
+            "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 3\n"
             "tellraw @s {\"text\":\"a warm hand - the night is less sure of itself\",\"color\":\"gray\",\"italic\":true}\n"));
         add(fn + QStringLiteral("dread/rang.mcfunction"), QByteArray(
-            "# the city heard its own bell: two points back, once a day\n"
+            "# the city heard its own bell: three points back; the bell and the market together come\n"
+            "# at most three times a Minecraft day per hand, and midnight clears the day's count\n"
             "advancement revoke @s only osmc_enc:calm_bell\n"
-            "execute if score #rang_d osmc_enc_t matches 1 run return 0\n"
-            "scoreboard players set #rang_d osmc_enc_t 1\n"
-            "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 2\n"
+            "execute if score @s osmc_tn matches 3.. run return 0\n"
+            "scoreboard players add @s osmc_tn 1\n"
+            "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 3\n"
             "tellraw @a {\"text\":\"a bell answered somewhere - the city listens to its towers\",\"color\":\"gray\",\"italic\":true}\n"));
         add(fn + QStringLiteral("dread/traded.mcfunction"), QByteArray(
-            "# a finished trade calms the city by one (one trade a cycle): the reward of the trade\n"
-            // advancement, which latches on #cyc like the light does. The vanilla trade STATISTIC
-            // would be the direct road, but the criterion of the scoreboard objective broke the
-            // whole load function in 26.x (the custom statistics were reshuffled), so the
-            // advancement - whose trigger both formats do have - carries the deed instead.
+            "# a finished trade calms the city by one; with the bell it makes three deeds a\n"
+            "# Minecraft day per hand, the count zeroed at midnight\n"
+            // The vanilla trade STATISTIC would be the direct road, but the criterion of the
+            // scoreboard objective broke the whole load function in 26.x (the custom statistics
+            // were reshuffled), so the advancement - whose trigger both formats do have -
+            // carries the deed instead.
             "advancement revoke @s only osmc_enc:calm_trade\n"
-            "execute if score @s osmc_td = #cyc osmc_enc_t run return 0\n"
-            "scoreboard players operation @s osmc_td = #cyc osmc_enc_t\n"
+            "execute if score @s osmc_tn matches 3.. run return 0\n"
+            "scoreboard players add @s osmc_tn 1\n"
             "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 1\n"));
         add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_trade.json"), QByteArray(
             "{\"criteria\":{\"trade\":{\"trigger\":\"minecraft:villager_trade\"}},"
             "\"rewards\":{\"function\":\"osmc_enc:dread/traded\"}}"));
+        add(fn + QStringLiteral("dread/kill.mcfunction"), QByteArray(
+            "# a monster fell by a player's hand - the night holds its breath by one (five minutes apart)\n"
+            "advancement revoke @s only osmc_enc:calm_kill\n"
+            "execute store result score #deed_t osmc_enc_t run time query gametime\n"
+            "execute unless score #deed_t osmc_enc_t >= @s osmc_kc run return 0\n"
+            "scoreboard players operation @s osmc_kc = #deed_t osmc_enc_t\n"
+            "scoreboard players add @s osmc_kc 6000\n"
+            "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 1\n"
+            "playsound minecraft:entity.experience_orb.pickup master @s ~ ~ ~ 0.25 1.4\n"));
+        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_kill.json"), QByteArray(
+            "{\"criteria\":{\"kill\":{\"trigger\":\"minecraft:player_killed_entity\",\"conditions\":{\"entity\":"
+            "{\"type\":\"#osmc_enc:monster\"}}}},\"rewards\":{\"function\":\"osmc_enc:dread/kill\"}}"));
+        // the hostile list of both target formats (there is no #minecraft:monster in vanilla; the
+        // ids were checked to live in 1.21 AND 26.x, so the tag resolves in either - creaking and
+        // the other 26.x-only monsters stay out, they simply never counted before either)
+        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/tags/entity_type/monster.json"), QByteArray(
+            "{\"replace\":false,\"values\":[\"minecraft:blaze\",\"minecraft:bogged\",\"minecraft:breeze\","
+            "\"minecraft:cave_spider\",\"minecraft:creeper\",\"minecraft:drowned\",\"minecraft:elder_guardian\","
+            "\"minecraft:enderman\",\"minecraft:endermite\",\"minecraft:evoker\",\"minecraft:ghast\","
+            "\"minecraft:guardian\",\"minecraft:hoglin\",\"minecraft:husk\",\"minecraft:magma_cube\","
+            "\"minecraft:phantom\",\"minecraft:piglin\",\"minecraft:piglin_brute\",\"minecraft:pillager\","
+            "\"minecraft:ravager\",\"minecraft:shulker\",\"minecraft:silverfish\",\"minecraft:skeleton\","
+            "\"minecraft:slime\",\"minecraft:spider\",\"minecraft:stray\",\"minecraft:vex\","
+            "\"minecraft:vindicator\",\"minecraft:warden\",\"minecraft:witch\",\"minecraft:wither\","
+            "\"minecraft:wither_skeleton\",\"minecraft:zoglin\",\"minecraft:zombie\",\"minecraft:zombie_villager\"]}"));
         add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_light.json"), QByteArray(
             "{\"criteria\":{\"light\":{\"trigger\":\"minecraft:placed_block\",\"conditions\":{\"location\":"
             "{\"type\":\"minecraft:match_block\",\"blocks\":[\"minecraft:torch\",\"minecraft:wall_torch\","
@@ -348,27 +367,15 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
             "\"minecraft:light_gray_candle\",\"minecraft:cyan_candle\",\"minecraft:purple_candle\","
             "\"minecraft:blue_candle\",\"minecraft:brown_candle\",\"minecraft:green_candle\",\"minecraft:red_candle\","
             "\"minecraft:black_candle\"]}}}},\"rewards\":{\"function\":\"osmc_enc:dread/light\"}}"));
-        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_slept.json"), QByteArray(
-            "{\"criteria\":{\"sleep\":{\"trigger\":\"minecraft:slept_in_bed\"}},"
-            "\"rewards\":{\"function\":\"osmc_enc:dread/slept\"}}"));
         add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_tame.json"), QByteArray(
-            "{\"criteria\":{\"tame\":{\"trigger\":\"minecraft:tame_animal\"}},"
+            "{\"criteria\":{\"cat\":{\"trigger\":\"minecraft:tame_animal\",\"conditions\":{\"entity\":"
+            "{\"type\":\"minecraft:cat\"}}},\"dog\":{\"trigger\":\"minecraft:tame_animal\",\"conditions\":"
+            "{\"entity\":{\"type\":\"minecraft:wolf\"}}},\"requirements\":[[\"cat\"],[\"dog\"]],"
             "\"rewards\":{\"function\":\"osmc_enc:dread/tame\"}}"));
         add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_bell.json"), QByteArray(
             "{\"criteria\":{\"use\":{\"trigger\":\"minecraft:default_block_use\",\"conditions\":{\"location\":"
             "{\"type\":\"minecraft:match_block\",\"blocks\":[\"minecraft:bell\"]}}}},"
             "\"rewards\":{\"function\":\"osmc_enc:dread/rang\"}}"));
-        if (!benches.isEmpty())
-        {   // the fog park calms its guests too: whoever has kept the same ground between two cycles
-            // pays one point per cycle back (the park listens while the city rests)
-            cycle += QStringLiteral(
-                "scoreboard players set #calm_now osmc_enc_t 0\n"
-                "execute in osmc_enc:fogpark positioned 0.5 -60 -2.5 if entity @a[distance=..1.3] run scoreboard players set #calm_now osmc_enc_t 1\n"
-                "execute in osmc_enc:fogpark positioned -2.5 -60 -2.5 if entity @a[distance=..1.3] run scoreboard players set #calm_now osmc_enc_t 1\n"
-                "execute in osmc_enc:fogpark positioned 3.5 -60 -2.5 if entity @a[distance=..1.3] run scoreboard players set #calm_now osmc_enc_t 1\n"
-                "execute if score #calm_now osmc_enc_t matches 1 if score #calm_p osmc_enc_t matches 1 unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 1\n"
-                "scoreboard players operation #calm_p osmc_enc_t = #calm_now osmc_enc_t\n");
-        }
         if (bookCell.size() >= 3)
         {   // the rules of the night lie on a lectern the exporter baked near the spawn; the city
             // repairs its own pedestal on every load (a taken book comes back, a broken lectern
@@ -383,9 +390,9 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                 "execute if block %1 %4 %3 minecraft:lectern[has_book=false] run data modify block %1 %4 %3 Book set value "
                 "{id:\"minecraft:written_book\",count:1,components:{\"minecraft:written_book_content\":{"
                 "title:{raw:\"Rules of the Night\"},author:\"the city\",pages:["
-                "{raw:\"The city feels broken glass. A window you break raises its dread; a pane you set back calms it by one.\"},"
+                "{raw:\"The city feels broken glass. A window you break raises its dread; a pane set back into the frame no longer buys you anything.\"},"
                 "{raw:\"At 25, 50, 75 and 95 the night speaks, and the higher the dread, the more often its events walk. At 95 every house opens its hidden floor.\"},"
-                "{raw:\"It calms down over kindness: a light placed, a night slept through, an animal tamed, a trade finished, a bell rung, a body sitting still in the fog park. Dawn takes one point back on its own.\"},"
+                "{raw:\"It calms down over kindness: a light in the dark and a monster laid to rest pay one point, once in five minutes; a bell answers by three, a finished trade by one - together three deeds a day at most, and midnight renews them; a tamed cat or dog pays three, again and again. The fog park flattens the dread to twenty-five. Dawn takes one point back on its own.\"},"
                 "{raw:\"Every event can be switched off while the world runs: function osmc_enc:off/<name> turns one away, osmc_enc:on/<name> calls it back. The dread itself answers the console: function osmc_enc:dread/s25 - the same for s0, s50, s75, s95, s100.\"}"
                 "]}}}\n")
                 .arg(bookCell[0]).arg(bookCell[1]).arg(bookCell[2]).arg(bookCell[1] + 1).toUtf8());
@@ -1424,13 +1431,51 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
             }
         }
         else if (id == QLatin1String("bench_otherworld"))
-        {   // the bench not for everyone: sit long on a bench the fog chose tonight and the city
-            // keeps its sound — you are sitting in the fog park of your own void dimension already;
-            // stand up from its bench and the city takes you back (docs/city-encounters.md)
+        {   // the bench not for everyone (a user request): about every three minutes the fog walks the
+            // city and with a chance takes ONE oak bench within 50 blocks of a player - its seat turns
+            // dark oak (seen from afar) while the former chosen one becomes ordinary oak again, so the
+            // fog always sits on exactly one bench. Standing three seconds in front of the dark bench
+            // sinks the sitter into the fog park; the way out waits before the middle park seat. The
+            // choice is let go at dawn and when somebody is taken.
             if (benches.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 10) + rollLines(10, benches.size(), fp + QStringLiteral("fob/"));
+                const int nB = benches.size();
+                // The body runs once per cycle (200 t): a countdown of 18 cycles is the three minutes.
+                // Its first two lines let the bench go when the dawn ends the fog's walk.
+                body = QStringLiteral(
+                    "# the fog walks the city: about every three minutes it may choose a bench near a person\n"
+                    "execute if score #fob_cur osmc_enc_t matches 0.. unless score #day osmc_enc_t"
+                    " matches 13000..23999 run function osmc_enc:ev/fob/quiet\n"
+                    "execute if score #fob_cur osmc_enc_t matches 0.. unless score #day osmc_enc_t"
+                    " matches 13000..23999 run scoreboard players set #fob_cur osmc_enc_t -1\n"
+                    "scoreboard players remove #fob_cd osmc_enc_t 1\n"
+                    "execute unless score #fob_cd osmc_enc_t matches ..0 run return 0\n"
+                    "scoreboard players set #fob_cd osmc_enc_t 18\n"
+                    "execute unless score #day osmc_enc_t matches 13000..23999 run return 0\n"
+                    "execute store result score #enc_r osmc_enc_t run random value 1..100\n"
+                    "execute unless score #enc_r osmc_enc_t matches 1..40 run return 0\n"
+                    "# the former bench becomes ordinary before the new one goes dark\n"
+                    "execute if score #fob_cur osmc_enc_t matches 0.. run function osmc_enc:ev/fob/quiet\n"
+                    "scoreboard players set #fob_cur osmc_enc_t -1\n"
+                    "scoreboard players set #fob_h osmc_enc_t 0\n"
+                    "scoreboard players set #fob_ok osmc_enc_t 0\n"
+                    // the walk of the place list starts at a random bench and closes over on itself:
+                    // the first one near a person wins, a fixed order would always choose the same
+                    "execute store result score #fob_c osmc_enc_t run random value 0..%1\n").arg(nB - 1);
+                for (int k = 0; k < nB; ++k)
+                    body += QStringLiteral(
+                        "execute if score #fob_ok osmc_enc_t matches 0 run function osmc_enc:ev/fob/pick\n"
+                        "execute if score #fob_ok osmc_enc_t matches 0 run scoreboard players add #fob_c osmc_enc_t 1\n"
+                        "execute if score #fob_ok osmc_enc_t matches 0 if score #fob_c osmc_enc_t matches %1"
+                        " run scoreboard players set #fob_c osmc_enc_t 0\n").arg(nB);
+                QString pick = QStringLiteral("# the bench #fob_c points at; #fob_ok says it has been taken\n");
+                QString quietAll = QStringLiteral("# the fog leaves its bench: the wood becomes ordinary oak again\n");
+                QString watch = QStringLiteral("# the fog's bench watched every tick: standing in front of it fills #fob_h\n");
+                QString take = QStringLiteral(
+                    "# the way in: three seconds standing before the fog's bench, and the city falls silent\n"
+                    "scoreboard players set #fob_h osmc_enc_t 0\n");
+                QString back = QStringLiteral("# the way out of the fog park: back to the bench this person stood at\n");
                 // the dimension is pure data — a void flat world of one biome under a frozen dusk;
                 // the fields the target formats do not know are ignored, the required ones are there
                 add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/dimension/fogpark.json"), QByteArray(
@@ -1471,12 +1516,16 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                     "execute in osmc_enc:fogpark run fill 4 -60 -7 4 -56 -7 minecraft:birch_log\n"
                     "execute in osmc_enc:fogpark run fill 2 -55 -9 6 -53 -5 minecraft:light_gray_wool\n"));
                 load += QStringLiteral("scoreboard players set #fob_h osmc_enc_t 0\n"
+                                       "scoreboard players set #fob_cur osmc_enc_t -1\n"
+                                       "scoreboard players set #fob_home osmc_enc_t -1\n"
+                                       "scoreboard players set #fob_cd osmc_enc_t 18\n"
                                        "schedule function osmc_enc:ev/fob/build 5s replace\n");
-                // the ride in and the ride back; both move players across the dimension border the
-                // way the map makers do: a tag in one context, the tp in the other
+                // the ride in; both moves across the dimension border are the map makers' way:
+                // a tag in one context, the tp in the other
                 add(ev + QStringLiteral("fob/enter.mcfunction"), QByteArray(
                     "# the sitting one sinks into the park; the city keeps the bench and every sound\n"
-                    "tag @a[distance=..2] add osmc_fog\n"
+                    "# and the fog flattens the dread of the city: whatever it was, twenty-five stays (a request)\n"
+                    "scoreboard players set #dread osmc_enc_t 25\n"
                     "execute in osmc_enc:fogpark positioned 0.5 -60 0.5 run tp @a[tag=osmc_fog] ~ ~ ~\n"
                     "execute in osmc_enc:fogpark positioned 0.5 -60 0.5 run particle minecraft:cloud"
                     " 0.5 -59 0.5 2 1 2 0.03 60\n"
@@ -1484,10 +1533,9 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                     " master @a[tag=osmc_fog] ~ ~ ~ 0.5 0.7\n"
                     "execute in osmc_enc:fogpark positioned 0.5 -60 0.5 run title @a[tag=osmc_fog] actionbar"
                     " {\"text\":\"the city fell silent - this park is on no map\",\"color\":\"gray\",\"italic\":true}\n"
-                    "tag @a[tag=osmc_fog] remove osmc_fog\n"
-                    "scoreboard players set #fob_h osmc_enc_t 0\n"));
+                    "tag @a[tag=osmc_fog] remove osmc_fog\n"));
                 static const char* const kFaceN[4] = { "north", "east", "south", "west" };   // the kDirNames order of the stair ids
-                for (int j = 0; j < benches.size(); ++j)
+                for (int j = 0; j < nB; ++j)
                 {
                     const Prop& p = benches[j];
                     const Cell& t = p.cells.first();     // the standing cell before the seat
@@ -1500,22 +1548,33 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                         dark += QStringLiteral("setblock %1 %2 %3 minecraft:dark_oak_stairs[facing=%4]\n")
                                     .arg(s.x).arg(s.y).arg(s.z).arg(face);
                         restock += QStringLiteral("setblock %1 %2 %3 minecraft:oak_stairs[facing=%4]\n")
-                                    .arg(s.x).arg(s.y).arg(s.z).arg(face);
+                                     .arg(s.x).arg(s.y).arg(s.z).arg(face);
                     }
-                    add(pth + QStringLiteral("go.mcfunction"), (QStringLiteral(
-                        "# the fog chooses this bench for tonight (#fob_%1 watches who sits)\n"
-                        "execute if score #fob_%1 osmc_enc matches 1.. run return 0\n"
-                        "scoreboard players set #fob_%1 osmc_enc 1\n").arg(j)
+                    add(pth + QStringLiteral("try.mcfunction"), (QStringLiteral(
+                        "# a candidate for tonight: the fog sits where a person stands close enough to see\n"
+                        "# the bench change (50 blocks), the first such bench of the walk is the chosen one\n"
+                        "execute in minecraft:overworld positioned %1 %2 %3 unless entity @a[distance=..50] run return 0\n"
+                        "scoreboard players set #fob_ok osmc_enc_t 1\n"
+                        "scoreboard players set #fob_cur osmc_enc_t %4\n")
+                        .arg(t.x).arg(t.y).arg(t.z).arg(j)
                         + dark + QStringLiteral(
                         "particle minecraft:cloud %1 %2 %3 1 0.5 1 0.02 30\n"
                         "playsound minecraft:block.wood.place master @a[x=%1,y=%2,z=%3,distance=..24] %1 %2 %3 0.4 0.6\n")
-                        .arg(t.x).arg(t.y + 1).arg(t.z)).toUtf8());
-                    add(pth + QStringLiteral("quiet.mcfunction"), (QStringLiteral(
-                        "# the dawn: the fog leaves the bench, the wood becomes ordinary again\n"
-                        "scoreboard players set #fob_%1 osmc_enc 0\n").arg(j) + restock).toUtf8());
+                        .arg(t.x).arg(t.y).arg(t.z)).toUtf8());
+                    add(pth + QStringLiteral("quiet.mcfunction"), restock.toUtf8());
+                    // the fog took this bench: whoever stood in front of it is in the park now, the wood
+                    // forgets its darkness, and #fob_home knows where the way out must lead back to
+                    add(pth + QStringLiteral("take.mcfunction"), QStringLiteral(
+                        "tag @a[distance=..2] add osmc_fog\n"
+                        "execute unless entity @a[tag=osmc_fog] run return 0\n"
+                        "scoreboard players set #fob_home osmc_enc_t %1\n"
+                        "function osmc_enc:ev/fob/enter\n"
+                        "function osmc_enc:ev/fob/%1/quiet\n"
+                        "scoreboard players set #fob_cur osmc_enc_t -1\n")
+                        .arg(j).toUtf8());
                     add(pth + QStringLiteral("leave.mcfunction"), QStringLiteral(
                         "# up from the park bench - the city takes this person back to the seat\n"
-                        "tag @a[distance=..1.5] add osmc_back\n"
+                        "execute in osmc_enc:fogpark positioned 0.5 -60 -1.5 run tag @a[distance=..1.5] add osmc_back\n"
                         "execute if entity @a[tag=osmc_back] in minecraft:overworld positioned %1 %2 %3"
                         " run tp @a[tag=osmc_back] ~ ~ ~\n"
                         "execute if entity @a[tag=osmc_back] in minecraft:overworld positioned %1 %2 %3"
@@ -1525,59 +1584,49 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                         " run title @a[tag=osmc_back] actionbar"
                         " {\"text\":\"the traffic came back - the bench here is cold, as it should be\","
                         "\"color\":\"gray\",\"italic\":true}\n"
-                        "tag @a[tag=osmc_back] remove osmc_back\n")
+                        "tag @a[tag=osmc_back] remove osmc_back\n"
+                        "scoreboard players set #fob_home osmc_enc_t -1\n")
                         .arg(t.x).arg(t.y).arg(t.z).toUtf8());
-                    QString sit, nosit;                                      // a person on the seat is a sitter too
-                    for (int c = 1; c < p.cells.size(); ++c)
-                    {
-                        const Cell& s = p.cells[c];
-                        sit += QStringLiteral(
-                            "execute if score #fob_%1 osmc_enc matches 1 in minecraft:overworld positioned %2 %3 %4"
-                            " if entity @a[distance=..1.3] run scoreboard players add #fob_h osmc_enc_t 1\n")
-                            .arg(j).arg(s.x).arg(s.y + 1).arg(s.z);
-                        nosit += QStringLiteral(" unless entity @a[x=%1,y=%2,z=%3,distance=..1.3]")
-                                     .arg(s.x).arg(s.y + 1).arg(s.z);
-                    }
-                    cycle += QStringLiteral(
-                        "execute if score #fob_%1 osmc_enc matches 1 in minecraft:overworld positioned %2 %3 %4"
-                        " if entity @a[distance=..1.1] run scoreboard players add #fob_h osmc_enc_t 1\n")
-                        .arg(j).arg(t.x).arg(t.y).arg(t.z)
-                        + sit + QStringLiteral(
-                        "execute if score #fob_%1 osmc_enc matches 1 in minecraft:overworld positioned %2 %3 %4"
-                        " unless entity @a[distance=..1.1]%5 run scoreboard players set #fob_h osmc_enc_t 0\n"
-                        "execute if score #fob_%1 osmc_enc matches 1 if score #day osmc_enc_t"
-                        " matches 0..11999 run function %6\n"
-                        "execute in osmc_enc:fogpark positioned 0.5 -60 -1.5 run function %7\n")
-                        .arg(j).arg(t.x).arg(t.y).arg(t.z).arg(nosit)
-                        .arg(fp + QStringLiteral("fob/%1/quiet").arg(j))
-                        .arg(fp + QStringLiteral("fob/%1/leave").arg(j)).toUtf8();
+                    pick += QStringLiteral("execute if score #fob_c osmc_enc_t matches %1"
+                                           " run function osmc_enc:ev/fob/%1/try\n").arg(j);
+                    quietAll += QStringLiteral("execute if score #fob_cur osmc_enc_t matches %1"
+                                               " run function osmc_enc:ev/fob/%1/quiet\n").arg(j);
+                    watch += QStringLiteral(
+                        "execute if score #fob_cur osmc_enc_t matches %1 in minecraft:overworld positioned %2 %3 %4"
+                        " if entity @a[distance=..1.1] run scoreboard players add #fob_h osmc_enc_t 1\n"
+                        "execute if score #fob_cur osmc_enc_t matches %1 in minecraft:overworld positioned %2 %3 %4"
+                        " unless entity @a[distance=..1.1] run scoreboard players set #fob_h osmc_enc_t 0\n")
+                        .arg(j).arg(t.x).arg(t.y).arg(t.z);
+                    take += QStringLiteral(
+                        "execute if score #fob_cur osmc_enc_t matches %1 in minecraft:overworld positioned %2 %3 %4"
+                        " run function osmc_enc:ev/fob/%1/take\n")
+                        .arg(j).arg(t.x).arg(t.y).arg(t.z);
+                    back += QStringLiteral("execute if score #fob_home osmc_enc_t matches %1"
+                                           " run function osmc_enc:ev/fob/%1/leave\n").arg(j);
                 }
+                add(ev + QStringLiteral("fob/pick.mcfunction"), pick.toUtf8());
+                add(ev + QStringLiteral("fob/quiet.mcfunction"), quietAll.toUtf8());
+                add(ev + QStringLiteral("fob/watch.mcfunction"), watch.toUtf8());
+                add(ev + QStringLiteral("fob/take.mcfunction"), take.toUtf8());
+                add(ev + QStringLiteral("fob/back.mcfunction"), back.toUtf8());
+                // the tick hooks of the fog's bench: three seconds (60 ticks) standing in front of the
+                // chosen one is the way in; standing at the park's exit is the way back
+                tickFob = QStringLiteral(
+                    "execute if score #fob_cur osmc_enc_t matches 0.. run function osmc_enc:ev/fob/watch\n"
+                    "execute if score #fob_h osmc_enc_t matches 60.. run function osmc_enc:ev/fob/take\n"
+                    "execute if score #fob_home osmc_enc_t matches 0.. run function osmc_enc:ev/fob/back\n");
                 cycle += QStringLiteral(
-                    "execute in minecraft:overworld run function osmc_enc:ev/fob/dispatch\n"
                     "execute in osmc_enc:fogpark positioned 0.5 -60 0.5 if entity @a[distance=..40]"
                     " run particle minecraft:cloud 0.5 -59 0.5 9 2 9 0.03 80\n");
-                // the ride in: the per-bench watch above fills #fob_h while somebody stands; the
-                // dispatch rides at the cell of the chosen bench that really has a sitter now
-                QString disp = QStringLiteral(
-                    "# the ride in: whoever stood at a chosen bench for two cycles sits in the park\n"
-                    "execute unless score #fob_h osmc_enc_t matches 2.. run return 0\n");
-                for (int j = 0; j < benches.size(); ++j)
-                {
-                    const Cell& t = benches[j].cells.first();
-                    disp += QStringLiteral(
-                        "execute if score #fob_%1 osmc_enc matches 1 in minecraft:overworld positioned %2 %3 %4"
-                        " if entity @a[distance=..2] run function osmc_enc:ev/fob/enter\n")
-                        .arg(j).arg(t.x).arg(t.y).arg(t.z);
-                }
-                disp += QStringLiteral("scoreboard players set #fob_h osmc_enc_t 0\n");
-                add(ev + QStringLiteral("fob/dispatch.mcfunction"), disp.toUtf8());
             }
         }
         else if (id == QLatin1String("floor_half"))
         {   // the floor between the floors: after midnight the stairwell of a tall house grows a
             // door that is on no plan of the house; whoever opens it from the flight is standing on
             // the same landing mirrored - windows into the void, doors onto nothing - and any door
-            // opened there brings the guest back to their own flight (docs/city-encounters.md)
+            // opened there brings the guest back to their own flight. The floor receives each guest
+            // fifty-fifty: a chest left in the hall, or company that did not come from the city
+            // above (docs/city-encounters.md)
             if (halfs.isEmpty()) body = noPlace;
             else
             {
@@ -1616,6 +1665,80 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                     "# the lights of a floor nobody drew\n"
                     "execute in osmc_enc:half run setblock -3 -35 0 minecraft:sea_lantern\n"
                     "execute in osmc_enc:half run setblock 3 -35 0 minecraft:sea_lantern\n"));
+                // the floor receives each guest fifty-fifty: half the visits find a chest in the
+                // hall (nine of ten plain, one of ten from a mansion), half meet company - five to
+                // fifteen ordinary horrors, or the one thing that hears hearts. No creepers (the
+                // hall would not outlive them), no bosses; the morning wipes both halves away.
+                add(ev + QStringLiteral("hf/roll.mcfunction"), QByteArray(
+                    "# what did the floor prepare for this guest: a gift, or company\n"
+                    "execute store result score #hf_kind osmc_enc run random value 1..2\n"
+                    "execute if score #hf_kind osmc_enc matches 1 in osmc_enc:half"
+                        " run function osmc_enc:ev/hf/prize\n"
+                    "execute if score #hf_kind osmc_enc matches 2 in osmc_enc:half"
+                        " run function osmc_enc:ev/hf/punish\n"));
+                add(ev + QStringLiteral("hf/prize.mcfunction"), QByteArray(
+                    "# a chest grows in the empty hall; the expensive one is the rare one\n"
+                    "setblock 0 -40 -2 minecraft:chest[facing=south]\n"
+                    "execute store result score #hf_loot osmc_enc run random value 1..10\n"
+                    "execute if score #hf_loot osmc_enc matches 1 run loot replace block 0 -40 -2"
+                        " container 0 loot minecraft:chests/woodland_mansion\n"
+                    "execute if score #hf_loot osmc_enc matches 2.. run loot replace block 0 -40 -2"
+                        " container 0 loot minecraft:chests/simple_dungeon\n"
+                    "execute if score #hf_loot osmc_enc matches 1 run playsound minecraft:block.chest.open"
+                        " master @a[tag=osmc_half] 0.5 -39 -1.5 1.0 0.7\n"
+                    "execute if score #hf_loot osmc_enc matches 2.. run playsound minecraft:block.chest.open"
+                        " master @a[tag=osmc_half] 0.5 -39 -1.5 1.0 1.3\n"
+                    "title @a[tag=osmc_half] actionbar"
+                    " {\"text\":\"a chest stood in the hall where a moment ago there was none\","
+                    "\"color\":\"gold\",\"italic\":true}\n"));
+                add(ev + QStringLiteral("hf/punish.mcfunction"), QByteArray(
+                    "# or the hall is not empty: a crowd of ordinary horrors, or one very old one\n"
+                    "execute store result score #hf_mob osmc_enc run random value 1..10\n"
+                    "execute if score #hf_mob osmc_enc matches 1 run summon minecraft:warden 2.5 -40 0.5\n"
+                    "execute if score #hf_mob osmc_enc matches 1 run playsound minecraft:entity.warden.agitated"
+                        " master @a[tag=osmc_half] 2.5 -40 0.5 1.0 1.0\n"
+                    "execute if score #hf_mob osmc_enc matches 1 run title @a[tag=osmc_half] actionbar"
+                    " {\"text\":\"something under the floor stopped digging and started listening\","
+                    "\"color\":\"dark_purple\",\"italic\":true}\n"
+                    "execute if score #hf_mob osmc_enc matches 2.. run function osmc_enc:ev/hf/count\n"
+                    "execute if score #hf_mob osmc_enc matches 2.. run playsound"
+                        " minecraft:entity.enderman.scream master @a[tag=osmc_half] 3.5 -40 2.5 1.5 0.5\n"
+                    "execute if score #hf_mob osmc_enc matches 2.. run title @a[tag=osmc_half] actionbar"
+                    " {\"text\":\"the hall is not empty any more\","
+                    "\"color\":\"dark_red\",\"italic\":true}\n"));
+                add(ev + QStringLiteral("hf/count.mcfunction"), QByteArray(
+                    "# five to fifteen of them, as the floor counts\n"
+                    "execute store result score #hf_n osmc_enc run random value 5..15\n"
+                    "function osmc_enc:ev/hf/spawn1\n"));
+                add(ev + QStringLiteral("hf/spawn1.mcfunction"), QByteArray(
+                    "# one guest at a time, of a kind the floor picks; no creepers, no bosses,\n"
+                    "# and the warm places are allowed to lend their horrors too\n"
+                    "execute if score #hf_n osmc_enc matches ..0 run return 0\n"
+                    "scoreboard players remove #hf_n osmc_enc 1\n"
+                    "execute store result score #hf_m osmc_enc run random value 1..18\n"
+                    "execute if score #hf_m osmc_enc matches 1 run summon minecraft:zombie 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 2 run summon minecraft:husk 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 3 run summon minecraft:drowned 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 4 run summon minecraft:skeleton 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 5 run summon minecraft:stray 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 6 run summon minecraft:bogged 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 7 run summon minecraft:spider 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 8 run summon minecraft:cave_spider 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 9 run summon minecraft:enderman 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 10 run summon minecraft:slime 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 11 run summon minecraft:silverfish 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 12 run summon minecraft:witch 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 13 run summon minecraft:blaze 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 14 run summon minecraft:wither_skeleton 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 15 run summon minecraft:magma_cube 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 16 run summon minecraft:piglin 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 17 run summon minecraft:piglin_brute 3.5 -40 2.5\n"
+                    "execute if score #hf_m osmc_enc matches 18 run summon minecraft:breeze 3.5 -40 2.5\n"
+                    "execute if score #hf_n osmc_enc matches 1.. run function osmc_enc:ev/hf/spawn1\n"));
+                add(ev + QStringLiteral("hf/wipe.mcfunction"), QByteArray(
+                    "# morning: the floor forgets its gift and its company alike\n"
+                    "kill @e[type=!minecraft:player]\n"
+                    "setblock 0 -40 -2 minecraft:air\n"));
                 load += QStringLiteral("scoreboard objectives add osmc_enc_p dummy\n"
                                        "schedule function osmc_enc:ev/hf/build 6s replace\n");
                 static const char* const kHFDoor[4][3] = {
@@ -1657,7 +1780,8 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                         " master @a[tag=osmc_half] ~ ~ ~ 0.4 0.5\n"
                         "execute in osmc_enc:half positioned 0.5 -40 0.5 run title @a[tag=osmc_half] actionbar"
                         " {\"text\":\"the landing is here, the city outside it is not\","
-                        "\"color\":\"gray\",\"italic\":true}\n")
+                        "\"color\":\"gray\",\"italic\":true}\n"
+                        "function osmc_enc:ev/hf/roll\n")
                         .arg(j).toUtf8());
                     add(pth + QStringLiteral("back.mcfunction"), QStringLiteral(
                         "# through any door of that floor - and the guest is back on their own flight\n"
@@ -1687,7 +1811,9 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
                         "execute if score #hf_%1 osmc_enc matches 1 if score #day osmc_enc_t"
                         " matches 0..11999 run function %6\n"
                         "execute in osmc_enc:half if entity @a[scores={osmc_enc_p=%1}]"
-                        " if score #day osmc_enc_t matches 0..11999 run function %7\n")
+                        " if score #day osmc_enc_t matches 0..11999 run function %7\n"
+                        "execute in osmc_enc:half if score #day osmc_enc_t matches 0..11999"
+                        " run function osmc_enc:ev/hf/wipe\n")
                         .arg(j).arg(p.x).arg(p.y).arg(p.z)
                         .arg(fnp + QStringLiteral("enter")).arg(fnp + QStringLiteral("hush"))
                         .arg(fnp + QStringLiteral("back")).toUtf8();
@@ -3175,7 +3301,7 @@ void EncPack::build(const AddFn& add, const QSet<QString>& off, const QVector<Pr
     add(fn + QStringLiteral("tick.mcfunction"),
             QByteArray("scoreboard players add #tick osmc_enc_t 1\n"
                        "execute if score #tick osmc_enc_t matches 200.. run function osmc_enc:cycle\n"
-                       "execute if score #tick osmc_enc_t matches 200.. run scoreboard players set #tick osmc_enc_t 0\n"));
+                       "execute if score #tick osmc_enc_t matches 200.. run scoreboard players set #tick osmc_enc_t 0\n") + tickFob.toUtf8());
     add(fn + QStringLiteral("cycle.mcfunction"), cycle.toUtf8());
     // the void dimension type shared by the fog park and the mirrored floor: written once, an
     // unused one changes nothing in the game (the fields the target formats do not know are ignored)

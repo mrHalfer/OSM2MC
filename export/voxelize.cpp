@@ -15,6 +15,13 @@ static quint16 mallRackId()
     return quint16(IdPaletteStart + paletteIndexOf("minecraft:light_gray_concrete"));
 }
 
+// The panel accent (a user request): a light gray concrete facade wears its trim in cyan terracotta -
+// the real corner columns rise through all floors and the parapet ring of a flat roof matches them.
+static quint16 panelTrimId()
+{
+    return quint16(IdPaletteStart + paletteIndexOf("minecraft:cyan_terracotta"));
+}
+
 // Everything a single-object voxelization needs: the object mesh, the transform,
 // the store to write into and the collected outputs (the old parameter list).
 class ObjectVoxelizer
@@ -728,6 +735,10 @@ void ObjectVoxelizer::buildWalls()
         // not the wall/structural color; every tier of a stepped complex gets its own cap.
         if (roofId && !priv && !dir && ly >= 2 && roofTop(cell) && interiorCol(lx, ly, lz))
             wallId = roofId;
+        // the corner pilasters of a concrete facade (the panel accent): only the cells of a REAL corner
+        // and only the rows that are light gray concrete - a stone plinth or a brick tier keep their own
+        if (wallId == mallRackId() && cornerCols.contains(pairKey(lx, lz)))
+            wallId = panelTrimId();
         addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : milPost ? IdTintedGlass : IdGlass) : wallId);
         if (dir) ++nWindows;
         if (dir)                                                // a window all the way through (a user request):
@@ -795,6 +806,7 @@ void ObjectVoxelizer::buildParapet()
     if (!roofId || priv || thinW)
         return;
     const quint16 mat = structId ? structId : id;
+    const quint16 matEdge = (mat == mallRackId()) ? panelTrimId() : mat;   // the parapet ring of a concrete facade trims in cyan
     for (int cell : surfaceCells)
     {
         if (grid[cell] == char(5)) continue;                // a written hole
@@ -803,7 +815,7 @@ void ObjectVoxelizer::buildParapet()
         const int lz = cell / sxy;
         if (!roofTop(cell)) continue;                       // not the top of the column
         if (ly >= 2 && interiorCol(lx, ly, lz)) continue;   // the cap middle - the roof itself
-        addVoxel(minx + lx, miny + ly + 1, minz + lz, mat);
+        addVoxel(minx + lx, miny + ly + 1, minz + lz, matEdge);
         ++added;
     }
 }
@@ -1114,7 +1126,18 @@ void ObjectVoxelizer::buildEntrances()
                             addVoxel(minx + lx + ddx[c.d], miny + y, minz + lz + ddz[c.d], IdPressurePlateStone);
                     }
                 }
-            }
+
+                if (out.doorSteps)
+                {   // the step-up to the sill: the ground around the building is only ready after the
+                    // voxelization, so the door is remembered for ExportRun::buildDoorSteps - it paves
+                    // a solid-block stair when the outer ground lies lower than the sill (a request)
+                    DoorStepSite ds;
+                    ds.x = minx + c.lx; ds.y = miny + lyF0 - sink; ds.z = minz + c.lz;
+                    ds.dir = c.d; ds.dbl = dbl ? 1 : 0;
+                    ds.mat = structId ? structId : id;
+                    out.doorSteps->append(ds);
+                }
+             }
         }
     }
 }

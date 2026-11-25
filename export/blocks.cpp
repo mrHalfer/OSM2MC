@@ -328,7 +328,7 @@ QString blockName(quint16 id)
     case IdTintedGlass:      return QLatin1String("minecraft:tinted_glass");
     case IdNetherGoldOre:    return QLatin1String("minecraft:nether_gold_ore");
     case IdPortalX:
-    case IdPortalZ:          return QLatin1String("minecraft:nether_portal");   // 26.x renamed 'portal' (jar: blockstates/nether_portal.json); 1.21.x worlds get the old name (the legacy rewrite in anvil.cpp)
+    case IdPortalZ:          return QLatin1String("minecraft:nether_portal");   // the real name in BOTH branches (the vanilla jar's blockstates say so); the old 'portal' was never a block
     case IdStoneStairsN:
     case IdStoneStairsE:
     case IdStoneStairsS:

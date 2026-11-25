@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE TS>
-<TS version="2.1" language="ru_RU"><context>
+<TS version="2.1" language="ru_RU">
+<context>
     <name>Climate</name>
     <message>
         <location filename="../export/climate.h" line="15"/>
@@ -66,437 +67,1107 @@
 <context>
     <name>EncountersDialog</name>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="31"/>
+        <location filename="../app/encountersdialog.cpp" line="33"/>
         <source>Pursuers</source>
         <translation>Преследователи</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="32"/>
+        <location filename="../app/encountersdialog.cpp" line="34"/>
         <source>The Lurker — a faceless figure in the lamplight</source>
         <translation>Долгий — бесликий в свете фонаря</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="38"/>
+        <location filename="../app/encountersdialog.cpp" line="35"/>
+        <source>A thin faceless figure in black. It rises far off in a lamp&apos;s light - by the park with the flying island, by a lonely lamp on the road, at the edge of a quarter. Walk closer and it waits behind you in the alley. It behaves like hearing: noise, footsteps nearer than your own.</source>
+        <translation>Тонкий высокий бесликий силуэт в чёрном. Встаёт вдали в свете фонаря — у парка с летающим островом, у одинокой лампы у дороги, на окраине квартала. Подойдёшь ближе — окажется за спиной в переулке. Ведёт себя как слух: помехи, шаги, которые ближе твоих. Финал арки — привести его к свету церкви или вокзала: растворится.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="39"/>
+        <source>Night 19:00-06:00, about 10% per cycle: the tall one circles the light of one street lamp and keeps his distance; he lets go only when the sun takes the street. The church-light finale is still coming.</source>
+        <translation>Ночь 19:00-06:00, ~10% за цикл: высокий ходит кругом вокруг света одного фонаря и держит дистанцию; отпускает, только когда солнце заберёт улицу. Финал со светом церкви ещё дописывается.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="43"/>
         <source>The Night Taxicab</source>
         <translation>Ночной таксист</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="43"/>
+        <location filename="../app/encountersdialog.cpp" line="44"/>
+        <source>By the night parking lot or the metro stop stands a car, and beside it a fellow traveller. Start the engine - a silhouette on the back seat. Step out to look - nobody, and the door slams itself. The arc closes where his garage stands in the industrial zone: an empty place with a stain.</source>
+        <translation>У ночной парковки или у остановки метро стоит машина, а рядом — «попутчик». Заведёшь двигатель — на заднем сиденье силуэт. Выйдешь посмотреть — никого, и дверь сама хлопнет. Арка закрывается, когда найдёшь его «гараж» в промзоне: пустое место с пятном.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="49"/>
+        <source>Night 19:00-06:00, about 10% per cycle: a plate lying by one car&apos;s door is his ignition. Find his empty spot with the stain in the industrial zone and the rider is gone for good.</source>
+        <translation>Ночь 19:00-06:00, ~10% за цикл: табличка у дверцы одной из машин - его зажигание. Найди его пустое место с пятном в промзоне - наездник уйдёт навсегда.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="53"/>
         <source>The Echo of the tunnels</source>
         <translation>Эхо тоннелей</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="48"/>
+        <location filename="../app/encountersdialog.cpp" line="54"/>
+        <source>In the metro tunnels and the underpasses it gives your own steps back a breath late, as if from another tunnel. The closer it is, the more in sync. Lead it into the street: the Echo does not go outside.</source>
+        <translation>В тоннелях метро и подземных переходах повторяет шаги игрока с задержкой в полтора секунды — будто из другого тоннеля. Чем ближе, тем синхроннее. Вывести на поверхность: Эхо на улицу не выходит.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="57"/>
+        <source>No dice at all: it listens in a baked tunnel - a step is heard where you stood one cycle ago. Stand still and only silence answers; outdoors it cannot follow.</source>
+        <translation>Без всякого шанса: слушает в «его» тоннеле - твой же шаг слышен там, где ты стоял циклом назад. Стоишь на месте - только тишина; на улицу не выходит.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="61"/>
         <source>The Night Matron (schools, hospitals)</source>
         <translation>Ночная дежурная (школы, больницы)</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="53"/>
+        <location filename="../app/encountersdialog.cpp" line="62"/>
+        <source>In schools, kindergartens and hospital wings the light comes on in her offices by a schedule, and a note &apos;check the 3rd floor&apos; shows on the block&apos;s board. Find her locker with the key and the block calms down.</source>
+        <translation>В школах, детсадах и больничных корпусах: свет включается «в её» кабинетах по расписанию, на карте квартала появляется записка «проверь 3 этаж». Найти её шкафчик с ключом — квартал успокаивается.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="65"/>
+        <source>Night 19:00-06:00, about 10% per cycle: in one school/hospital wing the light turns on in her office (314) and someone walks the corridor; by morning it goes dark again. The locker with the key is still coming.</source>
+        <translation>Ночь 19:00-06:00, ~10% за цикл: в одном из корпусов включается свет в «её» кабинете (314), по коридору кто-то ходит; к утру гаснет. Шкафчик с ключом ещё дописывается.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="70"/>
         <source>The Mower in the fog</source>
         <translation>Косильщик в тумане</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="57"/>
+        <location filename="../app/encountersdialog.cpp" line="71"/>
+        <source>The owner of a lawn that ran out. Invisible by day, his motor is audible in the fog; by morning the grass carries even stripes nobody mowed. The stripes cut a path to his shed - find it.</source>
+        <translation>Владелец газона, который кончился. Днём невидим, в тумане слышен мотор; к утру на траве ровные полосы, которых никто не косил. Полосы обкашивают путь к его сарайке — найти.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="74"/>
+        <source>Late night 00:00-06:00, about 8% per cycle: one stripe a night - three cells of grass trodden with the hum of something small and low. Dawn gives the whole lawn back.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~8% за цикл: одна полоса за ночь - три клетки газона примяты с гулом чего-то маленького и низкого. Рассвет возвращает газон целиком.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="78"/>
         <source>The Neighbour Above</source>
         <translation>Сосед сверху</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="61"/>
+        <location filename="../app/encountersdialog.cpp" line="79"/>
+        <source>A stomp strictly above your head wherever you spend the night. One floor up is a door that is on no plan. Go up to the roof: a chair waits there, a little yard, and a view over the whole city.</source>
+        <translation>Топот строго над головой, где бы ты ни ночевал. Этажом выше — дверь, которой нет на плане. Подняться на крышу: там стул, маленький дворик и вид на весь город.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="82"/>
+        <source>Late night 00:00-06:00, about 14% per cycle: furniture dragged seven blocks over your head, or three knocks with a door behind them. Only sound - the blocks never move.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~14% за цикл: звук передвигаемой мебели в семи блоках над головой или три стука с дверью за ними. Блоки не двигаются - только звук.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="86"/>
         <source>The Third Passenger</source>
         <translation>Третий в вагоне</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="65"/>
+        <location filename="../app/encountersdialog.cpp" line="87"/>
+        <source>In a &apos;car&apos; (a tunnel with tracks) there are always more riders than boarded. Do not turn around until the terminus - it passes.</source>
+        <translation>В «вагоне» (тоннеле с путями) пассажиров всегда на одного больше, чем зашло. Не оборачиваться до конечной — пройдёт.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="89"/>
+        <source>No dice at all: in a baked tunnel with tracks two shadows repeat your path one and two cycles behind you, and a third set of steps belongs to nobody. The count is announced once per walk; the shadows dissolve at dawn.</source>
+        <translation>Без шанса: в «его» тоннеле с путями две тени повторяют твой путь с отставанием в цикл и в два, а третьи шаги за ними ничьи. Счёт объявляется раз за проход, тени тают к рассвету.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="94"/>
         <source>Bus No. 13</source>
         <translation>Автобус №13</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="69"/>
+        <location filename="../app/encountersdialog.cpp" line="95"/>
+        <source>At night, at a terminus on the outskirts, a route that does not exist stops. The doors stand open; do not step inside - darkness and breathing. Keep its timetable and photograph it, and it becomes a harmless legend.</source>
+        <translation>Ночью на конечной у окраины останавливается маршрут, которого нет. Двери открыты; внутрь заходить нельзя — там темнота и дыхание. Засечь его расписание и сфотографировать — станет безобидной легендой.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="99"/>
+        <source>Night 19:00-06:00, about 12% per cycle: at a stop without route 13 the 13 only flickers past twice, with the roar of a passing engine. Stand there very still with a clock in hand and the stop stays quiet for good.</source>
+        <translation>Ночь 19:00-06:00, ~12% за цикл: на остановке без маршрута 13 он только мелькает дважды, с рёвом проезжающего мотора. Постой там неподвижно с часами в руках - остановка замолкает навсегда.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="103"/>
         <source>Parks and yards</source>
         <translation>Парки и дворы</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="70"/>
+        <location filename="../app/encountersdialog.cpp" line="104"/>
         <source>The Midnight Carousel</source>
         <translation>Полуночная карусель</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="74"/>
+        <location filename="../app/encountersdialog.cpp" line="105"/>
+        <source>It spins and plays by itself while nobody watches. It already works as a demo: cold sparks over the marked parks.</source>
+        <translation>Крутится сама и играет, пока никто не видит. Уже работает как демо: холодные искры над отмеченными парками.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="107"/>
+        <source>Night 19:00-06:00, about 8% per cycle: a cold end-rod shimmer flies over the parks marked for the carousel. The carousel itself is still coming.</source>
+        <translation>Ночь 19:00-06:00, ~8% за цикл: над отмеченными каруселью парками летает холодное мерцание end rod. Сама карусель ещё дописывается.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="111"/>
         <source>The Swings Nobody Rides</source>
         <translation>Качели, которые никто не качает</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="78"/>
+        <location filename="../app/encountersdialog.cpp" line="112"/>
+        <source>On the playground&apos;s fourth swing an invisible rider rocks; beside it in the sand, a boot print that was not there in the evening.</source>
+        <translation>На четвёртых качелях площадки укачивается невидимый; рядом в песке — след ботинка, которого вечером не было.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="114"/>
+        <source>Night 19:00-06:00, about 25% per cycle: the seat of the swings goes along the arc eight positions at a time under nobody; the playground is picked by the roll.</source>
+        <translation>Ночь 19:00-06:00, ~25% за цикл: сиденье качелей идёт по дуге восемь позиций за раз под невидимого; площадка выбирается по шансу.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="118"/>
         <source>Chalk That Redraws Itself</source>
         <translation>Мел, который дорисовывает себя сам</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="82"/>
+        <location filename="../app/encountersdialog.cpp" line="119"/>
+        <source>A children&apos;s chalk drawing on asphalt: &apos;drive here&apos;. At night the drawing changes - it is redrawn toward a new address.</source>
+        <translation>Детский рисунок мелом на асфальте: «доезжай сюда». Ночью рисунок меняется — функция перерисовывает его на новый адрес.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="121"/>
+        <source>Night 19:00-06:00, about 40% per cycle: the chalk arrow on the asphalt is erased and redrawn pointing to a new address, in another color.</source>
+        <translation>Ночь 19:00-06:00, ~40% за цикл: меловая стрелка на асфальте стирается и перерисовывается на новый адрес, другим цветом.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="124"/>
         <source>The Twin Island</source>
         <translation>Остров-близнец</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="86"/>
+        <location filename="../app/encountersdialog.cpp" line="125"/>
+        <source>Over the park that already got its flying island a second one rises, with no base under it. A spare exit for the Lurker.</source>
+        <translation>Над парком, которому уже достался летающий остров, появляется второй — без основания под ним. «Запасной выход» для Долгого.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="127"/>
+        <source>The logic is coming: by the design the second island will rise over the first.</source>
+        <translation>Логика дописывается: по замыслу второй остров поднимется над первым.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="130"/>
         <source>The Fountain Running Downward</source>
         <translation>Фонтан, уходящий вниз</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="90"/>
+        <location filename="../app/encountersdialog.cpp" line="131"/>
+        <source>At night the fountain&apos;s water flows not into the bowl but three blocks below ground level. Under the fountain, a cavity that is on no plan.</source>
+        <translation>Ночью вода из фонтана течёт не в чашу, а на три блока ниже уровня земли. Под фонтаном — полость, которой нет на планах.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="133"/>
+        <source>Night 19:00-06:00, about 10% per cycle: the bowl drains in one tick - the water leaves through the bottom - and half a minute later climbs back, colder.</source>
+        <translation>Ночь 19:00-06:00, ~10% за цикл: чаша пустеет за тик - вода уходит сквозь дно - и через полминуты поднимается обратно, холоднее.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="137"/>
         <source>The Bench Not For Everyone</source>
         <translation>Скамейка не для всех</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="94"/>
+        <location filename="../app/encountersdialog.cpp" line="138"/>
+        <source>Sit here - and the same bench stands in fog and rain, with not one sound from the city. A mini-dimension; the way out is simply to stand up.</source>
+        <translation>Сесть сюда — и та же скамейка стоит уже в тумане и дожде, и от города ни одного звука. Мини-измерение; выход — просто встать.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="141"/>
+        <source>About every three minutes the fog takes one oak bench within fifty blocks of a player - its seat turns dark. Stand three seconds before the dark bench and you sink into the park; the way out waits before the middle seat. The dread flattens to twenty-five.</source>
+        <translation>Раз в три минуты туман выбирает одну дубовую скамейку в пятидесяти блоках от игрока - сиденье темнеет. Постой три секунды перед тёмной - уйдёшь в парк; выход ждёт перед средней скамьёй. Ужас сглаживается до двадцати пяти.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="146"/>
         <source>The Dog Without An Owner</source>
         <translation>Собака без владельца</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="96"/>
+        <location filename="../app/encountersdialog.cpp" line="147"/>
+        <source>It follows the player in silence and disappears the moment you come near people.</source>
+        <translation>Идёт за игроком молча и исчезает, стоит подойти к людям.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="149"/>
+        <source>Night: a dog with no address falls in beside one walker - it keeps to him alone, slips away among people and is gone by dawn. It never makes a sound on its own.</source>
+        <translation>Ночь: пёс без адреса пристрояется к одному из идущих - держится одного, исчезает среди людей и уходит к рассвету. Сам не подаёт голоса.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="152"/>
         <source>Graveyards</source>
         <translation>Кладбища</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="97"/>
+        <location filename="../app/encountersdialog.cpp" line="153"/>
         <source>Pumpkins That Turn To You</source>
         <translation>Тыквы, которые поворачиваются к тебе</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="100"/>
+        <location filename="../app/encountersdialog.cpp" line="154"/>
+        <source>Jack-o&apos;-lanterns turn their faces toward the player - the block changes while you watch from afar.</source>
+        <translation>Тыквы-фонари поворачиваются «лицом» к игроку — блок меняется, пока смотришь издалека.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="156"/>
+        <source>No dice at all: every cycle the cemetery jacks turn their carved face to whoever watches from a distance - and never to someone standing close.</source>
+        <translation>Без шанса: каждый цикл тыквы-фонари поворачивают «лицо» к тому, кто смотрит издалека, - и никогда к тому, кто стоит вблизи.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="160"/>
         <source>The Fresh Grave</source>
         <translation>Свежая могила</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="103"/>
+        <location filename="../app/encountersdialog.cpp" line="161"/>
+        <source>Lit up as &apos;fresh soil&apos;. Do not dig: the shovel&apos;s sound breaks off on its own.</source>
+        <translation>Подсвечена «свежим грунтом». Копать нельзя: звук лопаты обрывается сам.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="163"/>
+        <source>Night 19:00-06:00, about 10% per cycle: one grave is lit up with fresh soil; dig into it and the grave digs itself back up.</source>
+        <translation>Ночь 19:00-06:00, ~10% за цикл: одна могила подсвечена свежим грунтом; копнёшь - могила закапывается обратно.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="166"/>
         <source>The Night Procession</source>
         <translation>Ночная процессия</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="107"/>
+        <location filename="../app/encountersdialog.cpp" line="167"/>
+        <source>At night a column of unseen mourners walks to the gates - only particles and steps. Stand in its way and they walk through.</source>
+        <translation>Ночью колонна невидимок идёт к воротам — только частицы и шаги. Встанешь на путь — пройдут сквозь.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="169"/>
+        <source>Late night 00:00-06:00, about 6% per cycle: soul fire marches along a graveyard alley from grave to grave, two seconds a cell; one procession at a time, and it walks only while somebody could see it.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~6% за цикл: аллейкой кладбища шагает soul fire от могилы к могиле, две секунды на клетку; колонна одна, и идёт она, пока её кто-то может видеть.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="173"/>
         <source>The Caretaker</source>
         <translation>Сторож</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="110"/>
+        <location filename="../app/encountersdialog.cpp" line="174"/>
+        <source>A skeleton in the guard house: while you are near he pretends to sit; turn away and he already stands at the door.</source>
+        <translation>Скелет в будке: при игроке делает вид, что сидит; отвернёшься — уже стоит у двери.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="176"/>
+        <source>Late night 00:00-06:00, about 8% per cycle: come to one side of the mound and the caretaker is already standing on the opposite one; at dawn he leaves.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~8% за цикл: придёшь на одну сторону холмика - Смотритель уже на противоположной; к рассвету уходит.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="180"/>
         <source>Always 03:07</source>
         <translation>Всегда 03:07</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="112"/>
+        <location filename="../app/encountersdialog.cpp" line="181"/>
+        <source>The cemetery clock strikes 03:07 even after the player broke its mechanism.</source>
+        <translation>Часы кладбища бьют 03:07, даже когда игрок сломал механизм.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="183"/>
+        <source>Seven bell strikes at exactly 03:07; the cemetery clock rebuilds itself after a break. Nothing more.</source>
+        <translation>Семь ударов ровно в 03:07; часы кладбища отстраиваются после поломки. Больше ничего.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="185"/>
         <source>Metro and tunnels</source>
         <translation>Метро и тоннели</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="113"/>
+        <location filename="../app/encountersdialog.cpp" line="186"/>
         <source>The Last Train</source>
         <translation>Последний поезд</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="117"/>
+        <location filename="../app/encountersdialog.cpp" line="187"/>
+        <source>Every few nights a train walks the tunnel: hostile mobs stay away while it runs. You can &apos;catch&apos; it and ride to the stash - a teleport room.</source>
+        <translation>Раз в несколько ночей по тоннелю проходит поезд: враждебные мобы в это время не появляются. Можно «поймать» его и уехать в тайник (комната-телепорт).</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="190"/>
+        <source>Deep night 05:00-06:00, about 10% per cycle: the train moves one cell every two seconds, clears the platform of mobs, and past the hall carries whoever stood on the platform to a room at the end of the line.</source>
+        <translation>Глубокая ночь 05:00-06:00, ~10% за цикл: поезд идёт по клетке за две секунды, вычищает платформу от мобов, а проехав зал увозит стоявшего на платформе в комнату в конце линии.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="195"/>
         <source>The Station That Is Not</source>
         <translation>Станция, которой нет</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="121"/>
+        <location filename="../app/encountersdialog.cpp" line="196"/>
+        <source>A signpost to the exit of a station that does not exist appears. Follow it: an empty hall, one burning lamp and a school desk.</source>
+        <translation>У игрока появляется указатель на выход к станции, которой нет. Придёшь — пустой зал, один горящий фонарь и школьная парта.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="198"/>
+        <source>Night 01:00-06:00, about 6% per cycle: the hall that is on no map lights up for about a minute - a lantern and a bell stand in it while nobody looks closely; the morning sweep removes them.</source>
+        <translation>Ночь 01:00-06:00, ~6% за цикл: зал, которого нет на картах, светится около минуты - фонарь и колокол стоят в нём, пока никто не смотрит вблизи; утренний обход их забирает.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="202"/>
         <source>The Stair With One Flight More</source>
         <translation>Лестница на пролёт больше</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="125"/>
+        <location filename="../app/encountersdialog.cpp" line="203"/>
+        <source>The escalator or the vestibule stairs climb one flight more than the outside shows. Inside, a decoy room.</source>
+        <translation>Эскалатор или лестница вестибюля ведёт на пролёт больше, чем видно снаружи. Внутри — комната-обманка.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="205"/>
+        <source>Night 03:00-06:00, about 6% per cycle: rail dust six times and a roar nobody counts the same way twice. The blocks never move.</source>
+        <translation>Ночь 03:00-06:00, ~6% за цикл: шесть раз пыль над путями и рёв, который никто досчитает одинаково дважды. Блоки не двигаются.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="208"/>
         <source>The Breathing Rails</source>
         <translation>Дышащие рельсы</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="128"/>
+        <location filename="../app/encountersdialog.cpp" line="209"/>
+        <source>The gap between the rails cyclically widens and narrows. At the middle of the span, a voice.</source>
+        <translation>Зазор между путями циклически расширяется и сужается. На середине пролёта — голос.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="211"/>
+        <source>Late night 00:00-06:00, about 6% per cycle: a red pulse walks the route, thinning and thickening, and at the middle a low sound leans in to listen to the sleeper. Only light and sound move; nobody is ever sealed inside.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~6% за цикл: по маршруту ходит красный пульс, разрежаясь и сгущаясь, а посередине низкий звук наклоняется послушать спящего. Двигаются только свет и звук; никого не запирает.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="216"/>
         <source>The Darkness Behind You</source>
         <translation>Тьма за спиной</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="131"/>
+        <location filename="../app/encountersdialog.cpp" line="217"/>
+        <source>Light in the tunnel goes out in segments behind your back: every lamp keeps its own timer, and the dark catches up.</source>
+        <translation>Свет в тоннеле гаснет сегментами за спиной: у каждого фонаря свой таймер, тьма догоняет.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="219"/>
+        <source>The logic is coming: by the design the tunnel lamps will go out segment by segment behind the walker.</source>
+        <translation>Логика дописывается: по замыслу фонари тоннеля будут гаснуть по сегментам за спиной.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="221"/>
         <source>Tower living</source>
         <translation>Высотки</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="132"/>
+        <location filename="../app/encountersdialog.cpp" line="222"/>
         <source>Floor Nine And A Half</source>
         <translation>Этаж девять с половиной</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="136"/>
+        <location filename="../app/encountersdialog.cpp" line="223"/>
+        <source>A door between the ninth and tenth floors. Behind it the same floor, only in mirrors: a duplicated mini-floor.</source>
+        <translation>Дверь между девятым и десятым этажом. За ней — тот же этаж, только в зеркалах: сдублированный мини-этаж.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="225"/>
+        <source>After midnight the door that is on no plan shows in the stairwell of a tall house (about 8% per cycle). Open it from the flight and you stand on the landing. The floor takes each guest fifty-fifty: a chest in the hall (nine of ten plain, one of ten from a mansion), or company: five to fifteen monsters, or a warden. Any door there brings you back to your own flight; by morning nothing is left.</source>
+        <translation>После полуночи в лестничной клетке высотника проступает дверь, которой нет на плане (~8% за цикл). Открой её с пролёта - ты на площадке. Этаж принимает каждого пятьдесят на пятьдесят: сундук в зале (девять из десяти простых, один из десяти из поместья) - или компания: от пяти до пятнадцати монстров, либо варден. Любая дверь за ней вернёт на свой пролёт; к утру не остаётся ничего.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="232"/>
         <source>The Lift Without A Shaft</source>
         <translation>Лифт без шахты</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="139"/>
+        <location filename="../app/encountersdialog.cpp" line="233"/>
+        <source>Call the lift on an empty flight - there will be a sound and &apos;doors&apos; opening onto a blind wall.</source>
+        <translation>Вызвать лифт на пустом пролёте — будет звук и раскрывшиеся «двери» в глухую стену.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="235"/>
+        <source>Late night 00:00-06:00, about 8% per cycle: press a button where there is no button and the shaft hums behind the stairwell wall, doors sliding across plain plaster. The cabin never comes.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~8% за цикл: нажми кнопку там, где кнопки нет, - за стеной лестничной клетки загудит шахта, двери разъедутся по глухой штукатурке. Кабина так и не приедет.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="239"/>
         <source>The Window Wave</source>
         <translation>Волна окон</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="143"/>
+        <location filename="../app/encountersdialog.cpp" line="240"/>
+        <source>Light in every window of one house turns on in turn from bottom to top, over twenty seconds, and goes out all at once.</source>
+        <translation>Свет во всех окнах одного дома включается по очереди снизу вверх, за двадцать секунд, и гаснет разом.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="242"/>
+        <source>Night 19:00-06:00, about 8% per cycle: a wave of light runs up one house&apos;s windows and dies at once. Houses without a fit row of windows sit it out.</source>
+        <translation>Ночь 19:00-06:00, ~8% за цикл: по окнам одного дома снизу вверх пробегает волна света и гаснет разом. Дома без годного ряда окон не участвуют.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="246"/>
         <source>The Roof Garden</source>
         <translation>Огород на крыше</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="147"/>
+        <location filename="../app/encountersdialog.cpp" line="247"/>
+        <source>On the roof: a garden bed, an armchair and a sign &apos;do not disturb&apos;. The owner will shush anyone trampling the beds.</source>
+        <translation>На крыше — грядка, кресло и табличка «не мешайте». Хозяин шикнет, если топтать по грядкам.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="249"/>
+        <source>The logic is coming: by the design the roof will keep a garden with a guardian.</source>
+        <translation>Логика дописывается: по замыслу на крыше заведётся грядка со сторожем.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="252"/>
         <source>The Boarded-Over Door</source>
         <translation>Заколоченная дверь</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="150"/>
+        <location filename="../app/encountersdialog.cpp" line="253"/>
+        <source>A door that is on the plan but boarded over. At night there is crying behind it. Tear the boards off - a room full of inscriptions.</source>
+        <translation>Дверь, которая есть на плане, но заколочена. Ночью из-за неё слышно плач. Снять доски — комната с надписями.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="255"/>
+        <source>The logic is coming: by the design a boarded door and a room behind it.</source>
+        <translation>Логика дописывается: по замыслу заколоченная дверь и комната за ней.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="257"/>
         <source>Streets and parking</source>
         <translation>Улицы и парковки</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="151"/>
+        <location filename="../app/encountersdialog.cpp" line="258"/>
         <source>The Extra Car</source>
         <translation>Лишняя машина</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="155"/>
+        <location filename="../app/encountersdialog.cpp" line="259"/>
+        <source>A car on the parking lot that was not on the list (OSMC places cars deterministically - so this one is &apos;extra&apos;). Its tape deck plays the news about that driver.</source>
+        <translation>Машина на парковке, которой не было в списке (OSMC расставляет машины детерминированно — вот и «лишняя»). Внутри магнитофон играет новости про «этого водителя».</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="262"/>
+        <source>Night 01:00-06:00, about 8% per cycle: a radio talks beside one of the cars - three note block taps like a broadcast without words, a line on the actionbar; silence by morning.</source>
+        <translation>Ночь 01:00-06:00, ~8% за цикл: у одной из машин играет радио голосами: три удара note block, как передача без слов, строка над хотбаром; к утру тихо.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="266"/>
         <source>The Flasher Without A Car</source>
         <translation>Мигалка без машины</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="159"/>
+        <location filename="../app/encountersdialog.cpp" line="267"/>
+        <source>A flasher without a car over an empty intersection. Come near - it dies here and lights up behind your back.</source>
+        <translation>Мигалка без машины на пустом перекрёстке. Подойдёшь — гаснет здесь и включается за спиной.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="269"/>
+        <source>Evening 18:00-06:00, about 10% per cycle: a blue blink over one of the crossings; approach and it goes out here and comes on behind you.</source>
+        <translation>Вечер 18:00-06:00, ~10% за цикл: синее мигание над одним из перекрёстков; подойдёшь - гаснет здесь и включается за спиной.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="272"/>
         <source>The Interchange Loop</source>
         <translation>Петля развязки</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="163"/>
+        <location filename="../app/encountersdialog.cpp" line="273"/>
+        <source>You passed the same interchange sign three times - and the block around you &apos;re-assembled&apos;: the neighboring chunks swapped in a mini-location.</source>
+        <translation>Проехал один и тот же знак развязки трижды — квартал вокруг «пересобрался»: соседние чанки подменены мини-локацией.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="276"/>
+        <source>The logic is coming: by the design a block reassembling around the same sign.</source>
+        <translation>Логика дописывается: по замыслу квартал, пересобирающийся вокруг одного и того же знака.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="279"/>
         <source>The Roadworks On The Viaduct</source>
         <translation>Ремонт на виадуке</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="167"/>
+        <location filename="../app/encountersdialog.cpp" line="280"/>
+        <source>&apos;Roadworks&apos; of blocks on the viaduct ahead. Clear the wreck and behind it is a cliff into nothing: the world&apos;s end, staged.</source>
+        <translation>На виадуке впереди «дорожные работы» из блоков. Разобрать завал — за ним обрыв в никуда: иллюзия конца мира.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="282"/>
+        <source>The logic is coming: by the design a wreck on the viaduct with a cliff behind it.</source>
+        <translation>Логика дописывается: по замыслу завал на виадуке с обрывом за ним.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="285"/>
         <source>The Hitchhiker</source>
         <translation>Автостопщик</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="170"/>
+        <location filename="../app/encountersdialog.cpp" line="286"/>
+        <source>A voice from the road edge asks for a ride. Take him and two hundred meters on he vanishes, leaving a note.</source>
+        <translation>Голос с обочины просит подвезти. Посадишь — через двести метров исчезнет, оставит записку.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="288"/>
+        <source>Night 04:00-06:00, about 6% per cycle: somebody waits at the road edge with a lantern; come close to offer a ride and the lantern burns on empty asphalt. By morning a note lies there: &apos;I did not ride. thank you anyway&apos;.</source>
+        <translation>Ночь 04:00-06:00, ~6% за цикл: у обочины кто-то ждёт с фонарём; подойдёшь подвезти - фонарь горит на пустом асфальте. К утру на нём записка: я не поехал. всё равно спасибо.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="292"/>
         <source>Schools</source>
         <translation>Школы</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="171"/>
+        <location filename="../app/encountersdialog.cpp" line="293"/>
         <source>The Game In The Gym</source>
         <translation>Игра в спортзале</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="174"/>
+        <location filename="../app/encountersdialog.cpp" line="294"/>
+        <source>At night somebody plays on the gym&apos;s net - the sounds of a ball. Step in: the ball rolls toward the door.</source>
+        <translation>Ночью в спортзале на сетке кто-то играет — звуки мяча. Зайти: мяч катится к двери.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="296"/>
+        <source>Night 01:00-06:00, about 10% per cycle: a snowball hops between three cells of the school gym - the yard plays by itself; by morning the ball lies still.</source>
+        <translation>Ночь 01:00-06:00, ~10% за цикл: снежок скачет между тремя клетками школьного зала - двор играет сам; к утру мяч замирает.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="300"/>
         <source>The Skipping Rope</source>
         <translation>Скакалка</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="177"/>
+        <location filename="../app/encountersdialog.cpp" line="301"/>
+        <source>In the yard a skipping rope jumps that nobody turns - and &apos;two of them&apos; jump into it.</source>
+        <translation>Во дворе скачет скакалка, которую никто не крутит, — и «двое» под неё прыгают.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="303"/>
+        <source>Night 01:00-06:00, about 8% per cycle: the rhythm of a note block, a rope of crit particles across the dark, and on every beat two small silhouettes rise and sit back down.</source>
+        <translation>Ночь 01:00-06:00, ~8% за цикл: ритм note block, верёвка из crit-частиц через темноту и на каждую долю два силуэта поменьше поднимаются и садятся обратно.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="307"/>
         <source>The Empty Auditorium</source>
         <translation>Пустой актовый зал</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="180"/>
+        <location filename="../app/encountersdialog.cpp" line="308"/>
+        <source>A spotlight switches on by itself over one empty chair; on the stage, the chalk outline of a &apos;graduate&apos;.</source>
+        <translation>Прожектор сам включается на пустое кресло; на сцене меловой контур «выпускника».</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="310"/>
+        <source>Night 02:00-06:00, about 6% per cycle: a pillar of end rod over the school yard, three slow pulses, and the outline of a graduate drawn in white sparks.</source>
+        <translation>Ночь 02:00-06:00, ~6% за цикл: столб end rod над школьным двором, три медленных импульса и контур выпускника белыми искрами.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="314"/>
         <source>Yesterday&apos;s Timetable</source>
         <translation>Расписание на вчера</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="183"/>
+        <location filename="../app/encountersdialog.cpp" line="315"/>
+        <source>The subjects on the board &apos;for tomorrow&apos; get rewritten to &apos;yesterday&apos;s&apos; - including teachers the school never had.</source>
+        <translation>Предметы на доске «на завтра» переписываются на предметы «на вчера» — включая тех, которых в школе никогда не было.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="317"/>
+        <source>Morning 07:00-12:00, about 8% per cycle: dust over the school&apos;s chest, a scrap left on its lid, and the last line reads a name the city does not have. The scrap can be picked up.</source>
+        <translation>Утро 07:00-12:00, ~8% за цикл: пыль над сундуком у школы, клочок на крышке, а последней строкой - имя, которого город не знает. Листок можно взять.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="320"/>
         <source>Private sector</source>
         <translation>Частный сектор</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="184"/>
+        <location filename="../app/encountersdialog.cpp" line="321"/>
         <source>The Banya With Lights On</source>
         <translation>Баня со светом</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="188"/>
+        <location filename="../app/encountersdialog.cpp" line="322"/>
+        <source>A banya that is &apos;abandoned&apos; yet steams and glows. Inside, a basin and a broom; take the broom and you will hear &apos;put it back&apos;, and it will not be yours to take until night.</source>
+        <translation>Баня, которая «брошена», а в ней пар и свет. Внутри таз и веник; возьмёшь веник — услышишь «положи обратно», и взять его нельзя до ночи.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="325"/>
+        <source>The logic is coming: by the design a banya with steam and a broom that must go back.</source>
+        <translation>Логика дописывается: по замыслу баня с паром и веником, который должен вернуться.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="328"/>
         <source>The Gate That Is Always Locked</source>
         <translation>Калитка, которая всегда заперта</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="192"/>
+        <location filename="../app/encountersdialog.cpp" line="329"/>
+        <source>The wicket that is &apos;always locked&apos; stands open for the third time. Behind it the same plot, only in winter: a mini-substitution.</source>
+        <translation>Калитка, которая «всегда заперта», в третий раз открыта. За ней — тот же участок, но зимой: мини-подмена.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="331"/>
+        <source>The logic is coming: by the design a wicket into the same plot, but winter.</source>
+        <translation>Логика дописывается: по замыслу калитка в тот же участок, только зимой.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="334"/>
         <source>The Scarecrow That Turned</source>
         <translation>Пугало, которое повернулось</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="196"/>
+        <location filename="../app/encountersdialog.cpp" line="335"/>
+        <source>By day it stands with its back to the house - you may check and turn it. At night it faces the house, and on its chest a board says &apos;leave by morning&apos;.</source>
+        <translation>Днём стоит спиной к дому — можно проверить и переставить. Ночью — лицом к дому, на груди доска «убирайся к утру».</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="338"/>
+        <source>Night: the scarecrow turns to face the house, puts on a carved pumpkin and the warning &apos;leave by morning&apos;; by day it turns back.</source>
+        <translation>Ночь: пугало поворачивается лицом к дому, надевает тыкву и доску «уйди к утру»; днём снова спиной.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="341"/>
         <source>The Dog Howling At One Fence</source>
         <translation>Пёс, воющий у одного забора</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="198"/>
+        <location filename="../app/encountersdialog.cpp" line="342"/>
+        <source>The neighbor&apos;s dog howls at one fence only. By that fence, an underground run into the forest.</source>
+        <translation>Соседская собака воет только у одного забора. У того забора — подземный ход в лес.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="344"/>
+        <source>Late night 00:00-06:00, about 10% per cycle: a howl from the field past the last house, and six seconds later an answer from further off. The underground run is still being dug.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~10% за цикл: вой с поля за последним домом, через шесть секунд ответ дальше. Подземный ход ещё докапывается.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="347"/>
         <source>Woods and industry</source>
         <translation>Леса и промзоны</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="199"/>
+        <location filename="../app/encountersdialog.cpp" line="348"/>
         <source>The White Moths</source>
         <translation>Белые мотыльки</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="203"/>
+        <location filename="../app/encountersdialog.cpp" line="349"/>
+        <source>A flight of white moth particles around one lamp. Stand in the center - the wing sound dies right in your ear.</source>
+        <translation>Стая белых мотыльков-частиц вокруг одного фонаря. Встанешь в центр — звук крыльев стихает прямо в ухе.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="351"/>
+        <source>Night 01:00-06:00, about 10% per cycle: a ring of moths turns around one lamp for about a minute; stand in the middle and the world goes quiet.</source>
+        <translation>Ночь 01:00-06:00, ~10% за цикл: круг мотыльков крутится вокруг одного фонаря около минуты; встань в середину - мир стихает.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="355"/>
         <source>The Hum Of The Power Line</source>
         <translation>Гул ЛЭП</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="207"/>
+        <location filename="../app/encountersdialog.cpp" line="356"/>
+        <source>A power-line cut with no pylons - the wires lie in the earth, and fifty hertz is audible. At the cut&apos;s end, a meter booth serving the whole district.</source>
+        <translation>Просека линии без опор — провода лежат в земле, и слышно пятьдесят герц. В конце просеки — будка со счётчиком на весь район.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="359"/>
+        <source>Night 02:00-06:00, about 8% per cycle: one lamp carries the hum tonight - three low pulses under the light, and the ordinary night again. The wires stay underground.</source>
+        <translation>Ночь 02:00-06:00, ~8% за цикл: одна лампа несёт гул сегодня - три низких импульса под светом, и обычная ночь. Провода остаются под землёй.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="363"/>
         <source>The Dead Camp</source>
         <translation>Мёртвый лагерь</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="211"/>
+        <location filename="../app/encountersdialog.cpp" line="364"/>
+        <source>An abandoned camp in the woods (OSMC builds such): the fire burns itself out, a fresh spoon lies by the coals.</source>
+        <translation>Заброшенный лагерь в лесу (OSMC такие строит): костёр дотлевёт сам, рядом свежая ложка у углей.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="366"/>
+        <source>The logic is coming: by the design a fire dying out by itself and somebody&apos;s spoon.</source>
+        <translation>Логика дописывается: по замыслу дотлевающий сам костёр и чья-то ложка.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="369"/>
         <source>The Conveyor At Night</source>
         <translation>Ночной конвейер</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="214"/>
+        <location filename="../app/encountersdialog.cpp" line="370"/>
+        <source>At night the shop floor&apos;s conveyor rolls a crate out onto the street. Inside: a mannequin in working overalls.</source>
+        <translation>Ночью конвейер цеха вывозит на улицу ящик. Внутри — манекен в рабочей робе.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="372"/>
+        <source>The logic is coming: by the design a crate rolling out at night with a &apos;worker&apos; inside.</source>
+        <translation>Логика дописывается: по замыслу ящик, выезжающий ночью, с рабочим внутри.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="375"/>
         <source>The Window In The Taiga</source>
         <translation>Окно в тайге</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="217"/>
+        <location filename="../app/encountersdialog.cpp" line="376"/>
+        <source>In the taiga by the private sector a path leads exactly to a &apos;window&apos; between houses. In the window, the light of your own campfire.</source>
+        <translation>В тайге у частного сектора тропинка ведёт ровно к «окну» между домами. В окне — свет твоего костра.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="378"/>
+        <source>The logic is coming: by the design a path leading to a lit window in the taiga.</source>
+        <translation>Логика дописывается: по замыслу тропинка к освещённому окну в тайге.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="380"/>
         <source>Water</source>
         <translation>Вода</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="218"/>
+        <location filename="../app/encountersdialog.cpp" line="381"/>
         <source>The Light Path On The Bottom</source>
         <translation>Светящаяся дорожка на дне</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="222"/>
+        <location filename="../app/encountersdialog.cpp" line="382"/>
+        <source>In the park lake a path of pale stone lies along the bottom. Walk it and the light goes out in patches behind your back.</source>
+        <translation>В озере парка по дну лежит дорожка из светлого камня. Идёшь по ней — свет гаснет участками за спиной.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="384"/>
+        <source>The logic is coming: by the design a light path under water dying section by section behind the walker.</source>
+        <translation>Логика дописывается: по замыслу светящаяся дорожка под водой, гаснущая участками за спиной.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="387"/>
         <source>Offerings On The Railing</source>
         <translation>Приношения на перилах</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="226"/>
+        <location filename="../app/encountersdialog.cpp" line="388"/>
+        <source>On the bridge railing &apos;offerings&apos; arrange themselves in rows of three. By morning the row has grown again.</source>
+        <translation>На перилах моста рядами складываются «приношения» по три предмета. К утру ряд дополняется сам.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="390"/>
+        <source>The logic is coming: by the design offerings on the railing, filling up by morning.</source>
+        <translation>Логика дописывается: по замыслу приношения на перилах, дополняющиеся к утру.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="393"/>
         <source>The Reflection Of An Absent Cloud</source>
         <translation>Отражение несуществующего облака</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="228"/>
+        <location filename="../app/encountersdialog.cpp" line="394"/>
+        <source>In the fountain&apos;s or the river&apos;s water a cloud is reflected that is not in this sky.</source>
+        <translation>В воде фонтана или реки отражается облако, которого на небе нет.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="396"/>
+        <source>Night 01:00-06:00, about 6% per cycle: a white softness drifts over the water three sweeps, passing under your own reflection.</source>
+        <translation>Ночь 01:00-06:00, ~6% за цикл: белая мягкость проходит три зачерка по воде - под твоим собственным отражением.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="398"/>
         <source>Underground</source>
         <translation>Подземка</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="229"/>
+        <location filename="../app/encountersdialog.cpp" line="399"/>
         <source>The Fourth Wall</source>
         <translation>Четвёртая стена</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="232"/>
+        <location filename="../app/encountersdialog.cpp" line="400"/>
+        <source>In a cave grotto a corridor opens onto a &apos;flooded&apos; copy of the street that is above.</source>
+        <translation>В пещерном гроте появляется коридор в «затопленную» копию улицы, которая наверху.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="402"/>
+        <source>The logic is coming: by the design a corridor into a flooded copy of the street.</source>
+        <translation>Логика дописывается: по замыслу коридор в затопленную копию улицы.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="405"/>
         <source>The Glowing Circle</source>
         <translation>Светящийся круг</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="236"/>
+        <location filename="../app/encountersdialog.cpp" line="406"/>
+        <source>A glowing patterned circle on a cave floor. Stand in the center - the world&apos;s sounds fall silent for thirty seconds.</source>
+        <translation>Светящийся узорчатый круг на полу пещеры. Встанешь в центр — тишина звуков мира на тридцать секунд.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="408"/>
+        <source>The logic is coming: by the design a pattern that silences the world at its center.</source>
+        <translation>Логика дописывается: по замыслу узор, глушащий мир в своём центре.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="411"/>
         <source>The Ghost Rrolley</source>
         <translation>Призрак вагонетки</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="238"/>
+        <location filename="../app/encountersdialog.cpp" line="412"/>
+        <source>The metro draisine comes if you simply stand on the rails and wait.</source>
+        <translation>Вагонетка на рельсах метростроя приедет, если просто стоять на путях и ждать.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="413"/>
+        <source>Late night 00:00-06:00, about 6% per cycle: stand on the rails and wait - a real handcart rolls along the baked route toward you with sparks, and at the far end it simply stops existing.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~6% за цикл: постой на путях и подожди - реальная дрезина едет по маршруту к тебе с искрами, а в конце маршрута просто перестаёт существовать.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="416"/>
         <source>Base and prison</source>
         <translation>Военка и тюрьма</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="239"/>
+        <location filename="../app/encountersdialog.cpp" line="417"/>
         <source>The Base Radio At Night</source>
         <translation>Радио базы ночью</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="243"/>
+        <location filename="../app/encountersdialog.cpp" line="418"/>
+        <source>At night the base loudspeakers read out coordinates and &apos;do not go&apos;. Go there: empty - but the &apos;meeting&apos; never appears there again.</source>
+        <translation>Ночью из динамиков базы — координаты и «не ходи». Сходишь туда: пусто, но «встреча» там уже не появляется.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="420"/>
+        <source>The logic is coming: by the design coordinates from a loudspeaker and a cancelled meeting.</source>
+        <translation>Логика дописывается: по замыслу координаты из репродуктора и отменённая встреча.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="423"/>
         <source>The Sentry Not In The Garrison</source>
         <translation>Часовой не из гарнизона</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="247"/>
+        <location filename="../app/encountersdialog.cpp" line="424"/>
+        <source>By the base wicket stands one sentry who is not in the garrison. He does not pass the gate - he walks around the fence.</source>
+        <translation>У калитки базы стоит один часовой, которого нет в гарнизоне. Через ворота не проходит — обходит забор.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="426"/>
+        <source>The logic is coming: by the design a sentry the gate will not take.</source>
+        <translation>Логика дописывается: по замыслу часовой, через которого проходят ворота.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="428"/>
         <source>The Camp That Vanishes By Dawn</source>
         <translation>Лагерь, исчезающий к утру</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="250"/>
+        <location filename="../app/encountersdialog.cpp" line="429"/>
+        <source>A camp of sacks and crates grows by the industrial zone and is gone by dawn. In the sacks, &apos;passports&apos; carrying the names of people from this city.</source>
+        <translation>Лагерь из мешков и ящиков появляется у промзоны и исчезает к утру. В мешках — «паспорта» с именами жителей города.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="432"/>
+        <source>The logic is coming: by the design a camp that exists at night and is gone by dawn.</source>
+        <translation>Логика дописывается: по замыслу лагерь, которого к утру уже нет.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="434"/>
         <source>Micro wonders</source>
         <translation>Мелкие чудеса</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="251"/>
+        <location filename="../app/encountersdialog.cpp" line="435"/>
         <source>The Winking Lamp</source>
         <translation>Фонарь, который подмигивает</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="254"/>
+        <location filename="../app/encountersdialog.cpp" line="436"/>
+        <source>A lamp winks right above the player - a change of its lit state.</source>
+        <translation>Фонарь подмигивает прямо над игроком — смена lit-состояния.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="437"/>
+        <source>Night 19:00-06:00, about 8% per cycle: one street lamp goes dark and comes back beat by beat; for the exporter&apos;s own lantern the dark is the empty cell it hangs in, for a mast the dark glowstones.</source>
+        <translation>Ночь 19:00-06:00, ~8% за цикл: один фонарь гаснет и загорается по такту; у собственного фонаря тьма - пустая ячейка, у мачты - тёмные glowstone.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="441"/>
         <source>The Field Of Silence</source>
         <translation>Поле тишины</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="258"/>
+        <location filename="../app/encountersdialog.cpp" line="442"/>
+        <source>A trap of silence: within ten blocks neither steps nor mobs are heard - for fifteen seconds.</source>
+        <translation>Капкан тишины: в радиусе десяти блоков не слышно ни шагов, ни мобов — на пятнадцать секунд.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="444"/>
+        <source>Any hour, about 6% per cycle: around one lamp the sound falls out of the air for a quarter of a minute; the ambience comes back by itself.</source>
+        <translation>В любое время, ~6% за цикл: вокруг одного фонаря звук выпадает из воздуха на четверть минуты; фон возвращается сам.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="447"/>
         <source>The Rain Above One Street</source>
         <translation>Дождь над одной улицей</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="262"/>
+        <location filename="../app/encountersdialog.cpp" line="448"/>
+        <source>Rain falls over one street only: splash particles overhead and rain sound, while beside it - dry.</source>
+        <translation>Дождь идёт только над одним участком: splash-частицы над головой и звук, а рядом — сухо.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="450"/>
+        <source>Any hour, about 8% per cycle: a wet column of splash and rain sound over one street lamp; the world&apos;s weather stays untouched - a local stylization.</source>
+        <translation>В любое время, ~8% за цикл: мокрая колонна splash и звука дождя над одним фонарём; погода мира не тронута - локальная стилизация.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="454"/>
         <source>The Silhouette In The Windows</source>
         <translation>Силуэт в окнах</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="265"/>
+        <location filename="../app/encountersdialog.cpp" line="455"/>
+        <source>On the fifth floor a silhouette with a lantern stands in the window and walks along the row of windows like a sleepwalker.</source>
+        <translation>На пятом этаже в окне стоит силуэт с фонарём и «лунатиком» идёт вдоль ряда окон.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="457"/>
+        <source>Late night 04:00-06:00, about 6% per cycle: a floating lantern crosses one row of a baked facade, one window per second and a half.</source>
+        <translation>Поздняя ночь 04:00-06:00, ~6% за цикл: плавающий фонарь идёт по ряду одного фасада, по окну за полторы секунды.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="460"/>
         <source>The Shadows Too Long For Noon</source>
         <translation>Слишком длинные тени</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="268"/>
+        <location filename="../app/encountersdialog.cpp" line="461"/>
+        <source>The noon shadows of the houses are ten degrees longer than they should be.</source>
+        <translation>Полуденные тени домов на десять градусов длиннее, чем должны быть.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="463"/>
+        <source>In the dusk, while the sky is still light: a dark seam of particles creeps away from a lamp three sweeps, each one thinner and longer; when the sky goes dark, the shadow is gone - the shadow is all that ever stood there.</source>
+        <translation>На сумерках, пока небо ещё светлое: тёмный шов частиц трижды ползёт от фонаря, каждый раз тоньше и дальше; стемнеет - тень исчезает. Тень - единственное, что вообще здесь стояло.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="468"/>
         <source>The Cat Council</source>
         <translation>Кошачий консилиум</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="271"/>
+        <location filename="../app/encountersdialog.cpp" line="469"/>
+        <source>The city&apos;s cats gather in a &apos;council&apos; by one entrance. Come near and they file off to their homes.</source>
+        <translation>Городские коты собираются «консилиумом» у одного подъезда. Подойдёшь — разойдутся по домам.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="471"/>
+        <source>Night 19:00-06:00, about 35% per cycle: the cats sit in council by one stop; scatter them and the next roll gathers them somewhere else.</source>
+        <translation>Ночь 19:00-06:00, ~35% за цикл: коты собираются советом у одной остановки; разгонишь - следующий шанс соберёт их в другом месте.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="473"/>
         <source>Bonus legends</source>
         <translation>Бонусные легенды</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="272"/>
+        <location filename="../app/encountersdialog.cpp" line="474"/>
         <source>The Telephone Booth That Rings</source>
         <translation>Телефонная будка, которая звонит</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="276"/>
+        <location filename="../app/encountersdialog.cpp" line="475"/>
+        <source>The city&apos;s &apos;telephone for the ears&apos;: the booth rings. Take the handset and you are dictated a route to a meeting.</source>
+        <translation>Городской «слуховой телефон»: будка звонит. Возьмёшь трубку — продиктуют маршрут к встрече.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="477"/>
+        <source>The logic is coming: by the design a call dictating the route to a meeting.</source>
+        <translation>Логика дописывается: по замыслу звонок, диктующий маршрут к встрече.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="480"/>
         <source>The Night Market</source>
         <translation>Ночной базар</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="280"/>
+        <location filename="../app/encountersdialog.cpp" line="481"/>
+        <source>On an empty square, five minutes of trade. By morning: a row of empty crates and change left on the counter.</source>
+        <translation>На пустой площади — пять минут торговли. К утру ряд пустых ящиков и сдача на прилавке.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="483"/>
+        <source>Night 01:00-06:00, about 6% per cycle: stalls of lantern light with no wood set up where the field lay all day, and the murmur of a hundred buyers is one villager&apos;s whisper; by the time you reach the stop the row is packing up.</source>
+        <translation>Ночь 01:00-06:00, ~6% за цикл: там, где весь день лежало поле, встают прилавки из света без дерева, а гул сотни покупателей - шёпот одного жильца; дойдёшь до остановки - ряд уже сворачивается.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="488"/>
         <source>The Street That Builds Itself</source>
         <translation>Улица, которая строится</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="284"/>
+        <location filename="../app/encountersdialog.cpp" line="489"/>
+        <source>A street that builds itself: fences, and progress visible every day. By the seventh day the house is finished - and it hosts the first meeting.</source>
+        <translation>Улица, которая строится: заборы, и прогресс виден каждый день. К седьмому дню дом достроят — и в нём состоится первая встреча.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="492"/>
+        <source>Late night 00:00-06:00, about 6% per cycle: the street &apos;climbs&apos; by sound - a gravel groan under the asphalt, dust through the seams, a lamp standing higher over the road. The blocks never move; the day-by-day build is still coming.</source>
+        <translation>Поздняя ночь 00:00-06:00, ~6% за цикл: улица «строится» звуком - gravel стонет под асфальтом, пыль в стыках, фонарь выше над дорогой. Блоки не двигаются; стройки по дням ещё дописываются.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="497"/>
         <source>The Teasing Sign</source>
         <translation>Табличка-дразнилка</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="329"/>
+        <location filename="../app/encountersdialog.cpp" line="498"/>
+        <source>A sign by the metro: &apos;do not go into the tunnel&apos;. Go in, and in the morning the sign reads: &apos;I told you&apos;.</source>
+        <translation>Табличка у метро: «не ходи в тоннель». Идёшь — утром табличка: «я же сказала».</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="500"/>
+        <source>The logic is coming: by the design a sign that rewrites itself by morning.</source>
+        <translation>Логика дописывается: по замыслу табличка, которая к утру переписывает себя.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="561"/>
         <source>Click to read</source>
         <translation type="unfinished">Кликните, чтобы прочесть</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="407"/>
+        <location filename="../app/encountersdialog.cpp" line="638"/>
         <source>City events</source>
         <translation>События в городе</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="416"/>
+        <location filename="../app/encountersdialog.cpp" line="647"/>
         <source>Random encounters over the exported world. The checked events ride into the world as the &quot;osmc_enc&quot; datapack; the unchecked ones are not written at all. The same list is on the command line: --encounters --encounters-off &lt;id&gt;,&lt;id&gt;…</source>
         <translation>Случайные встречи поверх экспортированного мира. Отмеченные события уезжают в мир датапаком «osmc_enc»; неотмеченные не пишутся вовсе. Тот же список в командной строке: --encounters --encounters-off &lt;id&gt;,&lt;id&gt;…</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="454"/>
+        <location filename="../app/encountersdialog.cpp" line="697"/>
         <source>Select an event on the left.</source>
         <translation>Выберите событие слева.</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="458"/>
+        <location filename="../app/encountersdialog.cpp" line="710"/>
         <source>All on</source>
         <translation>Включить все</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="459"/>
+        <location filename="../app/encountersdialog.cpp" line="711"/>
         <source>All off</source>
         <translation>Выключить все</translation>
     </message>
@@ -1612,47 +2283,47 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">файл настроек 3D (.t3d); по умолчанию .t3d из папки с shape-файлами, иначе настройки из проекта .tqt, иначе default.t3d рядом с программой</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="98"/>
+        <location filename="../app/main.cpp" line="97"/>
         <source>world zip archive</source>
         <translation>zip-архив мира</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="99"/>
+        <location filename="../app/main.cpp" line="98"/>
         <source>world version: 26 (default) or 1.21</source>
         <translation>версия мира: 26 (по умолчанию) или 1.21</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="100"/>
+        <location filename="../app/main.cpp" line="99"/>
         <source>superflat outside the area (default — a normal seed-based world)</source>
         <translation>суперплоскость вне области (по умолчанию — обычный мир по сиду)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="101"/>
+        <location filename="../app/main.cpp" line="100"/>
         <source>world seed (random by default)</source>
         <translation>сид мира (по умолчанию случайный)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="102"/>
+        <location filename="../app/main.cpp" line="101"/>
         <source>caves: 1 (default) or 0</source>
         <translation>пещеры: 1 (по умолчанию) или 0</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="103"/>
+        <location filename="../app/main.cpp" line="102"/>
         <source>convert map units to meters using the projection: 1 (default) or 0</source>
         <translation>привести единицы карты к метрам: 1 (по умолчанию) или 0</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="104"/>
+        <location filename="../app/main.cpp" line="103"/>
         <source>church chunk for the stronghold, F3 format: &quot;x z&quot; or &quot;x y z&quot;</source>
         <translation>чанк церкви для стронгхолда, формат F3: «x z» или «x y z»</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="105"/>
+        <location filename="../app/main.cpp" line="104"/>
         <source>church chunk for the Ancient City</source>
         <translation>чанк церкви для Древнего города</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="106"/>
+        <location filename="../app/main.cpp" line="105"/>
         <source>a chunk inside the forest that becomes the Pale Garden</source>
         <translation>чанк внутри леса, который станет лесом скрипунов</translation>
     </message>
@@ -1661,87 +2332,87 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">JSON с правилами «теги OSM -&gt; слой и коды» для источника .osm/.pbf (по умолчанию osm_rules.json рядом с файлом/программой)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="108"/>
+        <location filename="../app/main.cpp" line="107"/>
         <source>a custom osmconf.ini for the OSM driver (by default generated from the tags used by the rules)</source>
         <translation>свой osmconf.ini для драйвера OSM (по умолчанию генерируется по тегам из правил)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="109"/>
+        <location filename="../app/main.cpp" line="108"/>
         <source>export boundary — a polygon of WGS84 longitudes and latitudes: &quot;lon lat; lon lat; lon lat …&quot; (in the window — &quot;Boundary&quot;)</source>
         <translation>граница экспорта — многоугольник из долгот и широт WGS84: «lon lat; lon lat; lon lat …» (в окне — «Нарисовать границу»)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="110"/>
+        <location filename="../app/main.cpp" line="109"/>
         <source>save the world UNPACKED into this saves folder (a launcher or an instance folder), no zip — the world folder &lt;name&gt; is created inside it (in the window — &quot;Export settings&quot;)</source>
         <translation>сохранять мир в распакованном виде в эту папку saves (папка лаунчера или инстанса), без архива — внутри неё будет создана папка мира &lt;name&gt; (в окне — «Настройки экспорта»)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="111"/>
+        <location filename="../app/main.cpp" line="110"/>
         <source>copy the log to a text file (UTF-8), handy with --nogui</source>
         <translation>дублировать журнал в текстовый файл (UTF-8), удобно с --nogui</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="112"/>
+        <location filename="../app/main.cpp" line="111"/>
         <source>enhancer .dat file (fallback building type/height for OSM data); by default tmc_buildings.dat next to the program</source>
         <translation>файл улучшайзера .dat (запасные тип/высота зданий для данных OSM); по умолчанию tmc_buildings.dat рядом с программой</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="113"/>
+        <location filename="../app/main.cpp" line="112"/>
         <source>do not use the enhancer</source>
         <translation>не использовать улучшайзер</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="114"/>
+        <location filename="../app/main.cpp" line="113"/>
         <source>spawn point as WGS84 longitude and latitude: &quot;lon lat&quot; (in the window — a click on the map preview)</source>
         <translation>точка спавна по долготе и широте WGS84: «lon lat» (в окне — клик по предпросмотру карты)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="115"/>
+        <location filename="../app/main.cpp" line="114"/>
         <source>save the map preview to a PNG and exit (no window)</source>
         <translation>сохранить предпросмотр карты в PNG и выйти (без окна)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="116"/>
+        <location filename="../app/main.cpp" line="115"/>
         <source>(for testing) open the window, load the map, save a window screenshot to a PNG and exit</source>
         <translation>(для проверки) открыть окно, загрузить карту, сохранить снимок окна в PNG и выйти</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="117"/>
+        <location filename="../app/main.cpp" line="116"/>
         <source>(for testing, with --gui-screenshot) &quot;click&quot; on the map: fractions of width and height, for example &quot;0.4 0.6&quot;</source>
         <translation>(для проверки, с --gui-screenshot) «кликнуть» по карте: доли ширины и высоты, например «0.4 0.6»</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="118"/>
+        <location filename="../app/main.cpp" line="117"/>
         <source>(for testing) open the &quot;City events&quot; window and save two screenshots: &quot;file1;file2;&lt;id&gt;&quot; — the blurred description and the revealed one for that event</source>
         <translation>для проверки: открыть окно «События в городе» и сохранить два снимка: «file1;file2;&lt;id&gt;» — описание под блюром и то же после клика</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="119"/>
+        <location filename="../app/main.cpp" line="118"/>
         <source>do not put the /locate and eye-of-ender datapack in the world (stronghold, Ancient City …): the game will not ask for experimental features, but these structures cannot be found with a command</source>
         <translation>не класть в мир датапак для /locate и глаза Эндера (стронгхолд, Древний город …): игра не будет просить экспериментальных функций, но эти структуры нельзя найти командой</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="120"/>
+        <location filename="../app/main.cpp" line="119"/>
         <source>do not top up vegetation for OSM data (yards, taiga, forests, parks)</source>
         <translation>не достраивать растительность для данных OSM (дворы, тайга, леса, парки)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="121"/>
+        <location filename="../app/main.cpp" line="120"/>
         <source>random city events (docs/city-encounters.md): the &quot;osmc_enc&quot; datapack, the &quot;sites.json&quot; registry and site markers in the world</source>
         <translation>случайные городские события (docs/city-encounters.md): датапак «osmc_enc», реестр «sites.json» и маркеры участков в мире</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="122"/>
+        <location filename="../app/main.cpp" line="121"/>
         <source>with --encounters: event ids to switch off, comma separated (the same list as the &quot;City events&quot; window)</source>
         <translation>с --encounters: id событий для выключения через запятую (тот же список, что в окне «События в городе»)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="123"/>
+        <location filename="../app/main.cpp" line="122"/>
         <source>only load and classify the data (summary in the log), do not build the world</source>
         <translation>только загрузить данные и классифицировать (сводка в журнале), мир не строить</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="124"/>
+        <location filename="../app/main.cpp" line="123"/>
         <source>window theme: auto (as in Windows, default), light or dark</source>
         <translation>тема окна: auto (как в Windows, по умолчанию), light или dark</translation>
     </message>
@@ -1750,74 +2421,74 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">добавить в окно строку «Проект / папка»: источником может быть проект .tqt или папка с шейпфайлами (сервисные пути .t3d, правил OSM и enhancer и «реальные метры» задаются только в командной строке)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="125"/>
+        <location filename="../app/main.cpp" line="124"/>
         <source>(for testing, with --gui-screenshot) online mode: &quot;lon lat zoom; lon lat; lon lat; …&quot; — map view and boundary vertices</source>
         <translation>(для проверки, с --gui-screenshot) онлайн-режим: «lon lat zoom; lon lat; lon lat; …» — вид карты и вершины границы</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="126"/>
+        <location filename="../app/main.cpp" line="125"/>
         <source>download OSM data for the polygon &quot;lon lat; lon lat; …&quot; (up to 25 km²) into the --out file and exit; the result goes to the --log file</source>
         <translation>скачать данные OSM по многоугольнику «lon lat; lon lat; …» (до 25 км²) в файл --out и выйти; результат — в файл --log</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="127"/>
+        <location filename="../app/main.cpp" line="126"/>
         <source>climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid</source>
         <translation>климатическая зона: auto (по координатам, по умолчанию), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="129"/>
+        <location filename="../app/main.cpp" line="128"/>
         <source>(for testing, with --gui-screenshot) switch the interface language at run time (en, ru or zh) before the screenshot; the saved choice is not changed</source>
         <translation>(для проверки, вместе с --gui-screenshot) переключить язык интерфейса во время работы (en, ru или zh) перед снимком; сохранённый выбор не меняется</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="131"/>
+        <location filename="../app/main.cpp" line="130"/>
         <source>interface language: auto (the system one, default), en, ru or zh; not saved</source>
         <translation>язык интерфейса: auto (системный, по умолчанию), en, ru или zh; не сохраняется</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="128"/>
+        <location filename="../app/main.cpp" line="127"/>
         <source>(for testing) download a test OSM tile and a Nominatim reply, write the response codes to a file and exit</source>
         <translation>(для проверки) скачать тестовый тайл OSM и ответ Nominatim, записать коды ответов в файл и выйти</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="92"/>
+        <location filename="../app/main.cpp" line="91"/>
         <source>OSMC — exports OpenStreetMap data or the shapefiles of a folder to a Minecraft world.</source>
         <translation>OSMC — экспортёр данных OpenStreetMap или шейп-файлов папки в мир Minecraft.</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="96"/>
+        <location filename="../app/main.cpp" line="95"/>
         <source>an OSM extract (.osm/.pbf) or a folder with shapefiles (default — the current folder)</source>
         <translation>выгрузка OSM (.osm/.pbf) или папка с шейп-файлами (по умолчанию — текущая папка)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="97"/>
+        <location filename="../app/main.cpp" line="96"/>
         <source>rules catalog folder (rules/&lt;layer&gt;.json); by default the rules folder next to the program, in the current folder or in the source folder</source>
         <translation>папка каталога правил (rules/&lt;слой&gt;.json); по умолчанию — папка rules рядом с программой, в текущей папке или в папке исходных данных</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="107"/>
+        <location filename="../app/main.cpp" line="106"/>
         <source>JSON with the &quot;OSM tags -&gt; layer and codes&quot; rules for an .osm/.pbf source (default: osmrules.json next to the file, in the rules catalog or next to the program)</source>
         <translation>JSON с правилами «теги OSM -&gt; слой и коды» для источника .osm/.pbf (по умолчанию osmrules.json рядом с файлом, в каталоге правил или рядом с программой)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="130"/>
+        <location filename="../app/main.cpp" line="129"/>
         <source>(for testing, with --gui-screenshot) &quot;open:file&quot; or &quot;save:file&quot; — open or save a project file around the screenshot</source>
         <translation>(для проверки, вместе с --gui-screenshot) &quot;open:файл&quot; или &quot;save:файл&quot; — открыть или сохранить файл проекта вокруг снимка</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="132"/>
+        <location filename="../app/main.cpp" line="131"/>
         <source>no window: run the export and exit (code 0 — success)</source>
         <translation>без окна: выполнить экспорт и выйти (код 0 — успех)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="258"/>
-        <location filename="../app/tmcrun.cpp" line="99"/>
-        <location filename="../app/tmcrun.cpp" line="185"/>
+        <location filename="../app/main.cpp" line="257"/>
+        <location filename="../app/tmcrun.cpp" line="100"/>
+        <location filename="../app/tmcrun.cpp" line="186"/>
         <source>Error: %1</source>
         <translation>Ошибка: %1</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="290"/>
+        <location filename="../app/main.cpp" line="289"/>
         <source>Online</source>
         <translation>Онлайн</translation>
     </message>
@@ -1943,7 +2614,7 @@ It loads automatically when the data is ready.</source>
         <translation>сервер поиска ответил кодом %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="103"/>
+        <location filename="../app/tmcrun.cpp" line="104"/>
         <source>Source not found: %1</source>
         <translation>Источник не найден: %1</translation>
     </message>
@@ -1960,7 +2631,7 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">Не найден файл настроек 3D: укажите --t3d, положите .t3d в папку с shape-файлами или %1 рядом с программой.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="136"/>
+        <location filename="../app/tmcrun.cpp" line="137"/>
         <source>Loading: %1</source>
         <translation>Загрузка: %1</translation>
     </message>
@@ -1969,12 +2640,12 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">Не найден файл правил OSM (%1): укажите --osm-rules или положите его рядом с программой.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="153"/>
+        <location filename="../app/tmcrun.cpp" line="154"/>
         <source>Surface terrain is switched off — the height matrix is ignored.</source>
         <translation>Рельеф поверхности выключен — матрица высот игнорируется.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="159"/>
+        <location filename="../app/tmcrun.cpp" line="160"/>
         <source>Height matrix not found (neither %1.tif nor DTM.tif) — the terrain is flat.</source>
         <translation>Матрица высот не найдена (ни %1.tif, ни DTM.tif) — рельеф плоский.</translation>
     </message>
@@ -1983,125 +2654,125 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">Настройки 3D: %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="105"/>
+        <location filename="../app/tmcrun.cpp" line="106"/>
         <source>tqt projects are not supported since v2.0: pass an OpenStreetMap extract (.osm/.pbf) or a folder with shapefiles</source>
         <translation>проекты tqt не поддерживаются с v2.0: передайте выгрузку OpenStreetMap (.osm/.pbf) или папку с шейп-файлами</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="120"/>
+        <location filename="../app/tmcrun.cpp" line="121"/>
         <source>Rules catalog not found: specify --rules or put the rules folder next to the program</source>
         <translation>Каталог правил не найден: укажите --rules или положите папку rules рядом с программой</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="125"/>
+        <location filename="../app/tmcrun.cpp" line="126"/>
         <source>Rules catalog: %1</source>
         <translation>Каталог правил: %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="146"/>
+        <location filename="../app/tmcrun.cpp" line="147"/>
         <source>OSM rules file (%1) not found: specify --osm-rules or put it into the rules catalog.</source>
         <translation>Файл правил OSM (%1) не найден: укажите --osm-rules или положите его в каталог правил.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="171"/>
+        <location filename="../app/tmcrun.cpp" line="172"/>
         <source>Polygon boundary (%1 vertices): objects discarded outside it: %2</source>
         <translation>Граница-многоугольник (%1 вершин): вне неё отброшено объектов %2</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="174"/>
+        <location filename="../app/tmcrun.cpp" line="175"/>
         <source>There are no objects inside the boundary and no height matrix — nothing to export.</source>
         <translation>Внутри границы нет объектов и нет матрицы высот — экспортировать нечего.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="198"/>
+        <location filename="../app/tmcrun.cpp" line="199"/>
         <source>Dry run (--dry-run): the data was loaded, the world was not built.</source>
         <translation>Пробный прогон (--dry-run): данные загружены, мир не строился.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="221"/>
+        <location filename="../app/tmcrun.cpp" line="222"/>
         <source>Real meters: x%1 along X, x%2 along Y</source>
         <translation>Реальные метры: ×%1 по X, ×%2 по Y</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="231"/>
-        <location filename="../app/tmcrun.cpp" line="391"/>
-        <location filename="../export/exportrun.cpp" line="470"/>
-        <location filename="../export/exportrun.cpp" line="631"/>
-        <location filename="../export/exportrun.cpp" line="709"/>
-        <location filename="../export/exportrun.cpp" line="914"/>
-        <location filename="../export/exportrun.cpp" line="1595"/>
-        <location filename="../export/exportrun.cpp" line="5371"/>
-        <location filename="../export/exportrun.cpp" line="6651"/>
-        <location filename="../export/exportrun.cpp" line="9015"/>
-        <location filename="../export/exportrun.cpp" line="11883"/>
-        <location filename="../export/exportrun.cpp" line="12128"/>
-        <location filename="../export/exportrun.cpp" line="13158"/>
-        <location filename="../export/exportrun.cpp" line="13426"/>
+        <location filename="../app/tmcrun.cpp" line="232"/>
+        <location filename="../app/tmcrun.cpp" line="394"/>
+        <location filename="../export/exportrun.cpp" line="491"/>
+        <location filename="../export/exportrun.cpp" line="680"/>
+        <location filename="../export/exportrun.cpp" line="757"/>
+        <location filename="../export/exportrun.cpp" line="930"/>
+        <location filename="../export/exportrun.cpp" line="2173"/>
+        <location filename="../export/exportrun.cpp" line="6124"/>
+        <location filename="../export/exportrun.cpp" line="7409"/>
+        <location filename="../export/exportrun.cpp" line="9775"/>
+        <location filename="../export/exportrun.cpp" line="12651"/>
+        <location filename="../export/exportrun.cpp" line="12896"/>
+        <location filename="../export/exportrun.cpp" line="13926"/>
+        <location filename="../export/exportrun.cpp" line="14194"/>
         <source>Export cancelled.</source>
         <translation>Экспорт отменён.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="232"/>
+        <location filename="../app/tmcrun.cpp" line="233"/>
         <source>Objects to export: %1</source>
         <translation>Объектов для экспорта: %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="233"/>
+        <location filename="../app/tmcrun.cpp" line="234"/>
         <source>Scene center (project projection): x=%1 y=%2 — this is block (0, 0) of the world; scale x%3 along X, x%4 along Y</source>
         <translation>Центр сцены (проекция проекта): x=%1 y=%2 — это блок (0, 0) мира; масштаб ×%3 по X, ×%4 по Y</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="269"/>
+        <location filename="../app/tmcrun.cpp" line="272"/>
         <source>Landmark 3D models: %1</source>
         <translation>3D-модели достопримечательностей: %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="280"/>
+        <location filename="../app/tmcrun.cpp" line="283"/>
         <source>Climate zone: %1 (chosen manually)</source>
         <translation>Климатическая зона: %1 (выбрана вручную)</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="299"/>
+        <location filename="../app/tmcrun.cpp" line="302"/>
         <source>Climate zone: %1 (automatic: longitude %2, latitude %3)</source>
         <translation>Климатическая зона: %1 (автоматически: долгота %2, широта %3)</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="323"/>
+        <location filename="../app/tmcrun.cpp" line="326"/>
         <source>The spawn longitude/latitude could not be converted to the project projection — spawn at the data center.</source>
         <translation>Точка спавна по долготе/широте не переведена в проекцию проекта — спавн в центре данных.</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="327"/>
+        <location filename="../app/tmcrun.cpp" line="330"/>
         <source>Spawn point: x=%1 y=%2 (project coordinates)</source>
         <translation>Точка спавна: x=%1 y=%2 (координаты проекта)</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="382"/>
+        <location filename="../app/tmcrun.cpp" line="385"/>
         <source>Writing the world: %1</source>
         <translation>Запись мира: %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="392"/>
+        <location filename="../app/tmcrun.cpp" line="395"/>
         <source>Export failed: %1</source>
         <translation>Экспорт не удался: %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="396"/>
+        <location filename="../app/tmcrun.cpp" line="399"/>
         <source>%1 h %2 min</source>
         <translation>%1 ч %2 мин</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="397"/>
+        <location filename="../app/tmcrun.cpp" line="400"/>
         <source>%1 min %2 s</source>
         <translation>%1 мин %2 с</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="398"/>
+        <location filename="../app/tmcrun.cpp" line="401"/>
         <source>%1 s</source>
         <translation>%1 с</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="401"/>
+        <location filename="../app/tmcrun.cpp" line="404"/>
         <source>The Minecraft world was saved unpacked:
 %1
 
@@ -2118,7 +2789,7 @@ Open the world &quot;%7&quot; in Minecraft %8%9 from your saves.
 %10</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="408"/>
+        <location filename="../app/tmcrun.cpp" line="411"/>
         <source>The Minecraft save was created:
 %1
 
@@ -2135,8 +2806,8 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
 %9</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="405"/>
-        <location filename="../app/tmcrun.cpp" line="411"/>
+        <location filename="../app/tmcrun.cpp" line="408"/>
+        <location filename="../app/tmcrun.cpp" line="414"/>
         <source> (seed %1)</source>
         <translation> (сид %1)</translation>
     </message>
@@ -2151,319 +2822,324 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>Пещерные шаблоны: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11428"/>
+        <location filename="../export/exportrun.cpp" line="12192"/>
         <source>lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)</source>
         <translation>не найден lair_structures.bin (положите рядом с cave_templates.bin; искал в: %1)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11432"/>
+        <location filename="../export/exportrun.cpp" line="12196"/>
         <source>lair_structures.bin is damaged</source>
         <translation>lair_structures.bin повреждён</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11436"/>
+        <location filename="../export/exportrun.cpp" line="12200"/>
         <source>caves must be enabled together with the normal surroundings (a noise world)</source>
         <translation>нужны включённые пещеры и обычное окружение (noise-мир)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11512"/>
+        <location filename="../export/exportrun.cpp" line="12276"/>
         <source>Nothing to export: all meshes are empty.</source>
         <translation>Нечего экспортировать: все меши пусты.</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13723"/>
+        <location filename="../export/exportrun.cpp" line="14491"/>
         <source>; zebra on the roads: crossings %1 of %2 (cells %3)</source>
         <translation>; зебра на дорогах: переходов %1 из %2 (клеток %3)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13800"/>
+        <location filename="../export/exportrun.cpp" line="14568"/>
         <source>Could not voxelize a single object (empty or too huge meshes).</source>
         <translation>Не удалось вокселизировать ни один объект (пустые или слишком огромные меши).</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7275"/>
+        <location filename="../export/exportrun.cpp" line="8033"/>
         <source>%1Pale Garden: there is no suitable vegetation in the data — an empty site of %2×%2 chunks was allocated (chunks %3…%4 along X, %5…%6 along Z, gap to the data %7 chunks)</source>
         <translation>%1лес скрипунов: в данных нет подходящей растительности — выделена пустая площадка %2×%2 чанков (чанки %3…%4 по X, %5…%6 по Z, зазор до данных %7 чанк.)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3717"/>
-        <location filename="../export/exportrun.cpp" line="3723"/>
+        <location filename="../export/exportrun.cpp" line="3840"/>
+        <source>; benches along park paths: %1</source>
+        <translation>; скамейки вдоль парковых дорожек: %1</translation>
+    </message>
+    <message>
+        <location filename="../export/exportrun.cpp" line="4430"/>
+        <location filename="../export/exportrun.cpp" line="4436"/>
         <source>; landmark %1 skipped: %2</source>
         <translation>; модель %1 пропущена: %2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3778"/>
+        <location filename="../export/exportrun.cpp" line="4491"/>
         <source>; landmark models: %1 (buildings razed: %2)</source>
         <translation>; моделей достопримечательностей: %1 (зданий снесено: %2)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3779"/>
+        <location filename="../export/exportrun.cpp" line="4492"/>
         <source>; landmark models: %1</source>
         <translation>; моделей достопримечательностей: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6246"/>
+        <location filename="../export/exportrun.cpp" line="7004"/>
         <source>; single trees on the empty lands: %1 (greenery zones: %2)</source>
         <translation>; одиночных деревьев на пустых землях: %1 (зон озеленения: %2)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6460"/>
+        <location filename="../export/exportrun.cpp" line="7218"/>
         <source>; household pets: %1</source>
         <translation>; домашние животные: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7454"/>
+        <location filename="../export/exportrun.cpp" line="8212"/>
         <source>; fields and grass extended to the chunk edge on the export border: %1 chunks</source>
         <translation>; поля и трава продлены до края чанка на границе экспорта: %1 чанков</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7456"/>
+        <location filename="../export/exportrun.cpp" line="8214"/>
         <source>; forest extended to the chunk edge on the export border: %1 chunks</source>
         <translation>; лес продлён до края чанка на границе экспорта: %1 чанков</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7661"/>
+        <location filename="../export/exportrun.cpp" line="8421"/>
         <source>%1Pale Garden: there is no forest near the given chunk</source>
         <translation>%1лес скрипунов: рядом с заданным чанком леса нет</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7688"/>
+        <location filename="../export/exportrun.cpp" line="8448"/>
         <source>%1Pale Garden: meadow vegetation was chosen (%2 m², more than twice the best forest with height — %3 m²)</source>
         <translation>%1лес скрипунов: выбрана луговая растительность (%2 м², более чем вдвое больше лучшего леса с высотой — %3 м²)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7707"/>
+        <location filename="../export/exportrun.cpp" line="8467"/>
         <source>%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10</source>
         <translation>%1лес скрипунов: %2 м², центр x=%3 z=%4 (чанк %5 %6), границы x %7…%8, z %9…%10</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7715"/>
+        <location filename="../export/exportrun.cpp" line="8475"/>
         <source>%1Pale Garden: no suitable forest</source>
         <translation>%1лес скрипунов: подходящего леса нет</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7900"/>
+        <location filename="../export/exportrun.cpp" line="8660"/>
         <source>; forest mansion: 1 of %1 kept</source>
         <translation>; лесной особняк: оставлен 1 из %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7949"/>
+        <location filename="../export/exportrun.cpp" line="8709"/>
         <source>; Pale Garden: pale_garden.bin was not found next to cave_templates.bin — a procedural forest without the donor terrain</source>
         <translation>; лес скрипунов: pale_garden.bin не найден рядом с cave_templates.bin — процедурный лес без донорного рельефа</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8021"/>
+        <location filename="../export/exportrun.cpp" line="8781"/>
         <source>; terrain in forests: %1 columns</source>
         <translation>; рельеф в лесах: %1 колонок</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8194"/>
+        <location filename="../export/exportrun.cpp" line="8954"/>
         <source>; forest mansion (cut out of the game world) placed: center x=%1 z=%2 (chunk %3 %4)</source>
         <translation>; лесной особняк (вырезан из мира игры) поставлен: центр x=%1 z=%2 (чанк %3 %4)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8197"/>
+        <location filename="../export/exportrun.cpp" line="8957"/>
         <source>; forest mansion: no place was found in the Pale Garden</source>
         <translation>; лесной особняк: в лесу скрипунов не нашлось места</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8233"/>
+        <location filename="../export/exportrun.cpp" line="8993"/>
         <source>; bandit outposts: %1, abandoned camps: %2, small ruins: %3</source>
         <translation>; аванпосты бандитов: %1, заброшенные лагеря: %2, мелкие руины: %3</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8426"/>
+        <location filename="../export/exportrun.cpp" line="9186"/>
         <source>; terrain of the empty lands: %1 cells</source>
         <translation>; рельеф пустых земель: %1 клеток</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8427"/>
+        <location filename="../export/exportrun.cpp" line="9187"/>
         <source>; dunes of the forced sand: %1 cells</source>
         <translation>; барханы принудительного песка: %1 ячеек</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10088"/>
+        <location filename="../export/exportrun.cpp" line="10848"/>
         <source>; elevated roads: %1 deck cells, %2 tunnel cells, %3 portal cells, %4 piers, %5 tunnel lamps, %6 parapets, %7 lifted approach cells, %8 straight bore cells</source>
         <translation>; эстакады и тоннели: %1 клеток настила, %2 клеток тоннеля, %3 клеток порталов, %4 опор, %5 ламп в тоннелях, %6 парапетов, %7 подъёмных клеток подходов, %8 клеток прямого прохода</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="12100"/>
+        <location filename="../export/exportrun.cpp" line="12868"/>
         <source>; houses straightened to the axes: %1 (kept off other buildings: %2)</source>
         <translation>; домов выровнено по осям: %1 (отступов от других зданий: %2)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13176"/>
+        <location filename="../export/exportrun.cpp" line="13944"/>
         <source>; private houses: %1 brick (%2 with a mansard floor), %3 log</source>
         <translation>; частных домов: %1 кирпичных (%2 с мансардным этажом), %3 бревенчатых</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13587"/>
+        <location filename="../export/exportrun.cpp" line="14355"/>
         <source>; road width trimmed near buildings and fences: %1 sections, cells under buildings removed: %2</source>
         <translation>; ширина дорог уменьшена у зданий и заборов: %1 участков, клеток под зданиями убрано: %2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8306"/>
+        <location filename="../export/exportrun.cpp" line="9066"/>
         <source>; quarries: %1 columns of the stepped excavation</source>
         <translation>; карьеры: %1 колонок ступенчатой выемки</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8307"/>
+        <location filename="../export/exportrun.cpp" line="9067"/>
         <source>; spoil heaps: %1 columns of the mound</source>
         <translation>; терриконы: %1 колонок насыпи</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8457"/>
+        <location filename="../export/exportrun.cpp" line="9217"/>
         <source>; climate zone: %1</source>
         <translation>; климатическая зона: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8649"/>
+        <location filename="../export/exportrun.cpp" line="9409"/>
         <source>; road columns moved onto the relief: %1</source>
         <translation>; колонок дорог перенесено на рельеф: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10122"/>
+        <location filename="../export/exportrun.cpp" line="10882"/>
         <source>; bridge columns over water (roads and railways): %1</source>
         <translation>; колонок мостов над водой (дороги и железные дороги): %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10195"/>
+        <location filename="../export/exportrun.cpp" line="10955"/>
         <source>; mansion inhabitants: %1</source>
         <translation>; обитателей особняка: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10210"/>
+        <location filename="../export/exportrun.cpp" line="10970"/>
         <source>; outpost and camp blocks: %1</source>
         <translation>; блоков аванпостов и лагерей: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10302"/>
+        <location filename="../export/exportrun.cpp" line="11062"/>
         <source>; shipwrecks in big water bodies: %1 (on the bottom %2, on the water %3)</source>
         <translation>; кораблекрушения в больших водоёмах: %1 (на дне %2, на воде %3)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10331"/>
+        <location filename="../export/exportrun.cpp" line="11091"/>
         <source>; seaweed: kelp %1, seagrass %2 columns</source>
         <translation>; водоросли: ламинария %1, морская трава %2 колонок</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10399"/>
+        <location filename="../export/exportrun.cpp" line="11159"/>
         <source>; terrain and trees of the real Pale Garden: %1 blocks</source>
         <translation>; рельеф и деревья настоящего бледного сада: %1 блоков</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11208"/>
+        <location filename="../export/exportrun.cpp" line="11971"/>
         <source>; subway: %1 tunnels, %2 rails (%3 electrified), %4 lamps</source>
         <translation>; метро: тоннелей %1, рельсов %2 (электрофицировано %3), светильников %4</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11333"/>
+        <location filename="../export/exportrun.cpp" line="12097"/>
         <source>; secret rooms in the metro: %1</source>
         <translation>; секретные комнаты в метро: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11370"/>
+        <location filename="../export/exportrun.cpp" line="12134"/>
         <source>; station halls: %1</source>
         <translation>; залы вокзалов: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5586"/>
+        <location filename="../export/exportrun.cpp" line="6340"/>
         <source>; creaking hearts: %1 (extra removed %2, added %3)</source>
         <translation>; сердец скрипунов: %1 (убрано лишних %2, добавлено %3)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6407"/>
+        <location filename="../export/exportrun.cpp" line="7165"/>
         <source>; animals in forests: %1</source>
         <translation>; зверей в лесах: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6550"/>
+        <location filename="../export/exportrun.cpp" line="7308"/>
         <source>; aquatic fauna: %1</source>
         <translation>; водная фауна: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3111"/>
+        <location filename="../export/exportrun.cpp" line="3697"/>
         <source>; equipment on sports grounds: %1 items</source>
         <translation>; снаряжение на спортивных площадках: %1 предметов</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4931"/>
+        <location filename="../export/exportrun.cpp" line="5684"/>
         <source>churches: %1, with a maze: %2</source>
         <translation>церквей: %1, с лабиринтом: %2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5007"/>
+        <location filename="../export/exportrun.cpp" line="5760"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (здание, ближайшее к точке на карте)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5009"/>
+        <location filename="../export/exportrun.cpp" line="5762"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (лаборатория под научным зданием или школой, запасной вход)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5011"/>
+        <location filename="../export/exportrun.cpp" line="5764"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)</source>
         <translation>; %1 — люк под сундуком x=%2 z=%3 (церковь №%4 из %5 по размеру)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5047"/>
+        <location filename="../export/exportrun.cpp" line="5800"/>
         <source>; no church with a maze in chunk (%1, %2)</source>
         <translation>; в чанке (%1, %2) нет церкви с лабиринтом</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5074"/>
+        <location filename="../export/exportrun.cpp" line="5827"/>
         <source>; %1: no church with a maze in chunk (%2, %3)</source>
         <translation>; %1: в чанке (%2, %3) нет церкви с лабиринтом</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5101"/>
+        <location filename="../export/exportrun.cpp" line="5854"/>
         <source>; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other&apos;s way</source>
         <translation>; ancient_city — точка на карте слишком близко к стронгхолду: входы мешали бы друг другу</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5120"/>
+        <location filename="../export/exportrun.cpp" line="5873"/>
         <source>; the entrances cannot be placed in the given buildings — choosing automatically</source>
         <translation>; входы не удаётся разместить в заданных зданиях — выбираю автоматически</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5128"/>
+        <location filename="../export/exportrun.cpp" line="5881"/>
         <source>; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically</source>
         <translation>; в заданных церквях оба входа не разместить (мало чанков вокруг или шахты мешают друг другу) — выбираю автоматически</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5146"/>
+        <location filename="../export/exportrun.cpp" line="5899"/>
         <source>; stronghold — no suitable church was found</source>
         <translation>; стронгхолд — не нашлось подходящей церкви</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5176"/>
+        <location filename="../export/exportrun.cpp" line="5929"/>
         <source>; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)</source>
         <translation>; ancient_city — не нашлось ни подходящей церкви, ни научного здания, ни школы с лабораторией (край экспорта или шахты мешают друг другу)</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="530"/>
+        <location filename="../export/exportrun.cpp" line="551"/>
         <source>chunks added so that the buildings and lakes on the boundary stay whole: %1</source>
         <translation>чанков добавлено, чтобы здания и озёра на границе остались целыми: %1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="533"/>
+        <location filename="../export/exportrun.cpp" line="554"/>
         <source>polygon boundary: %1 of %2 chunks written</source>
         <translation>граница-многоугольник: записано %1 из %2 чанков</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="961"/>
+        <location filename="../export/exportrun.cpp" line="977"/>
         <source>The scene is too big for a save zip archive (%1 region files, ~%2 MB). Export a smaller area.</source>
         <translation>Сцена слишком велика для zip-архива сохранений (%1 region-файлов, ~%2 МБ). Экспортируйте меньшую область.</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="946"/>
-        <location filename="../export/exportrun.cpp" line="975"/>
+        <location filename="../export/exportrun.cpp" line="962"/>
+        <location filename="../export/exportrun.cpp" line="991"/>
         <source>Could not write the file %1: %2</source>
         <translation>Не удалось записать файл %1: %2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="980"/>
+        <location filename="../export/exportrun.cpp" line="996"/>
         <source>The file %1 was not written completely (quota/disk?).</source>
         <translation>Файл %1 записан не полностью (квота/диск?).</translation>
     </message>
@@ -2921,7 +3597,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>%1: неизвестный файл слоя проигнорирован (список слоёв фиксирован)</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="471"/>
+        <location filename="../app/encountersdialog.cpp" line="730"/>
         <source>Select an event on the left.</source>
         <translation>Выберите событие слева.</translation>
     </message>

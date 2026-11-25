@@ -97,8 +97,11 @@ struct EncPack
     //! the exporter samples the city's window glass and the pack watches those exact cells
     //! bookCell: the ground cell under the rules-book lectern as x,y,z (the exporter picks a free
     //! dry cell near the spawn); fewer than three values - the pack sets no book anywhere
+    //! russian: the export ran with the ru UI language, so the pack's player-visible lines (tellraw,
+    //! titles, the book) speak Russian; false - they stay English (export/encounters_ru.h)
     static void build(const AddFn& add, const QSet<QString>& off, const QVector<Prop>& props,
-                      const QVector<int>& glassCensus, const QVector<int>& bookCell, bool legacy121);
+                      const QVector<int>& glassCensus, const QVector<int>& bookCell, bool legacy121,
+                      bool russian = false);
 };
 
 //! The cells of the chalk arrow of a chalk prop in world (x;z) coordinates, the pattern rotated by

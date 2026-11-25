@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE TS>
-<TS version="2.1" language="zh_CN"><context>
+<TS version="2.1" language="zh_CN">
+<context>
     <name>Climate</name>
     <message>
         <location filename="../export/climate.h" line="15"/>
@@ -66,437 +67,1107 @@
 <context>
     <name>EncountersDialog</name>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="31"/>
+        <location filename="../app/encountersdialog.cpp" line="33"/>
         <source>Pursuers</source>
         <translation>追踪者</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="32"/>
+        <location filename="../app/encountersdialog.cpp" line="34"/>
         <source>The Lurker — a faceless figure in the lamplight</source>
         <translation>潜伏者——路灯下无面的身影</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="38"/>
+        <location filename="../app/encountersdialog.cpp" line="35"/>
+        <source>A thin faceless figure in black. It rises far off in a lamp&apos;s light - by the park with the flying island, by a lonely lamp on the road, at the edge of a quarter. Walk closer and it waits behind you in the alley. It behaves like hearing: noise, footsteps nearer than your own.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="39"/>
+        <source>Night 19:00-06:00, about 10% per cycle: the tall one circles the light of one street lamp and keeps his distance; he lets go only when the sun takes the street. The church-light finale is still coming.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="43"/>
         <source>The Night Taxicab</source>
         <translation>夜班的士</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="43"/>
+        <location filename="../app/encountersdialog.cpp" line="44"/>
+        <source>By the night parking lot or the metro stop stands a car, and beside it a fellow traveller. Start the engine - a silhouette on the back seat. Step out to look - nobody, and the door slams itself. The arc closes where his garage stands in the industrial zone: an empty place with a stain.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="49"/>
+        <source>Night 19:00-06:00, about 10% per cycle: a plate lying by one car&apos;s door is his ignition. Find his empty spot with the stain in the industrial zone and the rider is gone for good.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="53"/>
         <source>The Echo of the tunnels</source>
         <translation>隧道回声</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="48"/>
+        <location filename="../app/encountersdialog.cpp" line="54"/>
+        <source>In the metro tunnels and the underpasses it gives your own steps back a breath late, as if from another tunnel. The closer it is, the more in sync. Lead it into the street: the Echo does not go outside.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="57"/>
+        <source>No dice at all: it listens in a baked tunnel - a step is heard where you stood one cycle ago. Stand still and only silence answers; outdoors it cannot follow.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="61"/>
         <source>The Night Matron (schools, hospitals)</source>
         <translation>夜间值班员(学校、医院)</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="53"/>
+        <location filename="../app/encountersdialog.cpp" line="62"/>
+        <source>In schools, kindergartens and hospital wings the light comes on in her offices by a schedule, and a note &apos;check the 3rd floor&apos; shows on the block&apos;s board. Find her locker with the key and the block calms down.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="65"/>
+        <source>Night 19:00-06:00, about 10% per cycle: in one school/hospital wing the light turns on in her office (314) and someone walks the corridor; by morning it goes dark again. The locker with the key is still coming.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="70"/>
         <source>The Mower in the fog</source>
         <translation>雾中的割草人</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="57"/>
+        <location filename="../app/encountersdialog.cpp" line="71"/>
+        <source>The owner of a lawn that ran out. Invisible by day, his motor is audible in the fog; by morning the grass carries even stripes nobody mowed. The stripes cut a path to his shed - find it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="74"/>
+        <source>Late night 00:00-06:00, about 8% per cycle: one stripe a night - three cells of grass trodden with the hum of something small and low. Dawn gives the whole lawn back.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="78"/>
         <source>The Neighbour Above</source>
         <translation>楼上的邻居</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="61"/>
+        <location filename="../app/encountersdialog.cpp" line="79"/>
+        <source>A stomp strictly above your head wherever you spend the night. One floor up is a door that is on no plan. Go up to the roof: a chair waits there, a little yard, and a view over the whole city.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="82"/>
+        <source>Late night 00:00-06:00, about 14% per cycle: furniture dragged seven blocks over your head, or three knocks with a door behind them. Only sound - the blocks never move.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="86"/>
         <source>The Third Passenger</source>
         <translation>车厢里的第三位乘客</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="65"/>
+        <location filename="../app/encountersdialog.cpp" line="87"/>
+        <source>In a &apos;car&apos; (a tunnel with tracks) there are always more riders than boarded. Do not turn around until the terminus - it passes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="89"/>
+        <source>No dice at all: in a baked tunnel with tracks two shadows repeat your path one and two cycles behind you, and a third set of steps belongs to nobody. The count is announced once per walk; the shadows dissolve at dawn.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="94"/>
         <source>Bus No. 13</source>
         <translation>13路巴士</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="69"/>
+        <location filename="../app/encountersdialog.cpp" line="95"/>
+        <source>At night, at a terminus on the outskirts, a route that does not exist stops. The doors stand open; do not step inside - darkness and breathing. Keep its timetable and photograph it, and it becomes a harmless legend.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="99"/>
+        <source>Night 19:00-06:00, about 12% per cycle: at a stop without route 13 the 13 only flickers past twice, with the roar of a passing engine. Stand there very still with a clock in hand and the stop stays quiet for good.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="103"/>
         <source>Parks and yards</source>
         <translation>公园与院落</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="70"/>
+        <location filename="../app/encountersdialog.cpp" line="104"/>
         <source>The Midnight Carousel</source>
         <translation>午夜旋转木马</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="74"/>
+        <location filename="../app/encountersdialog.cpp" line="105"/>
+        <source>It spins and plays by itself while nobody watches. It already works as a demo: cold sparks over the marked parks.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="107"/>
+        <source>Night 19:00-06:00, about 8% per cycle: a cold end-rod shimmer flies over the parks marked for the carousel. The carousel itself is still coming.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="111"/>
         <source>The Swings Nobody Rides</source>
         <translation>无人荡的秋千</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="78"/>
+        <location filename="../app/encountersdialog.cpp" line="112"/>
+        <source>On the playground&apos;s fourth swing an invisible rider rocks; beside it in the sand, a boot print that was not there in the evening.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="114"/>
+        <source>Night 19:00-06:00, about 25% per cycle: the seat of the swings goes along the arc eight positions at a time under nobody; the playground is picked by the roll.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="118"/>
         <source>Chalk That Redraws Itself</source>
         <translation>会重画的粉笔涂鸦</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="82"/>
+        <location filename="../app/encountersdialog.cpp" line="119"/>
+        <source>A children&apos;s chalk drawing on asphalt: &apos;drive here&apos;. At night the drawing changes - it is redrawn toward a new address.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="121"/>
+        <source>Night 19:00-06:00, about 40% per cycle: the chalk arrow on the asphalt is erased and redrawn pointing to a new address, in another color.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="124"/>
         <source>The Twin Island</source>
         <translation>孪生浮岛</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="86"/>
+        <location filename="../app/encountersdialog.cpp" line="125"/>
+        <source>Over the park that already got its flying island a second one rises, with no base under it. A spare exit for the Lurker.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="127"/>
+        <source>The logic is coming: by the design the second island will rise over the first.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="130"/>
         <source>The Fountain Running Downward</source>
         <translation>向下流淌的喷泉</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="90"/>
+        <location filename="../app/encountersdialog.cpp" line="131"/>
+        <source>At night the fountain&apos;s water flows not into the bowl but three blocks below ground level. Under the fountain, a cavity that is on no plan.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="133"/>
+        <source>Night 19:00-06:00, about 10% per cycle: the bowl drains in one tick - the water leaves through the bottom - and half a minute later climbs back, colder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="137"/>
         <source>The Bench Not For Everyone</source>
         <translation>不是给所有人的长椅</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="94"/>
+        <location filename="../app/encountersdialog.cpp" line="138"/>
+        <source>Sit here - and the same bench stands in fog and rain, with not one sound from the city. A mini-dimension; the way out is simply to stand up.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="141"/>
+        <source>About every three minutes the fog takes one oak bench within fifty blocks of a player - its seat turns dark. Stand three seconds before the dark bench and you sink into the park; the way out waits before the middle seat. The dread flattens to twenty-five.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="146"/>
         <source>The Dog Without An Owner</source>
         <translation>没有主人的狗</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="96"/>
+        <location filename="../app/encountersdialog.cpp" line="147"/>
+        <source>It follows the player in silence and disappears the moment you come near people.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="149"/>
+        <source>Night: a dog with no address falls in beside one walker - it keeps to him alone, slips away among people and is gone by dawn. It never makes a sound on its own.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="152"/>
         <source>Graveyards</source>
         <translation>墓地</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="97"/>
+        <location filename="../app/encountersdialog.cpp" line="153"/>
         <source>Pumpkins That Turn To You</source>
         <translation>转向你的南瓜</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="100"/>
+        <location filename="../app/encountersdialog.cpp" line="154"/>
+        <source>Jack-o&apos;-lanterns turn their faces toward the player - the block changes while you watch from afar.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="156"/>
+        <source>No dice at all: every cycle the cemetery jacks turn their carved face to whoever watches from a distance - and never to someone standing close.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="160"/>
         <source>The Fresh Grave</source>
         <translation>新坟</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="103"/>
+        <location filename="../app/encountersdialog.cpp" line="161"/>
+        <source>Lit up as &apos;fresh soil&apos;. Do not dig: the shovel&apos;s sound breaks off on its own.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="163"/>
+        <source>Night 19:00-06:00, about 10% per cycle: one grave is lit up with fresh soil; dig into it and the grave digs itself back up.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="166"/>
         <source>The Night Procession</source>
         <translation>夜间送葬队伍</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="107"/>
+        <location filename="../app/encountersdialog.cpp" line="167"/>
+        <source>At night a column of unseen mourners walks to the gates - only particles and steps. Stand in its way and they walk through.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="169"/>
+        <source>Late night 00:00-06:00, about 6% per cycle: soul fire marches along a graveyard alley from grave to grave, two seconds a cell; one procession at a time, and it walks only while somebody could see it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="173"/>
         <source>The Caretaker</source>
         <translation>守墓人</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="110"/>
+        <location filename="../app/encountersdialog.cpp" line="174"/>
+        <source>A skeleton in the guard house: while you are near he pretends to sit; turn away and he already stands at the door.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="176"/>
+        <source>Late night 00:00-06:00, about 8% per cycle: come to one side of the mound and the caretaker is already standing on the opposite one; at dawn he leaves.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="180"/>
         <source>Always 03:07</source>
         <translation>永远是03:07</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="112"/>
+        <location filename="../app/encountersdialog.cpp" line="181"/>
+        <source>The cemetery clock strikes 03:07 even after the player broke its mechanism.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="183"/>
+        <source>Seven bell strikes at exactly 03:07; the cemetery clock rebuilds itself after a break. Nothing more.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="185"/>
         <source>Metro and tunnels</source>
         <translation>地铁与隧道</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="113"/>
+        <location filename="../app/encountersdialog.cpp" line="186"/>
         <source>The Last Train</source>
         <translation>末班车</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="117"/>
+        <location filename="../app/encountersdialog.cpp" line="187"/>
+        <source>Every few nights a train walks the tunnel: hostile mobs stay away while it runs. You can &apos;catch&apos; it and ride to the stash - a teleport room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="190"/>
+        <source>Deep night 05:00-06:00, about 10% per cycle: the train moves one cell every two seconds, clears the platform of mobs, and past the hall carries whoever stood on the platform to a room at the end of the line.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="195"/>
         <source>The Station That Is Not</source>
         <translation>不存在的车站</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="121"/>
+        <location filename="../app/encountersdialog.cpp" line="196"/>
+        <source>A signpost to the exit of a station that does not exist appears. Follow it: an empty hall, one burning lamp and a school desk.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="198"/>
+        <source>Night 01:00-06:00, about 6% per cycle: the hall that is on no map lights up for about a minute - a lantern and a bell stand in it while nobody looks closely; the morning sweep removes them.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="202"/>
         <source>The Stair With One Flight More</source>
         <translation>多出一层的楼梯</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="125"/>
+        <location filename="../app/encountersdialog.cpp" line="203"/>
+        <source>The escalator or the vestibule stairs climb one flight more than the outside shows. Inside, a decoy room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="205"/>
+        <source>Night 03:00-06:00, about 6% per cycle: rail dust six times and a roar nobody counts the same way twice. The blocks never move.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="208"/>
         <source>The Breathing Rails</source>
         <translation>会呼吸的轨道</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="128"/>
+        <location filename="../app/encountersdialog.cpp" line="209"/>
+        <source>The gap between the rails cyclically widens and narrows. At the middle of the span, a voice.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="211"/>
+        <source>Late night 00:00-06:00, about 6% per cycle: a red pulse walks the route, thinning and thickening, and at the middle a low sound leans in to listen to the sleeper. Only light and sound move; nobody is ever sealed inside.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="216"/>
         <source>The Darkness Behind You</source>
         <translation>身后的黑暗</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="131"/>
+        <location filename="../app/encountersdialog.cpp" line="217"/>
+        <source>Light in the tunnel goes out in segments behind your back: every lamp keeps its own timer, and the dark catches up.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="219"/>
+        <source>The logic is coming: by the design the tunnel lamps will go out segment by segment behind the walker.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="221"/>
         <source>Tower living</source>
         <translation>高层住宅</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="132"/>
+        <location filename="../app/encountersdialog.cpp" line="222"/>
         <source>Floor Nine And A Half</source>
         <translation>九层半</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="136"/>
+        <location filename="../app/encountersdialog.cpp" line="223"/>
+        <source>A door between the ninth and tenth floors. Behind it the same floor, only in mirrors: a duplicated mini-floor.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="225"/>
+        <source>After midnight the door that is on no plan shows in the stairwell of a tall house (about 8% per cycle). Open it from the flight and you stand on the landing. The floor takes each guest fifty-fifty: a chest in the hall (nine of ten plain, one of ten from a mansion), or company: five to fifteen monsters, or a warden. Any door there brings you back to your own flight; by morning nothing is left.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="232"/>
         <source>The Lift Without A Shaft</source>
         <translation>没有井道的电梯</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="139"/>
+        <location filename="../app/encountersdialog.cpp" line="233"/>
+        <source>Call the lift on an empty flight - there will be a sound and &apos;doors&apos; opening onto a blind wall.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="235"/>
+        <source>Late night 00:00-06:00, about 8% per cycle: press a button where there is no button and the shaft hums behind the stairwell wall, doors sliding across plain plaster. The cabin never comes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="239"/>
         <source>The Window Wave</source>
         <translation>窗户的波浪</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="143"/>
+        <location filename="../app/encountersdialog.cpp" line="240"/>
+        <source>Light in every window of one house turns on in turn from bottom to top, over twenty seconds, and goes out all at once.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="242"/>
+        <source>Night 19:00-06:00, about 8% per cycle: a wave of light runs up one house&apos;s windows and dies at once. Houses without a fit row of windows sit it out.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="246"/>
         <source>The Roof Garden</source>
         <translation>天台菜园</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="147"/>
+        <location filename="../app/encountersdialog.cpp" line="247"/>
+        <source>On the roof: a garden bed, an armchair and a sign &apos;do not disturb&apos;. The owner will shush anyone trampling the beds.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="249"/>
+        <source>The logic is coming: by the design the roof will keep a garden with a guardian.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="252"/>
         <source>The Boarded-Over Door</source>
         <translation>钉死的门</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="150"/>
+        <location filename="../app/encountersdialog.cpp" line="253"/>
+        <source>A door that is on the plan but boarded over. At night there is crying behind it. Tear the boards off - a room full of inscriptions.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="255"/>
+        <source>The logic is coming: by the design a boarded door and a room behind it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="257"/>
         <source>Streets and parking</source>
         <translation>街道与停车场</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="151"/>
+        <location filename="../app/encountersdialog.cpp" line="258"/>
         <source>The Extra Car</source>
         <translation>多出来的一辆车</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="155"/>
+        <location filename="../app/encountersdialog.cpp" line="259"/>
+        <source>A car on the parking lot that was not on the list (OSMC places cars deterministically - so this one is &apos;extra&apos;). Its tape deck plays the news about that driver.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="262"/>
+        <source>Night 01:00-06:00, about 8% per cycle: a radio talks beside one of the cars - three note block taps like a broadcast without words, a line on the actionbar; silence by morning.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="266"/>
         <source>The Flasher Without A Car</source>
         <translation>没有车的警示灯</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="159"/>
+        <location filename="../app/encountersdialog.cpp" line="267"/>
+        <source>A flasher without a car over an empty intersection. Come near - it dies here and lights up behind your back.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="269"/>
+        <source>Evening 18:00-06:00, about 10% per cycle: a blue blink over one of the crossings; approach and it goes out here and comes on behind you.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="272"/>
         <source>The Interchange Loop</source>
         <translation>立交环岛</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="163"/>
+        <location filename="../app/encountersdialog.cpp" line="273"/>
+        <source>You passed the same interchange sign three times - and the block around you &apos;re-assembled&apos;: the neighboring chunks swapped in a mini-location.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="276"/>
+        <source>The logic is coming: by the design a block reassembling around the same sign.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="279"/>
         <source>The Roadworks On The Viaduct</source>
         <translation>高架桥上的施工</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="167"/>
+        <location filename="../app/encountersdialog.cpp" line="280"/>
+        <source>&apos;Roadworks&apos; of blocks on the viaduct ahead. Clear the wreck and behind it is a cliff into nothing: the world&apos;s end, staged.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="282"/>
+        <source>The logic is coming: by the design a wreck on the viaduct with a cliff behind it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="285"/>
         <source>The Hitchhiker</source>
         <translation>搭车人</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="170"/>
+        <location filename="../app/encountersdialog.cpp" line="286"/>
+        <source>A voice from the road edge asks for a ride. Take him and two hundred meters on he vanishes, leaving a note.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="288"/>
+        <source>Night 04:00-06:00, about 6% per cycle: somebody waits at the road edge with a lantern; come close to offer a ride and the lantern burns on empty asphalt. By morning a note lies there: &apos;I did not ride. thank you anyway&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="292"/>
         <source>Schools</source>
         <translation>学校</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="171"/>
+        <location filename="../app/encountersdialog.cpp" line="293"/>
         <source>The Game In The Gym</source>
         <translation>体育馆里的球赛</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="174"/>
+        <location filename="../app/encountersdialog.cpp" line="294"/>
+        <source>At night somebody plays on the gym&apos;s net - the sounds of a ball. Step in: the ball rolls toward the door.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="296"/>
+        <source>Night 01:00-06:00, about 10% per cycle: a snowball hops between three cells of the school gym - the yard plays by itself; by morning the ball lies still.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="300"/>
         <source>The Skipping Rope</source>
         <translation>跳绳</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="177"/>
+        <location filename="../app/encountersdialog.cpp" line="301"/>
+        <source>In the yard a skipping rope jumps that nobody turns - and &apos;two of them&apos; jump into it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="303"/>
+        <source>Night 01:00-06:00, about 8% per cycle: the rhythm of a note block, a rope of crit particles across the dark, and on every beat two small silhouettes rise and sit back down.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="307"/>
         <source>The Empty Auditorium</source>
         <translation>空礼堂</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="180"/>
+        <location filename="../app/encountersdialog.cpp" line="308"/>
+        <source>A spotlight switches on by itself over one empty chair; on the stage, the chalk outline of a &apos;graduate&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="310"/>
+        <source>Night 02:00-06:00, about 6% per cycle: a pillar of end rod over the school yard, three slow pulses, and the outline of a graduate drawn in white sparks.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="314"/>
         <source>Yesterday&apos;s Timetable</source>
         <translation>昨天的课程表</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="183"/>
+        <location filename="../app/encountersdialog.cpp" line="315"/>
+        <source>The subjects on the board &apos;for tomorrow&apos; get rewritten to &apos;yesterday&apos;s&apos; - including teachers the school never had.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="317"/>
+        <source>Morning 07:00-12:00, about 8% per cycle: dust over the school&apos;s chest, a scrap left on its lid, and the last line reads a name the city does not have. The scrap can be picked up.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="320"/>
         <source>Private sector</source>
         <translation>独栋住宅区</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="184"/>
+        <location filename="../app/encountersdialog.cpp" line="321"/>
         <source>The Banya With Lights On</source>
         <translation>亮着灯的浴屋</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="188"/>
+        <location filename="../app/encountersdialog.cpp" line="322"/>
+        <source>A banya that is &apos;abandoned&apos; yet steams and glows. Inside, a basin and a broom; take the broom and you will hear &apos;put it back&apos;, and it will not be yours to take until night.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="325"/>
+        <source>The logic is coming: by the design a banya with steam and a broom that must go back.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="328"/>
         <source>The Gate That Is Always Locked</source>
         <translation>总锁着的小门</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="192"/>
+        <location filename="../app/encountersdialog.cpp" line="329"/>
+        <source>The wicket that is &apos;always locked&apos; stands open for the third time. Behind it the same plot, only in winter: a mini-substitution.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="331"/>
+        <source>The logic is coming: by the design a wicket into the same plot, but winter.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="334"/>
         <source>The Scarecrow That Turned</source>
         <translation>转过身来的稻草人</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="196"/>
+        <location filename="../app/encountersdialog.cpp" line="335"/>
+        <source>By day it stands with its back to the house - you may check and turn it. At night it faces the house, and on its chest a board says &apos;leave by morning&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="338"/>
+        <source>Night: the scarecrow turns to face the house, puts on a carved pumpkin and the warning &apos;leave by morning&apos;; by day it turns back.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="341"/>
         <source>The Dog Howling At One Fence</source>
         <translation>只对一个围栏嚎叫的狗</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="198"/>
+        <location filename="../app/encountersdialog.cpp" line="342"/>
+        <source>The neighbor&apos;s dog howls at one fence only. By that fence, an underground run into the forest.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="344"/>
+        <source>Late night 00:00-06:00, about 10% per cycle: a howl from the field past the last house, and six seconds later an answer from further off. The underground run is still being dug.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="347"/>
         <source>Woods and industry</source>
         <translation>林地与工业区</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="199"/>
+        <location filename="../app/encountersdialog.cpp" line="348"/>
         <source>The White Moths</source>
         <translation>白色飞蛾</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="203"/>
+        <location filename="../app/encountersdialog.cpp" line="349"/>
+        <source>A flight of white moth particles around one lamp. Stand in the center - the wing sound dies right in your ear.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="351"/>
+        <source>Night 01:00-06:00, about 10% per cycle: a ring of moths turns around one lamp for about a minute; stand in the middle and the world goes quiet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="355"/>
         <source>The Hum Of The Power Line</source>
         <translation>高压线的嗡鸣</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="207"/>
+        <location filename="../app/encountersdialog.cpp" line="356"/>
+        <source>A power-line cut with no pylons - the wires lie in the earth, and fifty hertz is audible. At the cut&apos;s end, a meter booth serving the whole district.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="359"/>
+        <source>Night 02:00-06:00, about 8% per cycle: one lamp carries the hum tonight - three low pulses under the light, and the ordinary night again. The wires stay underground.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="363"/>
         <source>The Dead Camp</source>
         <translation>死去的营地</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="211"/>
+        <location filename="../app/encountersdialog.cpp" line="364"/>
+        <source>An abandoned camp in the woods (OSMC builds such): the fire burns itself out, a fresh spoon lies by the coals.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="366"/>
+        <source>The logic is coming: by the design a fire dying out by itself and somebody&apos;s spoon.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="369"/>
         <source>The Conveyor At Night</source>
         <translation>夜里的传送带</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="214"/>
+        <location filename="../app/encountersdialog.cpp" line="370"/>
+        <source>At night the shop floor&apos;s conveyor rolls a crate out onto the street. Inside: a mannequin in working overalls.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="372"/>
+        <source>The logic is coming: by the design a crate rolling out at night with a &apos;worker&apos; inside.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="375"/>
         <source>The Window In The Taiga</source>
         <translation>泰加林里的窗户</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="217"/>
+        <location filename="../app/encountersdialog.cpp" line="376"/>
+        <source>In the taiga by the private sector a path leads exactly to a &apos;window&apos; between houses. In the window, the light of your own campfire.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="378"/>
+        <source>The logic is coming: by the design a path leading to a lit window in the taiga.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="380"/>
         <source>Water</source>
         <translation>水域</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="218"/>
+        <location filename="../app/encountersdialog.cpp" line="381"/>
         <source>The Light Path On The Bottom</source>
         <translation>水底的光之路</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="222"/>
+        <location filename="../app/encountersdialog.cpp" line="382"/>
+        <source>In the park lake a path of pale stone lies along the bottom. Walk it and the light goes out in patches behind your back.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="384"/>
+        <source>The logic is coming: by the design a light path under water dying section by section behind the walker.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="387"/>
         <source>Offerings On The Railing</source>
         <translation>栏杆上的祭品</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="226"/>
+        <location filename="../app/encountersdialog.cpp" line="388"/>
+        <source>On the bridge railing &apos;offerings&apos; arrange themselves in rows of three. By morning the row has grown again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="390"/>
+        <source>The logic is coming: by the design offerings on the railing, filling up by morning.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="393"/>
         <source>The Reflection Of An Absent Cloud</source>
         <translation>不存在云朵的倒影</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="228"/>
+        <location filename="../app/encountersdialog.cpp" line="394"/>
+        <source>In the fountain&apos;s or the river&apos;s water a cloud is reflected that is not in this sky.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="396"/>
+        <source>Night 01:00-06:00, about 6% per cycle: a white softness drifts over the water three sweeps, passing under your own reflection.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="398"/>
         <source>Underground</source>
         <translation>地下</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="229"/>
+        <location filename="../app/encountersdialog.cpp" line="399"/>
         <source>The Fourth Wall</source>
         <translation>第四面墙</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="232"/>
+        <location filename="../app/encountersdialog.cpp" line="400"/>
+        <source>In a cave grotto a corridor opens onto a &apos;flooded&apos; copy of the street that is above.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="402"/>
+        <source>The logic is coming: by the design a corridor into a flooded copy of the street.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="405"/>
         <source>The Glowing Circle</source>
         <translation>发光的圆阵</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="236"/>
+        <location filename="../app/encountersdialog.cpp" line="406"/>
+        <source>A glowing patterned circle on a cave floor. Stand in the center - the world&apos;s sounds fall silent for thirty seconds.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="408"/>
+        <source>The logic is coming: by the design a pattern that silences the world at its center.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="411"/>
         <source>The Ghost Rrolley</source>
         <translation>幽灵矿车</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="238"/>
+        <location filename="../app/encountersdialog.cpp" line="412"/>
+        <source>The metro draisine comes if you simply stand on the rails and wait.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="413"/>
+        <source>Late night 00:00-06:00, about 6% per cycle: stand on the rails and wait - a real handcart rolls along the baked route toward you with sparks, and at the far end it simply stops existing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="416"/>
         <source>Base and prison</source>
         <translation>军事基地与监狱</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="239"/>
+        <location filename="../app/encountersdialog.cpp" line="417"/>
         <source>The Base Radio At Night</source>
         <translation>基地夜半广播</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="243"/>
+        <location filename="../app/encountersdialog.cpp" line="418"/>
+        <source>At night the base loudspeakers read out coordinates and &apos;do not go&apos;. Go there: empty - but the &apos;meeting&apos; never appears there again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="420"/>
+        <source>The logic is coming: by the design coordinates from a loudspeaker and a cancelled meeting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="423"/>
         <source>The Sentry Not In The Garrison</source>
         <translation>不在编制里的哨兵</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="247"/>
+        <location filename="../app/encountersdialog.cpp" line="424"/>
+        <source>By the base wicket stands one sentry who is not in the garrison. He does not pass the gate - he walks around the fence.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="426"/>
+        <source>The logic is coming: by the design a sentry the gate will not take.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="428"/>
         <source>The Camp That Vanishes By Dawn</source>
         <translation>黎明消失的营地</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="250"/>
+        <location filename="../app/encountersdialog.cpp" line="429"/>
+        <source>A camp of sacks and crates grows by the industrial zone and is gone by dawn. In the sacks, &apos;passports&apos; carrying the names of people from this city.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="432"/>
+        <source>The logic is coming: by the design a camp that exists at night and is gone by dawn.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="434"/>
         <source>Micro wonders</source>
         <translation>微小的怪事</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="251"/>
+        <location filename="../app/encountersdialog.cpp" line="435"/>
         <source>The Winking Lamp</source>
         <translation>眨眼的路灯</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="254"/>
+        <location filename="../app/encountersdialog.cpp" line="436"/>
+        <source>A lamp winks right above the player - a change of its lit state.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="437"/>
+        <source>Night 19:00-06:00, about 8% per cycle: one street lamp goes dark and comes back beat by beat; for the exporter&apos;s own lantern the dark is the empty cell it hangs in, for a mast the dark glowstones.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="441"/>
         <source>The Field Of Silence</source>
         <translation>寂静领域</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="258"/>
+        <location filename="../app/encountersdialog.cpp" line="442"/>
+        <source>A trap of silence: within ten blocks neither steps nor mobs are heard - for fifteen seconds.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="444"/>
+        <source>Any hour, about 6% per cycle: around one lamp the sound falls out of the air for a quarter of a minute; the ambience comes back by itself.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="447"/>
         <source>The Rain Above One Street</source>
         <translation>只下一街的雨</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="262"/>
+        <location filename="../app/encountersdialog.cpp" line="448"/>
+        <source>Rain falls over one street only: splash particles overhead and rain sound, while beside it - dry.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="450"/>
+        <source>Any hour, about 8% per cycle: a wet column of splash and rain sound over one street lamp; the world&apos;s weather stays untouched - a local stylization.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="454"/>
         <source>The Silhouette In The Windows</source>
         <translation>窗中的剪影</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="265"/>
+        <location filename="../app/encountersdialog.cpp" line="455"/>
+        <source>On the fifth floor a silhouette with a lantern stands in the window and walks along the row of windows like a sleepwalker.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="457"/>
+        <source>Late night 04:00-06:00, about 6% per cycle: a floating lantern crosses one row of a baked facade, one window per second and a half.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="460"/>
         <source>The Shadows Too Long For Noon</source>
         <translation>中午过长的影子</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="268"/>
+        <location filename="../app/encountersdialog.cpp" line="461"/>
+        <source>The noon shadows of the houses are ten degrees longer than they should be.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="463"/>
+        <source>In the dusk, while the sky is still light: a dark seam of particles creeps away from a lamp three sweeps, each one thinner and longer; when the sky goes dark, the shadow is gone - the shadow is all that ever stood there.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="468"/>
         <source>The Cat Council</source>
         <translation>猫之议事会</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="271"/>
+        <location filename="../app/encountersdialog.cpp" line="469"/>
+        <source>The city&apos;s cats gather in a &apos;council&apos; by one entrance. Come near and they file off to their homes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="471"/>
+        <source>Night 19:00-06:00, about 35% per cycle: the cats sit in council by one stop; scatter them and the next roll gathers them somewhere else.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="473"/>
         <source>Bonus legends</source>
         <translation>附加传说</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="272"/>
+        <location filename="../app/encountersdialog.cpp" line="474"/>
         <source>The Telephone Booth That Rings</source>
         <translation>会响的电话亭</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="276"/>
+        <location filename="../app/encountersdialog.cpp" line="475"/>
+        <source>The city&apos;s &apos;telephone for the ears&apos;: the booth rings. Take the handset and you are dictated a route to a meeting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="477"/>
+        <source>The logic is coming: by the design a call dictating the route to a meeting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="480"/>
         <source>The Night Market</source>
         <translation>夜市</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="280"/>
+        <location filename="../app/encountersdialog.cpp" line="481"/>
+        <source>On an empty square, five minutes of trade. By morning: a row of empty crates and change left on the counter.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="483"/>
+        <source>Night 01:00-06:00, about 6% per cycle: stalls of lantern light with no wood set up where the field lay all day, and the murmur of a hundred buyers is one villager&apos;s whisper; by the time you reach the stop the row is packing up.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="488"/>
         <source>The Street That Builds Itself</source>
         <translation>会自己建造的街道</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="284"/>
+        <location filename="../app/encountersdialog.cpp" line="489"/>
+        <source>A street that builds itself: fences, and progress visible every day. By the seventh day the house is finished - and it hosts the first meeting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="492"/>
+        <source>Late night 00:00-06:00, about 6% per cycle: the street &apos;climbs&apos; by sound - a gravel groan under the asphalt, dust through the seams, a lamp standing higher over the road. The blocks never move; the day-by-day build is still coming.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="497"/>
         <source>The Teasing Sign</source>
         <translation>捉弄人的路牌</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="329"/>
+        <location filename="../app/encountersdialog.cpp" line="498"/>
+        <source>A sign by the metro: &apos;do not go into the tunnel&apos;. Go in, and in the morning the sign reads: &apos;I told you&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="500"/>
+        <source>The logic is coming: by the design a sign that rewrites itself by morning.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="561"/>
         <source>Click to read</source>
         <translation type="unfinished">点击阅读</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="407"/>
+        <location filename="../app/encountersdialog.cpp" line="638"/>
         <source>City events</source>
         <translation>城市事件</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="416"/>
+        <location filename="../app/encountersdialog.cpp" line="647"/>
         <source>Random encounters over the exported world. The checked events ride into the world as the &quot;osmc_enc&quot; datapack; the unchecked ones are not written at all. The same list is on the command line: --encounters --encounters-off &lt;id&gt;,&lt;id&gt;…</source>
         <translation>导出世界上的随机相遇。勾选的事件会以 &quot;osmc_enc&quot; 数据包形式写入世界;未勾选的完全不会写入。命令行同样可设:--encounters --encounters-off &lt;id&gt;,&lt;id&gt;…</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="454"/>
+        <location filename="../app/encountersdialog.cpp" line="697"/>
         <source>Select an event on the left.</source>
         <translation>在左侧选择一个事件。</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="458"/>
+        <location filename="../app/encountersdialog.cpp" line="710"/>
         <source>All on</source>
         <translation>全部开启</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="459"/>
+        <location filename="../app/encountersdialog.cpp" line="711"/>
         <source>All off</source>
         <translation>全部关闭</translation>
     </message>
@@ -1612,47 +2283,47 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">3D 设置文件（.t3d）；默认优先使用 shapefile 文件夹中的 .t3d，其次 .tqt 工程的设置，最后程序旁的 default.t3d</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="98"/>
+        <location filename="../app/main.cpp" line="97"/>
         <source>world zip archive</source>
         <translation>世界 zip 压缩包</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="99"/>
+        <location filename="../app/main.cpp" line="98"/>
         <source>world version: 26 (default) or 1.21</source>
         <translation>世界版本：26（默认）或 1.21</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="100"/>
+        <location filename="../app/main.cpp" line="99"/>
         <source>superflat outside the area (default — a normal seed-based world)</source>
         <translation>区域外为超平坦（默认 — 按种子正常生成的世界）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="101"/>
+        <location filename="../app/main.cpp" line="100"/>
         <source>world seed (random by default)</source>
         <translation>世界种子（默认随机）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="102"/>
+        <location filename="../app/main.cpp" line="101"/>
         <source>caves: 1 (default) or 0</source>
         <translation>洞穴：1（默认）或 0</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="103"/>
+        <location filename="../app/main.cpp" line="102"/>
         <source>convert map units to meters using the projection: 1 (default) or 0</source>
         <translation>利用投影将地图单位换算为米：1（默认）或 0</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="104"/>
+        <location filename="../app/main.cpp" line="103"/>
         <source>church chunk for the stronghold, F3 format: &quot;x z&quot; or &quot;x y z&quot;</source>
         <translation>要塞所在教堂的区块坐标，F3 格式：「x z」或「x y z」</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="105"/>
+        <location filename="../app/main.cpp" line="104"/>
         <source>church chunk for the Ancient City</source>
         <translation>远古城市所在教堂的区块坐标</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="106"/>
+        <location filename="../app/main.cpp" line="105"/>
         <source>a chunk inside the forest that becomes the Pale Garden</source>
         <translation>将变为苍白之园的森林内部的区块坐标</translation>
     </message>
@@ -1661,107 +2332,107 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">定义「OSM 标签 -&gt; 图层与代码」规则的 JSON 文件，用于 .osm/.pbf 数据源（默认：数据文件/程序旁边的 osm_rules.json）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="92"/>
+        <location filename="../app/main.cpp" line="91"/>
         <source>OSMC — exports OpenStreetMap data or the shapefiles of a folder to a Minecraft world.</source>
         <translation>OSMC——将 OpenStreetMap 数据或文件夹中的 shapefile 导出为 Minecraft 世界。</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="96"/>
+        <location filename="../app/main.cpp" line="95"/>
         <source>an OSM extract (.osm/.pbf) or a folder with shapefiles (default — the current folder)</source>
         <translation>OSM 提取文件（.osm/.pbf）或包含 shapefile 的文件夹（默认——当前文件夹）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="97"/>
+        <location filename="../app/main.cpp" line="96"/>
         <source>rules catalog folder (rules/&lt;layer&gt;.json); by default the rules folder next to the program, in the current folder or in the source folder</source>
         <translation>规则目录文件夹（rules/&lt;图层&gt;.json）；默认为程序旁的 rules 文件夹、当前文件夹或源数据文件夹</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="107"/>
+        <location filename="../app/main.cpp" line="106"/>
         <source>JSON with the &quot;OSM tags -&gt; layer and codes&quot; rules for an .osm/.pbf source (default: osmrules.json next to the file, in the rules catalog or next to the program)</source>
         <translation>包含「OSM 标签 -&gt; 图层与代码」规则的 JSON，用于 .osm/.pbf 源（默认：文件旁边的 osmrules.json、规则目录中或程序旁边）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="108"/>
+        <location filename="../app/main.cpp" line="107"/>
         <source>a custom osmconf.ini for the OSM driver (by default generated from the tags used by the rules)</source>
         <translation>为 OSM 驱动指定自定义 osmconf.ini（默认按规则用到的标签自动生成）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="109"/>
+        <location filename="../app/main.cpp" line="108"/>
         <source>export boundary — a polygon of WGS84 longitudes and latitudes: &quot;lon lat; lon lat; lon lat …&quot; (in the window — &quot;Boundary&quot;)</source>
         <translation>导出边界 — WGS84 经纬度多边形：「经度 纬度; 经度 纬度; 经度 纬度 …」（界面中对应「边界」）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="110"/>
+        <location filename="../app/main.cpp" line="109"/>
         <source>save the world UNPACKED into this saves folder (a launcher or an instance folder), no zip — the world folder &lt;name&gt; is created inside it (in the window — &quot;Export settings&quot;)</source>
         <translation>将世界以解包形式保存到该存档文件夹（启动器或实例文件夹），不生成 zip — 其中会创建世界文件夹 &lt;名称&gt;（界面中对应「导出设置」）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="111"/>
+        <location filename="../app/main.cpp" line="110"/>
         <source>copy the log to a text file (UTF-8), handy with --nogui</source>
         <translation>将日志另存为文本文件（UTF-8），配合 --nogui 很方便</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="112"/>
+        <location filename="../app/main.cpp" line="111"/>
         <source>enhancer .dat file (fallback building type/height for OSM data); by default tmc_buildings.dat next to the program</source>
         <translation>增强器 .dat 文件（OSM 数据建筑类型/高度的兜底数据）；默认使用程序旁的 tmc_buildings.dat</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="113"/>
+        <location filename="../app/main.cpp" line="112"/>
         <source>do not use the enhancer</source>
         <translation>不使用增强器</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="114"/>
+        <location filename="../app/main.cpp" line="113"/>
         <source>spawn point as WGS84 longitude and latitude: &quot;lon lat&quot; (in the window — a click on the map preview)</source>
         <translation>出生点，WGS84 经纬度：「经度 纬度」（界面中对应 — 点击地图预览）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="115"/>
+        <location filename="../app/main.cpp" line="114"/>
         <source>save the map preview to a PNG and exit (no window)</source>
         <translation>将地图预览保存为 PNG 后退出（不显示窗口）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="116"/>
+        <location filename="../app/main.cpp" line="115"/>
         <source>(for testing) open the window, load the map, save a window screenshot to a PNG and exit</source>
         <translation>（测试用）打开窗口、加载地图、将窗口截图保存为 PNG 后退出</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="117"/>
+        <location filename="../app/main.cpp" line="116"/>
         <source>(for testing, with --gui-screenshot) &quot;click&quot; on the map: fractions of width and height, for example &quot;0.4 0.6&quot;</source>
         <translation>（测试用，配合 --gui-screenshot）在地图上「点击」：宽和高的比例，例如「0.4 0.6」</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="118"/>
+        <location filename="../app/main.cpp" line="117"/>
         <source>(for testing) open the &quot;City events&quot; window and save two screenshots: &quot;file1;file2;&lt;id&gt;&quot; — the blurred description and the revealed one for that event</source>
         <translation>(测试)打开&quot;城市事件&quot;窗口并保存两张截图:&quot;file1;file2;&lt;id&gt;&quot;——模糊描述及点击后显示的那张</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="119"/>
+        <location filename="../app/main.cpp" line="118"/>
         <source>do not put the /locate and eye-of-ender datapack in the world (stronghold, Ancient City …): the game will not ask for experimental features, but these structures cannot be found with a command</source>
         <translation>不向世界添加供 /locate 和末影之眼查找的数据包（要塞、远古城市等）：游戏不会要求开启实验性功能，但这些结构无法用命令定位</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="120"/>
+        <location filename="../app/main.cpp" line="119"/>
         <source>do not top up vegetation for OSM data (yards, taiga, forests, parks)</source>
         <translation>不为 OSM 数据补充植被（庭院、针叶林、森林、公园）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="121"/>
+        <location filename="../app/main.cpp" line="120"/>
         <source>random city events (docs/city-encounters.md): the &quot;osmc_enc&quot; datapack, the &quot;sites.json&quot; registry and site markers in the world</source>
         <translation>随机城市事件(docs/city-encounters.md):向世界写入 &quot;osmc_enc&quot; 数据包、&quot;sites.json&quot; 登记表和地块标记</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="122"/>
+        <location filename="../app/main.cpp" line="121"/>
         <source>with --encounters: event ids to switch off, comma separated (the same list as the &quot;City events&quot; window)</source>
         <translation>配合 --encounters:要关闭的事件 id,逗号分隔(与&quot;城市事件&quot;窗口同一列表)</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="123"/>
+        <location filename="../app/main.cpp" line="122"/>
         <source>only load and classify the data (summary in the log), do not build the world</source>
         <translation>只加载并分类数据（日志中输出汇总），不构建世界</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="124"/>
+        <location filename="../app/main.cpp" line="123"/>
         <source>window theme: auto (as in Windows, default), light or dark</source>
         <translation>窗口主题：auto（跟随 Windows，默认）、light 或 dark</translation>
     </message>
@@ -1770,54 +2441,54 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">在窗口中添加“项目 / 文件夹”行：以 .tqt 项目或 shapefile 文件夹作为源（.t3d、OSM 规则和增强器等服务路径以及“真实米制”仅在命令行中设置）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="125"/>
+        <location filename="../app/main.cpp" line="124"/>
         <source>(for testing, with --gui-screenshot) online mode: &quot;lon lat zoom; lon lat; lon lat; …&quot; — map view and boundary vertices</source>
         <translation>（测试用，配合 --gui-screenshot）在线模式：「经度 纬度 缩放; 经度 纬度; 经度 纬度; …」— 地图视图与边界顶点</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="126"/>
+        <location filename="../app/main.cpp" line="125"/>
         <source>download OSM data for the polygon &quot;lon lat; lon lat; …&quot; (up to 25 km²) into the --out file and exit; the result goes to the --log file</source>
         <translation>下载多边形「经度 纬度; 经度 纬度; …」（最大 25 km²）的 OSM 数据到 --out 文件后退出；结果写入 --log 文件</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="127"/>
+        <location filename="../app/main.cpp" line="126"/>
         <source>climate zone: auto (by coordinates, default), temperate, boreal, tundra, steppe, mediterranean, desert, savanna, tropical, monsoon, semi-arid</source>
         <translation>气候带：auto（按坐标，默认）、temperate、boreal、tundra、steppe、mediterranean、desert、savanna、tropical、monsoon、semi-arid</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="128"/>
+        <location filename="../app/main.cpp" line="127"/>
         <source>(for testing) download a test OSM tile and a Nominatim reply, write the response codes to a file and exit</source>
         <translation>（测试用）下载一张测试 OSM 瓦片和 Nominatim 应答，将响应码写入文件后退出</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="129"/>
+        <location filename="../app/main.cpp" line="128"/>
         <source>(for testing, with --gui-screenshot) switch the interface language at run time (en, ru or zh) before the screenshot; the saved choice is not changed</source>
         <translation>（测试用，配合 --gui-screenshot）截图前在运行时切换界面语言（en、ru 或 zh）；不更改已保存的选择</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="130"/>
+        <location filename="../app/main.cpp" line="129"/>
         <source>(for testing, with --gui-screenshot) &quot;open:file&quot; or &quot;save:file&quot; — open or save a project file around the screenshot</source>
         <translation>（测试用，配合 --gui-screenshot）「open:文件」或「save:文件」— 截图前后打开或保存工程文件</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="131"/>
+        <location filename="../app/main.cpp" line="130"/>
         <source>interface language: auto (the system one, default), en, ru or zh; not saved</source>
         <translation>界面语言：auto（系统语言，默认）、en、ru 或 zh；不保存</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="132"/>
+        <location filename="../app/main.cpp" line="131"/>
         <source>no window: run the export and exit (code 0 — success)</source>
         <translation>无窗口：直接运行导出并退出（返回码 0 — 成功）</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="258"/>
-        <location filename="../app/tmcrun.cpp" line="99"/>
-        <location filename="../app/tmcrun.cpp" line="185"/>
+        <location filename="../app/main.cpp" line="257"/>
+        <location filename="../app/tmcrun.cpp" line="100"/>
+        <location filename="../app/tmcrun.cpp" line="186"/>
         <source>Error: %1</source>
         <translation>错误：%1</translation>
     </message>
     <message>
-        <location filename="../app/main.cpp" line="290"/>
+        <location filename="../app/main.cpp" line="289"/>
         <source>Online</source>
         <translation>在线</translation>
     </message>
@@ -1943,7 +2614,7 @@ It loads automatically when the data is ready.</source>
         <translation>搜索服务器返回代码 %1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="103"/>
+        <location filename="../app/tmcrun.cpp" line="104"/>
         <source>Source not found: %1</source>
         <translation>未找到数据源：%1</translation>
     </message>
@@ -1960,7 +2631,7 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">未找到 3D 设置文件：请指定 --t3d、把 .t3d 放入 shapefile 文件夹，或把 %1 放到程序旁边。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="136"/>
+        <location filename="../app/tmcrun.cpp" line="137"/>
         <source>Loading: %1</source>
         <translation>正在加载：%1</translation>
     </message>
@@ -1973,135 +2644,135 @@ It loads automatically when the data is ready.</source>
         <translation type="vanished">3D 设置：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="171"/>
+        <location filename="../app/tmcrun.cpp" line="172"/>
         <source>Polygon boundary (%1 vertices): objects discarded outside it: %2</source>
         <translation>多边形边界（%1 个顶点）：边界外舍弃的对象：%2</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="153"/>
+        <location filename="../app/tmcrun.cpp" line="154"/>
         <source>Surface terrain is switched off — the height matrix is ignored.</source>
         <translation>地表地形已关闭——忽略高度矩阵。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="105"/>
+        <location filename="../app/tmcrun.cpp" line="106"/>
         <source>tqt projects are not supported since v2.0: pass an OpenStreetMap extract (.osm/.pbf) or a folder with shapefiles</source>
         <translation>自 v2.0 起不再支持 tqt 项目：请传入 OpenStreetMap 提取文件（.osm/.pbf）或包含 shapefile 的文件夹</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="120"/>
+        <location filename="../app/tmcrun.cpp" line="121"/>
         <source>Rules catalog not found: specify --rules or put the rules folder next to the program</source>
         <translation>未找到规则目录：请指定 --rules 或将 rules 文件夹放在程序旁边</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="125"/>
+        <location filename="../app/tmcrun.cpp" line="126"/>
         <source>Rules catalog: %1</source>
         <translation>规则目录：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="146"/>
+        <location filename="../app/tmcrun.cpp" line="147"/>
         <source>OSM rules file (%1) not found: specify --osm-rules or put it into the rules catalog.</source>
         <translation>未找到 OSM 规则文件（%1）：请指定 --osm-rules 或将其放入规则目录。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="159"/>
+        <location filename="../app/tmcrun.cpp" line="160"/>
         <source>Height matrix not found (neither %1.tif nor DTM.tif) — the terrain is flat.</source>
         <translation>未找到高度矩阵（既无 %1.tif 也无 DTM.tif）——地形为平地。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="174"/>
+        <location filename="../app/tmcrun.cpp" line="175"/>
         <source>There are no objects inside the boundary and no height matrix — nothing to export.</source>
         <translation>边界内没有对象，也没有高度矩阵——没有可导出的内容。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="198"/>
+        <location filename="../app/tmcrun.cpp" line="199"/>
         <source>Dry run (--dry-run): the data was loaded, the world was not built.</source>
         <translation>试运行（--dry-run）：数据已加载，世界未构建。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="221"/>
+        <location filename="../app/tmcrun.cpp" line="222"/>
         <source>Real meters: x%1 along X, x%2 along Y</source>
         <translation>真实米制：X 方向 ×%1，Y 方向 ×%2</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="231"/>
-        <location filename="../app/tmcrun.cpp" line="391"/>
-        <location filename="../export/exportrun.cpp" line="470"/>
-        <location filename="../export/exportrun.cpp" line="631"/>
-        <location filename="../export/exportrun.cpp" line="709"/>
-        <location filename="../export/exportrun.cpp" line="914"/>
-        <location filename="../export/exportrun.cpp" line="1595"/>
-        <location filename="../export/exportrun.cpp" line="5371"/>
-        <location filename="../export/exportrun.cpp" line="6651"/>
-        <location filename="../export/exportrun.cpp" line="9015"/>
-        <location filename="../export/exportrun.cpp" line="11883"/>
-        <location filename="../export/exportrun.cpp" line="12128"/>
-        <location filename="../export/exportrun.cpp" line="13158"/>
-        <location filename="../export/exportrun.cpp" line="13426"/>
+        <location filename="../app/tmcrun.cpp" line="232"/>
+        <location filename="../app/tmcrun.cpp" line="394"/>
+        <location filename="../export/exportrun.cpp" line="491"/>
+        <location filename="../export/exportrun.cpp" line="680"/>
+        <location filename="../export/exportrun.cpp" line="757"/>
+        <location filename="../export/exportrun.cpp" line="930"/>
+        <location filename="../export/exportrun.cpp" line="2173"/>
+        <location filename="../export/exportrun.cpp" line="6124"/>
+        <location filename="../export/exportrun.cpp" line="7409"/>
+        <location filename="../export/exportrun.cpp" line="9775"/>
+        <location filename="../export/exportrun.cpp" line="12651"/>
+        <location filename="../export/exportrun.cpp" line="12896"/>
+        <location filename="../export/exportrun.cpp" line="13926"/>
+        <location filename="../export/exportrun.cpp" line="14194"/>
         <source>Export cancelled.</source>
         <translation>导出已取消。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="232"/>
+        <location filename="../app/tmcrun.cpp" line="233"/>
         <source>Objects to export: %1</source>
         <translation>待导出对象：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="233"/>
+        <location filename="../app/tmcrun.cpp" line="234"/>
         <source>Scene center (project projection): x=%1 y=%2 — this is block (0, 0) of the world; scale x%3 along X, x%4 along Y</source>
         <translation>场景中心（工程投影）：x=%1 y=%2 — 即世界的方块 (0, 0)；X 方向缩放 ×%3，Y 方向缩放 ×%4</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="269"/>
+        <location filename="../app/tmcrun.cpp" line="272"/>
         <source>Landmark 3D models: %1</source>
         <translation>3D 图形模型：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="280"/>
+        <location filename="../app/tmcrun.cpp" line="283"/>
         <source>Climate zone: %1 (chosen manually)</source>
         <translation>气候带：%1（手动选择）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="299"/>
+        <location filename="../app/tmcrun.cpp" line="302"/>
         <source>Climate zone: %1 (automatic: longitude %2, latitude %3)</source>
         <translation>气候带：%1（自动：经度 %2，纬度 %3）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="323"/>
+        <location filename="../app/tmcrun.cpp" line="326"/>
         <source>The spawn longitude/latitude could not be converted to the project projection — spawn at the data center.</source>
         <translation>出生点的经纬度无法转换为工程投影 — 改为在数据中心出生。</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="327"/>
+        <location filename="../app/tmcrun.cpp" line="330"/>
         <source>Spawn point: x=%1 y=%2 (project coordinates)</source>
         <translation>出生点：x=%1 y=%2（工程坐标）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="382"/>
+        <location filename="../app/tmcrun.cpp" line="385"/>
         <source>Writing the world: %1</source>
         <translation>正在写入世界：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="392"/>
+        <location filename="../app/tmcrun.cpp" line="395"/>
         <source>Export failed: %1</source>
         <translation>导出失败：%1</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="396"/>
+        <location filename="../app/tmcrun.cpp" line="399"/>
         <source>%1 h %2 min</source>
         <translation>%1 小时 %2 分</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="397"/>
+        <location filename="../app/tmcrun.cpp" line="400"/>
         <source>%1 min %2 s</source>
         <translation>%1 分 %2 秒</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="398"/>
+        <location filename="../app/tmcrun.cpp" line="401"/>
         <source>%1 s</source>
         <translation>%1 秒</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="401"/>
+        <location filename="../app/tmcrun.cpp" line="404"/>
         <source>The Minecraft world was saved unpacked:
 %1
 
@@ -2118,13 +2789,13 @@ Open the world &quot;%7&quot; in Minecraft %8%9 from your saves.
 %10</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="405"/>
-        <location filename="../app/tmcrun.cpp" line="411"/>
+        <location filename="../app/tmcrun.cpp" line="408"/>
+        <location filename="../app/tmcrun.cpp" line="414"/>
         <source> (seed %1)</source>
         <translation>（种子 %1）</translation>
     </message>
     <message>
-        <location filename="../app/tmcrun.cpp" line="408"/>
+        <location filename="../app/tmcrun.cpp" line="411"/>
         <source>The Minecraft save was created:
 %1
 
@@ -2151,319 +2822,324 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>洞穴模板：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11428"/>
+        <location filename="../export/exportrun.cpp" line="12192"/>
         <source>lair_structures.bin not found (put it next to cave_templates.bin; searched in: %1)</source>
         <translation>未找到 lair_structures.bin（请把它放到 cave_templates.bin 旁边；查找位置：%1）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11432"/>
+        <location filename="../export/exportrun.cpp" line="12196"/>
         <source>lair_structures.bin is damaged</source>
         <translation>lair_structures.bin 已损坏</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11436"/>
+        <location filename="../export/exportrun.cpp" line="12200"/>
         <source>caves must be enabled together with the normal surroundings (a noise world)</source>
         <translation>洞穴必须与正常周边环境（噪声世界）一起启用</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11512"/>
+        <location filename="../export/exportrun.cpp" line="12276"/>
         <source>Nothing to export: all meshes are empty.</source>
         <translation>无可导出内容：所有网格均为空。</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13723"/>
+        <location filename="../export/exportrun.cpp" line="14491"/>
         <source>; zebra on the roads: crossings %1 of %2 (cells %3)</source>
         <translation>；道路斑马线：人行横道 %1/%2（单元格 %3）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13800"/>
+        <location filename="../export/exportrun.cpp" line="14568"/>
         <source>Could not voxelize a single object (empty or too huge meshes).</source>
         <translation>没有任何对象能完成体素化（网格为空或过大）。</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7275"/>
+        <location filename="../export/exportrun.cpp" line="8033"/>
         <source>%1Pale Garden: there is no suitable vegetation in the data — an empty site of %2×%2 chunks was allocated (chunks %3…%4 along X, %5…%6 along Z, gap to the data %7 chunks)</source>
         <translation>%1苍白之园：数据中没有合适的植被 — 已划出 %2×%2 区块的空地（X 方向区块 %3…%4，Z 方向区块 %5…%6，距数据 %7 个区块）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3717"/>
-        <location filename="../export/exportrun.cpp" line="3723"/>
+        <location filename="../export/exportrun.cpp" line="3840"/>
+        <source>; benches along park paths: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../export/exportrun.cpp" line="4430"/>
+        <location filename="../export/exportrun.cpp" line="4436"/>
         <source>; landmark %1 skipped: %2</source>
         <translation>；图形 %1 已跳过：%2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3778"/>
+        <location filename="../export/exportrun.cpp" line="4491"/>
         <source>; landmark models: %1 (buildings razed: %2)</source>
         <translation>；图形模型：%1（拆除建筑：%2）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3779"/>
+        <location filename="../export/exportrun.cpp" line="4492"/>
         <source>; landmark models: %1</source>
         <translation>；图形模型：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6246"/>
+        <location filename="../export/exportrun.cpp" line="7004"/>
         <source>; single trees on the empty lands: %1 (greenery zones: %2)</source>
         <translation>；空地上的零星树木：%1（绿化区：%2）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6460"/>
+        <location filename="../export/exportrun.cpp" line="7218"/>
         <source>; household pets: %1</source>
         <translation>；家养宠物：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7454"/>
+        <location filename="../export/exportrun.cpp" line="8212"/>
         <source>; fields and grass extended to the chunk edge on the export border: %1 chunks</source>
         <translation>；导出边界处的田野和草地已延伸至区块边缘：%1 个区块</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7456"/>
+        <location filename="../export/exportrun.cpp" line="8214"/>
         <source>; forest extended to the chunk edge on the export border: %1 chunks</source>
         <translation>；导出边界处的森林已延伸至区块边缘：%1 个区块</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7661"/>
+        <location filename="../export/exportrun.cpp" line="8421"/>
         <source>%1Pale Garden: there is no forest near the given chunk</source>
         <translation>%1苍白之园：指定区块附近没有森林</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7688"/>
+        <location filename="../export/exportrun.cpp" line="8448"/>
         <source>%1Pale Garden: meadow vegetation was chosen (%2 m², more than twice the best forest with height — %3 m²)</source>
         <translation>%1苍白之园：选择了草甸植被（%2 m²，超过最佳带高森林面积的两倍 — %3 m²）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7707"/>
+        <location filename="../export/exportrun.cpp" line="8467"/>
         <source>%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10</source>
         <translation>%1苍白之园：%2 m²，中心 x=%3 z=%4（区块 %5 %6），范围 x %7…%8，z %9…%10</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7715"/>
+        <location filename="../export/exportrun.cpp" line="8475"/>
         <source>%1Pale Garden: no suitable forest</source>
         <translation>%1苍白之园：没有合适的森林</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7900"/>
+        <location filename="../export/exportrun.cpp" line="8660"/>
         <source>; forest mansion: 1 of %1 kept</source>
         <translation>；林地府邸：%1 座中保留 1 座</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="7949"/>
+        <location filename="../export/exportrun.cpp" line="8709"/>
         <source>; Pale Garden: pale_garden.bin was not found next to cave_templates.bin — a procedural forest without the donor terrain</source>
         <translation>；苍白之园：cave_templates.bin 旁未找到 pale_garden.bin — 生成不含原型地形的程序化森林</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8021"/>
+        <location filename="../export/exportrun.cpp" line="8781"/>
         <source>; terrain in forests: %1 columns</source>
         <translation>；森林内地形：%1 柱</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8194"/>
+        <location filename="../export/exportrun.cpp" line="8954"/>
         <source>; forest mansion (cut out of the game world) placed: center x=%1 z=%2 (chunk %3 %4)</source>
         <translation>；林地府邸（从游戏世界裁切）已放置：中心 x=%1 z=%2（区块 %3 %4）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8197"/>
+        <location filename="../export/exportrun.cpp" line="8957"/>
         <source>; forest mansion: no place was found in the Pale Garden</source>
         <translation>；林地府邸：在苍白之园中未找到合适位置</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8233"/>
+        <location filename="../export/exportrun.cpp" line="8993"/>
         <source>; bandit outposts: %1, abandoned camps: %2, small ruins: %3</source>
         <translation>；土匪哨站：%1，废弃营地：%2，小废墟：%3</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8426"/>
+        <location filename="../export/exportrun.cpp" line="9186"/>
         <source>; terrain of the empty lands: %1 cells</source>
         <translation>；空地地形：%1 个网格</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8427"/>
+        <location filename="../export/exportrun.cpp" line="9187"/>
         <source>; dunes of the forced sand: %1 cells</source>
         <translation>；强制沙地的沙丘：%1 格</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="12100"/>
+        <location filename="../export/exportrun.cpp" line="12868"/>
         <source>; houses straightened to the axes: %1 (kept off other buildings: %2)</source>
         <translation>；已对齐到轴线的房屋：%1（为避开其他建筑保留：%2）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13176"/>
+        <location filename="../export/exportrun.cpp" line="13944"/>
         <source>; private houses: %1 brick (%2 with a mansard floor), %3 log</source>
         <translation>；私人住宅：%1 砖砌（%2 带阁楼层），%3 原木</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="13587"/>
+        <location filename="../export/exportrun.cpp" line="14355"/>
         <source>; road width trimmed near buildings and fences: %1 sections, cells under buildings removed: %2</source>
         <translation>；建筑与围栏附近收窄路面：%1 段，建筑下移除的网格：%2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8306"/>
+        <location filename="../export/exportrun.cpp" line="9066"/>
         <source>; quarries: %1 columns of the stepped excavation</source>
         <translation>；采石场：阶梯式开挖 %1 柱</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8307"/>
+        <location filename="../export/exportrun.cpp" line="9067"/>
         <source>; spoil heaps: %1 columns of the mound</source>
         <translation>；废石堆：堆体 %1 柱</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8457"/>
+        <location filename="../export/exportrun.cpp" line="9217"/>
         <source>; climate zone: %1</source>
         <translation>；气候带：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="8649"/>
+        <location filename="../export/exportrun.cpp" line="9409"/>
         <source>; road columns moved onto the relief: %1</source>
         <translation>；已贴合到地形的道路柱：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10088"/>
+        <location filename="../export/exportrun.cpp" line="10848"/>
         <source>; elevated roads: %1 deck cells, %2 tunnel cells, %3 portal cells, %4 piers, %5 tunnel lamps, %6 parapets, %7 lifted approach cells, %8 straight bore cells</source>
         <translation>；高架道路：%1 个桥面网格，%2 个隧道网格，%3 个洞口网格，%4 个桥墩，%5 个隧道灯，%6 个护栏，%7 个抬升引道网格，%8 个直线掘进网格</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10122"/>
+        <location filename="../export/exportrun.cpp" line="10882"/>
         <source>; bridge columns over water (roads and railways): %1</source>
         <translation>；跨水桥梁柱（公路与铁路）：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10195"/>
+        <location filename="../export/exportrun.cpp" line="10955"/>
         <source>; mansion inhabitants: %1</source>
         <translation>；府邸居民：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10210"/>
+        <location filename="../export/exportrun.cpp" line="10970"/>
         <source>; outpost and camp blocks: %1</source>
         <translation>；哨站与营地方块：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10302"/>
+        <location filename="../export/exportrun.cpp" line="11062"/>
         <source>; shipwrecks in big water bodies: %1 (on the bottom %2, on the water %3)</source>
         <translation>；大型水体中的沉船：%1（水底 %2，水面 %3）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10331"/>
+        <location filename="../export/exportrun.cpp" line="11091"/>
         <source>; seaweed: kelp %1, seagrass %2 columns</source>
         <translation>；海藻：海带 %1，海草 %2 柱</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="10399"/>
+        <location filename="../export/exportrun.cpp" line="11159"/>
         <source>; terrain and trees of the real Pale Garden: %1 blocks</source>
         <translation>；真实苍白之园的地形与树木：%1 个方块</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11208"/>
+        <location filename="../export/exportrun.cpp" line="11971"/>
         <source>; subway: %1 tunnels, %2 rails (%3 electrified), %4 lamps</source>
         <translation>；地铁：隧道 %1 条，铁轨 %2 根（电气化 %3），灯 %4 盏</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11333"/>
+        <location filename="../export/exportrun.cpp" line="12097"/>
         <source>; secret rooms in the metro: %1</source>
         <translation>；地铁密室 %1 间</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="11370"/>
+        <location filename="../export/exportrun.cpp" line="12134"/>
         <source>; station halls: %1</source>
         <translation>；车站大厅 %1 座</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5586"/>
+        <location filename="../export/exportrun.cpp" line="6340"/>
         <source>; creaking hearts: %1 (extra removed %2, added %3)</source>
         <translation>；嘎枝之心：%1（额外移除 %2，添加 %3）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6407"/>
+        <location filename="../export/exportrun.cpp" line="7165"/>
         <source>; animals in forests: %1</source>
         <translation>；森林中的动物：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="6550"/>
+        <location filename="../export/exportrun.cpp" line="7308"/>
         <source>; aquatic fauna: %1</source>
         <translation>；水生动物：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="3111"/>
+        <location filename="../export/exportrun.cpp" line="3697"/>
         <source>; equipment on sports grounds: %1 items</source>
         <translation>；运动场地器材：%1 件</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="4931"/>
+        <location filename="../export/exportrun.cpp" line="5684"/>
         <source>churches: %1, with a maze: %2</source>
         <translation>教堂：%1，带迷宫的：%2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5007"/>
+        <location filename="../export/exportrun.cpp" line="5760"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (the building nearest to the point on the map)</source>
         <translation>；%1 — 箱子下方的活板门 x=%2 z=%3（离地图上标记点最近的建筑）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5009"/>
+        <location filename="../export/exportrun.cpp" line="5762"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (laboratory under a research building or a school, a spare entrance)</source>
         <translation>；%1 — 箱子下方的活板门 x=%2 z=%3（科研楼或学校下的实验室，备用入口）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5011"/>
+        <location filename="../export/exportrun.cpp" line="5764"/>
         <source>; %1 — hatch under the chest x=%2 z=%3 (church #%4 of %5 by size)</source>
         <translation>；%1 — 箱子下方的活板门 x=%2 z=%3（按面积第 %4/%5 大的教堂）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5047"/>
+        <location filename="../export/exportrun.cpp" line="5800"/>
         <source>; no church with a maze in chunk (%1, %2)</source>
         <translation>；区块 (%1, %2) 中没有带迷宫的教堂</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5074"/>
+        <location filename="../export/exportrun.cpp" line="5827"/>
         <source>; %1: no church with a maze in chunk (%2, %3)</source>
         <translation>；%1：区块 (%2, %3) 中没有带迷宫的教堂</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5101"/>
+        <location filename="../export/exportrun.cpp" line="5854"/>
         <source>; ancient_city — the point on the map is too close to the stronghold: the entrances would get in each other&apos;s way</source>
         <translation>；ancient_city — 地图标记点离要塞太近：两个入口会互相妨碍</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5120"/>
+        <location filename="../export/exportrun.cpp" line="5873"/>
         <source>; the entrances cannot be placed in the given buildings — choosing automatically</source>
         <translation>；入口无法放入指定建筑 — 改为自动选择</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5128"/>
+        <location filename="../export/exportrun.cpp" line="5881"/>
         <source>; both entrances cannot be placed in the given churches (too few chunks around or the shafts interfere with each other) — choosing automatically</source>
         <translation>；两个入口无法同时放入指定教堂（周边区块太少或竖井互相冲突）— 改为自动选择</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5146"/>
+        <location filename="../export/exportrun.cpp" line="5899"/>
         <source>; stronghold — no suitable church was found</source>
         <translation>；要塞 — 未找到合适的教堂</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="5176"/>
+        <location filename="../export/exportrun.cpp" line="5929"/>
         <source>; ancient_city — neither a suitable church, nor a research building, nor a school with a laboratory was found (the export edge or the shafts interfere with each other)</source>
         <translation>；ancient_city — 未找到合适的教堂、科研楼或带实验室的学校（导出边缘限制或竖井互相冲突）</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="530"/>
+        <location filename="../export/exportrun.cpp" line="551"/>
         <source>chunks added so that the buildings and lakes on the boundary stay whole: %1</source>
         <translation>为保持边界处的建筑和湖泊完整而增加的区块：%1</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="533"/>
+        <location filename="../export/exportrun.cpp" line="554"/>
         <source>polygon boundary: %1 of %2 chunks written</source>
         <translation>多边形边界：%2 个区块中已写入 %1 个</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="946"/>
-        <location filename="../export/exportrun.cpp" line="975"/>
+        <location filename="../export/exportrun.cpp" line="962"/>
+        <location filename="../export/exportrun.cpp" line="991"/>
         <source>Could not write the file %1: %2</source>
         <translation>无法写入文件 %1：%2</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="961"/>
+        <location filename="../export/exportrun.cpp" line="977"/>
         <source>The scene is too big for a save zip archive (%1 region files, ~%2 MB). Export a smaller area.</source>
         <translation>场景太大，无法生成 zip 存档（%1 个区域文件，约 %2 MB）。请导出更小的区域。</translation>
     </message>
     <message>
-        <location filename="../export/exportrun.cpp" line="980"/>
+        <location filename="../export/exportrun.cpp" line="996"/>
         <source>The file %1 was not written completely (quota/disk?).</source>
         <translation>文件 %1 未完全写入（配额/磁盘空间？）。</translation>
     </message>
@@ -2921,7 +3597,7 @@ Unpack the archive into the saves folder and open the world in Minecraft %7%8.
         <translation>%1：忽略未知的图层文件（图层列表是固定的）</translation>
     </message>
     <message>
-        <location filename="../app/encountersdialog.cpp" line="471"/>
+        <location filename="../app/encountersdialog.cpp" line="730"/>
         <source>Select an event on the left.</source>
         <translation>在左侧选择一个事件。</translation>
     </message>

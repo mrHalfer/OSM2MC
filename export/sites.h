@@ -110,6 +110,17 @@ struct HalfDoorSite
     int face = 0;                         // 0..3 = north/east/south/west, the door faces the flight
 };
 
+//! A building entrance whose sill stands higher than one block over the outer ground (the ground is only
+//! known after buildGround). A post pass lays a solid-block step up to the door, three cells wide along
+//! the wall (a user request). Recorded by buildEntrances; mat = the block the step is built of.
+struct DoorStepSite
+{
+    int x = 0, y = 0, z = 0;              // the OUTER wall cell of the door's lower row (store coords)
+    int dir = 0;                          // 0..3 = N/E/S/W, the direction the door faces (outward normal)
+    int dbl = 0;                          // a two-leaf door: the second leaf stands +1 along the wall
+    quint16 mat = 0;                      // the full block to pave the step with (the wall/foundation material)
+};
+
 //! An address plate of a house: the candidates (one per compass side, the cell OUTSIDE the wall, the sign faces outward) and two lines
 //! of text. The final side is chosen after the roads — the nearest to a road; SignSite is a ready plate (a block entity).
 struct SignCand

@@ -75,6 +75,7 @@ struct McWorldOptions
     //! the site codes. OFF — the world is exactly as before (no registry, no markers, no pack).
     bool encounters = false;
     QStringList encountersOff;            //!< ids of kEncIds switched off in the "City events" window (all on otherwise)
+    bool encountersRussian = false;       //!< the UI language of the export is ru: the events pack speaks to the player in Russian
     //! Meters per one map coordinate unit along the X and Y axes (at the scene center). 1.0 — the units are meters
     //! (local CRSs, UTM). For Mercator EPSG:3395 at 56° N it is ≈0.565: without the correction the horizontal
     //! sizes are inflated 1.77 times (areas — 3.1 times), while the heights stay real meters. The 3D window computes
