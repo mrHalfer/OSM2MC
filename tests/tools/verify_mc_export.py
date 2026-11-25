@@ -1431,14 +1431,14 @@ def check(path, legacy, env='flat', full=True):
         if _bb[1] == 5 and sorted((_bb[0], _bb[2])) == [1, 4]:
             obN += sum(1 for q in _comp if obsP[q] == 'minecraft:obsidian')
             crN += sum(1 for q in _comp if obsP[q] == 'minecraft:crying_obsidian')
-    poN = counts.get('minecraft:portal', 0)
-    poAx = {v for nm, tp in props_seen if nm == 'minecraft:portal'
+    poN = counts.get('minecraft:nether_portal', 0) + counts.get('minecraft:portal', 0)   # 26.x renamed the block
+    poAx = {v for nm, tp in props_seen if nm in ('minecraft:nether_portal', 'minecraft:portal')
             for k, v in (tp or ()) if k == 'axis'}
     # Portals are now in FORESTS (vegpol 71111110/71126000, >= 5000 real m², one per 1000 blocks):
     # the test scene gives exactly one suitable winner forest (A) -> one frame of 14 obsidian blocks
     # (in a "ruined" one part of the posts/top is knocked out and crying obsidian is mixed in); active 10% by hash, so
-    # portal blocks are 0 or 4. There are no more portals on csrpol — the gate "csrpol 10%/10%" was removed.
-    poOk = (8 <= obN + crN <= 14 and (poN == 0 or poN == 4)
+    # portal blocks are 0 or 6 (the burning 2x3 inside). There are no more portals on csrpol — the gate "csrpol 10%/10%" was removed.
+    poOk = (8 <= obN + crN <= 14 and (poN == 0 or poN == 6)
             and (not poAx or poAx <= {'x', 'z'}))
     print(f'  [{"OK " if poOk else "MISS"}] a portal in a forest (one per 1000 blocks): portal blocks {poN} '
           f'(want 0 or 4), obsidian+crying {obN + crN} (want 8..14 — one frame), '

@@ -26,6 +26,7 @@ Instead of the online map you can use a file: type the path to an OpenStreetMap 
 - **Special territories**: `landuse=military` becomes a strictly guarded military base - a stone wall along the contour (roads go through it as gates), a piglin garrison inside, no ordinary residents, and piglin loot in the buildings. An `amenity=prison` turns into a bandit refuge: every building inside is a raider lair, iron golem spawners keep the fight going, bandit patrols walk the ground, and the whole refuge is fenced with a wall whose gaps hold banner posts. `natural=bare_rock` turns the ground under the contour into stone mixed with terracotta, `natural=sand` into sand with dune hummocks - trees do not grow under either.
 - **Underground and hidden places**: caves, metro tunnels with rails and lanterns, grand underground station halls with pillars and staircase shafts to the surface, church and laboratory dungeons, a stronghold and an Ancient City with secret passages, a Pale Garden with a mansion, bandit outposts and camps, shipwrecks in big lakes, ruined portals, floating islands above the parks, and villages grown from clusters of private houses.
 - **Landmark 3D models**: list your landmarks (STL files) in `stl/landmarks.json` with their real coordinates and height, and OSMC turns them into blocks and stands them right on the building at that place - or instead of it. Or place them right in the window with the **3D figures** button: a model list with a voxel preview, any STL of your own, a click on the map, and a material/rotation/size per copy.
+- **City events**: check *City events (random encounters)* and the world carries a second datapack, `osmc_enc`, that brings dozens of city legends to life over your own streets - a midnight carousel, bus no. 13, a faceless watcher in the lamplight, the last train, a bench that takes you into a fog park. The city feels its own brokenness: shattered windows raise its dread, and the higher the dread, the more often the night speaks; kind deeds calm it down. The *Rules of the Night* book on the lectern by the spawn explains it all, console included (`/function osmc_enc:dread/s50`).
 - Villagers, mannequins, furniture and chests with ordinary game loot.
 - The result is an ordinary save (a `.zip`): drop it into `.minecraft/saves`, no need to unpack it. Versions **26.x** and **1.21.x** are supported; outside the exported area you get either a regular seed-based world or a superflat one.
 
@@ -41,6 +42,7 @@ Instead of the online map you can use a file: type the path to an OpenStreetMap 
 | **Surface terrain** | Follow the downloaded height matrix on the surface (on by default); switched off, the world keeps the terrain the game generates itself - caves and the rest are unaffected. |
 | **Terrain (elevation data from AWS Terrain Tiles)** | On the online map: downloads an open height matrix together with the area (on by default). If the tile server does not answer within 15 seconds, the world is built without terrain. |
 | **World datapack (for correct generation)** | Lets `/locate` and the Eye of Ender find the stronghold, the Ancient City, trial chambers and ruined portals. The game asks about experimental features when it opens such a world; without the datapack the structures are still there, but they cannot be found with a command. |
+| **City events (random encounters)** | The `osmc_enc` datapack: dozens of legends and random encounters that walk the exported city. The *Events...* button opens the list of them with their descriptions, and every event can be switched off there. |
 | **Climate** | Biomes, ground and trees according to the climate zone; *Auto* works it out from the coordinates. |
 | **Boundary, Spawn, Stronghold, Ancient City, Pale Garden** | Map tools: outline the area, place the player's spawn, mark the secret entrances. *Remove the boundary* and *Reset the marks* undo them; *Copy /tp* copies the teleport command to the marked point. |
 | **3D figures** | The 3D model list with a voxel preview (plus a button to load any STL): pick a model, click on the map and the figure stands there; a click on its mark opens the settings of this copy (material, azimuth, size). `stl/landmarks.json` is never changed; the figures live in the `.tmc` project. |
@@ -70,6 +72,7 @@ Pictures of a world made by OSMC (click a preview to open the full size).
 - Start with a small area (1–2 km²): an export takes minutes, while a big area takes much longer and needs more memory.
 - The result depends on how well the area is mapped in OpenStreetMap: heights, floors and building types appear only where mappers entered them; where they are missing, OSMC estimates them.
 - If you publish a world made from OpenStreetMap data (a server, a download), keep the attribution - see *License and data*.
+- With city events on, the dread of the city is a dial you can turn by hand: `/function osmc_enc:dread/s25` (also `s0`, `s50`, `s75`, `s95`, `s100`) - the higher it is, the more often the night speaks; at 95 every house opens its hidden floor.
 
 ## Command line (pro mode)
 
@@ -81,7 +84,7 @@ osmc.exe source.osm -o world.zip --nogui --log run.log
 
 Main options: `--format 26|1.21`, `--flat`, `--seed N`, `--caves 0|1`, `--climate auto|temperate|boreal|tundra|steppe|mediterranean|desert|savanna|tropical|monsoon|semi-arid|rainforest|dark-forest`,
 `--clip "lon lat; lon lat; ..."` (export only this polygon), `--spawn-lonlat "lon lat"`, `--lang auto|en|ru`, `--theme auto|light|dark`,
-`--download-osm "lon lat; ..." -o area.osm` (download an area of up to 25 km² and exit), `--dry-run` (only load and classify the data). `OSMC --help` lists everything.
+`--download-osm "lon lat; ..." -o area.osm` (download an area of up to 25 km² and exit), `--encounters` (the city events datapack), `--encounters-off id,id,…` (events to leave out), `--dry-run` (only load and classify the data). `OSMC --help` lists everything.
 A `.tmc` project file passed as the argument opens in the window.
 
 ## Tuning (for true gurus)

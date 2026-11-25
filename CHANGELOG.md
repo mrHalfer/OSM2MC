@@ -7,6 +7,53 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ### Added
 
+- The rules book pedestal is baked into the world by the exporter itself: a glowstone lamp and a
+  lectern facing the spawn, with the book written by the same pass that fills churches (author
+  "the city"). The pack only repairs the pedestal on load, so a taken book comes back.
+- A short console knob for the dread of the city: `/function osmc_enc:dread/s25` - one function per
+  level the night reads (s0, s25, s50, s75, s95, s100); the scoreboard command still works too.
+- The ground around every portal of a military base is scorched into an irregular stain of netherrack
+  streaked with nether gold ore (a request): the mark of a big piglin exodus out of the Nether. The
+  stain eats bushes and grass but never the fence, the roads, the water or a building.
+
+### Changed
+
+- Portals of a military base now grow from the center of the contour outward instead of parking by the
+  wall, and no two of them stand closer than 100 blocks to each other (the owner's game check).
+- Windows of buildings on a military base are tinted glass now - the dark glass of a guarded zone.
+- The dread of a city is counted from PLAIN glass only: the black stained panes of bandit lairs and the
+  tinted windows of military bases no longer raise or calm it, and the census never watches their cells.
+- The console can set the city's fear outright: `/scoreboard players set #dread osmc_enc_t 25` —
+  the rules book near the spawn tells about it too (function macros died in 26.x, so the knob is
+  the scoreboard itself and the fixed-level functions `osmc_enc:dread/s0…s100`).
+- An active Nether portal now burns across the whole inside of its frame (a 2x3 sheet), not just the
+  lower two rows - both the forest ruins and the portals of the military bases.
+- Benches along park paths stand one block back from the paving (a free gap cell between the path and
+  the seat) and look at the path: a stair block faces its BACK side, so seats whose back stood to the
+  path turned around (the street benches of the OSM points got the same turn).
+
+### Fixed
+
+- Nether portals were invisible in 26.x worlds: the block was renamed to `minecraft:nether_portal`
+  there, and portal blocks baked under the old name rendered as air - so an "activated" forest ruin or
+  base portal never looked lit. 1.21.x worlds keep the old name.
+- The butcher's barrels and the house stoves stocked the meat under its pre-26.x name (`raw_beef` and
+  friends), and 26.x dropped those stacks as unknown items on load; the barrels and stoves now carry
+  `beef`/`porkchop`/`chicken`/`mutton`, while 1.21.x worlds still get the `raw_` names.
+- **The whole events pack never ran in 26.x worlds**: the two commands that drive everything
+  (`load` and `cycle`) failed to parse, so the night said nothing and no rule was kept. The game's
+  own error log named the six culprits: the trade statistic criterion (the trade calm rides the
+  `villager_trade` advancement now), the retired `moisture` particle (the fog park breathes `cloud`
+  instead), the positional options of `dust` (the pack writes the component form `dust{color,scale}`),
+  the `soul_fire` particle (`soul_fire_flame`), an `s` suffix on an effect duration, and the removed
+  `polished_calcite` block (the flashing lamps switch `calcite` now).
+- Seven sound events the pack plays do not exist in 26.x (renamed there, or never were - checked
+  against the game's own sounds list), so those moments of the night were silent: the replacements
+  are `beacon.activate`, `beacon.power_select`, `redstone_torch.burnout`, `metal_pressure_plate.click_off`,
+  `wooden_door.close`, `elder_guardian.curse` and `wolf.growl`.
+- The rules book never came back after being taken: an empty lectern still carries its `Book` tag,
+  so the "book missing" guard never fired; it reads `lectern[has_book=false]` now.
+
 ## [2.1.26.11241] — 2026-11-24
 
 > **Events are in test mode.** Every event of this release is playable and every world keeps its

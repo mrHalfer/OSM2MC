@@ -728,7 +728,7 @@ void ObjectVoxelizer::buildWalls()
         // not the wall/structural color; every tier of a stepped complex gets its own cap.
         if (roofId && !priv && !dir && ly >= 2 && roofTop(cell) && interiorCol(lx, ly, lz))
             wallId = roofId;
-        addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : IdGlass) : wallId);
+        addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : milPost ? IdTintedGlass : IdGlass) : wallId);
         if (dir) ++nWindows;
         if (dir)                                                // a window all the way through (a user request):
         {                                                       // the second block of the two-layer wall behind the glass
@@ -749,7 +749,7 @@ void ObjectVoxelizer::buildWalls()
                         const int i2 = z * sxy + ly * sx + x;
                         if (grid[i2] != char(1) && grid[i2] != char(4)) break;
                         grid[i2] = char(5);                     // 5 — a written hole (the lining/wall pass skips it)
-                        addVoxel(minx + x, miny + ly, minz + z, lair ? IdBlackGlass : IdGlass);
+                        addVoxel(minx + x, miny + ly, minz + z, lair ? IdBlackGlass : milPost ? IdTintedGlass : IdGlass);
                     }
                 }
                 else
@@ -1495,11 +1495,12 @@ void ObjectVoxelizer::buildStairs()
         // 9th and the 10th floors. Its cells - a pair of INNER lining cells ("4") beside a step of the
         // 9 -> 10 flight where a person can really stand (the headroom window above the last steps),
         // both cells standing as the full masonry of the house. The night sets an oak door into them,
-        // the morning puts the wall back. Only tall residential houses play, and a quarter of them.
+        // the morning puts the wall back. Only tall residential houses play. Every candidate is baked
+        // now (the dread system, see encounters.cpp: at a scared night the door can appear anywhere,
+        // so the pack needs the whole pool; the nightly pick stays sparse through the roll).
         if (halfDoors && resid && !priv && nStories >= 11)
         {
-            const quint32 qtr = lineHash(pairKey(minx, minz) ^ 0x9ED1ull) % 4u;
-            if (f910.s0 >= 0 && qtr == 0)
+            if (f910.s0 >= 0)
             {
                 static const int kD[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
                 const QVector<int> fl = slotRect(f910);         // the flight's plan - a door does not stand in it
@@ -2506,7 +2507,7 @@ void ObjectVoxelizer::buildInteriors()
                             const int wx = lx + dvec[wd][0], wz = lz + dvec[wd][1];
                             quint16 wb0 = store.get(minx + wx, miny + lyF - sink, minz + wz);
                             quint16 wb1 = store.get(minx + wx, miny + lyF + 1 - sink, minz + wz);
-                            if (wb0 != IdAir && wb0 != IdGlass && wb1 != IdAir && wb1 != IdGlass)
+                            if (wb0 != IdAir && wb0 != IdGlass && wb0 != IdTintedGlass && wb1 != IdAir && wb1 != IdGlass && wb1 != IdTintedGlass)
                                 put(lx, lz, 1, vChis, &placedV);
                         }
                         else if (v30 >= 13u && v30 <= 14u && cellFree(lx, lz, 1))
@@ -2514,7 +2515,7 @@ void ObjectVoxelizer::buildInteriors()
                             const int wx = lx + dvec[wd][0], wz = lz + dvec[wd][1];
                             quint16 wb0 = store.get(minx + wx, miny + lyF - sink, minz + wz);
                             quint16 wb1 = store.get(minx + wx, miny + lyF + 1 - sink, minz + wz);
-                            if (wb0 != IdAir && wb0 != IdGlass && wb1 != IdAir && wb1 != IdGlass)
+                            if (wb0 != IdAir && wb0 != IdGlass && wb0 != IdTintedGlass && wb1 != IdAir && wb1 != IdGlass && wb1 != IdTintedGlass)
                                 put(lx, lz, 1, quint16(IdWallBannerBase + ((wd + 2) & 3)), &placedV);
                         }
                     }
@@ -2586,7 +2587,7 @@ void ObjectVoxelizer::buildInteriors()
                 for (int row = 0; row <= 2; ++row)
                 {
                     const quint16 b = store.get(minx + wx, miny + lyF + row - sink, minz + wz);
-                    if (b == IdAir || b == IdGlass || (b >= IdDoorBase && b < IdDoorMax)) return false;
+                    if (b == IdAir || b == IdGlass || b == IdTintedGlass || (b >= IdDoorBase && b < IdDoorMax)) return false;
                 }
                 return true;
             };

@@ -196,6 +196,7 @@ struct WaterBodyRec                       // a water body for the aquatic fauna 
 extern const char* const kSpawnerTypes[];
 extern const BookText kBooks[];
 extern const BookText kSciBooks[];
+extern const BookText kRulesBook;               // the cs.lectern >= 2000 book: the spawn pedestal of osmc_enc
 extern const char* const kBarrelLoot[];
 extern const char* const kChestLoot[];
 constexpr int kLootT0 = 9, kLootT1 = 15;

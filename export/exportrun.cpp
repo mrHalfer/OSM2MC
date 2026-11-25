@@ -355,6 +355,8 @@ private:
     QVector<SiteRec> sites;                         // random-encounter site registry (docs/city-encounters.md):
                                                     // sites.json + marker entities, world.encounters only
     QVector<EncPack::Prop> encProps;                // exact anchors the osmc_enc functions are baked around
+    QVector<int> encGlass;                          // the dread census: sampled window glass cells as x,y,z triples
+    QVector<int> encBook;                           // rules book lectern of osmc_enc: the ground cell x,y,z under it (empty - no book)
                                                     // (masts, bus stops, playgrounds, road chalk spots, jacks),
                                                     // world.encounters only
     QHash<ColKey, QVector<SpawnerSite>> spawnByChunk;       // spawners — their own block_entities
@@ -561,6 +563,34 @@ bool ExportRun::assembleChunks()
         menByChunk[pairKey(ms.x >> 4, ms.z >> 4)].append(ms);
     for (const SpawnerSite& sp : spawners)
         spawnByChunk[pairKey(sp.x >> 4, sp.z >> 4)].append(sp);
+    encBook.clear();
+    if (world.encounters)
+    {   // the rules book of the osmc_enc pack takes the first free dry cell within five steps of the
+        // spawn: solid ground with two free blocks above, no water, no roof. The pedestal bakes with
+        // the world (the owner's game check): a glowstone lamp block (his request), a lectern facing
+        // the spawn and the book itself through the chunk block_entities - the church lectern's path.
+        // The pack's dread/book only repairs what a player took or broke.
+        for (int r = 1; r <= 5 && encBook.isEmpty(); ++r)
+            for (int dz = -r; dz <= r && encBook.isEmpty(); ++dz)
+                for (int dx = -r; dx <= r && encBook.isEmpty(); ++dx)
+                {
+                    if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                    const int x = spawnX + dx, z = spawnZ + dz;
+                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                    if (git == ground.constEnd()) continue;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0) continue;                                   // not into water
+                    const int top = git->top[col];
+                    if (store.get(x, top + 1, z) || store.get(x, top + 2, z)) continue;   // the page needs air
+                    encBook << x << top << z;
+                    const int face = (std::abs(spawnZ - z) >= std::abs(spawnX - x))       // kDirNames: N,E,S,W
+                        ? (spawnZ >= z ? 2 : 0) : (spawnX >= x ? 1 : 3);
+                    store.set(x, top + 1, z, quint16(IdPaletteStart + paletteIndexOf("minecraft:glowstone")));
+                    store.set(x, top + 2, z, quint16(IdLecternBase + face));
+                    ChestSite cs; cs.x = x; cs.y = top + 2; cs.z = z; cs.lectern = 2000;
+                    chestsByChunk[pairKey(x >> 4, z >> 4)].append(cs);
+                }
+    }
     // The chunk assembly is completely independent (store/ground/chestsByChunk are only read), so it
     // runs in several threads; the regions are then assembled sequentially in the SAME order —
     // the archive stays deterministic.
@@ -708,7 +738,6 @@ bool ExportRun::assembleChunks()
         int nx = spawnX, ny = spawnY, nz = spawnZ;
         if (surfaceSpawn(sx0, sz0, nx, ny, nz)) { spawnX = nx; spawnY = ny; spawnZ = nz; }
     }
-
     tmcStepLog("post: chunks assembled");
     return true;
 }
@@ -817,7 +846,7 @@ bool ExportRun::writeZip()
     {
         QSet<QString> off;
         for (const QString& id : world.encountersOff) off.insert(id.trimmed());
-        EncPack::build(addEntry, off, encProps, legacy);
+        EncPack::build(addEntry, off, encProps, encGlass, encBook, legacy);
     }
     regionDir = legacy ? QStringLiteral("region/")
                                      : QStringLiteral("dimensions/minecraft/overworld/region/");
@@ -1198,37 +1227,60 @@ void ExportRun::buildPointObjects()
                         encProps.append(ep); }
                     break;
                 case kBench:                                             // a STREET BENCH — 2x1 oak stairs (a request)
-                {   // the bench axis is chosen by the column hash; the seat faces along it, the backrest on the side;
-                    // both cells must be free ground — no road, no water, no structure, nothing already built
+                {   // the seat looks at the roadway ALWAYS (the owner's rule): the direction that
+                    // has a street within four blocks is the seat's facing, the axis stands across
+                    // it, and the hash only picks which end the second seat cell lies on. On a
+                    // square with no street closer than four blocks the old hash axis plays. Both
+                    // cells must be free ground — no road, no water, no structure, nothing built
                     static const int kAx[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };   // N/E/S/W (kDirNames order)
-                    const int k = int(hsh % 4u);
-                    const int x2 = sp.x + kAx[k][0], z2 = sp.z + kAx[k][1];
-                    const qint64 ck2 = pairKey(x2, z2);
-                    const int gyB = std::max(gy, surfaceTop(ck2) + 1);   // the seat is level: the higher of the two columns
-                    clearVeg(std::min(sp.x, x2), std::max(sp.x, x2), gyB, gyB + 1,
-                             std::min(sp.z, z2), std::max(sp.z, z2));      // a leaf or a bush in the seat footprint is sheared
-                    if (colWater.contains(ck2) || roadCols.contains(ck2) || colMin.contains(ck2)
-                        || store.get(sp.x, gyB, sp.z) != IdAir || store.get(x2, gyB, z2) != IdAir
-                        || store.get(sp.x, gyB + 1, sp.z) != IdAir || store.get(x2, gyB + 1, z2) != IdAir)
-                    { ++nSkipped; break; }
-                    const quint16 st = quint16(IdStairsN + ((k + 1) & 3));   // the seat turned sideways to its axis
-                    store.set(sp.x, gyB, sp.z, st);
-                    store.set(x2, gyB, z2, st);
-                    ++nPlaced;
-                    if (world.encounters)       // bench_otherworld's trigger: the standing cell before the seat
+                    int rf = -1;                                         // the facing toward the street, if one is near
+                    const int rot = int((hsh >> 6) & 3u);                // so that no side of the world wins the scan
+                    for (int r = 1; r <= 4 && rf < 0; ++r)
+                        for (int q = 0; q < 4; ++q)
+                            if (roadCols.contains(pairKey(sp.x + kAx[(rot + q) & 3][0] * r, sp.z + kAx[(rot + q) & 3][1] * r)))
+                            { rf = (rot + q) & 3; break; }
+                    int cand[4], nCand = 0;                              // the seat's axis candidates, the best first
+                    if (rf >= 0) { cand[nCand] = (rf + 3) & 3; ++nCand; cand[nCand] = (rf + 1) & 3; ++nCand; }
+                    else cand[nCand++] = int(hsh % 4u);
+                    bool putB = false;
+                    for (int ci = 0; ci < nCand && !putB; ++ci)
                     {
-                        const int fk = (k + 1) & 3;
-                        const int fx = sp.x + kAx[fk][0], fz = sp.z + kAx[fk][1];
-                        if (!colWater.contains(pairKey(fx, fz)) && !colMin.contains(pairKey(fx, fz)))
+                        const int k = cand[ci];
+                        const int x2 = sp.x + kAx[k][0], z2 = sp.z + kAx[k][1];
+                        const qint64 ck2 = pairKey(x2, z2);
+                        const int gyB = std::max(gy, surfaceTop(ck2) + 1);   // the seat is level: the higher of the two columns
+                        clearVeg(std::min(sp.x, x2), std::max(sp.x, x2), gyB, gyB + 1,
+                                 std::min(sp.z, z2), std::max(sp.z, z2));    // a leaf or a bush in the footprint is sheared
+                        if (colWater.contains(ck2) || roadCols.contains(ck2) || colMin.contains(ck2)
+                            || store.get(sp.x, gyB, sp.z) != IdAir || store.get(x2, gyB, z2) != IdAir
+                            || store.get(sp.x, gyB + 1, sp.z) != IdAir || store.get(x2, gyB + 1, z2) != IdAir)
+                            continue;
+                        const int fk = (rf >= 0) ? rf : ((k + 1) & 3);           // the seat looks at the street, else across the hash axis
+                        // a stair's facing is its BACK (the rising side): the seated person looks the
+                        // other way, so the block gets the side opposite to the seat's facing
+                        const quint16 st = quint16(IdStairsN + ((fk + 2) & 3));
+                        store.set(sp.x, gyB, sp.z, st);
+                        store.set(x2, gyB, z2, st);
+                        ++nPlaced;
+                        putB = true;
+                        if (world.encounters)       // bench_otherworld's trigger: the standing cell before the seat
                         {
-                            EncPack::Prop ep; ep.kind = EncPack::kEpBench;
-                            ep.x = sp.x; ep.y = gyB; ep.z = sp.z; ep.dir = k;
-                            EncPack::Cell c; c.x = fx; c.z = fz;
-                            c.y = surfaceTop(pairKey(fx, fz)) + 1;
-                            ep.cells << c;
-                            encProps.append(ep);
+                            const int fx = sp.x + kAx[fk][0], fz = sp.z + kAx[fk][1];
+                            if (!colWater.contains(pairKey(fx, fz)) && !colMin.contains(pairKey(fx, fz)))
+                            {
+                                EncPack::Prop ep; ep.kind = EncPack::kEpBench;
+                                ep.x = sp.x; ep.y = gyB; ep.z = sp.z; ep.dir = k;
+                                EncPack::Cell c; c.x = fx; c.z = fz;
+                                c.y = surfaceTop(pairKey(fx, fz)) + 1;
+                                ep.cells << c;
+                                EncPack::Cell s1; s1.x = sp.x; s1.y = gyB; s1.z = sp.z; s1.id = st;
+                                EncPack::Cell s2; s2.x = x2;  s2.y = gyB; s2.z = z2;  s2.id = st;
+                                ep.cells << s1 << s2;               // the seat itself — the fog repaints these
+                                encProps.append(ep);
+                            }
                         }
                     }
+                    if (!putB) ++nSkipped;
                     break;
                 }
                 case kSculpture:                                         // a SMALL SCULPTURE (3 variants)
@@ -1683,6 +1735,56 @@ void ExportRun::buildPointObjects()
             ep.cells = best;
             encProps.append(ep);
             ++nWall;
+        }
+        // GLASS CENSUS (the dread system, docs/city-encounters.md): a spread sample of the city's
+        // window glass, baked so the pack can count what breaking into the city feels like — the pack
+        // watches these exact cells: glass gone from a loaded cell raises #dread, glass put back pays
+        // the debt through the placement advancement. Every SECOND house plays (the column hash), the
+        // first up to 4 panes of its perimeter line, the whole census capped — it is a proxy for all
+        // the windows, not every pane. Collected in the object order of the world, so the same walls
+        // are watched every run. ONLY PLAIN GLASS counts (the owner's fix): the stained glass of bandit
+        // lairs and the tinted windows of military bases never move the dread — and both are already
+        // tinted in the store by now, so the plain-glass filter excludes them by itself.
+        int nCensus = 0;
+        for (const McWorldExporter::McObject& q : objects)
+        {
+            if (nCensus >= 1600) break;
+            if (q.kind != McWorldExporter::McObject::Building || q.part || q.lift)
+                continue;
+            double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
+            for (const QVector3D& v : q.vertices)
+            {
+                const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
+                ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx);
+                az0 = std::min(az0, bz); az1 = std::max(az1, bz);
+            }
+            if (!preClip.isEmpty())
+            {
+                ax0 = std::max(ax0, double(preClip.left())); ax1 = std::min(ax1, double(preClip.right()));
+                az0 = std::max(az0, double(preClip.top()));  az1 = std::min(az1, double(preClip.bottom()));
+            }
+            const int x0 = int(std::ceil(ax0)), x1 = int(std::floor(ax1));
+            const int z0 = int(std::ceil(az0)), z1 = int(std::floor(az1));
+            if (x1 < x0 || z1 < z0) continue;
+            if (colHash(pairKey(x0, z0) ^ 0xD9EAull) % 2u != 0u) continue;   // every second house
+            int got = 0;
+            for (int face = 0; face < 4 && got < 4; ++face)
+            {   // the four perimeter lines of the box, as in the wave scan above
+                const int n = (face < 2 ? x1 - x0 : z1 - z0) + 1;
+                for (int i = 0; i < n && got < 4; ++i)
+                {
+                    const int cx = face == 0 ? x0 + i : (face == 1 ? x0 + i : (face == 2 ? x0 : x1));
+                    const int cz = face == 0 ? z0 : (face == 1 ? z1 : (face == 2 ? z0 + i : z0 + i));
+                    const int ys = surfaceTop(pairKey(cx, cz)) + 1;
+                    for (int y = ys; y <= ys + 200 && got < 4; ++y)
+                    {
+                        const quint16 b = store.get(cx, y, cz);
+                        if (b != IdGlass) continue;         // dread knows only plain glass
+                        encGlass << cx << y << cz;
+                        ++got; ++nCensus;
+                    }
+                }
+            }
         }
         // taxi: the plate cell is the paving cell by a car door that the parking stage recorded for
         // him (carDoors, parallel to carCores — a core's own neighbour is the car's body, so the door
@@ -3662,8 +3764,9 @@ void ExportRun::buildStreetFurniture()
                         break;
                     }
                 }
-                // — BENCHES ALONG PARK PATHS (a user request): a bench sits on the lawn opposite the path
-                //   cell and looks at it, about every 8th path cell; the seat is the same 2 oak stairs as
+                // — BENCHES ALONG PARK PATHS (a user request): a bench sits on the lawn one block past
+                //   the path (the owner's rule: a free gap cell between paving and seat) and looks at
+                //   it, about every 32nd path cell; the seat is the same 2 oak stairs as
                 //   the street benches of the OSM points. Where there is no room (a lamp post, a tree,
                 //   furniture, a fence, water or an uneven ground under the seat) the cell stays free.
                 int nParkBench = 0;
@@ -3672,7 +3775,7 @@ void ExportRun::buildStreetFurniture()
                 {
                     const int bx = keyFirst(ck), bz = keySecond(ck);
                     if (!spansContain(parkSpansAll, bx, bz)) continue;   // the path runs inside a park
-                    if (colHash(ck ^ 0xBEC4ull) % 8u != 0u) continue;    // the density along the path
+                    if (colHash(ck ^ 0xBEC4ull) % 32u) continue;    // the density along the path
                     if (colWater.contains(ck)) continue;                 // nothing sits over water
                     const quint32 hb = colHash(ck ^ 0x1B4E1ull);
                     const int f0 = int((hb >> 8) & 3u);
@@ -3681,7 +3784,7 @@ void ExportRun::buildStreetFurniture()
                     {   // four ways to face the path, two directions of the seat along it; the first fitting wins
                         const int f = (f0 + t) & 3;                             // the seat's facing (to the path)
                         const int axIdx = (t >> 2 ? (f + 1) : (f + 3)) & 3;     // the second seat cell along the path
-                        const int sx = bx - kAx[f][0], sz = bz - kAx[f][1];     // the first seat cell (the lawn)
+                        const int sx = bx - 2 * kAx[f][0], sz = bz - 2 * kAx[f][1]; // the first seat cell (the lawn, one cell past the path)
                         const int s2x = sx + kAx[axIdx][0], s2z = sz + kAx[axIdx][1];
                         const qint64 k1 = pairKey(sx, sz), k2 = pairKey(s2x, s2z);
                         if (roadCols.contains(k1) || roadCols.contains(k2) || colWater.contains(k1) || colWater.contains(k2)
@@ -3706,7 +3809,9 @@ void ExportRun::buildStreetFurniture()
                                 const int cx2 = ci ? s2x : sx, cz2 = ci ? s2z : sz;
                                 if (store.get(cx2, gyB + dy, cz2) != IdAir) store.erase(cx2, gyB + dy, cz2);
                             }
-                        const quint16 st = quint16(IdStairsN + f);
+                        // the stair's facing is its BACK side — the block faces away from the path so
+                        // that the seated person looks at it (the owner's art rule)
+                        const quint16 st = quint16(IdStairsN + ((f + 2) & 3));
                         store.set(sx, gyB, sz, st);
                         store.set(s2x, gyB, s2z, st);
                         noTreePadCols.insert(k1);
@@ -3719,12 +3824,54 @@ void ExportRun::buildStreetFurniture()
                             ep.x = sx; ep.y = gyB; ep.z = sz; ep.dir = axIdx;
                             EncPack::Cell c; c.x = bx; c.y = surfaceTop(ck) + 1; c.z = bz;
                             ep.cells << c;
+                            EncPack::Cell s1; s1.x = sx;  s1.y = gyB; s1.z = sz;  s1.id = st;
+                            EncPack::Cell s2; s2.x = s2x; s2.y = gyB; s2.z = s2z; s2.id = st;
+                            ep.cells << s1 << s2;              // the seat — the fog repaints the chosen bench
                             encProps.append(ep);
                         }
                     }
                 }
                 if (nParkBench > 0)
                     res.lairInfo += QObject::tr("; benches along park paths: %1").arg(nParkBench);
+
+                // — LAWN CELLS FOR THE NIGHT MOWER (an encounter anchor): the bare grass beside the park
+                //   path; the pack troddens the harvested cells one stripe per night and the dawn gives
+                //   the whole lawn back, so the mower is only ever proved by the stripe of the night
+                if (world.encounters)
+                {
+                    QVector<EncPack::Cell> lawn;
+                    for (qint64 ck : rc)
+                    {
+                        const int bx = keyFirst(ck), bz = keySecond(ck);
+                        if (!spansContain(parkSpansAll, bx, bz)) continue;
+                        if (colHash(ck ^ 0x4D0Dull) % 6u != 0u) continue;        // a few path cells to lean on
+                        for (int d = 0; d < 4; ++d)
+                        {
+                            const int px = bx + dxs[d], pz = bz + dzs[d];
+                            const qint64 pk = pairKey(px, pz);
+                            if (roadCols.contains(pk) || colWater.contains(pk) || colMin.contains(pk)
+                                || colWool.contains(pk) || fenceLineCols.contains(pk) || noTreePadCols.contains(pk))
+                                continue;
+                            if (!spansContain(parkSpansAll, px, pz)) continue;   // the lawn stands inside the park
+                            const int t0 = surfaceTop(pk);
+                            if (store.get(px, t0, pz) != IdGrass || store.get(px, t0 + 1, pz) != IdAir) continue;
+                            EncPack::Cell c; c.x = px; c.y = t0 + 1; c.z = pz; c.id = IdGrass;
+                            lawn << c;
+                            if (lawn.size() >= 24) break;
+                        }
+                        if (lawn.size() >= 24) break;
+                    }
+                    for (int off = 0; off < lawn.size(); )
+                    {   // walks of at least six cells; the cap in EncPack::build keeps the city honest
+                        const int take = qMin(24, lawn.size() - off);
+                        if (take < 6) break;
+                        EncPack::Prop ep; ep.kind = EncPack::kEpMow;
+                        ep.x = lawn[off].x; ep.y = lawn[off].y; ep.z = lawn[off].z;
+                        for (int i = 0; i < take; ++i) ep.cells << lawn[off + i];
+                        encProps.append(ep);
+                        off += take;
+                    }
+                }
             }
         }
         // ——— PORTALS TO THE NETHER in forests (vegpol, CODE 71111110/71126000; request: the forest area is at least
@@ -3832,9 +3979,9 @@ void ExportRun::buildStreetFurniture()
                             else store.set(bx, y0 + dy, bz, IdObsidian);
                         }
                     if (active)
-                    {   // active: portal 2×2 (i=1..2, dy=1..2), the row dy=3 inside — air
+                    {   // active: portal 2x3 (i=1..2, dy=1..3) — the whole inside of the frame (the owner's fix)
                         const quint16 pid = c.runX ? IdPortalX : IdPortalZ;
-                        for (int dy = 1; dy <= 2; ++dy)
+                        for (int dy = 1; dy <= 3; ++dy)
                             for (int i = 1; i <= 2; ++i)
                             {
                                 const qint64 ck = cellAt(i, dy);
@@ -14385,7 +14532,7 @@ void ExportRun::buildOverlayGround()
 {
     if (prisonPolys.isEmpty() && milPolys.isEmpty()) return;
     static const int sdx[4] = { 0, 1, 0, -1 }, sdz[4] = { -1, 0, 1, 0 };   // the banner "facing" numbering, as in voxelize
-    int nGolem = 0, nFlag = 0, nBandit = 0, nWall = 0, nPig = 0, nErase = 0;
+    int nGolem = 0, nFlag = 0, nBandit = 0, nWall = 0, nPig = 0, nErase = 0, nPortal = 0;
 
     // Plants are cut down above the ground in the column: a spawner must not stand inside a bush, a wall must not
     // fall apart because of a forest along the perimeter, a patrol must not get stuck in a trunk. Only vegetation
@@ -14558,6 +14705,7 @@ void ExportRun::buildOverlayGround()
         wallRing(p, &flagCols);                                   // the refuge is fenced in too (a request), the posts stand in the gaps
     }
 
+    QVector<QPoint> basePortals;                    // every baked base portal: the next one stands off it
     for (const OverlayPoly &p : milPolys)
     {
         wallRing(p, nullptr);                                     // four stone_brick_wall along the whole contour
@@ -14582,6 +14730,126 @@ void ExportRun::buildOverlayGround()
             npcs.append(pig);
             return true;
         });
+        // THE PORTALS OF THE BASE (a request): every base must have activated portals - at least two,
+        // more for a big one. A place is a free 4-cell strip of the base ground with the frame volume
+        // clear: inside the contour, a cell away from the wall and the gate, no water, no roadway, no
+        // building. The obsidian frame with the burning 2x2 bakes exactly as the world's active portal
+        // does it (the street furniture pass). The strict pass asks the strip floor to be flat; when it
+        // found fewer than two portals, the forced pass accepts a one-block step across the strip - the
+        // frame then rises from each column's own ground (a baked portal block works with no ignition).
+        QSet<ColKey> borderSet;
+        for (const qint64 bk : p.border) borderSet.insert(pairKey(keyFirst(bk), keySecond(bk)));
+        int relax = 0;
+        auto portalSite = [&](int bx, int bz, int y0, bool runX) -> bool
+        {
+            for (int i = -1; i <= 4; ++i)               // the strip and its one-cell ring: open base ground
+                for (int o = -1; o <= 1; ++o)
+                {
+                    const int cx = runX ? bx + i : bx + o, cz = runX ? bz + o : bz + i;
+                    const ColKey ck = pairKey(cx, cz);
+                    if (!milCols.contains(ck) || borderSet.contains(ck) || wallDone.contains(ck)
+                        || colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck))
+                        return false;
+                }
+            int yb[4];
+            for (int i = 0; i < 4; ++i)
+            {
+                const int cx = runX ? bx + i : bx, cz = runX ? bz : bz + i;
+                yb[i] = surfaceTop(pairKey(cx, cz));
+                if (!relax && yb[i] != y0 - 1) return false;         // the strict pass: one flat floor
+                if (yb[i] + 7 > kWorldMaxY) return false;
+                clearVeg(cx, cz, yb[i] + 1, 5);                     // the frame volume stays free of bushes
+                for (int dy = 1; dy <= 5; ++dy)
+                    if (store.get(cx, yb[i] + dy, cz) != IdAir) return false;
+            }
+            // ——— the frame: 14 obsidian cells, the burning 2x2 inside (the street furniture's pattern) ———
+            const quint16 pid = runX ? IdPortalX : IdPortalZ;
+            for (int i = 0; i < 4; ++i)
+            {
+                const int cx = runX ? bx + i : bx, cz = runX ? bz : bz + i;
+                for (int dy = 0; dy <= 4; ++dy)
+                {
+                    if (dy == 0 || dy == 4 || i == 0 || i == 3)
+                        store.set(cx, yb[i] + 1 + dy, cz, quint16(IdObsidian));
+                    else
+                        store.set(cx, yb[i] + 1 + dy, cz, pid);      // the burning 2x3 inside (the owner's fix)
+                }
+            }
+            {   // nobody should wake up standing inside a burning frame: the guards of this cell move out
+                const int x0 = bx - 1, x1 = bx + (runX ? 4 : 2);
+                const int z0 = bz - 1, z1 = bz + (runX ? 2 : 4);
+                int keep = 0;
+                for (int i = 0; i < npcs.size(); ++i)
+                {
+                    const NpcSite &n = npcs.at(i);
+                    if (n.x >= x0 && n.x <= x1 && n.z >= z0 && n.z <= z1) continue;
+                    if (keep != i) npcs[keep] = n;
+                    ++keep;
+                }
+                if (keep < npcs.size()) npcs.resize(keep);
+            }
+            return true;
+        };
+        // Selection (the owner's fix after the game check): the portals are taken from the contour CENTER
+        // outward (the first scatter walked the columns in raster order, so the greedy pass parked every frame
+        // by the wall), and no two portals of the bases stand closer than 50 blocks to each other.
+        QList<qint64> cand = p.cols;                                  // (std::sort works on QList too)
+        std::sort(cand.begin(), cand.end(), [&](qint64 a, qint64 b)
+        {
+            const qint64 dax = keyFirst(a) - p.cx, daz = keySecond(a) - p.cz;
+            const qint64 dbx = keyFirst(b) - p.cx, dbz = keySecond(b) - p.cz;
+            return dax * dax + daz * daz < dbx * dbx + dbz * dbz;
+        });
+        int got = 0;
+        const int want = qBound(2, 2 + p.nCols / 20000, 6);
+        for (int pass = 0; pass < 2 && got < want; ++pass)
+        {   // pass 0 asks a flat floor across the strip; when the center gave too few, pass 1 accepts a one-block step
+            relax = pass;
+            for (const qint64 ck : cand)
+            {
+                if (got >= want) break;
+                if (!milCols.contains(ck) || colWater.contains(ck) || roadCols.contains(ck) || colMin.contains(ck))
+                    continue;
+                const int bx = keyFirst(ck), bz = keySecond(ck);
+                bool far = true;
+                for (const QPoint &q : basePortals)
+                {
+                    const qint64 ddx = q.x() - bx, ddz = q.y() - bz;
+                    if (ddx * ddx + ddz * ddz < 100 * 100) { far = false; break; }   // the owner's "not closer than 100"
+                }
+                if (!far) continue;
+                const int y0 = surfaceTop(ck) + 1;
+                clearVeg(bx, bz, y0, 3);
+                if (store.get(bx, y0, bz) != IdAir || store.get(bx, y0 + 1, bz) != IdAir) continue;
+                for (int ax = 0; ax < 2; ++ax)
+                    if (portalSite(bx, bz, y0, ax == 0))
+                    {
+                        basePortals.append(QPoint(bx, bz));
+                        ++nPortal; ++got;
+                        // NETHER SCALD (the owner's request): the ground around the frame is scorched to netherrack
+                        // streaked with gold ore - the mark of a big piglin exodus out of the Nether. The edge of the
+                        // stain is feathered by the column hash; the fence, the roads, the water and the buildings hold.
+                        for (int dx = -11; dx <= 11; ++dx)
+                            for (int dz = -11; dz <= 11; ++dz)
+                            {
+                                const qint64 sk = pairKey(bx + dx, bz + dz);
+                                if (!milCols.contains(sk) || borderSet.contains(sk) || wallDone.contains(sk)
+                                    || colWater.contains(sk) || roadCols.contains(sk) || colMin.contains(sk))
+                                    continue;
+                                const quint32 sh = colHash(sk ^ 0x4E70B5ull);
+                                const int reach = 7 + int(sh % 5);          // an irregular disk of radius 7..11
+                                if (dx * dx + dz * dz > reach * reach) continue;
+                                const int ys = surfaceTop(sk);
+                                clearVeg(bx + dx, bz + dz, ys + 1, 2);      // no bush stays on the scorched ground
+                                const quint16 stain = ((sh >> 16) % 100u < 18u)
+                                    ? quint16(IdNetherGoldOre)
+                                    : quint16(IdPaletteStart + paletteIndexOf("minecraft:netherrack"));
+                                store.set(bx + dx, ys, bz + dz, stain);
+                            }
+                        break;
+                    }
+            }
+        }
     }
 
     // The residents of a guarded territory are not residents: villagers, traders and llamas inside the military
@@ -14602,10 +14870,10 @@ void ExportRun::buildOverlayGround()
         if (keep < npcs.size()) npcs.resize(keep);
     }
 
-    tmcStepLog(QString("overlays: golem spawners %1, bandit flags %2, bandit patrols %3, wall blocks %4, piglins %5, residents removed %6"
-                       " (prison %7 cols, military %8 cols)")
+    tmcStepLog(QString("overlays: golem spawners %1, bandit flags %2, bandit patrols %3, wall blocks %4, piglins %5, residents removed %6,"
+                       " base portals %7 (prison %8 cols, military %9 cols)")
                .arg(nGolem).arg(nFlag).arg(nBandit).arg(nWall).arg(nPig).arg(nErase)
-               .arg(prisonCols.size()).arg(milCols.size()).toUtf8().constData());
+               .arg(nPortal).arg(prisonCols.size()).arg(milCols.size()).toUtf8().constData());
 }
 
 McWorldExporter::Result ExportRun::run()

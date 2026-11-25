@@ -125,6 +125,17 @@ const char* const kProfs[] = { "armorer", "butcher", "cartographer", "cleric", "
                                       "shepherd", "toolsmith", "weaponsmith" };
 const char* const kVTypes[] = { "plains", "desert", "jungle", "savanna", "snow", "swamp", "taiga" };
 
+// The rules book baked on the lectern by the spawn (the events pack): the two pages the church's
+// writer fits; the pack's dread/book carries the full four-page text and restocks it after a reset.
+const BookText kRulesBook = {
+    "Rules of the Night",
+    "The city feels broken glass: a shattered window raises its dread, a pane set back calms it. "
+    "At 25, 50, 75 and 95 the night speaks, and the higher the dread, the more often its events walk. "
+    "At 95 every house opens its hidden floor.",
+    "It calms down over kindness: a light placed, a night slept through, an animal tamed, a trade finished, a bell rung. "
+    "The console: /function osmc_enc:dread/s25 - the same for s0, s50, s75, s95, s100."
+};
+
 
 // The tables are extern in export/sites.h — these asserts catch a forgotten count update.
 

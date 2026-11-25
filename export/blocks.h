@@ -130,9 +130,13 @@ enum : quint16
                                           //  a request: 10% of csrpol objects get a portal)
     IdCryingObsidian,                     // 'minecraft:crying_obsidian' — "ruined" portals
                                           //  (vanilla ruins mix in crying obsidian)
-    IdPortalX,                            // 'minecraft:portal' axis=x — an active portal: axis
+    IdPortalX,                            // 'minecraft:nether_portal' axis=x — an active portal (26.x
+                                          //  renamed it from 'portal'): axis
     IdPortalZ,                            //  = the direction of the frame's EXTENT (wiki): along X →
                                           //  axis=x, along Z → axis=z
+    IdTintedGlass,                        // 'minecraft:tinted_glass' — windows of buildings on military bases
+                                          //  (a request: the bases are dark glass; the dread census never watches it)
+    IdNetherGoldOre,                      // 'minecraft:nether_gold_ore' — the netherrack scald around a base portal
     IdOakTrapdoor,                        // 'minecraft:oak_trapdoor' facing=north half=bottom open=false — a wooden basement hatch (under a carpet)
     IdIronTrapdoor,                       // 'minecraft:iron_trapdoor' facing=north half=bottom open=false — a basement hatch
     IdLeverCeil,                          // 'minecraft:lever' face=ceiling facing=north powered=false — opens the hatch from inside

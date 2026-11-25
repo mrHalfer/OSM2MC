@@ -80,20 +80,25 @@ struct EncPack
                                         // route in train order (last_train); a bench: cells[0] is
                                         // the standing cell before the seat (bench_otherworld);
                                         // a stairwell: cells[0] and [1] are the door's lower
-                                        // and upper lining cells (floor_half)
+                                        // and upper lining cells (floor_half); a lawn: the bare grass cells of the mown walk,
+                                        // the mower troddens them one stripe per night (mower)
     };
     enum { kEpLamp = 0, kEpBusStop = 1, kEpPlayground = 2, kEpChalk = 3, kEpJack = 4,
            kEpCross = 5, kEpWindows = 6, kEpScarecrow = 7, kEpGrave = 8, kEpBell = 9, kEpSchool = 10,
-           kEpCar = 11, kEpLurker = 12, kEpFountain = 13, kEpMetro = 14, kEpBench = 15, kEpHalf = 16 };
+           kEpCar = 11, kEpLurker = 12, kEpFountain = 13, kEpMetro = 14, kEpBench = 15, kEpHalf = 16, kEpMow = 17 };
     enum { kLightMast = 0,               // an OSM lighting mast: glowstone lights on a calcite stand
            kLightHanging = 1,            // a street lamp post: a lantern hanging under the wing
            kLightStanding = 2 };         // a park path post: a lantern on top of the stand
     using AddFn = std::function<void (const QString& path, const QByteArray& data)>;   // = writeZip's addEntry
     //! legacy121: the world we write for is in the 1.21.x format (McWorldExporter::Format); 26.x
-    //! dropped the advancement trigger the grave's dig-undo runs on, so that event ships its
-    //! legacy variant only - every other function behaves identically in both formats
+    //! retired "time query daytime", so the cycle's day clock branches on it - every other function
+    //! behaves identically in both formats
+    //! glassCensus: window glass cells as x,y,z triples (the dread system's count - see build());
+    //! the exporter samples the city's window glass and the pack watches those exact cells
+    //! bookCell: the ground cell under the rules-book lectern as x,y,z (the exporter picks a free
+    //! dry cell near the spawn); fewer than three values - the pack sets no book anywhere
     static void build(const AddFn& add, const QSet<QString>& off, const QVector<Prop>& props,
-                      bool legacy121);
+                      const QVector<int>& glassCensus, const QVector<int>& bookCell, bool legacy121);
 };
 
 //! The cells of the chalk arrow of a chalk prop in world (x;z) coordinates, the pattern rotated by

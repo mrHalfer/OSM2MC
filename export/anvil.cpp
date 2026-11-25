@@ -35,14 +35,28 @@ static void packSparse(const QVector<quint32>& values, int bits, QVector<qint64>
 //! written straight into its block_entities, the pick and the counts come from a hash of the cell — stable
 //! between re-exports of the same project.
 struct BarrelGood { const char* id; char minC, maxC, weight; };   // id==nullptr — end of the row
+//! 26.x renamed the raw meats ('raw_beef' became 'beef' and so on; the cooked names did not move). The
+//! tables below carry the new names, a 1.21.x world gets the old ones back (the trick of the palette's
+//! block-name rewrite) - the game drops the whole stack with "Unknown registry key" otherwise.
+static QString itemWrite(const char* n, bool legacy)
+{
+    if (legacy)
+    {
+        if (qstrcmp(n, "minecraft:beef") == 0)     return QStringLiteral("minecraft:raw_beef");
+        if (qstrcmp(n, "minecraft:porkchop") == 0) return QStringLiteral("minecraft:raw_porkchop");
+        if (qstrcmp(n, "minecraft:chicken") == 0)  return QStringLiteral("minecraft:raw_chicken");
+        if (qstrcmp(n, "minecraft:mutton") == 0)   return QStringLiteral("minecraft:raw_mutton");
+    }
+    return QString::fromLatin1(n);
+}
 static const BarrelGood kBarrelGoods[kBarrelLootCount][5] = {
     {   // a fisherman's barrel
         { "minecraft:cod",         1, 3, 4 }, { "minecraft:salmon", 1, 2, 3 },
         { "minecraft:kelp",        2, 5, 3 }, { "minecraft:clay",   1, 2, 1 },
         { nullptr,                 0, 0, 0 } },
     {   // a butcher's barrel
-        { "minecraft:raw_beef",    1, 3, 3 }, { "minecraft:raw_porkchop", 1, 3, 3 },
-        { "minecraft:raw_mutton",  1, 3, 3 }, { "minecraft:coal",         1, 3, 2 },
+        { "minecraft:beef",        1, 3, 3 }, { "minecraft:porkchop", 1, 3, 3 },
+        { "minecraft:mutton",      1, 3, 3 }, { "minecraft:coal",     1, 3, 2 },
         { nullptr,                 0, 0, 0 } },
     {   // a provisions barrel of a plains house
         { "minecraft:bread",       1, 2, 3 }, { "minecraft:wheat",  1, 3, 3 },
@@ -508,6 +522,7 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
                     QString nm = blockName(id);
                     if (nm.contains(QLatin1String("poplar_leaves"))) nm = QStringLiteral("minecraft:oak_leaves");        // 1.21.x: no poplar
                     else if (nm == QLatin1String("minecraft:poplar_log")) nm = QStringLiteral("minecraft:oak_log");
+                    else if (nm == QLatin1String("minecraft:nether_portal")) nm = QStringLiteral("minecraft:portal");  // 1.21.x: the block was renamed in 26.x
                     w.writeString("Name", nm);
                 }
                 if (!props.isEmpty())
@@ -670,8 +685,8 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
             if (cs.stove > 0)
             {   // a working stove of a private house (a user request): fuel in slot 1, sometimes food in slot 0
                 // (the item format of 1.20.5+: id/count; Slot — a byte, as a vanilla container dumps it)
-                static const char* const kStoveFood[6] = { "minecraft:raw_beef", "minecraft:raw_porkchop", "minecraft:raw_chicken",
-                                                           "minecraft:raw_mutton", "minecraft:potato", "minecraft:carrot" };
+                static const char* const kStoveFood[6] = { "minecraft:beef", "minecraft:porkchop", "minecraft:chicken",
+                                                           "minecraft:mutton", "minecraft:potato", "minecraft:carrot" };
                 const int s = cs.stove - 1;
                 const bool food = (s & 2) != 0;
                 w.writeString("id", QStringLiteral("minecraft:furnace"));
@@ -683,7 +698,7 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
                 {
                     w.beginCompound(nullptr);
                     w.writeByte("Slot", 0);
-                    w.writeString("id", QLatin1String(kStoveFood[(s >> 3) % 6]));
+                    w.writeString("id", itemWrite(kStoveFood[(s >> 3) % 6], legacy));
                     w.writeByte("count", 1);
                     w.endCompound();
                 }
@@ -699,7 +714,8 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
             }
             if (cs.lectern >= 0)
             {   // a lectern with a written book (the item format of 1.20.5+: id/count/components)
-                const BookText& bk = cs.lectern >= 1000 ? kSciBooks[(cs.lectern - 1000) % kSciBooksCount] : kBooks[cs.lectern % kBooksCount];
+                const BookText& bk = cs.lectern >= 2000 ? kRulesBook
+                                   : cs.lectern >= 1000 ? kSciBooks[(cs.lectern - 1000) % kSciBooksCount] : kBooks[cs.lectern % kBooksCount];
                 w.writeString("id", QStringLiteral("minecraft:lectern"));
                 w.writeInt("x", cs.x);
                 w.writeInt("y", cs.y);
@@ -712,7 +728,8 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
                 w.beginCompound("title");
                 w.writeString("raw", QString::fromUtf8(bk.title));
                 w.endCompound();
-                w.writeString("author", QString::fromUtf8(cs.lectern >= 1000 ? "Кафедра физики" : "Настоятель"));
+                w.writeString("author", QString::fromUtf8(cs.lectern >= 2000 ? "the city"
+                                                        : cs.lectern >= 1000 ? "Кафедра физики" : "Настоятель"));
                 w.beginList("pages", Nbt::Compound, 2);
                 for (const char* pg : { bk.page1, bk.page2 })
                 {
@@ -752,7 +769,7 @@ QByteArray buildChunkNbt(int chunkX, int chunkZ, const QHash<int, QVector<quint1
                     const int cnt = g.minC + int(next() % quint32(g.maxC - g.minC + 1));
                     w.beginCompound(nullptr);
                     w.writeByte("Slot", qint8(j));
-                    w.writeString("id", QLatin1String(g.id));
+                    w.writeString("id", itemWrite(g.id, legacy));
                     w.writeByte("count", qint8(cnt));
                     w.endCompound();
                 }
