@@ -5,6 +5,8 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+## [2.1.26.11261] — 2026-11-26
+
 ### Added
 
 - The rules book pedestal is baked into the world by the exporter itself: a glowstone lamp and a
