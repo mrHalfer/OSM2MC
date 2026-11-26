@@ -37,7 +37,8 @@ QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
                                       const QVector<NpcSite>& npcsHere = QVector<NpcSite>(),
                                       const QVector<PaintingSite>& paintsHere = QVector<PaintingSite>(),
                                       const QVector<FrameSite>& framesHere = QVector<FrameSite>(),
-                                      const QVector<SiteRec>& sitesHere = QVector<SiteRec>());
+                                      const QVector<SiteRec>& sitesHere = QVector<SiteRec>(),
+                                       const QVector<EncMarker>& encHere = QVector<EncMarker>());
 QByteArray buildLevelDat(const QString& levelName, int spawnX, int spawnY, int spawnZ,
                                 McWorldExporter::Format format, int groundTopY,
                                 const McWorldExporter::WorldOptions& world);

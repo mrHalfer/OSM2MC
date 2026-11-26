@@ -4,6 +4,7 @@
 // (moved out of mcworldexporter.cpp).
 #include <QtGlobal>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 //! Villager professions — the indexes of kProfs (the file order matches the table).
@@ -193,6 +194,16 @@ struct SiteRec
     const char* kind = "";                //!< the role in the world (building/vegetation/water/…)
     QString layer;                        //!< source layer name (bldpol, vegpol, …)
     QString name;                         //!< the code's catalog name (empty — the catalog is silent)
+};
+
+//! A place marker of the events pack (docs/city-encounters.md): an invisible "minecraft:marker" at
+//! one EncPack::Prop, carrying the tags the generated near-search selects by (osmc.enc,
+//! osmc.k<kind>, osmc.p<place number> — export/encounters.h). Pos.y is the exact height the event
+//! is built at, so the pack both finds the candidate by radius and knows where to stand on it.
+struct EncMarker
+{
+    int x = 0, y = 0, z = 0;
+    QStringList tags;
 };
 
 struct WaterBodyRec                       // a water body for the aquatic fauna (recorded by the Water branch of the dispatcher)

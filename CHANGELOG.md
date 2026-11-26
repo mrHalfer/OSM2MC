@@ -9,9 +9,12 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 - The rules book pedestal is baked into the world by the exporter itself: a glowstone lamp and a
   lectern facing the spawn, with the book written by the same pass that fills churches (author
-  "the city"). The pack only repairs the pedestal on load, so a taken book comes back.
+  "the city"). The pack repairs the pedestal and re-pages the book on every load, so a taken book
+  comes back and a Russian world overwrites the English book the chunk itself carries.
 - A short console knob for the dread of the city: `/function osmc_enc:dread/s25` - one function per
-  level the night reads (s0, s25, s50, s75, s95, s100); the scoreboard command still works too.
+  level the night reads (s0, s25, s50, s75, s95, s100), and the scoreboard command
+  `/scoreboard players set #dread osmc_enc_t 25` works outright; the rules book near the spawn tells
+  about the knob too (function macros died in 26.x, so every level got its own generated function).
 - The ground around every portal of a military base is scorched into an irregular stain of netherrack
   streaked with nether gold ore (a request): the mark of a big piglin exodus out of the Nether. The
   stain eats bushes and grass but never the fence, the roads, the water or a building.
@@ -24,14 +27,34 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ### Changed
 
+- The night counts broken glass through the game's own statistics, not through a list of coordinates:
+  the baked window census is gone, the pack reads the scoreboard criteria `minecraft.mined:minecraft.glass`
+  and `minecraft.mined:minecraft.glass_pane` (a user's finding). Every window or pane a player breaks
+  raises the dread within a second of the break - all glass of the city, not the sampled half of it -
+  and every counted break answers with a soft glass sound to the neighbours; one time in twelve the
+  night whispers that the sound travelled further than the glass. The counters stay readable: the
+  debt of a player lives in `osmc_glass`/`osmc_pane` until the next tick.
+- Monsters calm the city through the game's own kill statistics, not through an advancement (a user's
+  world never granted the kill deed): the pack keeps the hostile list itself - one
+  `minecraft.killed:<kind>` objective per monster kind (`osmc_k_*`; totalKillCount stays unread, it
+  counts peaceful animals too) - and every tenth counted kill takes one point off the dread, the
+  remainder of the pool waiting across the nights. The objectives reset on world load, so a pack put
+  into a lived-in world cannot cash the player's past kills into tonight's calm.
+- City events are not a lottery over the whole map any more: every event rolls its dice on evenly
+  spaced slots of its hours — the dread tier buys both the rolls (one per tier plus one) and the
+  chance (ten percent per tier) — and every winning roll wakes exactly ONE place: the places of its
+  kind answer through marker entities buried at the anchors, the ten nearest to a player within 300
+  blocks try first, and only when nobody near woke does a second search reach a thousand. The night
+  waits while nobody is online — the slots are spent in front of a witness, not at an empty screen.
+  A woken place is busy till dawn, so two legends never share a twenty-block corner. Pumpkin faces
+  left the cycle watch too: every jack near a player rolls for itself every five seconds, the dread
+  tier buys the faces turns, a turned face rests a minute.
 - Portals of a military base now grow from the center of the contour outward instead of parking by the
   wall, and no two of them stand closer than 100 blocks to each other (the owner's game check).
 - Windows of buildings on a military base are tinted glass now - the dark glass of a guarded zone.
 - The dread of a city is counted from PLAIN glass only: the black stained panes of bandit lairs and the
-  tinted windows of military bases no longer raise or calm it, and the census never watches their cells.
-- The console can set the city's fear outright: `/scoreboard players set #dread osmc_enc_t 25` —
-  the rules book near the spawn tells about it too (function macros died in 26.x, so the knob is
-  the scoreboard itself and the fixed-level functions `osmc_enc:dread/s0…s100`).
+  tinted windows of military bases no longer raise or calm it, and the statistic criteria of tinted
+  and stained glass stay unread by the pack.
 - An active Nether portal now burns across the whole inside of its frame (a 2x3 sheet), not just the
   lower two rows - both the forest ruins and the portals of the military bases.
 - Benches along park paths stand one block back from the paving (a free gap cell between the path and
@@ -40,9 +63,9 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 - Dread calms down over deeds, not over sitting: a glassed flat and a slept night no longer pay
   anything at all. Instead: a torch lit in the dark takes a point off (once in five minutes), a church
   bell takes three, a finished trade one - the two together at most three times a Minecraft day per
-  player, midnight renews the count; a monster laid to rest takes one (once in five minutes), and a
-  tamed cat or dog takes three, as often as kindness goes. The fog park does not read the fear of
-  whoever enters - it sets it to twenty-five.
+  player, midnight renews the count; every tenth monster laid to rest takes one, and a tamed cat or
+  dog takes three, as often as kindness goes. The fog park does not read the fear of whoever enters
+  - it sets it to twenty-five.
 - The bench not for everyone: now the fog itself walks the city, about every three minutes taking one
   oak bench within fifty steps of a player - its seat turns dark. Standing three seconds before such
   a bench sinks the sitter into the fog park; the way out waits at the park's middle bench, and dawn
@@ -50,11 +73,35 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 - Floor nine and a half is fifty-fifty now: behind the door stands either a hall with a chest (nine
   times of ten an ordinary one, once of ten a chest of the mansion) or a company of five to fifteen
   monsters (and once of ten instead of the company there is only a warden). The lot is any mob but the bosses, the
-  creepers and the raiders - the Nether folk included. Whichever door behind carries back to your
-  flight; by morning nothing stays on the half floor.
+  creepers and the raiders - the Nether folk included. The floor promises each guest one of its four
+  doors - chosen blind on every visit, and only that one door carries back to your flight; by morning
+  nothing stays on the half floor.
 
 ### Fixed
 
+- The rules book pedestal searched near (0, 0), not near the world's real spawn (a user report: no
+  book by his spawn, which the editor had marked): the search read the spawn coordinates before the
+  exporter had decided them. The spawn point is now resolved before the world assembly, so the
+  pedestal and the book land beside the marked spawn even when it sits far from the map center.
+- The lighting deed paid exactly once (a user count): its re-arm revocation was not honored by the
+  version, and a player whose deadline score had never been set failed the cooldown check silently.
+  The deed function now seeds the missing deadline with zero, and the cycle re-arms every calm deed
+  for each online hand once per ten seconds as a backstop - a double re-arm cannot pay twice.
+- The cyan terracotta trim of concrete facades (corner pilasters, the parapet ring) exported as
+  stone (a user report): the trim looks its block up in the palette by name, the palette did not
+  carry `minecraft:cyan_terracotta`, and the miss landed below the palette - in stone. The palette
+  now holds cyan terracotta (87, 91, 91).
+- The rules book pedestal could be missing outright (a user report, his built-up city map): the
+  pedestal search demanded free ground within five steps of the spawn, and every ring cell was a
+  trunk, a post or a parked car. The search now reaches 24 steps over clean ground and 48 steps
+  where the only clutter is one block above the surface (tall grass, a flower - the lamp replaces it).
+- In worlds exported under a Russian interface the rules book on the pedestal stayed English: the
+  book baked into the chunk is written in English only, and the pack restocked the lectern solely
+  when the page went missing. The pack now re-pages the book on every load in its own language.
+- Broken windows went unheard by the city (a user counted his breaks in survival with the dread
+  score unchanged): the old census watched every second house only, up to four plain glass blocks
+  per house, and glass panes never. The game's own mining statistics replaced the census (see
+  Changed), so the dread now grows on every broken window and pane with a second.
 - Nether portals did not appear in the worlds at all: the block was baked as `minecraft:portal`,
   which is not a block id in either target (the real name is `minecraft:nether_portal` in both
   1.21.x and 26.x - the vanilla jar's blockstates say so), so the palette entry dropped on load and
@@ -75,6 +122,14 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   `wooden_door.close`, `elder_guardian.curse` and `wolf.growl`.
 - The rules book never came back after being taken: an empty lectern still carries its `Book` tag,
   so the "book missing" guard never fired; it reads `lectern[has_book=false]` now.
+- **Worlds with events opened in safe mode in 26.x**: the advancement registry aborted on the deed
+  filters - an entity tag sat in a field that parses as a plain entity id, and the tame file missed a
+  closing brace - so the game refused every datapack and offered `--safeMode`. The four deed
+  advancements now carry the shape of their format family: 26.x reads a trigger filter as ONE
+  condition dispatched by `type` with namespaced predicate keys, 1.21.x as an ARRAY of conditions
+  dispatched by `condition` - spelled exactly as the game's own vanilla advancements spell it, with
+  the monster list riding the entity_type tag alone; and `pack.mcmeta` states the real range in both
+  key notations, so the events pack loads from data pack format 48 (1.21.0) instead of only 82 up.
 
 ## [2.1.26.11241] — 2026-11-24
 

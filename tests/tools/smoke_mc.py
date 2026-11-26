@@ -57,12 +57,12 @@ CMDS = [
     # ORDINARY minecraft:spawner block (there are no named zombie/skeleton_spawner in the game — the server
     # turned them into air, a user remark). if block proves that the server did NOT
     # throw the block out; the type (skeleton) lies in the BE and is checked by the verify decode.
-    ('execute if block 172 209 -102 minecraft:spawner run say SMOKESPAWN', 4),
+    ('execute if block 176 179 -95 minecraft:spawner run say SMOKESPAWN', 4),
     # The table top = oak_pressure_plate ON a fence — the block is placed bypassing the placement
     # rules (a plate above a fence cannot be placed by hand!). if block proves that the
     # server did not throw the block out on loading (plates have no self-detachment without support — but
     # we check it by measurement, not on faith). The cell is deterministic (bigPriv, tier noise=70).
-    ('execute if block 242 70 43 minecraft:oak_pressure_plate run say SMOKEPLATE', 4),
+    ('execute if block 249 70 43 minecraft:oak_pressure_plate run say SMOKEPLATE', 4),
 ]
 BAD = ['failed to load', 'failed to handle', 'encountered an unexpected exception',
        'a fatal error', 'could not load', 'unable to load']

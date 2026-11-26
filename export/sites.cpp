@@ -129,7 +129,8 @@ const char* const kVTypes[] = { "plains", "desert", "jungle", "savanna", "snow",
 // writer fits; the pack's dread/book carries the full four-page text and restocks it after a reset.
 const BookText kRulesBook = {
     "Rules of the Night",
-    "The city feels broken glass: a shattered window raises its dread, a pane set back calms it. "
+    "The city feels broken glass: a shattered window or pane raises its dread, glass set back calms "
+    "nothing. "
     "At 25, 50, 75 and 95 the night speaks, and the higher the dread, the more often its events walk. "
     "At 95 every house opens its hidden floor.",
     "It calms down over kindness: a light placed, a night slept through, an animal tamed, a trade finished, a bell rung. "

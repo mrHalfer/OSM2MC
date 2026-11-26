@@ -151,11 +151,12 @@ const Row kRows[] = {
                               "a sound on its own.") },
     { "pumpkin_faces",          QT_TRANSLATE_NOOP("EncountersDialog", "Graveyards"),
       QT_TRANSLATE_NOOP("EncountersDialog", "Pumpkins That Turn To You"),
-      QT_TRANSLATE_NOOP("EncountersDialog", "Jack-o'-lanterns turn their faces toward the player - the block "
-                              "changes while you watch from afar."),
-      QT_TRANSLATE_NOOP("EncountersDialog", "No dice at all: every cycle the cemetery jacks turn their carved face "
-                              "to whoever watches from a distance - and never to someone standing "
-                              "close.") },
+      QT_TRANSLATE_NOOP("EncountersDialog", "Jack-o'-lanterns turn their carved faces toward the nearest witness - "
+                              "the block changes right before your eyes, and the more dreadful the night, "
+                              "the more restless the faces."),
+      QT_TRANSLATE_NOOP("EncountersDialog", "No night roll at all: every pumpkin near you spins its own die every "
+                              "five seconds, and the dread tier buys the faces extra turns. A face that has "
+                              "just turned rests a minute.") },
     { "fresh_grave",            nullptr,
       QT_TRANSLATE_NOOP("EncountersDialog", "The Fresh Grave"),
       QT_TRANSLATE_NOOP("EncountersDialog", "Lit up as 'fresh soil'. Do not dig: the shovel's sound breaks off on "
@@ -226,8 +227,9 @@ const Row kRows[] = {
                               "tall house (about 8% per cycle). Open it from the flight and you stand "
                               "on the landing. The floor takes each guest fifty-fifty: a chest in the "
                               "hall (nine of ten plain, one of ten from a mansion), or company: five "
-                              "to fifteen monsters, or a warden. Any door there brings you back to "
-                              "your own flight; by morning nothing is left.") },
+                              "to fifteen monsters, or a warden. The floor promises each guest one "
+                              "of its four doors: only that one opens back onto your own flight; "
+                              "by morning nothing is left.") },
     { "ghost_lift",             nullptr,
       QT_TRANSLATE_NOOP("EncountersDialog", "The Lift Without A Shaft"),
       QT_TRANSLATE_NOOP("EncountersDialog", "Call the lift on an empty flight - there will be a sound and 'doors' "

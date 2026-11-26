@@ -357,7 +357,6 @@ private:
     QVector<SiteRec> sites;                         // random-encounter site registry (docs/city-encounters.md):
                                                     // sites.json + marker entities, world.encounters only
     QVector<EncPack::Prop> encProps;                // exact anchors the osmc_enc functions are baked around
-    QVector<int> encGlass;                          // the dread census: sampled window glass cells as x,y,z triples
     QVector<int> encBook;                           // rules book lectern of osmc_enc: the ground cell x,y,z under it (empty - no book)
                                                     // (masts, bus stops, playgrounds, road chalk spots, jacks),
                                                     // world.encounters only
@@ -568,14 +567,57 @@ bool ExportRun::assembleChunks()
         menByChunk[pairKey(ms.x >> 4, ms.z >> 4)].append(ms);
     for (const SpawnerSite& sp : spawners)
         spawnByChunk[pairKey(sp.x >> 4, sp.z >> 4)].append(sp);
-    encBook.clear();
-    if (world.encounters)
-    {   // the rules book of the osmc_enc pack takes the first free dry cell within five steps of the
-        // spawn: solid ground with two free blocks above, no water, no roof. The pedestal bakes with
+    // Spawn on the surface: the ground top of the column or the topmost block above it (the roof); if the column is occupied by a building — the nearest free one
+    // (a spiral up to 48 blocks), otherwise the player would appear on a roof or (with terrain) underground.
+    auto surfaceSpawn = [&](int x0, int z0, int& outX, int& outY, int& outZ) -> bool
+    {
+        for (int r = 0; r <= 48; ++r)
+            for (int dz = -r; dz <= r; ++dz)
+                for (int dx = -r; dx <= r; ++dx)
+                {
+                    if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                    const int x = x0 + dx, z = z0 + dz;
+                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+                    if (git == ground.constEnd()) continue;
+                    const int col = (z & 15) * 16 + (x & 15);
+                    if (git->wd[col] > 0) continue;                       // not into water
+                    const int top = git->top[col];
+                    bool free = true;
+                    for (int y = top + 1; y <= std::min(top + 12, kWorldMaxY) && free; ++y)
+                        if (store.get(x, y, z)) free = false;
+                    if (!free) continue;
+                    outX = x; outZ = z; outY = std::min(top + 2, kWorldMaxY);
+                    return true;
+                }
+        return false;
+    };
+    // A spawn point marked in the project (the center of the map view) is resolved here, BEFORE
+    // the assembly: the rules book below bakes into the chunk next to the spawn, and the chunk
+    // NBTs freeze once the assembly threads are over (a user marked his spawn at 764 75 741 and
+    // got his book at -1 87 -1 - the search below read the default (0,0)). The final decision
+    // re-runs the SAME math after the assembly (the object centroid needs the assembly's sums),
+    // so level.dat's spawn is untouched; this only pre-empts the point the book search reads.
+    spawnX = 0;
+    spawnY = 258;
+    spawnZ = 0;
+    if (world.hasSpawnPoint)
+    {
+        const int sx0 = int(std::floor(toBlockX(tf, world.spawnMapX))), sz0 = int(std::floor(toBlockZ(tf, world.spawnMapY)));
+        int nx = spawnX, ny = spawnY, nz = spawnZ;
+        if (surfaceSpawn(sx0, sz0, nx, ny, nz)) { spawnX = nx; spawnY = ny; spawnZ = nz; }
+    }
+    encBook.clear();    if (world.encounters)
+    {   // the rules book of the osmc_enc pack takes the first free dry cell near the spawn: solid
+        // ground, no water, the lectern's cell and the page above it free. The pedestal bakes with
         // the world (the owner's game check): a glowstone lamp block (his request), a lectern facing
         // the spawn and the book itself through the chunk block_entities - the church lectern's path.
-        // The pack's dread/book only repairs what a player took or broke.
-        for (int r = 1; r <= 5 && encBook.isEmpty(); ++r)
+        // The pack's dread/book only repairs what a player took or broke. Five steps were not enough
+        // for a built-up map (a user report: no book in his city, every ring cell was a trunk, a
+        // post or a parked car): the strict scan grew to 24, and a second pass to 48 accepts a cell
+        // whose only clutter is ONE block over the ground (tall grass, a flower, leaf litter — the
+        // glowstone pedestal simply replaces it).
+        const auto tryRing = [&](int r, bool strict)
+        {
             for (int dz = -r; dz <= r && encBook.isEmpty(); ++dz)
                 for (int dx = -r; dx <= r && encBook.isEmpty(); ++dx)
                 {
@@ -586,15 +628,21 @@ bool ExportRun::assembleChunks()
                     const int col = (z & 15) * 16 + (x & 15);
                     if (git->wd[col] > 0) continue;                                   // not into water
                     const int top = git->top[col];
-                    if (store.get(x, top + 1, z) || store.get(x, top + 2, z)) continue;   // the page needs air
+                    if (store.get(x, top + 2, z)) continue;                           // the page needs air
+                    if (strict && store.get(x, top + 1, z)) continue;                 // nothing to clear away
                     encBook << x << top << z;
-                    const int face = (std::abs(spawnZ - z) >= std::abs(spawnX - x))       // kDirNames: N,E,S,W
+                    const int face = (std::abs(spawnZ - z) >= std::abs(spawnX - x))   // kDirNames: N,E,S,W
                         ? (spawnZ >= z ? 2 : 0) : (spawnX >= x ? 1 : 3);
                     store.set(x, top + 1, z, quint16(IdPaletteStart + paletteIndexOf("minecraft:glowstone")));
                     store.set(x, top + 2, z, quint16(IdLecternBase + face));
                     ChestSite cs; cs.x = x; cs.y = top + 2; cs.z = z; cs.lectern = 2000;
                     chestsByChunk[pairKey(x >> 4, z >> 4)].append(cs);
                 }
+        };
+        for (int r = 1; r <= 24 && encBook.isEmpty(); ++r)
+            tryRing(r, true);
+        for (int r = 1; r <= 48 && encBook.isEmpty(); ++r)
+            tryRing(r, false);
     }
     // The chunk assembly is completely independent (store/ground/chestsByChunk are only read), so it
     // runs in several threads; the regions are then assembled sequentially in the SAME order —
@@ -706,30 +754,6 @@ bool ExportRun::assembleChunks()
     spawnX = 0;
     spawnY = 258;
     spawnZ = 0;
-    // Spawn on the surface: the ground top of the column or the topmost block above it (the roof); if the column is occupied by a building — the nearest free one
-    // (a spiral up to 48 blocks), otherwise the player would appear on a roof or (with terrain) underground.
-    auto surfaceSpawn = [&](int x0, int z0, int& outX, int& outY, int& outZ) -> bool
-    {
-        for (int r = 0; r <= 48; ++r)
-            for (int dz = -r; dz <= r; ++dz)
-                for (int dx = -r; dx <= r; ++dx)
-                {
-                    if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
-                    const int x = x0 + dx, z = z0 + dz;
-                    const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
-                    if (git == ground.constEnd()) continue;
-                    const int col = (z & 15) * 16 + (x & 15);
-                    if (git->wd[col] > 0) continue;                       // not into water
-                    const int top = git->top[col];
-                    bool free = true;
-                    for (int y = top + 1; y <= std::min(top + 12, kWorldMaxY) && free; ++y)
-                        if (store.get(x, y, z)) free = false;
-                    if (!free) continue;
-                    outX = x; outZ = z; outY = std::min(top + 2, kWorldMaxY);
-                    return true;
-                }
-        return false;
-    };
     if (objCount > 0)
     {
         spawnX = int(std::llround(objCx / double(objCount)));
@@ -851,7 +875,14 @@ bool ExportRun::writeZip()
     {
         QSet<QString> off;
         for (const QString& id : world.encountersOff) off.insert(id.trimmed());
-        EncPack::build(addEntry, off, encProps, encGlass, encBook, legacy, world.encountersRussian);
+        // the pack's caps and the marker entities must agree on the places down to their numbers:
+        // candidates outside the written chunks leave first (a marker outside the map anchors
+        // nothing), then capProps() thins every kind by a uniform stride and numbers the survivors
+        // (EncPack::build reads the same numbers back out of this same list)
+        encProps.erase(std::remove_if(encProps.begin(), encProps.end(), [this](const EncPack::Prop& p)
+                                      { return !writeSet.contains(pairKey(p.x >> 4, p.z >> 4)); }), encProps.end());
+        EncPack::capProps(encProps);
+        EncPack::build(addEntry, off, encProps, encBook, legacy, world.encountersRussian);
     }
     regionDir = legacy ? QStringLiteral("region/")
                                      : QStringLiteral("dimensions/minecraft/overworld/region/");
@@ -864,6 +895,7 @@ bool ExportRun::writeZip()
         for (auto it = paintsByChunk.constBegin(); it != paintsByChunk.constEnd(); ++it) entChunks.insert(it.key());
         for (auto it = frameByChunk.constBegin(); it != frameByChunk.constEnd(); ++it) entChunks.insert(it.key());
         QHash<ColKey, QVector<SiteRec>> siteByChunk;              // site markers of the random encounters
+        QHash<ColKey, QVector<EncMarker>> encByChunk;             // place markers of the events pack
         if (world.encounters)
         {   // a site outside the written chunks anchors nothing — it leaves the registry together with its
             // marker; the marker's y is the ground top under the center (the ground map is complete by now)
@@ -876,6 +908,17 @@ bool ExportRun::writeZip()
                 siteByChunk[pairKey(s.x >> 4, s.z >> 4)].append(s);
             }
             for (auto it = siteByChunk.constBegin(); it != siteByChunk.constEnd(); ++it) entChunks.insert(it.key());
+            // the events' place markers (docs/city-encounters.md): one entity per capped prop; the
+            // kind tag and the place number carry the dispatch identity, Pos.y the anchor height
+            for (const EncPack::Prop& p : encProps)
+            {
+                EncMarker m;
+                m.x = p.x; m.y = p.y; m.z = p.z;
+                m.tags << QStringLiteral("osmc.enc") << QLatin1String(EncPack::kKindTag[p.kind])
+                       << QStringLiteral("osmc.p%1").arg(p.idx);
+                encByChunk[pairKey(p.x >> 4, p.z >> 4)].append(m);
+            }
+            for (auto it = encByChunk.constBegin(); it != encByChunk.constEnd(); ++it) entChunks.insert(it.key());
         }
         for (qint64 key : entChunks)
         {
@@ -888,7 +931,7 @@ bool ExportRun::writeZip()
             rd.payload.insert(ck, buildEntityChunkNbt(cx, cz, menByChunk.value(key),
                                                       format == McWorldExporter::Format::Legacy121x,
                                                       npcByChunk.value(key), paintsByChunk.value(key), frameByChunk.value(key),
-                                                      siteByChunk.value(key)));
+                                                      siteByChunk.value(key), encByChunk.value(key)));
         }
     }
     // The site registry (docs/city-encounters.md): one record per marker. The datapack does not read it
@@ -1740,56 +1783,6 @@ void ExportRun::buildPointObjects()
             ep.cells = best;
             encProps.append(ep);
             ++nWall;
-        }
-        // GLASS CENSUS (the dread system, docs/city-encounters.md): a spread sample of the city's
-        // window glass, baked so the pack can count what breaking into the city feels like — the pack
-        // watches these exact cells: glass gone from a loaded cell raises #dread, glass put back pays
-        // the debt through the placement advancement. Every SECOND house plays (the column hash), the
-        // first up to 4 panes of its perimeter line, the whole census capped — it is a proxy for all
-        // the windows, not every pane. Collected in the object order of the world, so the same walls
-        // are watched every run. ONLY PLAIN GLASS counts (the owner's fix): the stained glass of bandit
-        // lairs and the tinted windows of military bases never move the dread — and both are already
-        // tinted in the store by now, so the plain-glass filter excludes them by itself.
-        int nCensus = 0;
-        for (const McWorldExporter::McObject& q : objects)
-        {
-            if (nCensus >= 1600) break;
-            if (q.kind != McWorldExporter::McObject::Building || q.part || q.lift)
-                continue;
-            double ax0 = 1e18, ax1 = -1e18, az0 = 1e18, az1 = -1e18;
-            for (const QVector3D& v : q.vertices)
-            {
-                const double bx = toBlockX(tf, v.x()), bz = toBlockZ(tf, v.y());
-                ax0 = std::min(ax0, bx); ax1 = std::max(ax1, bx);
-                az0 = std::min(az0, bz); az1 = std::max(az1, bz);
-            }
-            if (!preClip.isEmpty())
-            {
-                ax0 = std::max(ax0, double(preClip.left())); ax1 = std::min(ax1, double(preClip.right()));
-                az0 = std::max(az0, double(preClip.top()));  az1 = std::min(az1, double(preClip.bottom()));
-            }
-            const int x0 = int(std::ceil(ax0)), x1 = int(std::floor(ax1));
-            const int z0 = int(std::ceil(az0)), z1 = int(std::floor(az1));
-            if (x1 < x0 || z1 < z0) continue;
-            if (colHash(pairKey(x0, z0) ^ 0xD9EAull) % 2u != 0u) continue;   // every second house
-            int got = 0;
-            for (int face = 0; face < 4 && got < 4; ++face)
-            {   // the four perimeter lines of the box, as in the wave scan above
-                const int n = (face < 2 ? x1 - x0 : z1 - z0) + 1;
-                for (int i = 0; i < n && got < 4; ++i)
-                {
-                    const int cx = face == 0 ? x0 + i : (face == 1 ? x0 + i : (face == 2 ? x0 : x1));
-                    const int cz = face == 0 ? z0 : (face == 1 ? z1 : (face == 2 ? z0 + i : z0 + i));
-                    const int ys = surfaceTop(pairKey(cx, cz)) + 1;
-                    for (int y = ys; y <= ys + 200 && got < 4; ++y)
-                    {
-                        const quint16 b = store.get(cx, y, cz);
-                        if (b != IdGlass) continue;         // dread knows only plain glass
-                        encGlass << cx << y << cz;
-                        ++got; ++nCensus;
-                    }
-                }
-            }
         }
         // taxi: the plate cell is the paving cell by a car door that the parking stage recorded for
         // him (carDoors, parallel to carCores — a core's own neighbour is the car's body, so the door

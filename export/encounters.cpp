@@ -77,44 +77,87 @@ void encChalkCells(const EncPack::Prop& prop, QPoint out[5])
     }
 }
 
+// The marker tag of every kEp* kind, in the order of the enum (docs/city-encounters.md): a prop
+// carries it on its marker entity, the radius searches of the events select by it
+const char* const EncPack::kKindTag[18] = {
+    "osmc.klamp", "osmc.kstop", "osmc.kplay", "osmc.kchalk", "osmc.kjack", "osmc.kcross",
+    "osmc.kwall", "osmc.kscares", "osmc.kgrave", "osmc.kbell", "osmc.kschool", "osmc.kcar",
+    "osmc.klurk", "osmc.kfount", "osmc.kmetro", "osmc.kbench", "osmc.khalf", "osmc.kmow"
+};
+
+// A prop whose side data is too thin gives the generator nothing to bake — such places leave both
+// the markers and the dispatch, so a selected place always has real functions behind it
+static bool encPropViable(const EncPack::Prop& p)
+{
+    int atLeast = 0;
+    switch (p.kind)
+    {
+    case EncPack::kEpWindows: case EncPack::kEpGrave: case EncPack::kEpLamp:
+    case EncPack::kEpBench:    atLeast = 1; break;      // a lamp with no light cell cannot blink, the bench without its trigger cell is mute
+    case EncPack::kEpSchool:  atLeast = 3; break;                           // the matron walks three cells
+    case EncPack::kEpCar:     atLeast = 2; break;                           // a taxi needs the patch and the car
+    case EncPack::kEpHalf:    atLeast = 2; break;                           // the door is a pair of lining cells, both must be real
+    case EncPack::kEpLurker:  atLeast = 4; break;
+    case EncPack::kEpFountain: atLeast = 17; break;                         // the bowl drains whole or not at all
+    case EncPack::kEpMetro:   atLeast = 12; break;                          // the catch cell plus an eleven-cell route
+    case EncPack::kEpMow:     atLeast = 6; break;                           // half a walk of stripes is not a walk, it is noise
+    default: break;
+    }
+    return p.cells.size() >= atLeast;
+}
+
+void EncPack::capProps(QVector<Prop>& props)
+{   // one cap per kind: an event spread over the whole city stops being LOCAL, and the caps bound
+    // the size of the generated pack (the caps also decide how many markers a small parcel grows)
+    static const int kCap[18] = { 120, 60, 40, 40, 200, 16, 24, 16, 60, 8, 24, 24, 32, 16, 12, 60, 200, 16 };
+    QVector<Prop> keep[18];
+    for (int k = 0; k < 18; ++k)
+    {
+        QVector<const Prop*> alive;
+        for (const Prop& p : props)
+            if (p.kind == k && encPropViable(p))
+                alive.append(&p);
+        const int n = alive.size();
+        const int cap = qMin(n, kCap[k]);
+        for (int s = 0; s < cap; ++s)          // the uniform stride keeps the places spread over the city
+            keep[k].append(*alive[cap == n ? s : s * n / cap]);
+    }
+    // the survivors re-enter the list grouped by kind and numbered inside it: build() rebuilds the
+    // same byKind lists in the same order, so Prop::idx IS the dispatch number of the place
+    props.clear();
+    for (int k = 0; k < 18; ++k)
+        for (int j = 0; j < keep[k].size(); ++j)
+        {
+            Prop p = keep[k][j];
+            p.idx = j;
+            props.append(p);
+        }
+}
+
 namespace
 {
-//! The gate every baked event starts with: the night window, then the roll of 1..100 against the
-//! chance. Each winning number dispatches to one baked place through rollLines().
+//! The gate of the player-bound rolls (upstairs): the night window, then the roll of 1..100 against
+//! the chance and the custom dispatch after it. Place-bound events use the nearRoll frame instead -
+//! one roll a night and the marker places of their kind answer near the players.
 QString gate(int lo, int hi, int chance)
 {
-    return QStringLiteral("# the roll of the event: the places are baked into the ev/ functions\n"
+    return QStringLiteral("# the roll of the event\n"
                           "execute unless score #day osmc_enc_t matches %1 run return 0\n"
                           "execute store result score #enc_r osmc_enc_t run random value 1..100\n"
                           "execute unless score #enc_r osmc_enc_t matches 1..%2 run return 0\n")
            .arg(QStringLiteral("%1..%2").arg(lo).arg(hi)).arg(chance);
 }
 
-//! The dispatch of the rolled number to one of n baked places ("<fnPrefix><i>/go"). With more places
-//! than rolls (the dread system grows the hf and lurker pools past their roll) the wins walk the
-//! place list by a step coprime with n, so a small roll still reaches the whole city.
-QString rollLines(int chance, int n, const QString& fnPrefix)
-{
-    int step = 1;
-    if (n > chance)
-    {   // the smallest step that spreads the rolls over the places and lands on each at most once
-        auto gcd = [](int a, int b) { while (b) { int t = a % b; a = b; b = t; } return a; };
-        for (step = std::max(1, n / qMax(1, chance)); gcd(step, n) != 1; ++step) {}
-    }
-    QString s;
-    for (int r = 1; r <= chance; ++r)
-        s += QStringLiteral("execute if score #enc_r osmc_enc_t matches %1 run function %2\n")
-                 .arg(r).arg(fnPrefix + QStringLiteral("%1/go").arg((r - 1) * step % n));
-    return s;
-}
 }   // namespace
 
 // The pack generator. Everything a baked event needs (coordinates, counters, schedules) is written
 // into literal mcfunction lines here — the runtime pack carries no macros and reads no data files,
-// so the same functions behave identically in 1.21.x and 26.x (the formats min_format 82 covers) -
+// so the same functions behave identically in 1.21.x and 26.x (from data pack format 48 = the 1.21.0
+// export to 121 = 26.3; the few JSON files whose schema the two families spell differently are
+// written per format, see the legacy121 branches below) -
 // except where 26.x retired the mechanic an event is built on, see the legacy121 branches below.
 void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<Prop>& props,
-                    const QVector<int>& glassCensus, const QVector<int>& bookCell, bool legacy121,
+                    const QVector<int>& bookCell, bool legacy121,
                     bool russian)
 {
     // the Russian voice of the pack (a user's request): the generator below keeps writing English,
@@ -123,32 +166,18 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
         ? AddFn([addIn](const QString& path, const QByteArray& data)
                 { addIn(path, encRu::translate(data)); })
         : addIn;
-    // The place lists per kind with caps: an event spread over the whole city stops being LOCAL, and
-    // the caps bound the size of the generated pack. The vector arrives in the stable order of the
-    // build stages (the chalk candidates are pre-sorted by coordinates), so the pack is reproducible.
+    // The place lists per kind. ExportRun caps and numbers the props through capProps() before the
+    // markers are written, so the caps filter below only guards a build() called without that pass;
+    // the vector arrives in the stable order of the build stages (the chalk candidates are pre-sorted
+    // by coordinates), so the pack is reproducible
     QVector<Prop> byKind[18];
     // the lurker and the ninth-and-a-half floor carry bigger pools since the dread system: at a
     // scared night the lurker comes from more lamps and the door of no plan can stand in more
     // houses (the storm of dread 95 opens every baked one at once, see the hf section)
-    static const int kCap[18] = { 40, 24, 24, 24, 96, 8, 6, 8, 8, 4, 6, 6, 12, 8, 3, 24, 96, 8 };
+    static const int kCap[18] = { 120, 60, 40, 40, 200, 16, 24, 16, 60, 8, 24, 24, 32, 16, 12, 60, 200, 16 };
     for (const Prop& p : props)
-        if (p.kind >= 0 && p.kind < 18 && byKind[p.kind].size() < kCap[p.kind])
+        if (p.kind >= 0 && p.kind < 18 && byKind[p.kind].size() < kCap[p.kind] && encPropViable(p))
             byKind[p.kind].append(p);
-    // props whose generator would have nothing to bake without their side data are dropped here, so
-    // the roll/dispatch below always addresses a place that really has functions
-    auto needCells = [](QVector<Prop>& v, int atLeast)
-    {   for (int i = v.size() - 1; i >= 0; --i) if (v[i].cells.size() < atLeast) v.remove(i); };
-    needCells(byKind[kEpWindows], 1);
-    needCells(byKind[kEpGrave], 1);
-    needCells(byKind[kEpLamp], 1);                                        // a lamp with no light cell cannot blink
-    needCells(byKind[kEpSchool], 3);
-    needCells(byKind[kEpCar], 2);
-    needCells(byKind[kEpLurker], 4);
-    needCells(byKind[kEpFountain], 17);                                   // the bowl drains whole or not at all
-    needCells(byKind[kEpMetro], 12);                        // the catch cell plus an eleven-cell route
-    needCells(byKind[kEpBench], 1);                          // the bench without its trigger cell is mute
-    needCells(byKind[kEpHalf], 2);
-    needCells(byKind[kEpMow], 6);            // half a walk of stripes is not a walk, it is noise            // the door is a pair of lining cells, both must be real
     const QVector<Prop>& lamps  = byKind[kEpLamp];        // blinking_lamp + the local_rain anchor
     const QVector<Prop>& stops  = byKind[kEpBusStop];     // cat_council + bus13
     const QVector<Prop>& plays  = byKind[kEpPlayground];  // swings
@@ -185,10 +214,12 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
                                   "execute unless score #dread osmc_enc_t matches -2147483648.. run scoreboard players set #dread osmc_enc_t 0\n"
                                   "execute unless score #dread_sent osmc_enc_t matches -2147483648.. run scoreboard players set #dread_sent osmc_enc_t 0\n"
                                   "scoreboard players set #lv osmc_enc_t 0\n"
-                                  "scoreboard players set #enc_hit osmc_enc_t 0\n"
                                   "scoreboard players set #k100 osmc_enc_t 100\n");
     QString cycle = QStringLiteral("# one cycle every 200 ticks; each enabled event decides inside whether it comes now\n");
     QString tickFob;                        // the per-tick hooks an event adds to tick.mcfunction
+    QString tickJack;                       // (the cemetery faces watch there too, see pumpkin_faces)
+    QString tickGlass;                      // the dread's glass counters are read every tick, not per cycle
+    QString tickKill;                       // (and so are the kill statistics, one gate per kind)
     if (legacy121)
     {
         cycle += QStringLiteral("execute store result score #day osmc_enc_t run time query daytime\n");
@@ -200,42 +231,49 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
         cycle += QStringLiteral("execute store result score #day osmc_enc_t run time query gametime\n"
                                 "scoreboard players operation #day osmc_enc_t %= #k24000 osmc_enc_t\n");
     }
+    // the day counter of the activation rolls: gametime never runs back, so "#<id>_d < #dayn" means
+    // "this event has not rolled its dice today" (one activation roll per Minecraft day, the owner's
+    // scheme: a place-bound event is rare, but the places near the player make it meetable)
+    cycle += QStringLiteral("execute store result score #dayn osmc_enc_t run time query gametime\n"
+                            "scoreboard players operation #dayn osmc_enc_t /= #k24000 osmc_enc_t\n");
 
     // ---- dread (docs/city-encounters.md): the city counts its broken windows. Breaking a window is
-    // the easiest way into any house, so glass is what frightens the city — PLAIN glass only (the
-    // owner's fix): the black stained panes of bandit lairs and the tinted windows of military bases
-    // never move the dread, and the census never watches their cells. The exporter bakes a census
-    // of sampled window cells (glassCensus); every cycle the census reads them — a watched cell whose
-    // glass is GONE while its chunk is loaded raises #dread once (each cell's own score re-arms, so an
-    // unloaded chunk is never a broken window and a long-standing hole counts once), glass standing
-    // there again only re-arms the cell by looking at the pane: the glass placement advancement is
-    // gone (a user's rework) - setting a window back no longer calms the city at all. Tiers speak once per climb
-    // in the chat (re-armed when the tier falls again), multiply the event rolls (an event function
-    // re-rolls its own dice, so an extra call is an extra place tonight), and at the top tier open
-    // every baked ninth-and-a-half floor door of the city at once (see the hf section).
+    // the easiest way into any house, so glass is what frightens the city. The scoreboard criterion
+    // minecraft.mined:<block> is the game's own counter of the glass a player has broken (a user's
+    // finding, and the way to go: the baked census of window coordinates this system carried first
+    // sampled half the city and missed the breaks the user counted by hand - and a real city holds
+    // too many glass blocks to watch them by coordinates; the advancement trigger registry, read
+    // from both target servers, has no block-break trigger at all). The pack adds two statistic
+    // objectives - plain glass and glass panes - and tick.mcfunction hands every breaker to
+    // dread/broke, which moves the counted panes into #dread and zeroes the scores: the counter
+    // doubles as the event queue, and /scoreboard players get <player> osmc_glass shows what is
+    // owed mid-cycle. Undyed glass only: the stained panes of bandit lairs and the tinted windows
+    // of military bases live under other criteria the pack never adds; explosions and weather are
+    // not mining either - the city feels a hand. Every counted break taps the neighbours with a
+    // soft glass sound, and one time in twelve the night whispers to whoever stands close. Tiers
+    // speak once per climb in the chat (re-armed when the tier falls again), multiply the event
+    // rolls (an event function re-rolls its own dice, so an extra call is an extra place tonight),
+    // and at the top tier open every baked ninth-and-a-half floor door of the city at once (see
+    // the hf section).
     {
-        QString census = QStringLiteral(
-            "# the glass census: #w<i> remembers glass standing at watched cell i\n"
-            "scoreboard players set #enc_hit osmc_enc_t 0\n");
-        for (int i = 0, w = 0; i + 2 < glassCensus.size(); i += 3, ++w)
-        {
-            const int x = glassCensus[i], y = glassCensus[i + 1], z = glassCensus[i + 2];
-            const QString at = QStringLiteral("if loaded %1 %2 %3").arg(x).arg(y).arg(z);
-            const QString gone = QStringLiteral("unless block %1 %2 %3 minecraft:glass").arg(x).arg(y).arg(z);
-            const QString base = QStringLiteral("#w%1 osmc_enc_t").arg(w);
-            census += QStringLiteral(
-                "execute unless score %4 matches -2147483648.. run scoreboard players set %4 1\n"
-                "execute %1 if score %4 matches 1 %2 run function osmc_enc:dread/broke\n"
-                "execute %1 if score %4 matches 1 %2 run scoreboard players set %4 0\n"
-                "execute %1 if block %5 %6 %7 minecraft:glass unless score %4 matches 1 run scoreboard players set %4 1\n")
-                .arg(at).arg(gone).arg(base).arg(x).arg(y).arg(z);
-        }
-        add(fn + QStringLiteral("dread/census.mcfunction"), census.toUtf8());
+        load += QStringLiteral(
+            "scoreboard objectives add osmc_glass minecraft.mined:minecraft.glass\n"
+            "scoreboard objectives add osmc_pane minecraft.mined:minecraft.glass_pane\n");
         add(fn + QStringLiteral("dread/broke.mcfunction"), QByteArray(
-            "# one watched window went missing since the last census - the city felt it\n"
-            "scoreboard players add #dread osmc_enc_t 1\n"
-            "scoreboard players set #enc_hit osmc_enc_t 1\n"
-            "execute if score #dread osmc_enc_t matches 101.. run scoreboard players operation #dread osmc_enc_t = #k100 osmc_enc_t\n"));
+            "# this player broke watched glass since the last tick - the city felt every pane\n"
+            "# (run as the breaker at the breaker, so the neighbours of the break hear it)\n"
+            "scoreboard players operation #dread osmc_enc_t += @s osmc_glass\n"
+            "scoreboard players operation #dread osmc_enc_t += @s osmc_pane\n"
+            "scoreboard players set @s osmc_glass 0\n"
+            "scoreboard players set @s osmc_pane 0\n"
+            "execute if score #dread osmc_enc_t matches 101.. run scoreboard players operation #dread osmc_enc_t = #k100 osmc_enc_t\n"
+            "execute as @a[distance=..24] at @s run playsound minecraft:block.glass.break master @s ~ ~ ~ 0.6 0.5\n"
+            "execute store result score #brk_r osmc_enc_t run random value 1..12\n"
+            "execute if score #brk_r osmc_enc_t matches 1 run"
+            " tellraw @a[distance=..40] {\"text\":\"that sound travelled further than the glass\",\"color\":\"dark_gray\",\"italic\":true}\n"));
+        tickGlass = QStringLiteral(
+            "execute as @a[scores={osmc_glass=1..}] at @s run function osmc_enc:dread/broke\n"
+            "execute as @a[scores={osmc_pane=1..}] at @s run function osmc_enc:dread/broke\n");
         // the console knob (a request): function macros died in 26.x, so the levels the night reads
         // get their own one-line functions - "/function osmc_enc:dread/s95" beats a whole scoreboard
         // command; any other value still goes through /scoreboard players set #dread osmc_enc_t N
@@ -259,9 +297,6 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
                     .arg(t + 1).arg(QLatin1String(kTiers[t].text)).arg(QLatin1String(kTiers[t].color))
                     .arg(QLatin1String(kTiers[t].sound)).toUtf8());
         cycle += QStringLiteral(
-            "execute if entity @a run function osmc_enc:dread/census\n"
-            "execute if score #enc_hit osmc_enc_t matches 1 as @a[limit=1,sort=random] at @s run"
-            " playsound minecraft:block.glass.break master @s ~ ~ ~ 0.5 0.55\n"
             // the tier ladder; #dread_sent chases it down, so a voice speaks once per climb
             "scoreboard players set #lv osmc_enc_t 0\n"
             "execute if score #dread osmc_enc_t matches 25.. run scoreboard players set #lv osmc_enc_t 1\n"
@@ -279,8 +314,12 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
     // soothes it, so every deed below pays #dread back - the calm side of the rework of a user:
     // glass put back and a night slept through pay NOTHING now. The advancements reward the way the
     // old glass_place did - the reward revokes its own advancement, the revoke goes FIRST so that a
-    // guarded return still re-arms the deed. A light and a monster kill pay one point at most once
-    // per five minutes per player (osmc_lc/osmc_kc keep a gametime deadline); the bell pays three
+    // guarded return still re-arms the deed, and the cycle revokes every deed for every online hand
+    // once per ten seconds as a backstop (a user watched his light deed grant exactly once: the
+    // in-function revoke is the road the version may eat). A light pays one point at most once per
+    // five minutes per player (osmc_lc keeps a gametime deadline, seeded zero on the first sight -
+    // a missing score makes the >= comparison of the deadline fail, and that read wrong once killed
+    // the deed); monsters are counted OUTSIDE the advancements, by scoreboard statistics - see below
     // points and a finished trade one, and the two together come at most three times per player
     // per Minecraft day - osmc_tn counts the day's deeds and midnight (daytime 18000) zeroes it;
     // taming a cat or a dog pays three points without limits; the fog park flattens the dread to
@@ -289,8 +328,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
     {
         load += QStringLiteral(
             "scoreboard objectives add osmc_lc dummy\n"
-            "scoreboard objectives add osmc_tn dummy\n"
-            "scoreboard objectives add osmc_kc dummy\n");
+            "scoreboard objectives add osmc_tn dummy\n");
         cycle += QStringLiteral(
             "execute if score #day osmc_enc_t matches 18000..18199 run scoreboard players set @a osmc_tn 0\n"
             "execute if score #day osmc_enc_t matches 0..499 unless score #dec_d osmc_enc_t matches 1 unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 1\n"
@@ -299,6 +337,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
         add(fn + QStringLiteral("dread/light.mcfunction"), QByteArray(
             "# a light stands where it was dark - the city breathes easier by one (five minutes apart)\n"
             "advancement revoke @s only osmc_enc:calm_light\n"
+            "execute unless score @s osmc_lc matches -2147483648.. run scoreboard players set @s osmc_lc 0\n"
             "execute store result score #deed_t osmc_enc_t run time query gametime\n"
             "execute unless score #deed_t osmc_enc_t >= @s osmc_lc run return 0\n"
             "scoreboard players operation @s osmc_lc = #deed_t osmc_enc_t\n"
@@ -332,83 +371,254 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
         add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_trade.json"), QByteArray(
             "{\"criteria\":{\"trade\":{\"trigger\":\"minecraft:villager_trade\"}},"
             "\"rewards\":{\"function\":\"osmc_enc:dread/traded\"}}"));
-        add(fn + QStringLiteral("dread/kill.mcfunction"), QByteArray(
-            "# a monster fell by a player's hand - the night holds its breath by one (five minutes apart)\n"
-            "advancement revoke @s only osmc_enc:calm_kill\n"
-            "execute store result score #deed_t osmc_enc_t run time query gametime\n"
-            "execute unless score #deed_t osmc_enc_t >= @s osmc_kc run return 0\n"
-            "scoreboard players operation @s osmc_kc = #deed_t osmc_enc_t\n"
-            "scoreboard players add @s osmc_kc 6000\n"
-            "execute unless score #dread osmc_enc_t matches ..0 run scoreboard players remove #dread osmc_enc_t 1\n"
-            "playsound minecraft:entity.experience_orb.pickup master @s ~ ~ ~ 0.25 1.4\n"));
-        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_kill.json"), QByteArray(
-            "{\"criteria\":{\"kill\":{\"trigger\":\"minecraft:player_killed_entity\",\"conditions\":{\"entity\":"
-            "{\"type\":\"#osmc_enc:monster\"}}}},\"rewards\":{\"function\":\"osmc_enc:dread/kill\"}}"));
-        // the hostile list of both target formats (there is no #minecraft:monster in vanilla; the
-        // ids were checked to live in 1.21 AND 26.x, so the tag resolves in either - creaking and
-        // the other 26.x-only monsters stay out, they simply never counted before either)
-        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/tags/entity_type/monster.json"), QByteArray(
-            "{\"replace\":false,\"values\":[\"minecraft:blaze\",\"minecraft:bogged\",\"minecraft:breeze\","
-            "\"minecraft:cave_spider\",\"minecraft:creeper\",\"minecraft:drowned\",\"minecraft:elder_guardian\","
-            "\"minecraft:enderman\",\"minecraft:endermite\",\"minecraft:evoker\",\"minecraft:ghast\","
-            "\"minecraft:guardian\",\"minecraft:hoglin\",\"minecraft:husk\",\"minecraft:magma_cube\","
-            "\"minecraft:phantom\",\"minecraft:piglin\",\"minecraft:piglin_brute\",\"minecraft:pillager\","
-            "\"minecraft:ravager\",\"minecraft:shulker\",\"minecraft:silverfish\",\"minecraft:skeleton\","
-            "\"minecraft:slime\",\"minecraft:spider\",\"minecraft:stray\",\"minecraft:vex\","
-            "\"minecraft:vindicator\",\"minecraft:warden\",\"minecraft:witch\",\"minecraft:wither\","
-            "\"minecraft:wither_skeleton\",\"minecraft:zoglin\",\"minecraft:zombie\",\"minecraft:zombie_villager\"]}"));
-        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_light.json"), QByteArray(
-            "{\"criteria\":{\"light\":{\"trigger\":\"minecraft:placed_block\",\"conditions\":{\"location\":"
-            "{\"type\":\"minecraft:match_block\",\"blocks\":[\"minecraft:torch\",\"minecraft:wall_torch\","
-            "\"minecraft:soul_torch\",\"minecraft:soul_wall_torch\",\"minecraft:lantern\",\"minecraft:soul_lantern\","
-            "\"minecraft:sea_lantern\",\"minecraft:glowstone\",\"minecraft:candle\",\"minecraft:white_candle\","
-            "\"minecraft:orange_candle\",\"minecraft:magenta_candle\",\"minecraft:light_blue_candle\","
-            "\"minecraft:yellow_candle\",\"minecraft:lime_candle\",\"minecraft:pink_candle\",\"minecraft:gray_candle\","
-            "\"minecraft:light_gray_candle\",\"minecraft:cyan_candle\",\"minecraft:purple_candle\","
-            "\"minecraft:blue_candle\",\"minecraft:brown_candle\",\"minecraft:green_candle\",\"minecraft:red_candle\","
-            "\"minecraft:black_candle\"]}}}},\"rewards\":{\"function\":\"osmc_enc:dread/light\"}}"));
-        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_tame.json"), QByteArray(
-            "{\"criteria\":{\"cat\":{\"trigger\":\"minecraft:tame_animal\",\"conditions\":{\"entity\":"
-            "{\"type\":\"minecraft:cat\"}}},\"dog\":{\"trigger\":\"minecraft:tame_animal\",\"conditions\":"
-            "{\"entity\":{\"type\":\"minecraft:wolf\"}}},\"requirements\":[[\"cat\"],[\"dog\"]],"
-            "\"rewards\":{\"function\":\"osmc_enc:dread/tame\"}}"));
-        add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/calm_bell.json"), QByteArray(
-            "{\"criteria\":{\"use\":{\"trigger\":\"minecraft:default_block_use\",\"conditions\":{\"location\":"
-            "{\"type\":\"minecraft:match_block\",\"blocks\":[\"minecraft:bell\"]}}}},"
-            "\"rewards\":{\"function\":\"osmc_enc:dread/rang\"}}"));
+        // Monsters calm the city through the game's own kill statistics, one objective per hostile
+        // kind: ten counted kills lay the dread back by one (the owner's count, replacing the five
+        // minutes of the first shape). The advancement road was this deed's first form - and it
+        // never granted at all in the owner's 26.x world while the statistic objectives of the same
+        // pack counted his glass to the pane; there is no way to check a grant headless, so the
+        // deed moves to the mechanism this project has proven alive. No single criterion counts
+        // "every monster": totalKillCount would count the owner's chickens too (his word), so the
+        // pack carries the hostile list itself - the ids were checked to live in 1.21 AND 26.x, and
+        // a killed: criterion of an id one family lacks would kill the whole load function, so the
+        // list stays exactly as vetted (creaking and the other 26.x-only monsters stay out). World
+        // loads reset the objectives: the game keeps kill statistics per world, and a pack put into
+        // a lived-in world must not cash the player's past kills into tonight's calm.
+        static const char* const kMonster[] = {
+            "blaze", "bogged", "breeze", "cave_spider", "creeper", "drowned", "elder_guardian",
+            "enderman", "endermite", "evoker", "ghast", "guardian", "hoglin", "husk", "magma_cube",
+            "phantom", "piglin", "piglin_brute", "pillager", "ravager", "shulker", "silverfish",
+            "skeleton", "slime", "spider", "stray", "vex", "vindicator", "warden", "witch",
+            "wither", "wither_skeleton", "zoglin", "zombie", "zombie_villager" };
+        const int nMon = int(sizeof(kMonster) / sizeof(kMonster[0]));
+        load += QStringLiteral("scoreboard players set #k10 osmc_enc_t 10\n");
+        for (int i = 0; i < nMon; ++i)
+        {
+            const QString kind = QLatin1String(kMonster[i]);
+            const QString obj = QStringLiteral("osmc_k_%1").arg(kind);
+            load += QStringLiteral("scoreboard objectives add %1 minecraft.killed:minecraft.%2\n"
+                                   "scoreboard players reset * %1\n")
+                        .arg(obj, kind);
+            add(fn + QStringLiteral("dread/kill/%1.mcfunction").arg(kind), QStringLiteral(
+                "# this kind lost one to this hand since the last count - the tens pool decides\n"
+                "scoreboard players operation #kpool osmc_enc_t += @s %1\n"
+                "scoreboard players set @s %1 0\n"
+                "function osmc_enc:dread/kill10\n").arg(obj).toUtf8());
+            tickKill += QStringLiteral(
+                "execute as @a[scores={%1=1..}] at @s run function osmc_enc:dread/kill/%2\n")
+                            .arg(obj, kind);
+        }
+        add(fn + QStringLiteral("dread/kill10.mcfunction"), QByteArray(
+            "# ten counted monsters lay the dread back by one; the remainder of the pool waits for\n"
+            "# the next kills across the nights, and the city spends them whole tens only\n"
+            "scoreboard players operation #kt osmc_enc_t = #kpool osmc_enc_t\n"
+            "scoreboard players operation #kt osmc_enc_t /= #k10 osmc_enc_t\n"
+            "scoreboard players operation #kpool osmc_enc_t %= #k10 osmc_enc_t\n"
+            "execute if score #kt osmc_enc_t matches 1.. run scoreboard players operation #dread osmc_enc_t -= #kt osmc_enc_t\n"
+            "execute if score #dread osmc_enc_t matches ..-1 run scoreboard players set #dread osmc_enc_t 0\n"
+            "execute if score #kt osmc_enc_t matches 1.. run playsound minecraft:entity.experience_orb.pickup master @s ~ ~ ~ 0.3 1.3\n"));
+        // the blocks the lighting deed accepts, spelled into both "location" forms below
+        static const char* const kLights[] = {
+            "torch", "wall_torch", "soul_torch", "soul_wall_torch", "lantern", "soul_lantern",
+            "sea_lantern", "glowstone", "candle", "white_candle", "orange_candle", "magenta_candle",
+            "light_blue_candle", "yellow_candle", "lime_candle", "pink_candle", "gray_candle",
+            "light_gray_candle", "cyan_candle", "purple_candle", "blue_candle", "brown_candle",
+            "green_candle", "red_candle", "black_candle" };
+        QString lightIds;
+        const int nLight = int(sizeof(kLights) / sizeof(kLights[0]));
+        for (int i = 0; i < nLight; ++i)
+        {
+            if (i > 0)
+                lightIds += QLatin1Char(',');
+            lightIds += QStringLiteral("\"minecraft:%1\"").arg(QLatin1String(kLights[i]));
+        }
+        // The four calm deeds filter the victim/subject/block inside the trigger's "conditions", and
+        // the two format families spell those fields differently: since data pack format 101 (26.1)
+        // a field like "entity"/"location" is ONE condition dispatched by "type" with namespaced
+        // predicate keys, while 1.21.x (formats 48..100) reads the same field as an ARRAY of
+        // conditions dispatched by "condition" with plain keys; an entity tag inside the predicate
+        // resolves in both. A wrong spelling fails the whole advancement registry and the world
+        // then opens in safe mode, so every export writes the form of its own format family - the
+        // shapes below are the ones that very version's vanilla data ships itself (voluntary_exile
+        // in 26.3, the same pair plus read_power_of_chiseled_bookshelf for the "location" field in
+        // 1.21.0 and 1.21.11). The kill deed is NOT here any more: it lives in the statistics above.
+        const QString adv = QStringLiteral("datapacks/osmc_enc/data/osmc_enc/advancement/");
+        if (legacy121)
+        {
+            add(adv + QStringLiteral("calm_tame.json"), QByteArray(
+                "{\"criteria\":{\"cat\":{\"trigger\":\"minecraft:tame_animal\",\"conditions\":{\"entity\":"
+                "[{\"condition\":\"minecraft:entity_properties\",\"entity\":\"this\",\"predicate\":"
+                "{\"type\":\"minecraft:cat\"}}]}},\"dog\":{\"trigger\":\"minecraft:tame_animal\","
+                "\"conditions\":{\"entity\":[{\"condition\":\"minecraft:entity_properties\",\"entity\":"
+                "\"this\",\"predicate\":{\"type\":\"minecraft:wolf\"}}]}}},\"requirements\":[[\"cat\"],"
+                "[\"dog\"]],\"rewards\":{\"function\":\"osmc_enc:dread/tame\"}}"));
+            add(adv + QStringLiteral("calm_light.json"), QByteArray(
+                "{\"criteria\":{\"light\":{\"trigger\":\"minecraft:placed_block\",\"conditions\":"
+                "{\"location\":[{\"condition\":\"minecraft:location_check\",\"predicate\":{\"block\":"
+                "{\"blocks\":[") + lightIds.toUtf8()
+                + "]}}}]}}},\"rewards\":{\"function\":\"osmc_enc:dread/light\"}}");
+            add(adv + QStringLiteral("calm_bell.json"), QByteArray(
+                "{\"criteria\":{\"use\":{\"trigger\":\"minecraft:default_block_use\",\"conditions\":"
+                "{\"location\":[{\"condition\":\"minecraft:location_check\",\"predicate\":{\"block\":"
+                "{\"blocks\":[\"minecraft:bell\"]}}}]}}},\"rewards\":{\"function\":"
+                "\"osmc_enc:dread/rang\"}}"));
+        }
+        else
+        {
+            add(adv + QStringLiteral("calm_light.json"), QByteArray(
+                "{\"criteria\":{\"light\":{\"trigger\":\"minecraft:placed_block\",\"conditions\":"
+                "{\"location\":{\"type\":\"minecraft:match_block\",\"blocks\":[") + lightIds.toUtf8()
+                + "]}}}},\"rewards\":{\"function\":\"osmc_enc:dread/light\"}}");
+            add(adv + QStringLiteral("calm_tame.json"), QByteArray(
+                "{\"criteria\":{\"cat\":{\"trigger\":\"minecraft:tame_animal\",\"conditions\":{\"entity\":"
+                "{\"type\":\"minecraft:entity_properties\",\"entity\":\"this\",\"predicate\":"
+                "{\"minecraft:entity_type\":\"minecraft:cat\"}}}},\"dog\":{\"trigger\":"
+                "\"minecraft:tame_animal\",\"conditions\":{\"entity\":{\"type\":"
+                "\"minecraft:entity_properties\",\"entity\":\"this\",\"predicate\":{\"minecraft:entity_"
+                "type\":\"minecraft:wolf\"}}}}},\"requirements\":[[\"cat\"],[\"dog\"]],\"rewards\":"
+                "{\"function\":\"osmc_enc:dread/tame\"}}"));
+            add(adv + QStringLiteral("calm_bell.json"), QByteArray(
+                "{\"criteria\":{\"use\":{\"trigger\":\"minecraft:default_block_use\",\"conditions\":"
+                "{\"location\":{\"type\":\"minecraft:match_block\",\"blocks\":[\"minecraft:bell\"]}}}},"
+                "\"rewards\":{\"function\":\"osmc_enc:dread/rang\"}}"));
+        }
+        // The backstop of the re-arm: a deed's function revokes its own advancement, and the cycle
+        // (every ten seconds) revokes it once more for every online hand - a deed whose in-function
+        // revoke was eaten by some version re-arms here anyway, and the cooldowns kept inside the
+        // functions mean a double re-arm cannot pay twice
+        cycle += QStringLiteral(
+            "advancement revoke @a only osmc_enc:calm_light\n"
+            "advancement revoke @a only osmc_enc:calm_tame\n"
+            "advancement revoke @a only osmc_enc:calm_bell\n"
+            "advancement revoke @a only osmc_enc:calm_trade\n");
         if (bookCell.size() >= 3)
         {   // the rules of the night lie on a lectern the exporter baked near the spawn; the city
             // repairs its own pedestal on every load (a taken book comes back, a broken lectern
-            // stands again), and the glowstone block under it keeps the page readable. The guard is
-            // the has_book state, not `unless data`: an empty lectern still carries its Book tag
+            // stands again), and the glowstone block under it keeps the page readable. The book
+            // is re-paged on every load, guardlessly: the chunk-baked book is English-only, so a
+            // Russian world must overwrite it, and a re-page costs nothing the player can lose
             load += QStringLiteral("schedule function osmc_enc:dread/book 5s replace\n");
             add(fn + QStringLiteral("dread/book.mcfunction"), QStringLiteral(
                 "# the rules book on the lectern by the spawn: the written_book component form both\n"
                 "# target formats read, set with data and restocked whenever the page goes missing\n"
                 "execute unless block %1 %2 %3 minecraft:glowstone run setblock %1 %2 %3 minecraft:glowstone\n"
                 "execute unless block %1 %4 %3 minecraft:lectern run setblock %1 %4 %3 minecraft:lectern\n"
-                "execute if block %1 %4 %3 minecraft:lectern[has_book=false] run data modify block %1 %4 %3 Book set value "
+                "execute if block %1 %4 %3 minecraft:lectern run data modify block %1 %4 %3 Book set value "
                 "{id:\"minecraft:written_book\",count:1,components:{\"minecraft:written_book_content\":{"
                 "title:{raw:\"Rules of the Night\"},author:\"the city\",pages:["
                 "{raw:\"The city feels broken glass. A window you break raises its dread; a pane set back into the frame no longer buys you anything.\"},"
                 "{raw:\"At 25, 50, 75 and 95 the night speaks, and the higher the dread, the more often its events walk. At 95 every house opens its hidden floor.\"},"
-                "{raw:\"It calms down over kindness: a light in the dark and a monster laid to rest pay one point, once in five minutes; a bell answers by three, a finished trade by one - together three deeds a day at most, and midnight renews them; a tamed cat or dog pays three, again and again. The fog park flattens the dread to twenty-five. Dawn takes one point back on its own.\"},"
+                "{raw:\"It calms down over kindness: a light in the dark pays one point, once in five minutes; every ten monsters laid to rest pay one more; a bell answers by three, a finished trade by one - together three deeds a day at most, and midnight renews them; a tamed cat or dog pays three, again and again. The fog park flattens the dread to twenty-five. Dawn takes one point back on its own.\"},"
                 "{raw:\"Every event can be switched off while the world runs: function osmc_enc:off/<name> turns one away, osmc_enc:on/<name> calls it back. The dread itself answers the console: function osmc_enc:dread/s25 - the same for s0, s50, s75, s95, s100.\"}"
                 "]}}}\n")
                 .arg(bookCell[0]).arg(bookCell[1]).arg(bookCell[2]).arg(bookCell[1] + 1).toUtf8());
         }
     }
 
+    // ---- the activation frame of the place-bound events (the owner's rework): the dice of an event
+    // fall on evenly spaced slots of its hours — the dread tier buys the rolls (#rolls = tier + 1) and
+    // the chance (#ch = ten per tier) — and every winning roll wakes exactly ONE place: the nearest
+    // free marker around a player answers first, and only when nobody near woke does a second, wider
+    // search reach the whole city. The night waits while nobody is online (the slots are counted in
+    // world time but consumed only in front of a witness), and a woken place carries the busy score
+    // of osmc_enc_b until dawn, so two legends never share a twenty-block corner.
+    {
+        load += QStringLiteral(
+            "scoreboard objectives add osmc_enc_b dummy\n"           // a place taken by tonight's event
+            "scoreboard objectives add osmc_enc_j dummy\n"           // the jack's own re-turn rest
+            "scoreboard players set #ten osmc_enc_t 10\n");
+        cycle += QStringLiteral(
+            "#ch: the chance of one roll; #rolls: how many rolls the tier spreads over the hours\n"
+            "scoreboard players operation #ch osmc_enc_t = #lv osmc_enc_t\n"
+            "scoreboard players add #ch osmc_enc_t 1\n"
+            "scoreboard players operation #ch osmc_enc_t *= #ten osmc_enc_t\n"
+            "scoreboard players operation #rolls osmc_enc_t = #lv osmc_enc_t\n"
+            "scoreboard players add #rolls osmc_enc_t 1\n"
+            // the morning hands the city back: every place is free for the next night's dice
+            "execute if score #day osmc_enc_t matches 0..499 unless score #busy_l osmc_enc_t matches 1 run scoreboard players reset * osmc_enc_b\n"
+            "execute if score #day osmc_enc_t matches 0..499 run scoreboard players set #busy_l osmc_enc_t 1\n"
+            "execute unless score #day osmc_enc_t matches 0..499 run scoreboard players set #busy_l osmc_enc_t 0\n");
+    }
+
     const QString noPlace =
         QStringLiteral("# no places of this kind were found in the exported world\nreturn 0\n");
+
+    // The body of one place-bound event plus the three functions it searches through (v is never
+    // empty at the call sites — each one answers noPlace itself when its kind found nothing)
+    auto nearRoll = [&](const QString& id, int lo, int hi, const QVector<Prop>& v, const QString& p)
+    {   // p: the ev/ path prefix of the event's places ("blink/"); the per-j go files bake their
+        // own coordinates and stay exactly as the event blocks below write them
+        const QString tag = QLatin1String(kKindTag[v.first().kind]);
+        const QString fnp = fp + p;
+        const int w = hi - lo + 1;                      // the width of the event's hours in ticks
+        // the roll counter and the day stamp survive /reload (the city does not forget what it has
+        // already rolled today); #<id>_w/#<id>_w2 are the window's widths the slot arithmetic divides by
+        load += QStringLiteral(
+            "execute unless score #%1_d osmc_enc_t matches -2147483648.. run scoreboard players set #%1_d osmc_enc_t -1\n"
+            "scoreboard players set #%1_w osmc_enc_t %2\n"
+            "scoreboard players set #%1_w2 osmc_enc_t %3\n")
+            .arg(id).arg(w).arg(2 * w);
+        add(ev + p + QStringLiteral("scan.mcfunction"), QStringLiteral(
+            "# the ten places of this kind nearest to whoever stands in the city\n"
+            "execute as @e[type=minecraft:marker,tag=%1,distance=..300,limit=10,sort=nearest] "
+            "at @s run function %2near\n")
+            .arg(tag).arg(fnp).toUtf8());
+        add(ev + p + QStringLiteral("far.mcfunction"), QStringLiteral(
+            "# nobody near woke — the search reaches the whole loaded city, so the legend still\n"
+            "# happens somewhere tonight even when the player sleeps far from it\n"
+            "execute as @e[type=minecraft:marker,tag=%1,distance=..1000,limit=6,sort=nearest] "
+            "at @s run function %2near\n")
+            .arg(tag).arg(fnp).toUtf8());
+        QString near = QStringLiteral(
+            "# one roll wakes ONE place: the nearest eligible marker answers, the rest stay asleep\n"
+            "execute if score @s osmc_enc_b matches 1.. run return 0\n"
+            "execute if entity @e[type=minecraft:marker,tag=osmc.enc,scores={osmc_enc_b=1..},distance=..20] run return 0\n"
+            "execute if score #go osmc_enc_t matches 1.. run return 0\n"
+            "scoreboard players set #go osmc_enc_t 1\n"
+            "scoreboard players add @s osmc_enc_b 1\n");
+        for (int j = 0; j < v.size(); ++j)
+            near += QStringLiteral("execute if entity @s[tag=osmc.p%1] run function %2\n")
+                        .arg(j).arg(fnp + QStringLiteral("%1/go").arg(j));
+        add(ev + p + QStringLiteral("near.mcfunction"), near.toUtf8());
+        // the slot of the roll: #id_k counts the slots already spent today, the (2*pos+... ) shape
+        // puts the N slots at the CENTERS of N equal parts of the window (the first roll lands mid
+        // into the hours, not at their opening); the arithmetic truncates toward zero, so the +w bias
+        // keeps #pos positive and the -1 restores the first slot before the window's quarter mark
+        return QStringLiteral(
+                "# the dice of the legend: #rolls slots spread over its hours, the night waits\n"
+                "# for a witness, and every winning roll wakes exactly one place near a player\n"
+                "execute unless entity @a run return 0\n"
+                "execute unless score #day osmc_enc_t matches %1 run return 0\n"
+                // a Minecraft day (its #dayn) hands the roll counter back to the legend
+                "execute if score #%2_d osmc_enc_t < #dayn osmc_enc_t run scoreboard players set #%2_k osmc_enc_t -1\n"
+                "execute if score #%2_d osmc_enc_t < #dayn osmc_enc_t run scoreboard players operation #%2_d osmc_enc_t = #dayn osmc_enc_t\n"
+                // #pos = round-down( 2*#rolls*(#day-lo) + w ) / 2w - 1 : the slot of this tick
+                "scoreboard players operation #pos osmc_enc_t = #day osmc_enc_t\n"
+                "scoreboard players remove #pos osmc_enc_t %7\n"
+                "scoreboard players operation #pos osmc_enc_t *= #rolls osmc_enc_t\n"
+                "scoreboard players operation #pos osmc_enc_t += #pos osmc_enc_t\n"
+                "scoreboard players operation #pos osmc_enc_t += #%2_w osmc_enc_t\n"
+                "scoreboard players operation #pos osmc_enc_t /= #%2_w2 osmc_enc_t\n"
+                "scoreboard players remove #pos osmc_enc_t 1\n"
+                "execute unless score #pos osmc_enc_t > #%2_k osmc_enc_t run return 0\n"
+                "scoreboard players operation #%2_k osmc_enc_t = #pos osmc_enc_t\n"
+                // the roll; the places answer through their markers
+                "execute store result score #enc_r osmc_enc_t run random value 1..100\n"
+                "execute unless score #enc_r osmc_enc_t <= #ch osmc_enc_t run return 0\n"
+                "scoreboard players set #go osmc_enc_t 0\n"
+                "execute as @a unless score #go osmc_enc_t matches 1.. at @s run function %3scan\n"
+                "execute as @a unless score #go osmc_enc_t matches 1.. at @s run function %3far\n")
+            .arg(QStringLiteral("%1..%2").arg(lo).arg(hi)).arg(id).arg(fnp).arg(lo);
+    };
 
     for (int i = 0; i < kEncCount; ++i)
     {
         const QString id = QLatin1String(kEncIds[i]);
         load += QStringLiteral("scoreboard players set #%1 osmc_enc %2\n").arg(id).arg(off.contains(id) ? 0 : 1);
         cycle += QStringLiteral("execute if score #%1 osmc_enc matches 1 run function osmc_enc:event/%1\n").arg(id);
-        // the dread climbs: every tier adds one more roll for every enabled event (the event
-        // re-rolls inside, so an extra call is one more place of the same legend tonight)
+        // the dread climbs: every tier adds one more call for every enabled event (the player-bound
+        // events re-roll their own dice inside, so an extra call is one more meeting tonight; the
+        // place-bound ones ignore the extra calls of the same cycle through their slot guard — their
+        // growth is the #ch chance and the #rolls slot count spread over the hours)
         cycle += QStringLiteral(
             "execute if score #lv osmc_enc_t matches 1.. if score #%1 osmc_enc matches 1 run function osmc_enc:event/%1\n"
             "execute if score #lv osmc_enc_t matches 2.. if score #%1 osmc_enc matches 1 run function osmc_enc:event/%1\n"
@@ -431,7 +641,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (lamps.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 8) + rollLines(8, lamps.size(), fp + QStringLiteral("blink/"));
+                body = nearRoll(id, 13000, 23999, lamps, QStringLiteral("blink/"));
                 for (int j = 0; j < lamps.size(); ++j)
                 {
                     const Prop& p = lamps[j];
@@ -481,7 +691,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (lamps.isEmpty()) body = noPlace;
             else
             {
-                body = gate(0, 23999, 8) + rollLines(8, lamps.size(), fp + QStringLiteral("rain/"));
+                body = nearRoll(id, 0, 23999, lamps, QStringLiteral("rain/"));
                 for (int j = 0; j < lamps.size(); ++j)
                 {
                     const Prop& p = lamps[j];
@@ -509,7 +719,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (chalks.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 40) + rollLines(40, chalks.size(), fp + QStringLiteral("chalk/"));
+                body = nearRoll(id, 13000, 23999, chalks, QStringLiteral("chalk/"));
                 static const char* const kChalkColor[4] = { "white", "yellow", "red", "light_blue" };
                 for (int j = 0; j < chalks.size(); ++j)
                 {
@@ -556,7 +766,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (plays.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 25) + rollLines(25, plays.size(), fp + QStringLiteral("swing/"));
+                body = nearRoll(id, 13000, 23999, plays, QStringLiteral("swing/"));
                 static const double kArc[8] = { 1.0, 0.55, 0.0, -0.55, -1.0, -0.55, 0.0, 0.55 };
                 static const int kAxis[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };   // N/E/S/W
                 add(ev + QStringLiteral("swing/stop.mcfunction"), QByteArray(
@@ -612,44 +822,50 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             }
         }
         else if (id == QLatin1String("pumpkin_faces"))
-        {   // a cemetery jack turns his carved face to whoever stands before him at a distance — but
-            // never while too close (docs/city-encounters.md). This used to be a nightly lottery: one
-            // roll of the cycle chose ONE jack of the whole city, so the one walking the alleys saw a
-            // turn by luck only. Now it is the car-TNT family of tricks (baked coordinates + a
-            // standing watch): while the event is on and the night holds, the body looks over the
-            // witness strip of every jack's four faces every cycle. A witness found in a far strip
-            // while the face looks elsewhere turns it with the carving heard; a witness at arm's
-            // distance keeps the face still — it stays looking where the last far witness stood
+        {   // a cemetery jack turns his carved face to the nearest player (the owner's rework): the
+            // far-witness lottery hid the event on big maps, so the face watch left the cycle and
+            // every pumpkin near a player now rolls for itself every five seconds - the dread tier
+            // buys the faces more turns. No places are dispatched: the tick walks the kjack markers,
+            // and a face that has just turned rests a minute of its own score (osmc_enc_j)
             if (jacks.isEmpty()) body = noPlace;
             else
             {
-                static const char* const kFace[4] = { "north", "east", "south", "west" };
                 body = QStringLiteral(
-                    "# the face watch runs every night cycle with no roll: the alley walk IS the event\n"
-                    "execute unless score #day osmc_enc_t matches 18000..23999 run return 0\n");
-                for (int j = 0; j < jacks.size(); ++j)
-                {
-                    const Prop& p = jacks[j];
-                    for (int f = 0; f < 4; ++f)
-                    {   // the witness strip 16..48 blocks in front of that face, 32 wide; the four
-                        // strips do not intersect, so at most one of them claims the witness
-                        const int wx = (f == 0 || f == 2) ? p.x - 16 : (f == 1 ? p.x + 16 : p.x - 48);
-                        const int wz = (f == 1 || f == 3) ? p.z - 16 : (f == 0 ? p.z - 48 : p.z + 16);
-                        body += QStringLiteral(
-                            "execute if loaded %1 %2 %3 unless block %1 %2 %3 minecraft:jack_o_lantern[facing=%4]"
-                            " if entity @a[x=%5,y=%6,z=%7,dx=32,dy=32,dz=32]"
-                            " positioned %1 %2 %3 run function %8\n")
-                            .arg(p.x).arg(p.y).arg(p.z).arg(QLatin1String(kFace[f]))
-                            .arg(wx).arg(p.y - 8).arg(wz)
-                            .arg(fp + QStringLiteral("jack/turn/%1").arg(f));
-                    }
-                }
-                for (int f = 0; f < 4; ++f)
-                    add(ev + QStringLiteral("jack/turn/%1.mcfunction").arg(f), QStringLiteral(
-                        "# %1: the lit face turns to the far witness; the carving is heard, the face is kept\n"
+                    "# the faces watch on their own: every pumpkin rolls in ev/jack/tick (the tick)\n");
+                tickJack += QStringLiteral(
+                    "scoreboard players add #jack_t osmc_enc_t 1\n"
+                    "execute if score #jack_t osmc_enc_t matches 100.. run function osmc_enc:ev/jack/tick\n"
+                    "execute if score #jack_t osmc_enc_t matches 100.. run scoreboard players set #jack_t osmc_enc_t 0\n");
+                add(ev + QStringLiteral("jack/tick.mcfunction"), QByteArray(
+                    "# every five seconds each lit face within a hundred blocks of a player rolls\n"
+                    "# to turn; the dread tier buys turns (2+lv of 200 per pumpkin per five seconds)\n"
+                    "execute unless score #pumpkin_faces osmc_enc matches 1 run return 0\n"
+                    "execute unless score #day osmc_enc_t matches 18000..23999 run return 0\n"
+                    "execute store result score #jack_now osmc_enc_t run time query gametime\n"
+                    "scoreboard players operation #jack_ch osmc_enc_t = #lv osmc_enc_t\n"
+                    "scoreboard players add #jack_ch osmc_enc_t 2\n"
+                    "execute as @a at @s as @e[type=minecraft:marker,tag=osmc.kjack,distance=..100,limit=64] "
+                    "at @s run function osmc_enc:ev/jack/turn\n"));
+                add(ev + QStringLiteral("jack/turn.mcfunction"), QByteArray(
+                    "# this pumpkin's own roll; the first box holding a player owns the new face\n"
+                    "execute unless block ~ ~ ~ minecraft:jack_o_lantern run return 0\n"
+                    "execute if score @s osmc_enc_j matches 1.. unless score #jack_now osmc_enc_t >= @s osmc_enc_j run return 0\n"
+                    "execute store result score #enc_r osmc_enc_t run random value 1..200\n"
+                    "execute if score #enc_r osmc_enc_t > #jack_ch osmc_enc_t run return 0\n"
+                    "execute if entity @a[x=~-16,y=~-16,z=~-16,dx=31,dy=31,dz=15,limit=1] run return run function osmc_enc:ev/jack/turned/north\n"
+                    "execute if entity @a[x=~-16,y=~-16,z=~-16,dx=15,dy=31,dz=31,limit=1] run return run function osmc_enc:ev/jack/turned/west\n"
+                    "execute if entity @a[x=~-16,y=~-16,z=~,dx=31,dy=31,dz=15,limit=1] run return run function osmc_enc:ev/jack/turned/south\n"
+                    "execute if entity @a[x=~,y=~-16,z=~-16,dx=15,dy=31,dz=31,limit=1] run return run function osmc_enc:ev/jack/turned/east\n"
+                    "return 0\n"));
+                static const char* const kFace[4] = { "north", "west", "south", "east" };
+                for (const char* const f : kFace)
+                    add(ev + QStringLiteral("jack/turned/%1.mcfunction").arg(QLatin1String(f)), QStringLiteral(
+                        "# %1: the lit face turns to the nearest witness; the carving is heard\n"
                         "setblock ~ ~ ~ minecraft:jack_o_lantern[facing=%1]\n"
-                        "playsound minecraft:block.pumpkin.carve master @a[distance=..32] ~ ~ ~ 0.5 0.6\n")
-                        .arg(QLatin1String(kFace[f])).toUtf8());
+                        "playsound minecraft:block.pumpkin.carve master @a[distance=..32] ~ ~ ~ 0.5 0.6\n"
+                        "scoreboard players operation @s osmc_enc_j = #jack_now osmc_enc_t\n"
+                        "scoreboard players add @s osmc_enc_j 1200\n")
+                        .arg(QLatin1String(f)).toUtf8());
             }
         }
         else if (id == QLatin1String("cat_council"))
@@ -658,7 +874,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (stops.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 35) + rollLines(35, stops.size(), fp + QStringLiteral("cat/"));
+                body = nearRoll(id, 13000, 23999, stops, QStringLiteral("cat/"));
                 static const int kSeat[5][2] = { {0, 0}, {1, 0}, {-1, 0}, {0, 1}, {1, 1} };
                 QString watch = QStringLiteral(
                     "# the council breaks up when someone comes too close, and at dawn the cats go home\n");
@@ -704,7 +920,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (crosses.isEmpty()) body = noPlace;
             else
             {
-                body = gate(12000, 23999, 10) + rollLines(10, crosses.size(), fp + QStringLiteral("flash/"));
+                body = nearRoll(id, 12000, 23999, crosses, QStringLiteral("flash/"));
                 for (int j = 0; j < crosses.size(); ++j)
                 {
                     const Prop& p = crosses[j];
@@ -752,7 +968,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (walls.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 8) + rollLines(8, walls.size(), fp + QStringLiteral("win/"));
+                body = nearRoll(id, 13000, 23999, walls, QStringLiteral("win/"));
                 for (int j = 0; j < walls.size(); ++j)
                 {
                     const Prop& p = walls[j];
@@ -811,7 +1027,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (schools.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 10) + rollLines(10, schools.size(), fp + QStringLiteral("mat/"));
+                body = nearRoll(id, 13000, 23999, schools, QStringLiteral("mat/"));
                 static const char* const kFace4[4] = { "north", "east", "south", "west" };
                 for (int j = 0; j < schools.size(); ++j)
                 {
@@ -909,7 +1125,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (scares.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 18) + rollLines(18, scares.size(), fp + QStringLiteral("sc/"));
+                body = nearRoll(id, 13000, 23999, scares, QStringLiteral("sc/"));
                 static const double kYaw[4] = { 180, -90, 0, 90 };    // the kDirNames order N/E/S/W
                 QString watch = QStringLiteral(
                     "# the flip itself runs from the cycle while any scarecrow stands\n");
@@ -963,7 +1179,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (graves.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 10) + rollLines(10, graves.size(), fp + QStringLiteral("grave/"));
+                body = nearRoll(id, 13000, 23999, graves, QStringLiteral("grave/"));
                 for (int j = 0; j < graves.size(); ++j)
                 {
                     const Prop& p = graves[j];
@@ -1040,7 +1256,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (cars.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 10) + rollLines(10, cars.size(), fp + QStringLiteral("taxi/"));
+                body = nearRoll(id, 13000, 23999, cars, QStringLiteral("taxi/"));
                 for (int j = 0; j < cars.size(); ++j)
                 {
                     const Prop& p = cars[j];
@@ -1110,7 +1326,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (lurks.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 10) + rollLines(10, lurks.size(), fp + QStringLiteral("lurk/"));
+                body = nearRoll(id, 13000, 23999, lurks, QStringLiteral("lurk/"));
                 static const double kFaceC[4] = { 0, 90, 180, -90 };   // the stand is invisible; the yaw only
                 // keeps the four ring spots (the first four accepted rays of N,NE,E,SE,S,SW,W,NW) distinct
                 for (int j = 0; j < lurks.size(); ++j)
@@ -1179,7 +1395,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (stops.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 12) + rollLines(12, stops.size(), fp + QStringLiteral("bus/"));
+                body = nearRoll(id, 13000, 23999, stops, QStringLiteral("bus/"));
                 static const int kAx4[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };   // N E S W
                 for (int j = 0; j < stops.size(); ++j)
                 {
@@ -1264,7 +1480,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (founts.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 10) + rollLines(10, founts.size(), fp + QStringLiteral("fount/"));
+                body = nearRoll(id, 13000, 23999, founts, QStringLiteral("fount/"));
                 for (int j = 0; j < founts.size(); ++j)
                 {
                     const Prop& p = founts[j];
@@ -1321,7 +1537,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (metros.isEmpty()) body = noPlace;
             else
             {
-                body = gate(23000, 23999, 10) + rollLines(10, metros.size(), fp + QStringLiteral("lt/"));
+                body = nearRoll(id, 23000, 23999, metros, QStringLiteral("lt/"));
                 static const char* const kChased[5] = { "zombie", "skeleton", "spider", "cave_spider", "creeper" };
                 for (int j = 0; j < metros.size(); ++j)
                 {
@@ -1623,14 +1839,15 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
         else if (id == QLatin1String("floor_half"))
         {   // the floor between the floors: after midnight the stairwell of a tall house grows a
             // door that is on no plan of the house; whoever opens it from the flight is standing on
-            // the same landing mirrored - windows into the void, doors onto nothing - and any door
-            // opened there brings the guest back to their own flight. The floor receives each guest
+            // the same landing mirrored - windows into the void, doors onto nothing - and only ONE
+            // of the four doors of that floor lets the guest back, one door per guest, chosen by
+            // the floor at the trade (the owner's rule). The floor receives each guest
             // fifty-fifty: a chest left in the hall, or company that did not come from the city
             // above (docs/city-encounters.md)
             if (halfs.isEmpty()) body = noPlace;
             else
             {
-                body = gate(13000, 23999, 8) + rollLines(8, halfs.size(), fp + QStringLiteral("hf/"));
+                body = nearRoll(id, 13000, 23999, halfs, QStringLiteral("hf/"));
                 // the mirrored floor stands in its own void dimension (the dusk type is shared
                 // with the fog park and written below the loop)
                 add(QStringLiteral("datapacks/osmc_enc/data/osmc_enc/dimension/half.json"), QByteArray(
@@ -1740,6 +1957,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
                     "kill @e[type=!minecraft:player]\n"
                     "setblock 0 -40 -2 minecraft:air\n"));
                 load += QStringLiteral("scoreboard objectives add osmc_enc_p dummy\n"
+                                       "scoreboard objectives add osmc_enc_g dummy\n"
                                        "schedule function osmc_enc:ev/hf/build 6s replace\n");
                 static const char* const kHFDoor[4][3] = {
                     { "-6", "-40", "-1" }, { "-6", "-40", "1" }, { "6", "-40", "-2" }, { "6", "-40", "2" } };
@@ -1773,6 +1991,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
                         "# the stairwell trades its guest for the floor of no plan\n"
                         "tag @a[distance=..2.5] add osmc_half\n"
                         "scoreboard players set @a[distance=..2.5] osmc_enc_p %1\n"
+                        "execute as @a[distance=..2.5] run function osmc_enc:ev/hf/gate\n"
                         "execute in osmc_enc:half run tp @a[tag=osmc_half] 0.5 -40 0.5\n"
                         "execute in osmc_enc:half positioned 0.5 -40 0.5 run particle minecraft:portal"
                         " 0.5 -39 0.5 1.5 1 1.5 0.05 80\n"
@@ -1784,7 +2003,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
                         "function osmc_enc:ev/hf/roll\n")
                         .arg(j).toUtf8());
                     add(pth + QStringLiteral("back.mcfunction"), QStringLiteral(
-                        "# through any door of that floor - and the guest is back on their own flight\n"
+                        "# through the one door the floor promised this guest - back on their flight\n"
                         "execute in minecraft:overworld run tp @a[scores={osmc_enc_p=%1},tag=osmc_half] %2 %3 %4\n"
                         "execute if entity @a[x=%2,y=%3,z=%4,distance=..4,scores={osmc_enc_p=%1}]"
                         " in minecraft:overworld run playsound minecraft:block.grass.break"
@@ -1793,8 +2012,9 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
                         " in minecraft:overworld run title @a[x=%2,y=%3,z=%4,distance=..8] actionbar"
                         " {\"text\":\"the stairwell took its guest back; the wall is a wall again\","
                         "\"color\":\"gray\",\"italic\":true}\n"
-                        "scoreboard players reset @a[scores={osmc_enc_p=%1},tag=osmc_half] osmc_enc_p\n"
-                        "tag @a[scores={osmc_enc_p=%1},tag=osmc_half] remove osmc_half\n")
+                        "tag @a[scores={osmc_enc_p=%1},tag=osmc_half] remove osmc_half\n"
+                        "scoreboard players reset @a[scores={osmc_enc_p=%1}] osmc_enc_g\n"
+                        "scoreboard players reset @a[scores={osmc_enc_p=%1}] osmc_enc_p\n")
                         .arg(j).arg(double(stx + 0.5), 0, 'f', 1).arg(p.y)
                         .arg(double(stz + 0.5), 0, 'f', 1).toUtf8());
                     add(pth + QStringLiteral("hush.mcfunction"), QStringLiteral(
@@ -1828,23 +2048,31 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
                 cycle += QStringLiteral(
                     "execute if score #lv osmc_enc_t matches 4 if score #day osmc_enc_t matches 13000..23999"
                     " if score #floor_half osmc_enc matches 1 run function osmc_enc:ev/hf/storm\n");
-                // the way out of the mirrored floor is any of its doors (they open onto nothing,
-                // and behind them the guest's own stairwell is already waiting)
+                // the way out of the mirrored floor is the ONE door the floor promised each guest
+                // on the trade (osmc_enc_g); the other three open onto nobody's ground and keep
+                // the guest a little longer in the hall of windows into the void
+                add(ev + QStringLiteral("hf/gate.mcfunction"), QByteArray(
+                    "# the floor promises this guest one of its four doors; only it lets back\n"
+                    "execute store result score @s osmc_enc_g run random value 1..4\n"));
                 QString exits = QStringLiteral(
-                    "# the door the guest picked on that floor is the way back\n");
-                for (int j = 0; j < halfs.size(); ++j)
-                    exits += QStringLiteral("execute if entity @a[scores={osmc_enc_p=%1},tag=osmc_half]"
-                                            " run function %2\n")
-                                 .arg(j).arg(fp + QStringLiteral("hf/%1/back").arg(j));
+                    "# the promised door steps the guest standing at it back; the other three keep\n"
+                    "execute as @a[distance=..2.5,scores={osmc_enc_p=0..}] run function osmc_enc:ev/hf/guestback\n");
                 add(ev + QStringLiteral("hf/exit.mcfunction"), exits.toUtf8());
+                QString guestBack = QStringLiteral(
+                    "# whose visit is this: back to the flight that traded for it\n");
+                for (int j = 0; j < halfs.size(); ++j)
+                    guestBack += QStringLiteral("execute if entity @s[scores={osmc_enc_p=%1}]"
+                                               " run function %2\n")
+                                     .arg(j).arg(fp + QStringLiteral("hf/%1/back").arg(j));
+                add(ev + QStringLiteral("hf/guestback.mcfunction"), guestBack.toUtf8());
                 for (int d = 0; d < 4; ++d)
                     cycle += QStringLiteral(
                         "execute in osmc_enc:half positioned %1 %2 %3"
                         " if block %1 %2 %3 minecraft:oak_door[half=lower,open=true]"
-                        " if entity @a[distance=..2.5,scores={osmc_enc_p=0..}]"
+                        " if entity @a[distance=..2.5,scores={osmc_enc_g=%4}]"
                         " run function osmc_enc:ev/hf/exit\n")
                         .arg(QLatin1String(kHFDoor[d][0])).arg(QLatin1String(kHFDoor[d][1]))
-                        .arg(QLatin1String(kHFDoor[d][2]));
+                        .arg(QLatin1String(kHFDoor[d][2])).arg(d + 1);
             }
         }
         else if (id == QLatin1String("echo"))
@@ -2054,7 +2282,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (graves.isEmpty()) body = noPlace;
             else
             {
-                body = gate(18000, 23999, 6) + rollLines(6, graves.size(), fp + QStringLiteral("proc/"));
+                body = nearRoll(id, 18000, 23999, graves, QStringLiteral("proc/"));
                 for (int j = 0; j < graves.size(); ++j)
                 {   // the route: this grave, then two waypoints toward the next one only when that
                     // next grave is a neighbour of the same graveyard, not another cemetery
@@ -2116,7 +2344,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             else
             {
                 load += QStringLiteral("scoreboard players set #k8 osmc_enc_t 8\n");
-                body = gate(19000, 23999, 10) + rollLines(10, lamps.size(), fp + QStringLiteral("moth/"));
+                body = nearRoll(id, 19000, 23999, lamps, QStringLiteral("moth/"));
                 static const int kOrbit[8][2] = { {2, 0}, {1, 1}, {0, 2}, {-1, 1}, {-2, 0}, {-1, -1}, {0, -2}, {1, -1} };
                 for (int j = 0; j < lamps.size(); ++j)
                 {
@@ -2165,7 +2393,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (lamps.isEmpty()) body = noPlace;
             else
             {
-                body = gate(0, 23999, 6) + rollLines(6, lamps.size(), fp + QStringLiteral("hush/"));
+                body = nearRoll(id, 0, 23999, lamps, QStringLiteral("hush/"));
                 for (int j = 0; j < lamps.size(); ++j)
                 {
                     const Prop& p = lamps[j];
@@ -2202,7 +2430,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (walls.isEmpty()) body = noPlace;
             else
             {
-                body = gate(22000, 23999, 6) + rollLines(6, walls.size(), fp + QStringLiteral("ww/"));
+                body = nearRoll(id, 22000, 23999, walls, QStringLiteral("ww/"));
                 for (int j = 0; j < walls.size(); ++j)
                 {
                     const Prop& p = walls[j];
@@ -2282,7 +2510,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (graves.isEmpty()) body = noPlace;
             else
             {
-                body = gate(18000, 23999, 8) + rollLines(8, graves.size(), fp + QStringLiteral("gc/"));
+                body = nearRoll(id, 18000, 23999, graves, QStringLiteral("gc/"));
                 for (int j = 0; j < graves.size(); ++j)
                 {
                     const Prop& p = graves[j];
@@ -2336,7 +2564,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (stops.isEmpty()) body = noPlace;
             else
             {
-                body = gate(18000, 23999, 10) + rollLines(10, stops.size(), fp + QStringLiteral("hd/"));
+                body = nearRoll(id, 18000, 23999, stops, QStringLiteral("hd/"));
                 static const int kAx[4][2] = { {0, -1}, {1, 0}, {0, 1}, {-1, 0} };   // the kDirNames order
                 for (int j = 0; j < stops.size(); ++j)
                 {
@@ -2370,7 +2598,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (schools.isEmpty()) body = noPlace;
             else
             {
-                body = gate(19000, 23999, 10) + rollLines(10, schools.size(), fp + QStringLiteral("ng/"));
+                body = nearRoll(id, 19000, 23999, schools, QStringLiteral("ng/"));
                 for (int j = 0; j < schools.size(); ++j)
                 {
                     const Prop& p = schools[j];
@@ -2434,7 +2662,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             else
             {
                 load += QStringLiteral("scoreboard players set #k2 osmc_enc_t 2\n");
-                body = gate(19000, 23999, 8) + rollLines(8, schools.size(), fp + QStringLiteral("sr/"));
+                body = nearRoll(id, 19000, 23999, schools, QStringLiteral("sr/"));
                 for (int j = 0; j < schools.size(); ++j)
                 {
                     const Prop& p = schools[j];
@@ -2502,7 +2730,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (schools.isEmpty()) body = noPlace;
             else
             {
-                body = gate(20000, 23999, 6) + rollLines(6, schools.size(), fp + QStringLiteral("au/"));
+                body = nearRoll(id, 20000, 23999, schools, QStringLiteral("au/"));
                 static const int kRing[8][2] = { {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1} };
                 for (int j = 0; j < schools.size(); ++j)
                 {
@@ -2558,7 +2786,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (schools.isEmpty()) body = noPlace;
             else
             {
-                body = gate(1000, 5999, 8) + rollLines(8, schools.size(), fp + QStringLiteral("tt/"));
+                body = nearRoll(id, 1000, 5999, schools, QStringLiteral("tt/"));
                 static const char* const kNames[6] = { "V. Nezhina", "A. Voltinskaya", "K. Surov",
                                                        "M. Golubeva", "I. Tish", "L. Morozova" };
                 for (int j = 0; j < schools.size(); ++j)
@@ -2590,7 +2818,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (lawns.isEmpty()) body = noPlace;
             else
             {
-                body = gate(18000, 23999, 8) + rollLines(8, lawns.size(), fp + QStringLiteral("mow/"));
+                body = nearRoll(id, 18000, 23999, lawns, QStringLiteral("mow/"));
                 for (int j = 0; j < lawns.size(); ++j)
                 {
                     const Prop& p = lawns[j];
@@ -2648,7 +2876,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (cars.isEmpty()) body = noPlace;
             else
             {
-                body = gate(19000, 23999, 8) + rollLines(8, cars.size(), fp + QStringLiteral("ec/"));
+                body = nearRoll(id, 19000, 23999, cars, QStringLiteral("ec/"));
                 for (int j = 0; j < cars.size(); ++j)
                 {
                     const Prop& p = cars[j];
@@ -2684,7 +2912,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (metros.isEmpty()) body = noPlace;
             else
             {
-                body = gate(19000, 23999, 6) + rollLines(6, metros.size(), fp + QStringLiteral("ps/"));
+                body = nearRoll(id, 19000, 23999, metros, QStringLiteral("ps/"));
                 for (int j = 0; j < metros.size(); ++j)
                 {
                     const Prop& p = metros[j];
@@ -2731,7 +2959,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             else
             {
                 load += QStringLiteral("scoreboard players set #k4 osmc_enc_t 4\n");
-                body = gate(18000, 23999, 6) + rollLines(6, metros.size(), fp + QStringLiteral("br/"));
+                body = nearRoll(id, 18000, 23999, metros, QStringLiteral("br/"));
                 for (int j = 0; j < metros.size(); ++j)
                 {
                     const Prop& p = metros[j];
@@ -2779,7 +3007,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (lamps.isEmpty()) body = noPlace;
             else
             {
-                body = gate(20000, 23999, 8) + rollLines(8, lamps.size(), fp + QStringLiteral("ph/"));
+                body = nearRoll(id, 20000, 23999, lamps, QStringLiteral("ph/"));
                 for (int j = 0; j < lamps.size(); ++j)
                 {
                     const Prop& p = lamps[j];
@@ -2830,7 +3058,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (founts.isEmpty()) body = noPlace;
             else
             {
-                body = gate(19000, 23999, 6) + rollLines(6, founts.size(), fp + QStringLiteral("cr/"));
+                body = nearRoll(id, 19000, 23999, founts, QStringLiteral("cr/"));
                 static const int kDrift[3][2] = { { 0, 0 }, { 1, 1 }, { -1, -1 } };   // the cloud's path
                 for (int j = 0; j < founts.size(); ++j)
                 {
@@ -2881,7 +3109,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (metros.isEmpty()) body = noPlace;
             else
             {
-                body = gate(18000, 23999, 6) + rollLines(6, metros.size(), fp + QStringLiteral("gr/"));
+                body = nearRoll(id, 18000, 23999, metros, QStringLiteral("gr/"));
                 for (int j = 0; j < metros.size(); ++j)
                 {
                     const Prop& p = metros[j];
@@ -2945,7 +3173,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (stops.isEmpty()) body = noPlace;
             else
             {
-                body = gate(19000, 23999, 6) + rollLines(6, stops.size(), fp + QStringLiteral("nm/"));
+                body = nearRoll(id, 19000, 23999, stops, QStringLiteral("nm/"));
                 static const int kRow[5] = { -6, -3, 0, 3, 6 };   // the five stalls of the row
                 for (int j = 0; j < stops.size(); ++j)
                 {
@@ -3006,7 +3234,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (cars.isEmpty()) body = noPlace;
             else
             {
-                body = gate(21000, 23999, 6) + rollLines(6, cars.size(), fp + QStringLiteral("hh/"));
+                body = nearRoll(id, 21000, 23999, cars, QStringLiteral("hh/"));
                 for (int j = 0; j < cars.size(); ++j)
                 {
                     const Prop& p = cars[j];
@@ -3079,7 +3307,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (halfs.isEmpty()) body = noPlace;
             else
             {
-                body = gate(18000, 23999, 8) + rollLines(8, halfs.size(), fp + QStringLiteral("gl/"));
+                body = nearRoll(id, 18000, 23999, halfs, QStringLiteral("gl/"));
                 for (int j = 0; j < halfs.size(); ++j)
                 {
                     const Prop& p = halfs[j];
@@ -3132,10 +3360,8 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (lamps.isEmpty()) body = noPlace;
             else
             {
-                body = QStringLiteral(
-                    "# dusk only: this is an event of the last light\n"
-                    "execute unless score #day osmc_enc_t matches 12000..13999 run return 0\n")
-                    + rollLines(6, lamps.size(), fp + QStringLiteral("ls/"));
+                body = nearRoll(id, 12000, 13999, lamps, QStringLiteral("ls/"))
+                    + QStringLiteral("# (dusk only: this is an event of the last light, the window above is tight)\n");
                 static const int kLen[3] = { 6, 12, 18 };   // the three lengths of the seam
                 for (int j = 0; j < lamps.size(); ++j)
                 {
@@ -3189,7 +3415,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (lamps.isEmpty()) body = noPlace;
             else
             {
-                body = gate(18000, 23999, 6) + rollLines(6, lamps.size(), fp + QStringLiteral("rs/"));
+                body = nearRoll(id, 18000, 23999, lamps, QStringLiteral("rs/"));
                 for (int j = 0; j < lamps.size(); ++j)
                 {
                     const Prop& p = lamps[j];
@@ -3243,7 +3469,7 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
             if (metros.isEmpty()) body = noPlace;
             else
             {
-                body = gate(21000, 23999, 6) + rollLines(6, metros.size(), fp + QStringLiteral("ef/"));
+                body = nearRoll(id, 21000, 23999, metros, QStringLiteral("ef/"));
                 for (int j = 0; j < metros.size(); ++j)
                 {
                     const Prop& p = metros[j];
@@ -3301,7 +3527,8 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
     add(fn + QStringLiteral("tick.mcfunction"),
             QByteArray("scoreboard players add #tick osmc_enc_t 1\n"
                        "execute if score #tick osmc_enc_t matches 200.. run function osmc_enc:cycle\n"
-                       "execute if score #tick osmc_enc_t matches 200.. run scoreboard players set #tick osmc_enc_t 0\n") + tickFob.toUtf8());
+                       "execute if score #tick osmc_enc_t matches 200.. run scoreboard players set #tick osmc_enc_t 0\n")
+            + tickGlass.toUtf8() + tickKill.toUtf8() + tickFob.toUtf8() + tickJack.toUtf8());
     add(fn + QStringLiteral("cycle.mcfunction"), cycle.toUtf8());
     // the void dimension type shared by the fog park and the mirrored floor: written once, an
     // unused one changes nothing in the game (the fields the target formats do not know are ignored)
@@ -3320,6 +3547,13 @@ void EncPack::build(const AddFn& addIn, const QSet<QString>& off, const QVector<
              QByteArray("{\"values\":[\"osmc_enc:load\"]}"));
     add(QStringLiteral("datapacks/osmc_enc/data/minecraft/tags/function/tick.json"),
              QByteArray("{\"values\":[\"osmc_enc:tick\"]}"));
-    add(QStringLiteral("datapacks/osmc_enc/pack.mcmeta"),
-             QByteArray("{\"pack\":{\"description\":\"OSMC: random city events over the exported places\",\"min_format\":82,\"max_format\":121}}"));
+    add(QStringLiteral("datapacks/osmc_enc/pack.mcmeta"), legacy121
+        // every key of both naming styles (the game itself writes its overlays this way since 1.21,
+        // see the tmc_tall pack): 1.21.x reads "supported_formats", 26.x reads "min/max_format"
+        ? QByteArray("{\"pack\":{\"description\":\"OSMC: random city events over the exported places\","
+                     "\"pack_format\":48,\"supported_formats\":{\"min_inclusive\":48,\"max_inclusive\":100},"
+                     "\"min_format\":[48,0],\"max_format\":[100,2147483647]}}")
+        : QByteArray("{\"pack\":{\"description\":\"OSMC: random city events over the exported places\","
+                     "\"pack_format\":101,\"supported_formats\":{\"min_inclusive\":101,\"max_inclusive\":121},"
+                     "\"min_format\":[101,0],\"max_format\":[121,2147483647]}}"));
 }

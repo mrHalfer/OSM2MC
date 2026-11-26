@@ -964,14 +964,15 @@ QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
                                       const QVector<NpcSite>& npcsHere,
                                       const QVector<PaintingSite>& paintsHere,
                                       const QVector<FrameSite>& framesHere,
-                                      const QVector<SiteRec>& sitesHere)
+                                      const QVector<SiteRec>& sitesHere,
+                                       const QVector<EncMarker>& encHere)
 {
     NbtWriter w;
     w.beginCompound("");                        // the root is a named compound
     w.writeIntArray("Position", { chunkX, chunkZ });
     w.writeInt("DataVersion", legacy ? 4671 : 5023);
     w.beginList("Entities", Nbt::Compound, mannequinsHere.size() + npcsHere.size() + paintsHere.size()
-                                          + framesHere.size() + sitesHere.size());
+                                          + framesHere.size() + sitesHere.size() + encHere.size());
     {
         auto pos3 = [&w](double x, double y, double z)
         {
@@ -1239,6 +1240,19 @@ QByteArray buildEntityChunkNbt(int chunkX, int chunkZ,
             w.writeStringElem(QStringLiteral("osmc.site"));
             w.writeStringElem(QStringLiteral("osmc.site_%1").arg(s.code));
             w.writeInt("osmc_code", s.code);
+            w.endCompound();                                  // a list element
+        }
+        for (const EncMarker& m : encHere)
+        {   // a place marker of the events pack (docs/city-encounters.md): the datapack searches the
+            // candidates of an event kind by radius (tag=osmc.k<kind>), the osmc.p<j> tag carries the
+            // place number of the generated dispatch, and Pos.y is the exact height of the anchor.
+            // No hitbox, no renderer, no tick cost — the same marker entity the sites use.
+            w.beginCompound(nullptr);
+            w.writeString("id", QStringLiteral("minecraft:marker"));
+            pos3(m.x + 0.5, double(m.y), m.z + 0.5);
+            w.beginList("Tags", Nbt::String, int(m.tags.size()));
+            for (const QString& t : m.tags)
+                w.writeStringElem(t);
             w.endCompound();                                  // a list element
         }
     }

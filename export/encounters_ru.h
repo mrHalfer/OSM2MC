@@ -101,6 +101,8 @@ inline QByteArray translate(const QByteArray& in)
           "Фонари теперь смотрят в асфальт. Высокие окна смотрят в ответ." },
         { "The city knows your count. Tonight everything walks, and every house has a floor you never found.",
           "Город знает твой счёт. Сегодня ночью ходит всё, и в каждом доме есть этаж, который ты не находил." },
+        { "that sound travelled further than the glass",
+          "тот звук разнёсся дальше, чем само стекло" },
         // the rules book (raw:"..." pages, set as one data-modify value)
         { "Rules of the Night", "Правила ночи" },
         { "The city feels broken glass. A window you break raises its dread; a pane set back into the "
@@ -111,14 +113,16 @@ inline QByteArray translate(const QByteArray& in)
           "walk. At 95 every house opens its hidden floor.",
           "На 25, 50, 75 и 95 ночь говорит, и чем выше ужас, тем чаще ходят её события. "
           "На 95 каждый дом открывает свой скрытый этаж." },
-        { "It calms down over kindness: a light in the dark and a monster laid to rest pay one point, "
-          "once in five minutes; a bell answers by three, a finished trade by one - together three "
-          "deeds a day at most, and midnight renews them; a tamed cat or dog pays three, again and "
-          "again. The fog park flattens the dread to twenty-five. Dawn takes one point back on its own.",
-          "Он утихает от добрых дел: свет в темноте и упокоенный монстр возвращают по очку, не чаще "
-          "раза в пять минут; колокол отвечает тремя, завершённая сделка — очком, вместе не более "
-          "трёх дел в день, и полночь обновляет этот счёт; приручённые кот или пёс — три, снова и "
-          "снова. Туманный парк сглаживает ужас до двадцати пяти. Рассвет сам забирает очко обратно." },
+        { "It calms down over kindness: a light in the dark pays one point, once in five minutes; "
+          "every ten monsters laid to rest pay one more; a bell answers by three, a finished trade "
+          "by one - together three deeds a day at most, and midnight renews them; a tamed cat or "
+          "dog pays three, again and again. The fog park flattens the dread to twenty-five. Dawn "
+          "takes one point back on its own.",
+          "Он утихает от добрых дел: свет в темноте возвращает очко, не чаще раза в пять минут; "
+          "каждые десять упокоенных монстров — ещё очко; колокол отвечает тремя, завершённая "
+          "сделка — очком, вместе не более трёх дел в день, и полночь обновляет этот счёт; "
+          "приручённые кот или пёс — три, снова и снова. Туманный парк сглаживает ужас до "
+          "двадцати пяти. Рассвет сам забирает очко обратно." },
         { "Every event can be switched off while the world runs: function osmc_enc:off/<name> turns "
           "one away, osmc_enc:on/<name> calls it back. The dread itself answers the console: function "
           "osmc_enc:dread/s25 - the same for s0, s50, s75, s95, s100.",

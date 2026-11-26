@@ -82,7 +82,18 @@ struct EncPack
                                         // a stairwell: cells[0] and [1] are the door's lower
                                         // and upper lining cells (floor_half); a lawn: the bare grass cells of the mown walk,
                                         // the mower troddens them one stripe per night (mower)
+        int idx = -1;                   // the place number of this prop inside its kind, set by
+                                        // capProps(): the marker entity carries it as the osmc.p<j>
+                                        // tag and the generated dispatch matches the same number
     };
+    //! The marker tag of a kind ("osmc.klamp"...): the tag the radius searches select by. One list
+    //! shared by capProps (the markers) and build (the dispatch), so the two can never disagree
+    static const char* const kKindTag[18];
+    //! Thins the collected places down to the pack's caps BEFORE the world writes the markers: the
+    //! survivors of the needCells rules are taken by a uniform stride (a city keeps places spread
+    //! over all of it, not only the first blocks built), and every survivor is numbered inside its
+    //! kind (Prop::idx) so the markers and the generated dispatch speak the same numbers
+    static void capProps(QVector<Prop>& props);
     enum { kEpLamp = 0, kEpBusStop = 1, kEpPlayground = 2, kEpChalk = 3, kEpJack = 4,
            kEpCross = 5, kEpWindows = 6, kEpScarecrow = 7, kEpGrave = 8, kEpBell = 9, kEpSchool = 10,
            kEpCar = 11, kEpLurker = 12, kEpFountain = 13, kEpMetro = 14, kEpBench = 15, kEpHalf = 16, kEpMow = 17 };
@@ -93,14 +104,12 @@ struct EncPack
     //! legacy121: the world we write for is in the 1.21.x format (McWorldExporter::Format); 26.x
     //! retired "time query daytime", so the cycle's day clock branches on it - every other function
     //! behaves identically in both formats
-    //! glassCensus: window glass cells as x,y,z triples (the dread system's count - see build());
-    //! the exporter samples the city's window glass and the pack watches those exact cells
     //! bookCell: the ground cell under the rules-book lectern as x,y,z (the exporter picks a free
     //! dry cell near the spawn); fewer than three values - the pack sets no book anywhere
     //! russian: the export ran with the ru UI language, so the pack's player-visible lines (tellraw,
     //! titles, the book) speak Russian; false - they stay English (export/encounters_ru.h)
     static void build(const AddFn& add, const QSet<QString>& off, const QVector<Prop>& props,
-                      const QVector<int>& glassCensus, const QVector<int>& bookCell, bool legacy121,
+                      const QVector<int>& bookCell, bool legacy121,
                       bool russian = false);
 };
 

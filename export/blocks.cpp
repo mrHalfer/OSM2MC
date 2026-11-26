@@ -144,6 +144,9 @@ const NamedColor kBlockPalette[] = {
     { "minecraft:oxidized_copper",        82, 162, 132 },
     // Grounds (lcapol 22410000 bare rock): terracotta mixed into the stone surface
     { "minecraft:terracotta",            152,  94,  67 },
+    // Panel accent (a user request): the cyan terracotta trim of concrete facades (corner columns,
+    // parapet ring — voxelize.cpp panelTrimId looks this up BY NAME, a miss lands below the palette)
+    { "minecraft:cyan_terracotta",        87,  91,  91 },
 };
 
 
