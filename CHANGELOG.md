@@ -1,9 +1,11 @@
 # Changelog
 
 All notable changes to OSMC are written here, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/);
-versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEVELOPING.md](DEVELOPING.md)).
+versions are `major.minor.YY.MMDDN` (`N` is the number of the build of the day, see [DEVELOPING.md](DEVELOPING.md)).
 
 ## [Unreleased]
+
+## [2.2.26.11281] — 2026-11-28
 
 ### Added
 
@@ -16,8 +18,19 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
   glazier gives the frame its window back. **Call 01** - an alarm bell and smoke over a private
   roof; the smell reaches thirty blocks and in thirty cases out of a hundred the ridge really
   catches, until the firemen put it back. **The Fire Deer** - heat and hoofbeats in a dense forest:
-  three beats, a flash of thunder, and every crown of the hundred-block grove lights up at once;
-  the fire walks to the other trees by itself, the pack's foresters replant the burning crowns.
+  three beats, a flash of thunder, and the crowns of the hundred-block ring around the clearing
+  light up at once - the trees inside the ring stand until the fire walks to them itself, and the
+  pack's foresters replant the burning crowns before dawn.
+- **The Bat Swarm** (a user request): at night, over a random player under the open sky, six to
+  twelve phantoms wheel up and dive. The swarm is a scare with a sting, not a death sentence: a
+  phantom within five blocks of the player bursts into dust a second later - some dives bite,
+  others pop a couple of blocks short of the victim; the stragglers scatter within four minutes.
+- **Corner posts on light concrete facades** (a user request): the buildings whose walls are light
+  gray concrete by the ordinary rule - residential towers and offices, shops and hospitals, malls -
+  wear a cyan terracotta post on every EXTERNAL corner of the SOURCE geometry: a bend point of the
+  vector ring from the OSM/shape file, never the staircase step a rotated footprint makes after the
+  voxelization. Schools and kindergartens keep their own facade style; the addressless booths
+  (44000000) stay plain.
 
 ### Changed
 
@@ -46,17 +59,33 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 - The stray dog is a find, not a fixture (a user request): his dice fell every cycle, so he joined
   the walk several times a night; like the place-bound legends he now comes at most ONCE a night,
   on one roll of ten the whole night through.
-- The 9 1/2 floor is easier to find (a user request): houses of TEN floors join the pool (was
-  eleven), and one house in three of them may host the door - the dice is a hash of the house's own
-  corner, so the pool is the same in every export of the same map. The pool keeps every door it
-  grew (the list cap lifted, the owner's word): a door a player earned by climbing ten floors must
-  not be thinned away on the way to the pack.
+- The 9 1/2 floor is easier to find (a user request): EVERY house of TEN floors and up grows a
+  door of its own now (was one house in three - a user walk-through: searching the stairwells of
+  the scarce towers took the whole night, and the event stayed the longest and the most dangerous
+  of them all). The pool keeps every door it grew (the list cap lifted): a door
+  a player earned by climbing ten floors must not be thinned away on the way to the pack.
 - The broken glass no longer whispers to the chat (a user request): the one-in-twelve line about
   the sound travelling further than the glass served the debug days; in the game it only irritated.
   The soft glass sound the neighbours hear stays.
+- The fog's bench became readable (a user walk-through): the way in is the whole clearing around
+  the dark seat now - the bench's own cells plus two blocks all around (a person standing a row
+  below the seat or on top of it counts too) - and it takes a second of standing, not three; the
+  fog park lights its own way out - a tile of sea lanterns in the lawn right before the middle
+  seat, with motes drifting over it - standing on the glowing tile goes back to the city bench at
+  once, and the arrival line says the way home glows underfoot.
 
 ### Fixed
 
+- The tall road step became a stair (a user report): where the road height jumped by two blocks and
+  up (the real relief and the artificial hilliness together), the step pass stacked a bottom slab per
+  level and the upper slabs hung over a half-block gap - the look of a floating TOP slab over paths
+  and roads, showiest in the parks. The body of such a step fills with full blocks of the road's own
+  material now, and only the top row stays a slab.
+- The gift of the 9 1/2 floor arrives (a test-server catch, older than this batch): the prize
+  function filled its chest with the `container <n>` slot, retired in the new loot rework - the
+  whole function failed to LOAD on both supported server families and the chest of the mirrored
+  hall stayed empty. The loot now pours the table into the chest (`contents`), verified on live
+  26.x and 1.21.x servers.
 - The morning wipe of the half floor no longer kills the whole world (a user catch: monsters near
   the cemetery and even the creaking hearts' owners in the Pale Garden died on their own): the
   bare `kill @e[type=!player]` had no position, so all through the day it emptied the city of

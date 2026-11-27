@@ -139,9 +139,10 @@ const Row kRows[] = {
                               "sound from the city. A mini-dimension; the way out is simply to stand "
                               "up."),
       QT_TRANSLATE_NOOP("EncountersDialog", "About every three minutes the fog takes one oak bench within fifty "
-                              "blocks of a player - its seat turns dark. Stand three seconds before "
-                              "the dark bench and you sink into the park; the way out waits before "
-                              "the middle seat. The dread flattens to twenty-five.") },
+                              "blocks of a player - its seat turns dark. Stand a second in the "
+                              "clearing around the dark bench - the seat plus two blocks - and you "
+                              "sink into the park; the way home glows underfoot before the middle "
+                              "seat. The dread flattens to twenty-five.") },
     { "stray_dog",              nullptr,
       QT_TRANSLATE_NOOP("EncountersDialog", "The Dog Without An Owner"),
       QT_TRANSLATE_NOOP("EncountersDialog", "It follows the player in silence and disappears the moment you come "
@@ -521,12 +522,22 @@ const Row kRows[] = {
     { "fire_deer",              nullptr,
       QT_TRANSLATE_NOOP("EncountersDialog", "The Fire Deer"),
       QT_TRANSLATE_NOOP("EncountersDialog", "Heat and hoofbeats in a dense forest - three beats, a flash, and "
-                               "every crown of the grove lights up at once. The deer is gone; the fire walks "
-                               "the forest after it."),
+                               "the crowns along the grove's rim light up at once. The deer is gone; the fire "
+                               "walks the forest after it."),
       QT_TRANSLATE_NOOP("EncountersDialog", "Day 14:00-23:00, one roll a night: the hoofbeats and flame particles "
-                               "walk thirty blocks around a clearing, then thunder - and all baked crowns of "
-                               "the hundred-block grove turn to fire. The foresters of the pack replant the "
-                               "burning crowns before dawn.") },
+                               "walk thirty blocks around a clearing, then thunder - and the crowns of the "
+                               "hundred-block ring turn to fire, the trees inside the ring standing until the "
+                               "fire reaches them itself. The foresters of the pack replant the burning crowns "
+                               "before dawn.") },
+     { "bat_swarm",              nullptr,
+      QT_TRANSLATE_NOOP("EncountersDialog", "The Bat Swarm"),
+      QT_TRANSLATE_NOOP("EncountersDialog", "A screech over the head - and six to twelve phantoms wheel up in the "
+                               "night sky above you. The swarm dives, but this is a scare, not a sentence: "
+                               "whoever gets too close bursts into dust in mid-dive."),
+      QT_TRANSLATE_NOOP("EncountersDialog", "Night 19:00-06:00, about 2% per cycle: over a random player under the "
+                               "open sky six to twelve phantoms spawn and swoop. One within five blocks of the "
+                               "player pops a second later - some reach the victim, others die a couple of "
+                               "blocks short; the stragglers scatter within four minutes.") }
 };
 const int kRowCount = int(sizeof(kRows) / sizeof(kRows[0]));
 

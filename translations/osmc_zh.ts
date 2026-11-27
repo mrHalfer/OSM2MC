@@ -283,7 +283,7 @@
     </message>
     <message>
         <location filename="../app/encountersdialog.cpp" line="141"/>
-        <source>About every three minutes the fog takes one oak bench within fifty blocks of a player - its seat turns dark. Stand three seconds before the dark bench and you sink into the park; the way out waits before the middle seat. The dread flattens to twenty-five.</source>
+        <source>About every three minutes the fog takes one oak bench within fifty blocks of a player - its seat turns dark. Stand a second in the clearing around the dark bench - the seat plus two blocks - and you sink into the park; the way home glows underfoot before the middle seat. The dread flattens to twenty-five.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

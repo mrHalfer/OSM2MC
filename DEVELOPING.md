@@ -37,7 +37,7 @@ From Windows you can RUN the Linux build without leaving Windows: `run_linux.bat
 
 ### Version
 
-`VERSION` in `osmc.pro` has the form `1.2.YY.MMDDN`: `YY` — the year, `MMDD` — the month and day, `N` — the number of the build of the day (1–9; a same-day hotfix takes the next digit), for example `1.2.26.10281`, `1.2.26.10282`. The last number must stay ≤ 65535 (a Windows limit). Change only that line. After a version change touch `app/exportmeta.cpp` (its timestamp, not its content) before building: the version reaches the code as a `-D` define and nmake does not recompile sources when only defines change.
+`VERSION` in `osmc.pro` has the form `major.minor.YY.MMDDN` (currently `2.2`): `YY` — the year, `MMDD` — the month and day, `N` — the number of the build of the day (1–9; a same-day hotfix takes the next digit), for example `2.2.26.11281`, `2.2.26.11282`. The last number must stay ≤ 65535 (a Windows limit). Change only that line. After a version change touch `app/exportmeta.cpp` (its timestamp, not its content) before building: the version reaches the code as a `-D` define and nmake does not recompile sources when only defines change.
 
 ## Changelog
 

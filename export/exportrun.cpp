@@ -1695,10 +1695,11 @@ void ExportRun::buildPointObjects()
             encProps.append(ep);
             ++nRoof;
         }
-        // fire_deer (a user request): a clearing of a big dense forest and EVERY crown of the hundred-block
-        // grove around it — the event lights the crowns one by one and the fire walks to the rest of the
-        // trees by itself. The crowns are read back from the built store (vegetation has run already), so
-        // the baked cells can never lie about what stands in the world
+        // fire_deer (a user request): a clearing of a big dense forest and the RING of crowns around it
+        // fifty blocks out — the rim of the grove only, never its inside (a user walk-through: the
+        // whole disc burned and the deer itself was nowhere to see). The fire walks to the inner trees
+        // by itself. The crowns are read back from the built store (vegetation has run already), so the
+        // baked cells can never lie about what stands in the world
         static const quint16 kLeafIds[] = { IdOakLeaves, IdSpruceLeaves, IdDarkOakLeaves, IdBirchLeaves,
                                             IdJungleLeaves, IdAcaciaLeaves, IdPaleLeaves, IdRedPoplarLeaves,
                                             IdOrangePoplarLeaves, IdYellowPoplarLeaves };
@@ -1720,6 +1721,9 @@ void ExportRun::buildPointObjects()
                 for (int gx = tx - 50; gx <= tx + 50 && crowns.size() < 100; gx += 8)
                     for (int gz = tz - 50; gz <= tz + 50 && crowns.size() < 100; gz += 8)
                     {
+                        const int dx = gx - tx, dz = gz - tz;
+                        if (dx * dx + dz * dz < 42 * 42 || dx * dx + dz * dz > 58 * 58)
+                            continue;                                    // the fire ring only, not the disc
                         const qint64 dk = pairKey(gx, gz);
                         if (colWater.contains(dk) || colMin.contains(dk)) continue;   // no crowns over water or a house
                         const int st = surfaceTop(dk);
@@ -1737,7 +1741,7 @@ void ExportRun::buildPointObjects()
                             break;                                // the first solid decides — higher hits are somebody's crown
                         }
                     }
-                if (crowns.size() < 40) continue;                 // a scattering of trees is not a burning grove
+                if (crowns.size() < 24) continue;                 // a circle dashed to bits is not a ring
                 EncPack::Prop ep; ep.kind = EncPack::kEpDeer;
                 ep.x = tx; ep.y = yy + 1; ep.z = tz;
                 ep.cells = crowns;
@@ -9982,7 +9986,8 @@ bool ExportRun::buildGround()
     {   // ROAD STEPS: where the road's height changes between neighbouring cells, the step is smoothed with slabs of
         // the road's own material and color (a user request): gray concrete slab for the motor roadway, light gray
         // concrete slab for the pedestrian roads, white wool slab for the markings, light gray wool slab for the curbs.
-        // A bottom slab on the lower cell halves the step; a step of several blocks gets a half-slab ledge per level.
+        // A bottom slab on the lower cell halves the step; a step of several blocks gets a solid body of full
+        // road blocks under its top slab (never a stack of gap-separated slabs — the floating "top slab" look).
         // The half-slab ledge is then EXTENDED two cells downhill along the road (a user request: 2-3 cells of half
         // blocks instead of one), together with the marking and the curb — a one-block rise is spread over three cells.
         qint64 nSlab = 0;
@@ -10010,18 +10015,24 @@ bool ExportRun::buildGround()
             }
             if (hi <= h) continue;
             quint16 slab = roadSlabForCarpet(store.get(x, h + 1, z));  // a marking/curb: the wool slab of its color
-            if (!slab)
-            {
-                const auto wit = colWool.constFind(ck);                // the roadway: the slab of its material
-                if (wit != colWool.constEnd()) slab = roadSlabForSurface(wit.value());
-            }
+            const auto wit = colWool.constFind(ck);                    // the roadway: the slab of its material
+            if (!slab && wit != colWool.constEnd()) slab = roadSlabForSurface(wit.value());
             if (!slab) continue;                                       // podzol/dirt roads — no matching slab
+            // A step of TWO blocks and up (the real relief plus the artificial hilliness together, a user
+            // report): bottom slabs stacked one over another leave a half-block gap between them, and the
+            // upper slab reads as a floating TOP slab. The body of such a step is filled with FULL blocks
+            // of the road's own material (the roadway block, or the wool of the marking's own color where
+            // the cell is a bare marking), and the slab stays only on top — a solid stair, the same walking
+            // height as before.
+            quint16 fill = 0;
+            if (wit != colWool.constEnd()) fill = wit.value();
+            else fill = quint16(IdWoolBase + (int(slab) - int(IdRoadSlabBase) - 16));   // wool slab -> full wool
             for (int y = h + 1; y <= hi; ++y)
             {
                 const quint16 cur = store.get(x, y, z);
                 if (cur != IdAir && !(cur >= IdCarpetBase && cur < IdCarpetBase + kCarpetsCount))
                     continue;                                          // a lamp/plant/other block — leave it
-                store.set(x, y, z, slab);
+                store.set(x, y, z, (y < hi && fill) ? fill : slab);
                 ++nSlab;
             }
             slabbed.insert(ck);

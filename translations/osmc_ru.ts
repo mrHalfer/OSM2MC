@@ -283,8 +283,8 @@
     </message>
     <message>
         <location filename="../app/encountersdialog.cpp" line="141"/>
-        <source>About every three minutes the fog takes one oak bench within fifty blocks of a player - its seat turns dark. Stand three seconds before the dark bench and you sink into the park; the way out waits before the middle seat. The dread flattens to twenty-five.</source>
-        <translation>Раз в три минуты туман выбирает одну дубовую скамейку в пятидесяти блоках от игрока - сиденье темнеет. Постой три секунды перед тёмной - уйдёшь в парк; выход ждёт перед средней скамьёй. Ужас сглаживается до двадцати пяти.</translation>
+        <source>About every three minutes the fog takes one oak bench within fifty blocks of a player - its seat turns dark. Stand a second in the clearing around the dark bench - the seat plus two blocks - and you sink into the park; the way home glows underfoot before the middle seat. The dread flattens to twenty-five.</source>
+        <translation>Раз в три минуты туман выбирает одну дубовую скамейку в пятидесяти блоках от игрока - сиденье темнеет. Постой секунду на поляне вокруг тёмной - само сиденье плюс два блока - и уйдёшь в парк; дорога домой светится у ног перед средней скамьёй. Ужас сглаживается до двадцати пяти.</translation>
     </message>
     <message>
         <location filename="../app/encountersdialog.cpp" line="146"/>
@@ -1207,13 +1207,28 @@
     </message>
     <message>
         <location filename="../app/encountersdialog.cpp" line="523"/>
-        <source>Heat and hoofbeats in a dense forest - three beats, a flash, and every crown of the grove lights up at once. The deer is gone; the fire walks the forest after it.</source>
-        <translation>Жар и топот копыт в плотном лесу — три удара, вспышка, и все кроны рощы загораются разом. Олень ушёл; огонь бродит по лесу следом за ним.</translation>
+        <source>Heat and hoofbeats in a dense forest - three beats, a flash, and the crowns along the grove's rim light up at once. The deer is gone; the fire walks the forest after it.</source>
+        <translation>Жар и топот копыт в плотном лесу — три удара, вспышка, и кроны по краю рощы загораются разом. Олень ушёл; огонь бродит по лесу следом за ним.</translation>
     </message>
     <message>
         <location filename="../app/encountersdialog.cpp" line="526"/>
-        <source>Day 14:00-23:00, one roll a night: the hoofbeats and flame particles walk thirty blocks around a clearing, then thunder - and all baked crowns of the hundred-block grove turn to fire. The foresters of the pack replant the burning crowns before dawn.</source>
-        <translation>День 14:00–23:00, один бросок за ночь: топот копыт и искры пламени ходят на тридцать блоков вокруг поляны, затем удар грома — и все кроны стометровой рощы встают в огне. Лесники датапака возвращают горящие кроны обратно до рассвета.</translation>
+        <source>Day 14:00-23:00, one roll a night: the hoofbeats and flame particles walk thirty blocks around a clearing, then thunder - and the crowns of the hundred-block ring turn to fire, the trees inside the ring standing until the fire reaches them itself. The foresters of the pack replant the burning crowns before dawn.</source>
+        <translation>День 14:00–23:00, один бросок за ночь: топот копыт и искры пламени ходят на тридцать блоков вокруг поляны, затем удар грома — и кроны стометрового кольца встают в огне, а деревья внутри него стоят, пока огонь сам до них не дойдёт. Лесники датапака возвращают горящие кроны обратно до рассвета.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="533"/>
+        <source>The Bat Swarm</source>
+        <translation>Туча нетопырей</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="534"/>
+        <source>A screech over the head - and six to twelve phantoms wheel up in the night sky above you. The swarm dives, but this is a scare, not a sentence: whoever gets too close bursts into dust in mid-dive.</source>
+        <translation>Над головой визг — и в ночном небе встаёт от шести до двенадцати фантомов. Туча бросается вниз, но это испуг с жалом, а не расправа: подлетевший вплотную разваливается в пыль прямо на пикировании.</translation>
+    </message>
+    <message>
+        <location filename="../app/encountersdialog.cpp" line="537"/>
+        <source>Night 19:00-06:00, about 2% per cycle: over a random player under the open sky six to twelve phantoms spawn and swoop. One within five blocks of the player pops a second later - some reach the victim, others die a couple of blocks short; the stragglers scatter within four minutes.</source>
+        <translation>Ночь 19:00–06:00, ~2% за цикл: над случайным игроком под открытым небом появляются шесть-двенадцать фантомов и пикируют. Фантом в пяти блоках от игрока лопается через секунду — одним повезёт ударить, другие погибнут в паре блоков от цели; уцелевшие разлетаются в течение четырёх минут.</translation>
     </message>
     <message>
         <location filename="../app/encountersdialog.cpp" line="589"/>

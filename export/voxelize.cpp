@@ -102,6 +102,9 @@ private:
     QVector<qint64> entranceKeys;                               // the entrance cells (furniture keeps out)
     QSet<int> forcedWall;                                       // the outer cells where a window is forbidden
     QSet<qint64> cornerCols;                                    // the REAL corners of the footprint (the hull of the outline): no windows there
+    QSet<qint64> pilasterCols;                                  // the columns of the REAL geometry bends (the source ring): the cyan corner posts
+    QVector<QVector3D> bcVerts;                                 // the mesh vertices in block coordinates (buildGrid): the source of the ring rebuild
+    bool trimCorners = false;                                   // the code wears the corner posts (the light concrete facades, the owner's code list)
     QSet<ColKey> stairXZ;                                       // the cells (lx,lz) of flights and ladders: furniture is not placed in front of or under them
     QSet<ColKey> doorCells;
     QSet<ColKey> partSet;                 // the blocks of inter-room partitions — we hang paintings on them
@@ -127,6 +130,9 @@ private:
     int windowDir(int lx, int ly, int lz) const;
     // Writes the wall patch and the windows into the store (entrances already marked).
     void buildWalls();
+    // Finds the columns of the REAL geometry corners for the cyan pilasters (a user request); needs the
+    // flood-filled grid and the floor pass (priv/thinW), so it runs after calcFloors.
+    void collectCornerPilasters();
     // The parapet of wall material along the edge of a flat roof (a user request, walls of roofTop cells).
     void buildParapet();
     // The rare small gear on a flat roof: a stair hut, a vent pipe, antennas (a user request).
@@ -319,6 +325,8 @@ bool ObjectVoxelizer::buildGrid()
 
     sx = int(sxl); sy = int(syl); sz = int(szl);
     minx = int(gx0); miny = int(gy0); minz = int(gz0);
+    if (obj.kind == McWorldExporter::McObject::Building)
+        bcVerts = bc;               // the ring rebuild of the corner posts reads the prism vertices (collectCornerPilasters)
     {   // The REAL corners of the footprint (the convex hull of the projected outline): a window may stand on a
         // staircase step of a rotated wall, but the true corners stay blind (a user request).
         QVector<QPointF> hp;
@@ -700,6 +708,132 @@ int ObjectVoxelizer::windowDir(int lx, int ly, int lz) const
                                                                   // the street into the wall thickness
 }
 
+void ObjectVoxelizer::collectCornerPilasters()
+{
+    // The vertical corner posts (a user request): the buildings whose walls are light gray concrete by
+    // the ORDINARY rule — offices, shops, hospitals, residential towers, malls (the owner's code list;
+    // booths 44000000 stay plain, schools and kindergartens wear their own facade marking) — put a cyan
+    // terracotta post on every EXTERNAL corner of the SOURCE geometry: a bend point of the vector ring,
+    // never a staircase step a rotated footprint makes after the voxelization. The rings are rebuilt
+    // from the extruded prism: a triangle with exactly one vertical edge is a wall triangle, and its
+    // edge with the equal-height ends joins neighbouring ring vertices; the cycles are walked, the
+    // convex bends sharper than ~17 degrees of turn become posts (a flatter bend is digitization noise
+    // along a straight panel facade). The post's cell is the wall column nearest to the bend point.
+    static const int kTrimCodes[] = { 44400000, 44310000, 44340000, 44300000, 44311000,
+                                      44314000, 44316000, 44317000, 44318000 };
+    if (obj.kind != McWorldExporter::McObject::Building || !obj.closed || priv || thinW
+        || std::find(std::begin(kTrimCodes), std::end(kTrimCodes), obj.code) == std::end(kTrimCodes))
+        return;
+    trimCorners = true;         // the rows still check their own material (buildWalls): a stone plinth
+                                // or a brick tier of the same house keeps its own face
+    const double eps = 1e-3;
+    auto nkey = [&](const QVector3D& v)
+                { return pairKey(qint64(std::llround(double(v.x()) * 64.0)),
+                                 qint64(std::llround(double(v.z()) * 64.0))); };
+    auto vertEdge = [&](int i, int j)
+                    { const QVector3D& a = bcVerts[i], & b = bcVerts[j];
+                      return std::fabs(a.x() - b.x()) <= eps && std::fabs(a.z() - b.z()) <= eps
+                          && std::fabs(a.y() - b.y()) > eps; };
+    auto hEdge = [&](int i, int j)
+                 { const QVector3D& a = bcVerts[i], & b = bcVerts[j];
+                   return std::fabs(a.y() - b.y()) <= eps
+                       && (std::fabs(a.x() - b.x()) > eps || std::fabs(a.z() - b.z()) > eps); };
+    QHash<qint64, QPointF> nodePos;                     // the ring vertex (x, world z)
+    QHash<qint64, QVector<qint64>> adj;                 // the ring neighbours of a vertex
+    QSet<qint64> edgeSeen;
+    for (int i = 0; i + 2 < obj.indices.size(); i += 3)
+    {
+        const int v0 = int(obj.indices[i]), v1 = int(obj.indices[i + 1]), v2 = int(obj.indices[i + 2]);
+        if (v0 >= bcVerts.size() || v1 >= bcVerts.size() || v2 >= bcVerts.size())
+            continue;
+        const int tri[3][2] = { { v0, v1 }, { v1, v2 }, { v2, v0 } };
+        const bool vert[3] = { vertEdge(v0, v1), vertEdge(v1, v2), vertEdge(v2, v0) };
+        if (int(vert[0]) + int(vert[1]) + int(vert[2]) != 1)
+            continue;                                   // a cap triangle (0) or a degenerate wall (2+)
+        for (int e = 0; e < 3; ++e)
+        {
+            if (vert[e] || !hEdge(tri[e][0], tri[e][1]))
+                continue;                               // the rectangle diagonal runs bottom-to-top
+            const qint64 k1 = nkey(bcVerts[tri[e][0]]), k2 = nkey(bcVerts[tri[e][1]]);
+            if (k1 == k2)
+                continue;
+            nodePos.insert(k1, QPointF(bcVerts[tri[e][0]].x(), bcVerts[tri[e][0]].z()));
+            nodePos.insert(k2, QPointF(bcVerts[tri[e][1]].x(), bcVerts[tri[e][1]].z()));
+            const qint64 ek = k1 < k2 ? pairKey(k1, k2) : pairKey(k2, k1);
+            if (edgeSeen.contains(ek))
+                continue;                               // the bottom and the top copy of the wall
+            edgeSeen.insert(ek);
+            adj[k1] << k2;
+            adj[k2] << k1;
+        }
+    }
+    QSet<qint64> walked;
+    for (auto it = adj.constBegin(); it != adj.constEnd(); ++it)
+    {
+        if (walked.contains(it.key()))
+            continue;
+        QVector<qint64> ring;
+        qint64 prev = 0, cur = it.key();
+        bool ok = true;
+        while (!walked.contains(cur))
+        {
+            if (adj.value(cur).size() != 2) { ok = false; break; }     // a shared vertex: the rings ran into each other
+            walked.insert(cur);
+            ring << cur;
+            const QVector<qint64>& nb = adj.value(cur);
+            const qint64 nxt = (nb[0] == prev) ? nb[1] : nb[0];
+            prev = cur;
+            cur = nxt;
+        }
+        if (!ok || cur != ring.first() || ring.size() < 3)
+            continue;                                   // a broken chain — this ring keeps no posts
+        double area2 = 0.0;
+        for (int i = 0; i < ring.size(); ++i)
+        {
+            const QPointF& p = nodePos[ring[i]];
+            const QPointF& q = nodePos[ring[(i + 1) % ring.size()]];
+            area2 += p.x() * q.y() - q.x() * p.y();     // p.y holds the world z
+        }
+        if (std::fabs(area2) < 1e-6)
+            continue;
+        const double sgn = area2 > 0.0 ? 1.0 : -1.0;    // the ring orientation: the convex turns match it
+        for (int i = 0; i < ring.size(); ++i)
+        {
+            const QPointF& p0 = nodePos[ring[(i + ring.size() - 1) % ring.size()]];
+            const QPointF& p1 = nodePos[ring[i]];
+            const QPointF& p2 = nodePos[ring[(i + 1) % ring.size()]];
+            const double e1x = p1.x() - p0.x(), e1z = p1.y() - p0.y();
+            const double e2x = p2.x() - p1.x(), e2z = p2.y() - p1.y();
+            const double l1 = std::hypot(e1x, e1z), l2 = std::hypot(e2x, e2z);
+            if (l1 < eps || l2 < eps)
+                continue;
+            const double turn = (e1x * e2z - e1z * e2x) * sgn / (l1 * l2);   // the sine of the turn, positive at a convex bend
+            if (turn < 0.30)
+                continue;                               // concave or a straight-line noise vertex
+            const int cx0 = int(std::floor(p1.x())) - minx, cz0 = int(std::floor(p1.y())) - minz;
+            double bestD = 8.01;
+            int blx = -1, blz = -1;
+            for (int dz = -2; dz <= 2; ++dz)
+                for (int dx = -2; dx <= 2; ++dx)
+                {
+                    const int lx = cx0 + dx, lz = cz0 + dz;
+                    if (lx < 0 || lx >= sx || lz < 0 || lz >= sz)
+                        continue;
+                    bool wall = false;
+                    for (int ly = 0; ly < sy; ++ly)
+                        if (grid[lz * sxy + ly * sx + lx] == char(1)) { wall = true; break; }
+                    if (!wall)
+                        continue;
+                    const double ddx = lx + 0.5 - (double(p1.x()) - minx), ddz = lz + 0.5 - (double(p1.y()) - minz);
+                    const double d2 = ddx * ddx + ddz * ddz;
+                    if (d2 < bestD) { bestD = d2; blx = lx; blz = lz; }
+                }
+            if (blx >= 0)
+                pilasterCols.insert(pairKey(blx, blz));
+        }
+    }
+}
+
 void ObjectVoxelizer::buildWalls()
 {
     nWindows = 0;                                     // windows in the building (without a single window — cobwebs inside)
@@ -712,7 +846,17 @@ void ObjectVoxelizer::buildWalls()
         if (priv && lyHigh >= 0 && ly == lyHigh && interiorCol(lx, ly, lz))
             continue;                                     // the private sector: we write the flat cap
                                                           // only on the wall ring (the slopes hold onto it)
-        const int dir = forcedWall.contains(cell) ? 0 : windowDir(lx, ly, lz);   // there are no windows at an entrance
+        quint16 wallId = structFor(ly);
+        // The corner post of a concrete facade (a user request): cyan terracotta stands on the columns of
+        // the REAL geometry bends (collectCornerPilasters). The mall keeps its glass wrapped around the
+        // corner (the owner's word) — there the post paints only the blind rows of the panorama rhythm;
+        // the other facades stay windowless at the post so the column reads as one solid accent. The row's
+        // REAL material: structFor paints only the plinth/upper tiers, an ordinary course writes with 0
+        // — which addVoxel turns into the facade's own color (id).
+        const bool pil = trimCorners && (wallId ? wallId : id) == mallRackId()
+                      && pilasterCols.contains(pairKey(lx, lz));
+        const bool pilBlind = pil && obj.code != 44318000;
+        const int dir = (pilBlind || forcedWall.contains(cell)) ? 0 : windowDir(lx, ly, lz);   // there are no windows at an entrance
         bool stepWin = false;                                   // a window on a staircase step of a rotated private house
         if (dir && priv)
         {
@@ -722,23 +866,21 @@ void ObjectVoxelizer::buildWalls()
             const bool zp = (lz == sz - 1 || grid[cell + sxy] == char(0) || grid[cell + sxy] == char(2));
             stepWin = (xn || xp) && (zn || zp) && !cornerCols.contains(pairKey(lx, lz));
         }
-        quint16 wallId = structFor(ly);
         // The facade trim (a user request): the wall row UNDER a window (a sill course) is painted with
         // the contrast stone of the membrane. The wall material from the OSM tag stays everywhere else;
         // schools/kindergartens/malls/private houses never get it (trimId = 0). The corner pilasters the
         // first version added were dropped: the owner found them too much (schools keep their own look).
-        if (trimId && !dir && !forcedWall.contains(cell)
+        if (trimId && !pil && !dir && !forcedWall.contains(cell)
             && ly + 1 < sy && ly + 1 < lyHigh && !forcedWall.contains(cell + sx)
             && windowDir(lx, ly + 1, lz) != 0)
             wallId = trimId;
         // The flat roof membrane (a user request): the roof cap is a dark concrete (facades are usually light),
         // not the wall/structural color; every tier of a stepped complex gets its own cap.
-        if (roofId && !priv && !dir && ly >= 2 && roofTop(cell) && interiorCol(lx, ly, lz))
+        if (roofId && !pil && !priv && !dir && ly >= 2 && roofTop(cell) && interiorCol(lx, ly, lz))
             wallId = roofId;
-        // the corner pilasters of a concrete facade (the panel accent): only the cells of a REAL corner
-        // and only the rows that are light gray concrete - a stone plinth or a brick tier keep their own
-        if (wallId == mallRackId() && cornerCols.contains(pairKey(lx, lz)))
-            wallId = panelTrimId();
+        if (pil)
+            wallId = panelTrimId();                   // a stone plinth or a brick tier of the house is not
+                                                      // a post (the material check above), glass still wins
         addVoxel(minx + lx, miny + ly, minz + lz, dir ? (lair ? IdBlackGlass : milPost ? IdTintedGlass : IdGlass) : wallId);
         if (dir) ++nWindows;
         if (dir)                                                // a window all the way through (a user request):
@@ -1518,13 +1660,11 @@ void ObjectVoxelizer::buildStairs()
         // 9th and the 10th floors. Its cells - a pair of INNER lining cells ("4") beside a step of the
         // 9 -> 10 flight where a person can really stand (the headroom window above the last steps),
         // both cells standing as the full masonry of the house. The night sets an oak door into them,
-        // the morning puts the wall back. Houses of TEN floors and up play, and one house in three of
-        // them (a user request: the eleven-floor pool was so thin the floor stayed a legend among
-        // legends; the dice is a hash of the house corner, so one building is in or out the same way
-        // in every export). Every candidate is baked now (the dread system, see encounters.cpp: at a
-        // scared night the door can appear anywhere, so the pack needs the whole pool).
-        const quint32 halfHash = ((quint32(minx) * 73856093u) ^ (quint32(minz) * 19349663u)) >> 7;
-        if (halfDoors && resid && !priv && nStories >= 10 && halfHash % 3u == 0u)
+        // the morning puts the wall back. Houses of TEN floors and up all play (a user walk-through:
+        // with one house in three the tall towers were so scarce that searching the stairs beat the
+        // reward — the night ended before the search did; the whole house pool is the target now).
+        // The night picks its host among the baked doors itself, so the pool may be generous.
+        if (halfDoors && resid && !priv && nStories >= 10)
         {
             if (f910.s0 >= 0)
             {
@@ -4545,6 +4685,8 @@ int ObjectVoxelizer::run()
 
 
     calcFloors();
+
+    collectCornerPilasters();     // needs priv/thinW from the floor pass and the flood-filled grid
 
     calcPatch();
     // The private sector has NO flat roof (a user request): the roof cap (lyHigh) and
