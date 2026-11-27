@@ -103,32 +103,21 @@ inline QByteArray translate(const QByteArray& in)
           "Город знает твой счёт. Сегодня ночью ходит всё, и в каждом доме есть этаж, который ты не находил." },
         { "that sound travelled further than the glass",
           "тот звук разнёсся дальше, чем само стекло" },
-        // the rules book (raw:"..." pages, set as one data-modify value)
+        // the rules book (raw:"..." pages, set as one data-modify value; the escapes below are the
+        // book's own SNBT \n line breaks, matching byte-for-byte what the generator emits)
         { "Rules of the Night", "Правила ночи" },
-        { "The city feels broken glass. A window you break raises its dread; a pane set back into the "
-          "frame no longer buys you anything.",
-          "Город чувствует разбитое стекло. Окно, которое ты разбиваешь, поднимает его ужас; вставленная "
-          "обратно рама больше ничего не откупает." },
-        { "At 25, 50, 75 and 95 the night speaks, and the higher the dread, the more often its events "
-          "walk. At 95 every house opens its hidden floor.",
-          "На 25, 50, 75 и 95 ночь говорит, и чем выше ужас, тем чаще ходят её события. "
-          "На 95 каждый дом открывает свой скрытый этаж." },
-        { "It calms down over kindness: a light in the dark pays one point, once in five minutes; "
-          "every ten monsters laid to rest pay one more; a bell answers by three, a finished trade "
-          "by one - together three deeds a day at most, and midnight renews them; a tamed cat or "
-          "dog pays three, again and again. The fog park flattens the dread to twenty-five. Dawn "
-          "takes one point back on its own.",
-          "Он утихает от добрых дел: свет в темноте возвращает очко, не чаще раза в пять минут; "
-          "каждые десять упокоенных монстров — ещё очко; колокол отвечает тремя, завершённая "
-          "сделка — очком, вместе не более трёх дел в день, и полночь обновляет этот счёт; "
-          "приручённые кот или пёс — три, снова и снова. Туманный парк сглаживает ужас до "
-          "двадцати пяти. Рассвет сам забирает очко обратно." },
-        { "Every event can be switched off while the world runs: function osmc_enc:off/<name> turns "
-          "one away, osmc_enc:on/<name> calls it back. The dread itself answers the console: function "
-          "osmc_enc:dread/s25 - the same for s0, s50, s75, s95, s100.",
-          "Любое событие можно выключить на ходу: функция osmc_enc:off/<name> убирает одно, "
-          "osmc_enc:on/<name> возвращает. Сам ужас откликается консоли: функция osmc_enc:dread/s25 — "
-          "так же s0, s50, s75, s95, s100." },
+        { R"(The world around you is alive.\nThe city feels broken glass:\nevery window you break raises its dread.\nThe higher the dread,\nthe more often the night's events find you.\nSome are harmless.\nSome can kill you.)",
+          R"(Мир вокруг вас живой.\nГород чувствует разбитое стекло:\nкаждое разбитое окно поднимает его ужас.\nЧем выше ужас,\nтем чаще ночь наводит на вас события.\nОдни безобидны.\nДругие могут убить.)" },
+        { R"(At 25, 50, 75 and 95\nthe night changes its voice.\nAt 95 every house\nopens its hidden floor.)",
+          R"(На 25, 50, 75 и 95\nночь меняет голос.\nНа 95 каждый дом\nоткрывает свой скрытый этаж.)" },
+        { R"(The dread calms down over kindness:\n- a torch in the dark: one point,\nat most once in five minutes\n- ten monsters laid to rest: one point\n- a bell answers by three\n- a finished trade by one)",
+          R"(Ужас утихает от добрых дел:\n- свет в темноте: очко,\nне чаще раза в пять минут\n- десять упокоенных монстров: очко\n- колокол отвечает тремя\n- завершённая сделка - очком)" },
+        { R"(Bells and trades together pay\nat most three times a day,\nand midnight renews the count.\nA tamed cat or dog pays three -\nas often as you earn it.)",
+          R"(Колокол и сделки вместе платят\nне более трёх раз в день,\nи полночь обновляет счёт.\nПриручённый кот или пёс - три,\nи сколько раз заслужите.)" },
+        { R"(The fog park flattens the dread\nto twenty-five, whatever it was.\nDawn takes one point back\non its own.)",
+          R"(Туманный парк сглаживает ужас\nдо двадцати пяти, каким бы он ни был.\nРассвет сам забирает\nочко обратно.)" },
+        { R"(Anything here can be switched off on the run:\nfunction osmc_enc:off/<name> turns one away,\nosmc_enc:on/<name> calls it back.\nThe dread answers the console itself:\nosmc_enc:dread/s25 - the same for\ns0, s50, s75, s95, s100.)",
+          R"(Всё здесь выключается на ходу:\nфункция osmc_enc:off/<name> убирает одно,\nosmc_enc:on/<name> возвращает.\nСам ужас откликается консоли:\nosmc_enc:dread/s25 - так же\ns0, s50, s75, s95, s100.)" },
         // the plain quoted strings: the book's author, the scarecrow's night warning
         { "the city", "город" },
         { "leave by morning", "уйди к утру" },
@@ -139,6 +128,12 @@ inline QByteArray translate(const QByteArray& in)
     for (size_t i = 0; i < sizeof(kPairs) / sizeof(kPairs[0]); ++i)
         for (size_t s = 0; s < 3; ++s)
             out.replace(kPre[s] + kPairs[i][0] + "\"", kPre[s] + kPairs[i][1] + "\"");
+    // SNBT values (the book pages, the author, the CustomName of the scarecrow) carry their quotes
+    // ESCAPED as \"payload\" - without this pass every such payload stayed English in a Russian
+    // world (a user catch: the rules book never came out in Russian)
+    static const QByteArray kEsc = QByteArrayLiteral("\\\"");
+    for (size_t i = 0; i < sizeof(kPairs) / sizeof(kPairs[0]); ++i)
+        out.replace(kEsc + kPairs[i][0] + kEsc, kEsc + kPairs[i][1] + kEsc);
     return out;
 }
 

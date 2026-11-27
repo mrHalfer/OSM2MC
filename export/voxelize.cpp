@@ -1518,10 +1518,13 @@ void ObjectVoxelizer::buildStairs()
         // 9th and the 10th floors. Its cells - a pair of INNER lining cells ("4") beside a step of the
         // 9 -> 10 flight where a person can really stand (the headroom window above the last steps),
         // both cells standing as the full masonry of the house. The night sets an oak door into them,
-        // the morning puts the wall back. Only tall residential houses play. Every candidate is baked
-        // now (the dread system, see encounters.cpp: at a scared night the door can appear anywhere,
-        // so the pack needs the whole pool; the nightly pick stays sparse through the roll).
-        if (halfDoors && resid && !priv && nStories >= 11)
+        // the morning puts the wall back. Houses of TEN floors and up play, and one house in three of
+        // them (a user request: the eleven-floor pool was so thin the floor stayed a legend among
+        // legends; the dice is a hash of the house corner, so one building is in or out the same way
+        // in every export). Every candidate is baked now (the dread system, see encounters.cpp: at a
+        // scared night the door can appear anywhere, so the pack needs the whole pool).
+        const quint32 halfHash = ((quint32(minx) * 73856093u) ^ (quint32(minz) * 19349663u)) >> 7;
+        if (halfDoors && resid && !priv && nStories >= 10 && halfHash % 3u == 0u)
         {
             if (f910.s0 >= 0)
             {

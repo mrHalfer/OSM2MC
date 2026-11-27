@@ -51,7 +51,8 @@ struct EncPack
                                         // a fountain — the ground cell under its post; a metro
                                         // station — the hall floor cell at its platform; a bench —
                                         // the seat cell, dir is the axis of its two-cell row; a
-                                        // stairwell - the door's lower cell, dir is the facing
+                                        // stairwell - the door's lower cell, dir is the facing; a roof — the
+                                        // ridge cell of a private house; a deer — a clearing cell of a dense forest
         int kind = 0;                   // one of the kEp* below
         int dir = 0;                    // 0..3, the kDirNames order (N/E/S/W): a chalk — the arrow
                                         // points this way; a jack — the facing the cemetery baked;
@@ -88,7 +89,7 @@ struct EncPack
     };
     //! The marker tag of a kind ("osmc.klamp"...): the tag the radius searches select by. One list
     //! shared by capProps (the markers) and build (the dispatch), so the two can never disagree
-    static const char* const kKindTag[18];
+    static const char* const kKindTag[20];
     //! Thins the collected places down to the pack's caps BEFORE the world writes the markers: the
     //! survivors of the needCells rules are taken by a uniform stride (a city keeps places spread
     //! over all of it, not only the first blocks built), and every survivor is numbered inside its
@@ -96,7 +97,8 @@ struct EncPack
     static void capProps(QVector<Prop>& props);
     enum { kEpLamp = 0, kEpBusStop = 1, kEpPlayground = 2, kEpChalk = 3, kEpJack = 4,
            kEpCross = 5, kEpWindows = 6, kEpScarecrow = 7, kEpGrave = 8, kEpBell = 9, kEpSchool = 10,
-           kEpCar = 11, kEpLurker = 12, kEpFountain = 13, kEpMetro = 14, kEpBench = 15, kEpHalf = 16, kEpMow = 17 };
+           kEpCar = 11, kEpLurker = 12, kEpFountain = 13, kEpMetro = 14, kEpBench = 15, kEpHalf = 16, kEpMow = 17,
+           kEpRoof = 18, kEpDeer = 19 };
     enum { kLightMast = 0,               // an OSM lighting mast: glowstone lights on a calcite stand
            kLightHanging = 1,            // a street lamp post: a lantern hanging under the wing
            kLightStanding = 2 };         // a park path post: a lantern on top of the stand

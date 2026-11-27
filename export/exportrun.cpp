@@ -320,6 +320,7 @@ private:
     QVector<int> carDoors;                      // the same cars' plate-ready paving cells by a car door, x,y,z triples; x = -0x7FFFFFFF — no free cell by that car (the taxi bake)
     QHash<ColKey, PaleCol> paleCol;
     bool paleDonorUsed;
+    QRect paleZone;                                                   // the Pale Garden's square (a cap, a user request): ≤ 4×4 donor templates, centered on the forest, clamped to its bounds — the donor terrain, the biome, pale trees and the mansion live ONLY inside it
     int erX0, erZ0, erW, erH;
     QVector<qint8> emptyDelta;
     int tsX0 = 0, tsZ0 = 0, tsW = 0, tsH = 0;    // the terrain slope map (8-block cells, see groundTopCol)
@@ -1663,6 +1664,86 @@ void ExportRun::buildPointObjects()
                     ++nScare;
                     break;
                 }
+        }
+        // call_01: the ridge cell of a private house roof (a user request): above the box center the
+        // topmost solid block whose straight pair of same-level neighbours continues the ridge line —
+        // in the private sector that is the half-block roof row (oak_slab top/bottom); the pack's
+        // restore lines carry the full state of the baked block, so a slab gives back its own half
+        int nRoof = 0;
+        for (int i = 0; i < int(privBoxes.size()) && nRoof < 16; ++i)
+        {
+            const QPoint ctr = privBoxes[i].center();
+            const auto git = ground.constFind(pairKey(ctr.x() >> 4, ctr.y() >> 4));
+            if (git == ground.constEnd()) continue;
+            const int gt = int(git->top[(ctr.y() & 15) * 16 + (ctr.x() & 15)]);
+            int ry = 0; quint16 rid = 0;
+            for (int y = gt + 24; y >= gt + 3; --y)
+            {
+                const quint16 b = store.get(ctr.x(), y, ctr.y());
+                if (!b) continue;
+                ry = y; rid = b;                        // the topmost solid is the roof line here — anything above it is an antenna of chance
+                break;
+            }
+            if (!ry) continue;
+            const bool ridge = (store.get(ctr.x() - 1, ry, ctr.y()) && store.get(ctr.x() + 1, ry, ctr.y()))
+                            || (store.get(ctr.x(), ry, ctr.y() - 1) && store.get(ctr.x(), ry, ctr.y() + 1));
+            if (!ridge) continue;                                 // not a ridge line — the fire would sit on a hip
+            EncPack::Prop ep; ep.kind = EncPack::kEpRoof;
+            ep.x = ctr.x(); ep.y = ry; ep.z = ctr.y();
+            EncPack::Cell c; c.x = ctr.x(); c.y = ry; c.z = ctr.y(); c.id = rid;
+            ep.cells << c;
+            encProps.append(ep);
+            ++nRoof;
+        }
+        // fire_deer (a user request): a clearing of a big dense forest and EVERY crown of the hundred-block
+        // grove around it — the event lights the crowns one by one and the fire walks to the rest of the
+        // trees by itself. The crowns are read back from the built store (vegetation has run already), so
+        // the baked cells can never lie about what stands in the world
+        static const quint16 kLeafIds[] = { IdOakLeaves, IdSpruceLeaves, IdDarkOakLeaves, IdBirchLeaves,
+                                            IdJungleLeaves, IdAcaciaLeaves, IdPaleLeaves, IdRedPoplarLeaves,
+                                            IdOrangePoplarLeaves, IdYellowPoplarLeaves };
+        int nDeer = 0;
+        for (int fi = 0; fi < forests.size() && nDeer < 8; ++fi)
+        {
+            const VegSite& fs = forests[fi];
+            if (fs.code != 71111110 || fs.park || fs.intra || fs.spans.size() < 40)
+                continue;                                         // only a big dense massif burns as a grove
+            for (int t = 0; t < 4 && nDeer < 8; ++t)
+            {
+                const quint32 h = colHash(pairKey(fi * 4441 + t, 0x5EED));
+                const ColSpan& c0 = fs.spans[h % quint32(fs.spans.size())];
+                const int tx = c0.x, tz = int(c0.z0 + (h >> 12) % quint32(c0.z1 - c0.z0 + 1));
+                const qint64 ck = pairKey(tx, tz);
+                int yy = 0; quint16 sid = 0;
+                if (!freeCell(ck) || !surfOf(ck, yy, sid)) continue;      // the clearing: dry, free, real ground
+                QVector<EncPack::Cell> crowns;
+                for (int gx = tx - 50; gx <= tx + 50 && crowns.size() < 100; gx += 8)
+                    for (int gz = tz - 50; gz <= tz + 50 && crowns.size() < 100; gz += 8)
+                    {
+                        const qint64 dk = pairKey(gx, gz);
+                        if (colWater.contains(dk) || colMin.contains(dk)) continue;   // no crowns over water or a house
+                        const int st = surfaceTop(dk);
+                        for (int y = st + 30; y >= st + 2; --y)
+                        {
+                            const quint16 b = store.get(gx, y, gz);
+                            if (!b) continue;
+                            for (const quint16 lf : kLeafIds)
+                                if (b == lf)
+                                {
+                                    EncPack::Cell c; c.x = gx; c.y = y; c.z = gz; c.id = b;
+                                    crowns << c;
+                                    break;
+                                }
+                            break;                                // the first solid decides — higher hits are somebody's crown
+                        }
+                    }
+                if (crowns.size() < 40) continue;                 // a scattering of trees is not a burning grove
+                EncPack::Prop ep; ep.kind = EncPack::kEpDeer;
+                ep.x = tx; ep.y = yy + 1; ep.z = tz;
+                ep.cells = crowns;
+                encProps.append(ep);
+                ++nDeer;
+            }
         }
         // matron: the cabinet cell against a school facade with three walk cells out of it. The site's
         // box is the polygon's own frame while the built footprint is rotated and can be L-shaped, so the
@@ -4489,40 +4570,89 @@ void ExportRun::buildStreetFurniture()
 }
 
 // The step-up to an entrance whose sill stands over the outer ground (a user request): solid rows of the
-// wall material in front of the door — one row per block of the height, never higher than 2 blocks, 3 cells
-// wide along the wall (4 for a double door). Roadway and water columns are left alone: the exporter never
-// paves a road over or dams a stream; the step simply narrows around them.
+// wall material in front of the door — one row per block of the rise, 3 cells wide along the wall (4 for a
+// double door). The ground around the house lives in the dense "ground" chunks (a column there is solid up
+// to its "top"), the objects in the "store" — the scan reads BOTH (looking only at the store made every
+// column over the terrain a pit, and steps appeared only where a paving had been laid in front of the door).
+// Roadway and water cells are left alone: the exporter never paves a road over or dams a stream.
 void ExportRun::buildDoorSteps()
 {
     if (doorSteps.isEmpty()) return;
     static const int ddx[4] = { 0, 1, 0, -1 }, ddz[4] = { -1, 0, 1, 0 };   // N, E, S, W (as in buildEntrances)
     const auto latX = [](int d) { return ddz[d] != 0 ? 1 : 0; };
     const auto latZ = [](int d) { return ddx[d] != 0 ? 1 : 0; };
+    // the little plants the step may stand on: grass sprigs, flowers and litter give way to it,
+    // anything structural (a paving, a wall, a fence) keeps the cell free of the step as before
+    const auto soft = [](quint16 bid)
+    {
+        return bid == IdGrassPlant || bid == IdTallGrass || bid == IdTallGrassUpper
+            || bid == IdLeafLitter || bid == IdPaleMossCarpet
+            || (bid >= IdFlowerBase && bid < IdFlowerMax);
+    };
+    // the topmost solid cell of the column at or under fromY: a store block (an object, a paving, a decor)
+    // or the top of the ground column — the dense ground of buildGround is not visible through the store.
+    // A soft plant standing on the ground is not a floor: the scan steps through it to the real surface
+    // the step's own stair block: the material family of the apron; facing = the climbing
+    // direction (vanilla: the high side of a stair looks where the walker goes), so for a row
+    // outside the door it is the direction back to the wall - the door's outward normal flipped
+    const auto stairFor = [](quint16 mat, int face) -> quint16
+    {
+        const QString n = blockName(mat);
+        quint16 base = IdStoneStairsN;
+        if (n.contains(QLatin1String("brick"))) base = IdBrickStairsN;
+        else if (n.contains(QLatin1String("planks")) || n.contains(QLatin1String("log")))
+            base = IdStairsN;
+        return quint16(base + (face & 3));
+    };
+    const auto solidTop = [this, &soft](int x, int z, int fromY, int* yOut) -> bool
+    {
+        int gt = std::numeric_limits<int>::min();
+        const auto git = ground.constFind(pairKey(x >> 4, z >> 4));
+        if (git != ground.constEnd() && !git->isEmpty())
+            gt = git->top[(z & 15) * 16 + (x & 15)];
+        for (int y = fromY; y >= fromY - 12; --y)
+        {
+            const quint16 bid = store.get(x, y, z);
+            if (gt >= y || (bid != IdAir && !soft(bid))) { *yOut = y; return true; }
+        }
+        return false;
+    };
     for (const DoorStepSite& ds : doorSteps)
     {
         const int ox = ds.x + ddx[ds.dir], oz = ds.z + ddz[ds.dir];        // the cell right outside the door
         int gy = 0;
-        bool found = false;
-        for (int y = ds.y - 1; y >= ds.y - 6; --y)
-            if (store.get(ox, y, oz) != IdAir) { gy = y; found = true; break; }
-        if (!found) continue;                                             // a pit under the door — nothing to lean on
+        if (!solidTop(ox, oz, ds.y - 1, &gy)) continue;                   // a pit under the door — nothing to lean on
         const int gap = ds.y - (gy + 1);                                  // the sill stands `gap` rows over the walking row
         if (gap < 2) continue;                                            // flush (or 1 block): the player just walks in
         const int w1 = ds.dbl ? 2 : 1;                                    // along the wall: -1..+1, a pair -1..+2
-        for (int d = 1; d <= 2; ++d)
-        {   // the step line d cells out of the wall: its top row sits one block below the sill per cell of the setback
-            const int top = std::min(ds.y - d, gy + 2);                   // capped: no step taller than 2 blocks
+        const int reach = std::min(gap, 6);                               // one stair row per one block of the rise
+        for (int d = 0; d < reach; ++d)
+        {   // the step line d cells out of the wall (d=0 stands AGAINST it): its top sits exactly d rows
+            // below the door's floor - one row of rise per row of setback, the whole flight walkable
+            // as stairs (the old clamp at two blocks over the ground flattened the first rows into a
+            // 2-block ledge the owner caught))
             const int hx = ox + d * ddx[ds.dir], hz = oz + d * ddz[ds.dir];
             for (int t = -1; t <= w1; ++t)
             {
                 const int bx = hx + t * latX(ds.dir), bz = hz + t * latZ(ds.dir);
                 const qint64 ck = pairKey(bx, bz);
                 if (roadCols.contains(ck) || colWater.contains(ck)) continue;
-                for (int y = gy + 1; y <= top; ++y)
+                const auto git = ground.constFind(pairKey(bx >> 4, bz >> 4));
+                if (git != ground.constEnd() && !git->isEmpty()
+                        && git->wd[(bz & 15) * 16 + (bx & 15)] > 0) continue;   // a water pit: no dam across it
+                int gy2 = 0;
+                if (!solidTop(bx, bz, ds.y - 1, &gy2)) continue;
+                const int top = ds.y - 1 - d;                       // the walking row of this step
+                if (top < gy2 + 1) continue;                        // the ground here is already at or over it
+                bool clear = true;
+                for (int y = gy2 + 1; y <= top; ++y)
                 {
-                    if (store.get(bx, y, bz) != IdAir) break;             // something already stands in the way
-                    store.set(bx, y, bz, ds.mat);
+                    const quint16 here = store.get(bx, y, bz);
+                    if (here != IdAir && !soft(here)) { clear = false; break; }   // something stands in the way
                 }
+                if (!clear) continue;
+                for (int y = gy2 + 1; y < top; ++y) store.set(bx, y, bz, ds.mat);    // the body under the step
+                store.set(bx, top, bz, stairFor(ds.mat, (ds.dir + 2) & 3));          // the step itself
             }
         }
     }
@@ -6098,7 +6228,7 @@ bool ExportRun::buildVegetation()
     for (int fidx = 0; fidx < forests.size(); ++fidx)
     {
         const VegSite& site = forests[fidx];
-        const bool pale = (fidx == paleIdx);
+        const bool paleSite = (fidx == paleIdx);        // the Pale Garden forest: its pale trees grow only inside the garden zone (per-cell check below)
         // A 6×6 grid (~2.8% of the columns, like the former ~2.5%): in every cell one hash-shifted place, inside
         // the forest — a tree. The work is of the order of the number of bbox cells, not the number of forest columns (tens of millions).
         const int G = site.dense ? 8 : 6;                // yards (OSM): an 8×8 grid (it was 4×4: the crowns of neighboring trees merged into a solid canopy over the whole yard)
@@ -6125,6 +6255,9 @@ bool ExportRun::buildVegetation()
             if (tx < site.minX || tx > site.maxX || tz < site.minZ || tz > site.maxZ) continue;
             if (!spansContain(site.spans, tx, tz)) continue;
             const qint64 ck = pairKey(tx, tz);
+            const bool pale = paleSite && paleZone.contains(tx, tz) && !cemeteryCols.contains(ck);   // inside the
+            // zone the garden is planted with pale oaks, outside it the forest is an ordinary one,
+            // and a cemetery keeps its dark grove even under the garden (a user catch)
             if (colWater.contains(ck)) continue;               // we do not grow on water
             if (noTreePadCols.contains(ck)) continue;          // the reserved spots (apiaries, farms, objects from points)
             if (colWool.contains(ck)) continue;                // a roadway or a paved square (a request: no trees on the plaza paving)
@@ -6140,7 +6273,7 @@ bool ExportRun::buildVegetation()
                 const auto pcit = paleCol.constFind(ck);
                 if (pcit != paleCol.constEnd() && pcit->pid < 0 && pcit->w >= 235 && pcit->surf != 0) continue;
             }
-            if (paleDonorUsed && !pale && spansContain(forests[paleIdx].spans, tx, tz)) continue;
+            if (paleDonorUsed && !paleSite && paleZone.contains(tx, tz) && spansContain(forests[paleIdx].spans, tx, tz)) continue;   // a garden donor column — a foreign forest does not push its trees in here
             if (!patchCols.isEmpty() && patchCols.contains(pairKey(tx, tz))) continue;
             if (!lcapCol.isEmpty() && lcapCol.contains(ck)) continue;             // the grounds (lcapol): bare rock and forced sand grow no trees      // outposts/camps: trees do not climb into the structures   // other (overlapping) forests do not plant extra trees into the Pale Garden
             if (pale)
@@ -6285,9 +6418,10 @@ bool ExportRun::buildVegetation()
         }
     }
     if (paleIdx >= 0 && paleDonorUsed && !heartsByChunk.isEmpty())
-    {   // CREAKING HEARTS — rare and spaced apart (horror, not a "wild run"): the extra ones (closer than 32 blocks to an already kept one) become a log again,
-        // and where there is no heart at all within a radius of 50 blocks, a new one is added into a suitable trunk (not closer than 50 to the others).
-        constexpr double kMinD = 32.0, kGapD = 50.0;
+    {   // CREAKING HEARTS — the owner walks the garden for them: only hearts closer than 10 blocks
+        // to an already kept one become a log again (a wide gap culled whole groves),
+        // and a heart is added where none stands within 30 blocks of another.
+        constexpr double kMinD = 10.0, kGapD = 30.0;
         QVector<QPoint3> all;
         for (auto it = heartsByChunk.constBegin(); it != heartsByChunk.constEnd(); ++it) all += it.value();
         std::sort(all.begin(), all.end(), [&](const QPoint3& a, const QPoint3& b)
@@ -6338,6 +6472,7 @@ bool ExportRun::buildVegetation()
         for (const ColSpan& c : ps.spans)
             for (int z = c.z0; z <= c.z1; ++z)
             {
+                if (!paleZone.contains(c.x, z)) continue;                   // the moss and eyeblossoms live inside the garden zone only
                 const qint64 ck = pairKey(c.x, z);
                 if (colWater.contains(ck) || colMin.contains(ck) || colWool.contains(ck)) continue;
                 const quint32 hq = colHash(ck ^ 0xB1EDull);
@@ -6718,14 +6853,19 @@ bool ExportRun::buildVegetation()
             if (store.get(bx, y0, bz) != IdAir) continue;
             store.set(bx, y0, bz, qPumpkin);
             ++nPumpkin;
+            if (world.encounters)       // the carved grass faces watch too (a user catch: the posts
+            {   EncPack::Prop ep; ep.kind = EncPack::kEpJack; ep.x = bx; ep.y = y0; ep.z = bz;
+                encProps.append(ep); }  // turned, the cemetery carvings never had a marker)
         }
         QSet<ColKey> cells6;
         for (ColKey ck : cemeteryCols)
             cells6.insert(pairKey(floorC6(keyFirst(ck)), floorC6(keySecond(ck))));
         for (ColKey cell : cells6)
-        {   // the monsters of the graveyard — a 6x6 grid, ~45% of the cells: a zombie, a skeleton, a spider or a witch
+        {   // the monsters of the graveyard — a 6x6 grid, ~22% of the cells (a user request: half
+            // of the old crowd - a zombie, a skeleton, a spider - and a witch one case in eight
+            // of what it was, a whole mob of them was impossible to fight through)
             const quint32 hm = colHash(cell ^ 0x4045E7ull);
-            if (hm % 100u >= 45u) continue;
+            if (hm % 100u >= 22u) continue;
             const int mx = keyFirst(cell) * 6 + int(hm % 6u), mz = keySecond(cell) * 6 + int((hm >> 8) % 6u);
             const ColKey ck = pairKey(mx, mz);
             if (!cemeteryCols.contains(ck)) continue;
@@ -6734,7 +6874,13 @@ bool ExportRun::buildVegetation()
             const int y0 = surfaceTop(ck) + 1;
             if (store.get(mx, y0, mz) != IdAir || store.get(mx, y0 + 1, mz) != IdAir) continue;   // the body needs two rows
             NpcSite ms;
-            ms.kind = 4; ms.variant = int((hm >> 16) % 4u);          // 0 zombie, 1 skeleton, 2 spider, 3 witch
+            ms.kind = 4;
+            ms.variant = ((hm >> 16) % 32u) >= 30u ? 3 : int((hm >> 16) % 3u);   // a witch in 2 cases out
+                                                                            // of 32: eight times rarer
+                                                                            // than the old quarter (a user
+                                                                            // request), the rest split into
+                                                                            // zombie, skeleton and spider
+                                                                            // evenly
             ms.x = mx; ms.y = y0; ms.z = mz; ms.yaw = int((hm >> 4) % 4u) * 90;
             npcs.append(ms);
             ++nCemMob;
@@ -6788,6 +6934,10 @@ bool ExportRun::buildVegetation()
         snprintf(cbuf, sizeof cbuf, "3.5 cemeteries: %d columns, %d dark oaks, %d crosses, %d jack o'lanterns, %d pumpkins, %d monsters, %d chests",
                  int(cemeteryCols.size()), nCemTrees, nCross, nJack, nPumpkin, nCemMob, nCemChest);
         tmcStepLog(cbuf);
+        // the faces count into the report too (a user ask): the watch keeps every one of them,
+        // so these two numbers ARE the size of the kEpJack marker list
+        res.lairInfo += QObject::tr("; cemetery: %1 jack o'lanterns, %2 carved pumpkins")
+                           .arg(nJack).arg(nPumpkin);
     }
     return true;
 }
@@ -7414,14 +7564,15 @@ bool ExportRun::buildForestTreasures()
                 const int y = surfaceTop(ck) + 1;
                 if (y > 254) continue;
                 if (paleF && patchCols.contains(ck)) continue;                // not inside the mansion / a patch
+                const bool paleHere = paleF && paleZone.contains(tx, tz);     // the garden's own bonuses (litter, rich loot) — inside its zone only
                 {
                     const quint16 here = store.get(bx, y, bz);
-                    if (paleF && (here == IdPaleMossCarpet || here == IdLeafLitter || here == IdGrassPlant || here == IdTallGrass))
+                    if (paleHere && (here == IdPaleMossCarpet || here == IdLeafLitter || here == IdGrassPlant || here == IdTallGrass))
                         store.erase(bx, y, bz);                                   // the chest displaces the forest litter
                     else if (here != IdAir) continue;                             // the place is already taken by a tree/planting
                 }
                 store.set(bx, y, bz, IdChest);
-                if (paleF)
+                if (paleHere)
                 {   // Pale Garden: 35% expensive (mansion/pyramid/outpost/sunken treasure), 25% medium, the rest everyday
                     const quint32 hq = colHash(ck ^ 0x51ull);
                     const int rich = kChestLootCount - 3;                         // woodland_mansion
@@ -8372,6 +8523,7 @@ bool ExportRun::buildGround()
     // PALE GARDEN: the biggest forest (by the number of columns) becomes a full "Pale Garden" biome — the biome on
     // 4×4 cells along the forest outline, trees of pale oak (a 2×2 trunk, some with a "creaking heart"), moss, "eyeblossom" flowers.
     paleIdx = -1;
+    paleZone = QRect();
     {
         qint64 bestArea = 0;
         // a forest set by the user by chunk (WorldOptions::paleForestChunk): the forest nearest to the chunk center; otherwise — the biggest
@@ -8444,22 +8596,40 @@ bool ExportRun::buildGround()
         }
         if (paleIdx >= 0 && bestArea >= 2000)
         {
+            // PALE GARDEN ZONE (a user request): the garden does not cover the whole massif — a square of at most
+            // 4×4 donor templates, centered on the center of gravity and clamped inside the forest bounds. The biome,
+            // the donor terrain, pale trees, the mansion and the litter live only inside it; around it the forest
+            // goes on as usual (its own relief, its own trees, the taiga/forest biome).
+            const VegSite& pf = forests[paleIdx];
+            double sx = 0, sz = 0; qint64 n = 0;
+            for (const ColSpan& c : pf.spans) { const qint64 len = c.z1 - c.z0 + 1; sx += double(c.x) * len; sz += 0.5 * (c.z0 + c.z1) * len; n += len; }
+            int px = int(std::lround(sx / double(n))), pz = int(std::lround(sz / double(n)));
+            if (!spansContain(pf.spans, px, pz))
+            {   // the center of gravity is outside the forest (a ring, a horseshoe) — the nearest column from the middle of the list
+                const ColSpan& mid = pf.spans[pf.spans.size() / 2];
+                px = mid.x; pz = (mid.z0 + mid.z1) / 2;
+            }
+            {   // 4 donor tiles per side (the donor is 224×224 → 896×896 at most); no donor file (W=0) — the nominal tile,
+                // a forest smaller than the cap gets the whole of itself as the zone (nothing changes for it)
+                const int tw = paleDonor.W > 0 ? paleDonor.W : 224, th = paleDonor.H > 0 ? paleDonor.H : 224;
+                const int zw = std::min(4 * tw, pf.maxX - pf.minX + 1), zh = std::min(4 * th, pf.maxZ - pf.minZ + 1);
+                paleZone = QRect(px - zw / 2, pz - zh / 2, zw, zh);
+                if (paleZone.left() < pf.minX) paleZone.moveLeft(pf.minX);
+                if (paleZone.top() < pf.minZ) paleZone.moveTop(pf.minZ);
+                if (paleZone.right() > pf.maxX) paleZone.moveLeft(pf.maxX - paleZone.width() + 1);
+                if (paleZone.bottom() > pf.maxZ) paleZone.moveTop(pf.maxZ - paleZone.height() + 1);
+            }
             for (const ColSpan& c : forests[paleIdx].spans)
                 for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
-                    paleCells.insert(pairKey(c.x >> 2, z4));
+                    if (paleZone.contains((c.x >> 2) * 4 + 2, z4 * 4 + 2))    // a 4×4 biome cell is pale when its center is in the zone
+                        paleCells.insert(pairKey(c.x >> 2, z4));
             {   // coordinates for the player (/tp): a point inside the forest closer to the center of gravity, the chunk (as in F3), the size
-                const VegSite& pf = forests[paleIdx];
-                double sx = 0, sz = 0; qint64 n = 0;
-                for (const ColSpan& c : pf.spans) { const qint64 len = c.z1 - c.z0 + 1; sx += double(c.x) * len; sz += 0.5 * (c.z0 + c.z1) * len; n += len; }
-                int px = int(std::lround(sx / double(n))), pz = int(std::lround(sz / double(n)));
-                if (!spansContain(pf.spans, px, pz))
-                {   // the center of gravity is outside the forest (a ring, a horseshoe) — the nearest column from the middle of the list
-                    const ColSpan& mid = pf.spans[pf.spans.size() / 2];
-                    px = mid.x; pz = (mid.z0 + mid.z1) / 2;
-                }
-                res.lairInfo += QObject::tr("%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10")
-                                    .arg(res.lairInfo.isEmpty() ? QString() : QStringLiteral("; ")).arg(bestArea).arg(px).arg(pz).arg(px >> 4).arg(pz >> 4)
-                                    .arg(pf.minX).arg(pf.maxX).arg(pf.minZ).arg(pf.maxZ);
+                QString pg = QObject::tr("%1Pale Garden: %2 m², center x=%3 z=%4 (chunk %5 %6), bounds x %7…%8, z %9…%10")
+                                 .arg(res.lairInfo.isEmpty() ? QString() : QStringLiteral("; ")).arg(bestArea).arg(px).arg(pz).arg(px >> 4).arg(pz >> 4)
+                                 .arg(pf.minX).arg(pf.maxX).arg(pf.minZ).arg(pf.maxZ);
+                pg += QObject::tr(", zone x %1…%2, z %3…%4")
+                          .arg(paleZone.left()).arg(paleZone.right()).arg(paleZone.top()).arg(paleZone.bottom());
+                res.lairInfo += pg;
             }
         }
         else
@@ -8468,9 +8638,9 @@ bool ExportRun::buildGround()
             res.lairInfo += QObject::tr("%1Pale Garden: no suitable forest").arg(res.lairInfo.isEmpty() ? QString() : QStringLiteral("; "));
         }
     }
-    // Spruce forests (71111110, big): the taiga biome cells along the outline
+    // Spruce forests (71111110, big): the taiga biome cells along the outline (the Pale Garden forest too — its cells OUTSIDE the zone stay taiga, the pale ones are overwritten below)
     for (int fi = 0; fi < forests.size(); ++fi)
-        if (forests[fi].spruce && fi != paleIdx)
+        if (forests[fi].spruce)
             for (const ColSpan& c : forests[fi].spans)
                 for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
                     taigaCells.insert(pairKey(c.x >> 2, z4));
@@ -8480,7 +8650,7 @@ bool ExportRun::buildGround()
         if (pit.value() == quint16(IdTallGrass))
             biomeCells.insert(pairKey(keyFirst(pit.key()) >> 2, keySecond(pit.key()) >> 2), quint8(7));
     for (int fi = 0; fi < forests.size(); ++fi)
-        if (fi != paleIdx && !forests[fi].spruce)
+        if (!forests[fi].spruce)    // the Pale Garden forest too: outside its zone the ordinary forest biome stays (pale cells are inserted over these below)
             for (const ColSpan& c : forests[fi].spans)
                 for (int z4 = c.z0 >> 2; z4 <= (c.z1 >> 2); ++z4)
                 {
@@ -8571,6 +8741,7 @@ bool ExportRun::buildGround()
     if (paleIdx >= 0 && !paleDonor.empty())
     {
         const VegSite& ps = forests[paleIdx];
+        const int pzx0 = paleZone.left(), pzz0 = paleZone.top(), pzx1 = paleZone.right(), pzz1 = paleZone.bottom();   // the tiling is anchored to the ZONE corner
         const int pbx0 = ps.minX, pbz0 = ps.minZ, PW = ps.maxX - ps.minX + 1, PH = ps.maxZ - ps.minZ + 1;
         if (qint64(PW) * PH <= 60000000ll)
         {
@@ -8596,8 +8767,9 @@ bool ExportRun::buildGround()
             constexpr double kBlendL = 28.0;                                // the width of the smooth transition at the forest border, blocks
             constexpr int kBlendB = 12;                                     // the ramp width at the seam of a replaced mansion box, blocks
             auto donorIndex = [&](int x, int z) -> int
-            {
-                int ux = (x - pbx0) % (2 * paleDonor.W), uz = (z - pbz0) % (2 * paleDonor.H);
+            {   // the mirrored tiling anchored at the zone corner (the double modulo keeps negative differences in range too)
+                int ux = int(((x - pzx0) % (2 * paleDonor.W) + 2 * paleDonor.W) % (2 * paleDonor.W));
+                int uz = int(((z - pzz0) % (2 * paleDonor.H) + 2 * paleDonor.H) % (2 * paleDonor.H));
                 if (ux >= paleDonor.W) ux = 2 * paleDonor.W - 1 - ux;
                 if (uz >= paleDonor.H) uz = 2 * paleDonor.H - 1 - uz;
                 return uz * paleDonor.W + ux;
@@ -8613,7 +8785,7 @@ bool ExportRun::buildGround()
                 QVector<int> compSize;
                 for (const ColSpan& c : ps.spans)
                     for (int z = c.z0; z <= c.z1; ++z)
-                        if (paleDonor.mansion[donorIndex(c.x, z)]) comp.insert(pairKey(c.x, z), -1);
+                        if (paleZone.contains(c.x, z) && paleDonor.mansion[donorIndex(c.x, z)]) comp.insert(pairKey(c.x, z), -1);   // the zone columns only
                 QVector<qint64> stack;
                 for (auto it = comp.begin(); it != comp.end(); ++it)
                 {
@@ -8638,7 +8810,7 @@ bool ExportRun::buildGround()
                 // We prefer a whole mansion (not cut by the forest edge) in a direct (non-mirrored) tile; otherwise the largest.
                 QVector<char> compMirror(compSize.size(), 0);
                 for (auto it = comp.constBegin(); it != comp.constEnd(); ++it)
-                    if ((keyFirst(it.key()) - pbx0) % (2 * paleDonor.W) >= paleDonor.W || (keySecond(it.key()) - pbz0) % (2 * paleDonor.H) >= paleDonor.H) compMirror[it.value()] = 1;
+                    if ((keyFirst(it.key()) - pzx0) % (2 * paleDonor.W) >= paleDonor.W || (keySecond(it.key()) - pzz0) % (2 * paleDonor.H) >= paleDonor.H) compMirror[it.value()] = 1;
                 int fullCount = 0;
                 for (const quint8 mv : paleDonor.mansion) if (mv) ++fullCount;
                 int bestComp = -1;
@@ -8665,8 +8837,11 @@ bool ExportRun::buildGround()
             for (const ColSpan& c : ps.spans)
                 for (int z = c.z0; z <= c.z1; ++z)
                 {
+                    if (!paleZone.contains(c.x, z)) continue;         // the donor terrain lives inside the zone only (a cap) — outside it the forest is ordinary
                     const qint64 ck = pairKey(c.x, z);
-                    if (reliefBlocked(ck)) continue;   // buildings and water are not touched (roads follow the terrain)
+                    if (reliefBlocked(ck) || cemeteryCols.contains(ck)) continue;   // buildings, water and cemeteries
+                    // are not touched (roads follow the terrain; the cemetery grove was planted already and must
+                    // not be buried or left floating over the poured garden ground - a user catch)
                     int di = donorIndex(c.x, z);
                     int seamDi = -1, seamD = 0;                            // a replaced mansion box: the donor column just outside its nearest edge + the distance to that edge
                     if (paleDonor.mansion[di] && !keepMansion.contains(ck))
@@ -8683,6 +8858,13 @@ bool ExportRun::buildGround()
                     }
                     double wv = std::min(1.0, double(dist[(z - pbz0) * PW + (c.x - pbx0)]) / kBlendL);
                     wv = wv * wv * (3.0 - 2.0 * wv);
+                    {   // the zone border: the same smoothstep against the zone edge — the garden descends into the forest
+                        // before the cap line, not on it (when the zone is the whole forest nothing changes: the forest-edge
+                        // blend above already brings wv to ~0 there)
+                        const int zd = std::min(std::min(c.x - pzx0, pzx1 - c.x), std::min(z - pzz0, pzz1 - z)) + 1;
+                        const double wz0 = std::min(1.0, double(zd) / kBlendL), wz = wz0 * wz0 * (3.0 - 2.0 * wz0);
+                        wv *= wz;
+                    }
                     wv *= edgeFade(c.x, z);
                     int hdHere = paleDonor.hd[di];
                     if (seamDi >= 0 && seamD < kBlendB)
@@ -8714,7 +8896,6 @@ bool ExportRun::buildGround()
         QtConcurrent::blockingMap(reliefIdx, [&](int fi)
         {
             const VegSite& fs = forests[fi];
-            if (fi == paleIdx) return;                                      // the Pale Garden terrain is not touched
             if (fs.loose) return;                                           // yards and taiga of the private sector (OSM): the "empty lands" terrain, see below
             if (fs.park)
             {   // big parks (from 6000 m²) get terrain too, softer than the forest one; small ones stay flat
@@ -8751,6 +8932,7 @@ bool ExportRun::buildGround()
                 for (int z = c.z0; z <= c.z1; ++z)
                 {
                     const qint64 ck = pairKey(c.x, z);
+                    if (fi == paleIdx && paleZone.contains(c.x, z)) continue;   // the garden's own ground (donor or procedural) stands here, not the forest hills
                     if (reliefBlocked(ck) || paleCol.contains(ck)) continue;
                     double wv = std::min(1.0, double(dist[(z - fbz0) * FW + (c.x - fbx0)]) / kBlendR);
                     wv = wv * wv * (3.0 - 2.0 * wv);
@@ -8793,7 +8975,14 @@ bool ExportRun::buildGround()
         {
             const VegSite& fs = forests[fi];
             const PaleDonor& pd = patches[pi];
-            const int bw = fs.maxX - fs.minX + 1 - pd.W, bh = fs.maxZ - fs.minZ + 1 - pd.H;
+            int pxL = fs.minX, pzT = fs.minZ, pxR = fs.maxX, pzB = fs.maxZ;
+            if (fi == paleIdx)
+            {   // the pale garden's patches stay inside its zone (a user request) — the mansion and the camps are
+                // not scattered over the ordinary forest around the garden
+                pxL = std::max(pxL, paleZone.left()); pzT = std::max(pzT, paleZone.top());
+                pxR = std::min(pxR, paleZone.right()); pzB = std::min(pzB, paleZone.bottom());
+            }
+            const int bw = pxR - pxL + 1 - pd.W, bh = pzB - pzT + 1 - pd.H;
             if (bw <= 0 || bh <= 0) return false;
             // Mansion: from the suitable places (up to 150) we take the one where the forest terrain fits best the terrain of the structure itself, and the height
             // is chosen by the average deviation around — otherwise the mansion "sits in a pit"/on a fill that the smoothing ring cuts off.
@@ -8828,7 +9017,7 @@ bool ExportRun::buildGround()
                 for (int t = 0; t < 400 && nValid < 150; ++t)
                 {
                     const quint32 h = colHash(pairKey(fi * 977 + int(salt & 0xFF), t) ^ (qint64(salt) << 8));
-                    const int x0 = fs.minX + int(h % quint32(bw)), z0 = fs.minZ + int((h >> 12) % quint32(bh));
+                    const int x0 = pxL + int(h % quint32(bw)), z0 = pzT + int((h >> 12) % quint32(bh));
                     if (!placeable(x0, z0)) continue;
                     ++nValid;
                     QVector<double> diffs;
@@ -8854,7 +9043,7 @@ bool ExportRun::buildGround()
             for (int t = 0; t < 400; ++t)
             {
                 const quint32 h = colHash(pairKey(fi * 977 + int(salt & 0xFF), t) ^ (qint64(salt) << 8));
-                int x0 = fs.minX + int(h % quint32(bw)), z0 = fs.minZ + int((h >> 12) % quint32(bh));
+                int x0 = pxL + int(h % quint32(bw)), z0 = pzT + int((h >> 12) % quint32(bh));
                 if (havePick) { x0 = pickX; z0 = pickZ; }
                 const bool ok = placeable(x0, z0);
                 if (!ok && havePick) return false;
@@ -9445,6 +9634,7 @@ bool ExportRun::buildGround()
             auto inPale = [&](const ColKey& ck) -> bool
             {
                 return paleIdx >= 0 && paleIdx < forests.size()
+                    && paleZone.contains(keyFirst(ck), keySecond(ck))         // only the garden zone keeps its own, donor relief
                     && spansContain(forests[paleIdx].spans, keyFirst(ck), keySecond(ck));
             };
             QSet<ColKey> track = roadCols;
@@ -14932,7 +15122,6 @@ McWorldExporter::Result ExportRun::run()
     // The start of the step of stage st (the stage name — in the window caption, see the tqt 3D window, updateLoadStatus): without a counter
     // (total=0) the caption just shows WHAT is being done now, not the "hanging" percent of the previous step.
     if (!buildGround()) return res;
-    buildDoorSteps();                                   // step-ups to entrance sills over the new ground (see buildEntrances)
     lap("before 3.5");
     beginStep(4, vegCells);
     if (!buildVegetation()) return res;
@@ -14973,6 +15162,10 @@ McWorldExporter::Result ExportRun::run()
     buildEdgeFluids();
     lap("before 3.576");
     buildPlatforms();
+    // The step-ups to entrance sills LAST of all the ground stages (the owner's catch: measured
+    // before the late fill, the turfed surface and the edge fluids, the doors stood over ground
+    // that was not there yet - and no stair was built or was built in the air)
+    buildDoorSteps();
     lap("before 4.");
     tmcStepLog("post: chunk assembly start");
     if (!assembleChunks()) return res;

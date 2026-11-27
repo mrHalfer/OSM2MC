@@ -152,11 +152,11 @@ const Row kRows[] = {
     { "pumpkin_faces",          QT_TRANSLATE_NOOP("EncountersDialog", "Graveyards"),
       QT_TRANSLATE_NOOP("EncountersDialog", "Pumpkins That Turn To You"),
       QT_TRANSLATE_NOOP("EncountersDialog", "Jack-o'-lanterns turn their carved faces toward the nearest witness - "
-                              "the block changes right before your eyes, and the more dreadful the night, "
-                              "the more restless the faces."),
-      QT_TRANSLATE_NOOP("EncountersDialog", "No night roll at all: every pumpkin near you spins its own die every "
-                              "five seconds, and the dread tier buys the faces extra turns. A face that has "
-                              "just turned rests a minute.") },
+                              "the block changes right before your eyes, every face within a "
+                              "fifty-block ring, day or night."),
+      QT_TRANSLATE_NOOP("EncountersDialog", "No dice at all: every two seconds every graveyard pumpkin within fifty "
+                              "blocks of a player re-aims at the closest witness; a face already looking "
+                              "the right way stays quiet.") },
     { "fresh_grave",            nullptr,
       QT_TRANSLATE_NOOP("EncountersDialog", "The Fresh Grave"),
       QT_TRANSLATE_NOOP("EncountersDialog", "Lit up as 'fresh soil'. Do not dig: the shovel's sound breaks off on "
@@ -336,9 +336,11 @@ const Row kRows[] = {
       QT_TRANSLATE_NOOP("EncountersDialog", "The Scarecrow That Turned"),
       QT_TRANSLATE_NOOP("EncountersDialog", "By day it stands with its back to the house - you may check and turn "
                               "it. At night it faces the house, and on its chest a board says 'leave "
-                              "by morning'."),
+                              "by morning'. And it does not like being watched from behind."),
       QT_TRANSLATE_NOOP("EncountersDialog", "Night: the scarecrow turns to face the house, puts on a carved pumpkin "
-                              "and the warning 'leave by morning'; by day it turns back.") },
+                              "and the warning 'leave by morning'; by day it turns back. And every two "
+                              "seconds: if the closest player within twenty blocks is not looking at "
+                              "him, he swings around to watch them - look back and he is at his post again.") },
     { "howling_dog",            nullptr,
       QT_TRANSLATE_NOOP("EncountersDialog", "The Dog Howling At One Fence"),
       QT_TRANSLATE_NOOP("EncountersDialog", "The neighbor's dog howls at one fence only. By that fence, an "
@@ -501,6 +503,30 @@ const Row kRows[] = {
                               "morning the sign reads: 'I told you'."),
       QT_TRANSLATE_NOOP("EncountersDialog", "The logic is coming: by the design a sign that rewrites itself by "
                               "morning.") },
+    { "gas_cylinder",           QT_TRANSLATE_NOOP("EncountersDialog", "Destructive events"),
+      QT_TRANSLATE_NOOP("EncountersDialog", "The Gas Cylinder"),
+      QT_TRANSLATE_NOOP("EncountersDialog", "One window of a high-rise hisses quietly - the stairwell smells of "
+                               "gas. The glass turns into a primed cylinder, and the window blows out."),
+      QT_TRANSLATE_NOOP("EncountersDialog", "Day 14:00-22:00, one roll a night: the smell reaches twenty blocks "
+                               "around the hissing window; four seconds later the cylinder goes off inside the "
+                               "glass, and within three minutes the morning glazier gives the frame its window "
+                               "back.") },
+    { "call_01",                nullptr,
+      QT_TRANSLATE_NOOP("EncountersDialog", "Call 01"),
+      QT_TRANSLATE_NOOP("EncountersDialog", "An alarm bell and smoke over a private roof, and thirty cases out of "
+                               "a hundred the ridge really catches - the firemen are on their way."),
+      QT_TRANSLATE_NOOP("EncountersDialog", "Day 13:00-23:00, one roll a night: the bell and the smell of smoke "
+                               "reach thirty blocks; where the fire still stands two minutes later, the ridge "
+                               "goes back under the extinguisher.") },
+    { "fire_deer",              nullptr,
+      QT_TRANSLATE_NOOP("EncountersDialog", "The Fire Deer"),
+      QT_TRANSLATE_NOOP("EncountersDialog", "Heat and hoofbeats in a dense forest - three beats, a flash, and "
+                               "every crown of the grove lights up at once. The deer is gone; the fire walks "
+                               "the forest after it."),
+      QT_TRANSLATE_NOOP("EncountersDialog", "Day 14:00-23:00, one roll a night: the hoofbeats and flame particles "
+                               "walk thirty blocks around a clearing, then thunder - and all baked crowns of "
+                               "the hundred-block grove turn to fire. The foresters of the pack replant the "
+                               "burning crowns before dawn.") },
 };
 const int kRowCount = int(sizeof(kRows) / sizeof(kRows[0]));
 

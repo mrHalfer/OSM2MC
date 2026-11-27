@@ -5,6 +5,96 @@ versions are `1.0.YY.MMDDN` (`N` is the number of the build of the day, see [DEV
 
 ## [Unreleased]
 
+### Added
+
+- `docs/events-testing.md` — a hands-on guide to testing the pack's events in a saved world: the
+  dread knob (`/function osmc_enc:dread/s100`), the per-event on/off switches, and a force-run
+  command for every event id.
+- Three destructive events (a user request), a new "Destructive events" group in the events window:
+  **The Gas Cylinder** - one window of a high-rise hisses, the stairwell smells of gas for twenty
+  blocks, and seconds later a primed cylinder inside the frame blows the window out; the morning
+  glazier gives the frame its window back. **Call 01** - an alarm bell and smoke over a private
+  roof; the smell reaches thirty blocks and in thirty cases out of a hundred the ridge really
+  catches, until the firemen put it back. **The Fire Deer** - heat and hoofbeats in a dense forest:
+  three beats, a flash of thunder, and every crown of the hundred-block grove lights up at once;
+  the fire walks to the other trees by itself, the pack's foresters replant the burning crowns.
+
+### Changed
+
+- The scarecrow does not like being watched from behind (a user request): whoever comes within
+  twenty blocks without looking at it finds it turned to face them; look back and it is at its post
+  again.
+- The graveyard faces rework (a user request): no dice - every two seconds, from dusk till dawn
+  only, every carved pumpkin and every jack o'lantern within twenty-four blocks of a player re-aims
+  its face at the closest witness (through the day the faces sleep). The cemetery grass carries
+  unlit carvings too - they watch now as the lit posts do - and the watch box is small on purpose:
+  the scan stays cheap on every tick.
+- The graveyard crowd thinned (a user fight: a mob of zombies and skeletons alongside the spiders
+  was impossible to get through) - half the cells keep a monster now, and a witch falls in two
+  cases out of thirty-two instead of one in four: eight times rarer than before.
+- The Pale Garden now has a cap (a user request): the garden covers a square of at most 4x4 donor
+  tiles (896x896), centered on the forest's center of gravity; outside the zone it eases into the
+  forest before the border. The biome, the donor relief, pale trees, the mansion and the camps, the
+  moss litter and the garden's richer chests live only inside the zone - around it the forest goes
+  on as usual, with its own taiga biome and its own hills. The Pale Garden line now also prints the
+  zone bounds.
+- The rules book pages are set short line by line (manual breaks), matching the book's own SNBT
+  escaping, so both languages paginate the same way.
+- Creaking hearts are culled far less (a user request): only hearts closer than 10 blocks to a kept
+  one become a log again (was 32 - whole groves lost their hearts to the thinning), and a heart is
+  added where none stands within 30 blocks (was 50).
+- The stray dog is a find, not a fixture (a user request): his dice fell every cycle, so he joined
+  the walk several times a night; like the place-bound legends he now comes at most ONCE a night,
+  on one roll of ten the whole night through.
+- The 9 1/2 floor is easier to find (a user request): houses of TEN floors join the pool (was
+  eleven), and one house in three of them may host the door - the dice is a hash of the house's own
+  corner, so the pool is the same in every export of the same map. The pool keeps every door it
+  grew (the list cap lifted, the owner's word): a door a player earned by climbing ten floors must
+  not be thinned away on the way to the pack.
+- The broken glass no longer whispers to the chat (a user request): the one-in-twelve line about
+  the sound travelling further than the glass served the debug days; in the game it only irritated.
+  The soft glass sound the neighbours hear stays.
+
+### Fixed
+
+- The morning wipe of the half floor no longer kills the whole world (a user catch: monsters near
+  the cemetery and even the creaking hearts' owners in the Pale Garden died on their own): the
+  bare `kill @e[type=!player]` had no position, so all through the day it emptied the city of
+  every mob, golem and dropped item - and it erased the floor's own chest and crowd before a
+  guest could see them (the empty 9.5 hall). The kill now reaches only the mirrored hall, and the
+  wipe runs once per cycle instead of once per stairwell.
+- The Fog Park pond sits in the lawn now instead of floating over it (a user catch): the poured
+  water ran off the clay across the whole park, filled the seats and the exit cell, and the guest
+  of the fog's bench could not stand at the way out and never came back; the park rebuild sweeps
+  leftover water off the lawn line on every load too.
+- The Pale Garden does not stand over a cemetery now (a user catch): under the garden's cap a
+  cemetery keeps its own lawn ground and its dense grove of dark oaks - the pale oaks used to be
+  planted in the grove's place, and the donor ground poured under the already planted trees left
+  trunks floating in the air.
+- The pack follows `/time` commands now (a user catch): 26.x moved the day onto the
+  `minecraft:day` timeline while `gametime` stayed a bare tick counter that the commands never move
+  - the pack read `gametime`, so a tested `/time set midnight` left every night gate asleep and the
+  clocks diverged on `/time add` too. The clock is now re-read from the timeline itself
+  (`time query day`, one call every 20 ticks), so all gates and the midnight hook follow a commanded
+  time within a second; a commanded dawn counts as a new day for the once-a-day dice as well.
+- Every face of a cemetery watches now (a user catch: of all the pumpkins he walked past, exactly
+  two turned): the pumpkin marker list was capped at 200 faces for the whole city and the stride
+  thinning sprinkled the cemetery lawns almost empty. The watch thins no more - a face keeps its
+  place the way a grave does, and a test parcel alone grew near six thousand of them. The export
+  report counts the faces too now: jack o'lanterns and carved pumpkins of every graveyard.
+- Russian worlds get the rules book (and every other quoted pack payload) in Russian: the escaped
+  SNBT payloads the generator writes were missed by the translator and always stayed English (a
+  user catch).
+- The rules book restocks itself when a player stands near the pedestal: the single pass five
+  seconds after the load only reached the lectern while its chunk happened to be loaded, so a
+  freshly exported world often kept the short English book the chunk was baked with (a user catch).
+- Houses standing over the relief reach their doors: the step-to-the-threshold pass now reads the
+  ground column levels as well as the building blocks, walks multi-row staircases up to six steps
+  and skips water and road cells - on a relief test world all 129 baked doors end at a stair or a
+  flush floor (before, gaps of two and more blocks were left as cliffs). The top row of every step
+  is a real stair block of the wall's material family, one row of rise per row of setback (a user
+  catch: the first pass clamped the apron at two blocks and made ledges, not steps).
+
 ## [2.1.26.11261] — 2026-11-26
 
 ### Added
